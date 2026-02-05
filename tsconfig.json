@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@animus/shared": ["packages/shared/src"],
+      "@animus/agents": ["packages/agents/src"],
+      "@animus/backend": ["packages/backend/src"],
+      "@animus/frontend": ["packages/frontend/src"]
+    }
+  },
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/agents" },
+    { "path": "packages/backend" },
+    { "path": "packages/frontend" }
+  ],
+  "include": [],
+  "exclude": ["node_modules", "dist"]
+}

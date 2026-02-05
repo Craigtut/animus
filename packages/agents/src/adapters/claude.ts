@@ -1,0 +1,837 @@
+/**
+ * Claude Agent SDK adapter.
+ *
+ * Implements the unified agent interface using the Claude Agent SDK.
+ * The SDK spawns Claude Code CLI as a subprocess and communicates
+ * via JSON-lines over stdin/stdout.
+ *
+ * @see https://platform.claude.com/docs/en/agent-sdk/overview
+ */
+
+import type { AgentProvider } from '@animus/shared';
+import type {
+  AgentSessionConfig,
+  AdapterCapabilities,
+  IAgentSession,
+  AgentResponse,
+  SessionUsage,
+  AgentCost,
+  PromptOptions,
+  HookResult,
+} from '../types.js';
+import { AgentError, wrapError } from '../errors.js';
+import { createTaggedLogger, type Logger } from '../logger.js';
+import { CLAUDE_CAPABILITIES } from '../capabilities.js';
+import { BaseAdapter, BaseSession, type AdapterOptions } from './base.js';
+import { generateUUID, now, createPendingSessionId, fileExists } from '../utils/index.js';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+// Type declarations for the Claude Agent SDK
+// The actual SDK will be dynamically imported
+interface ClaudeSDK {
+  query: (params: QueryParams) => Query;
+}
+
+interface QueryParams {
+  prompt: string | AsyncIterable<SDKUserMessage>;
+  options?: QueryOptions;
+}
+
+interface QueryOptions {
+  model?: string;
+  systemPrompt?: string;
+  cwd?: string;
+  permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  maxTurns?: number;
+  maxBudgetUsd?: number;
+  maxThinkingTokens?: number;
+  includePartialMessages?: boolean;
+  abortController?: AbortController;
+  resume?: string;
+  forkSession?: boolean;
+  mcpServers?: Record<string, unknown>;
+  hooks?: Record<string, HookMatcher[]>;
+}
+
+interface HookMatcher {
+  matcher: string;
+  hooks: HookCallback[];
+}
+
+type HookCallback = (input: HookInput) => Promise<HookOutput>;
+
+interface HookInput {
+  hook_event_name: string;
+  session_id: string;
+  tool_name?: string;
+  tool_input?: unknown;
+  tool_response?: unknown;
+  error?: string;
+}
+
+interface HookOutput {
+  continue?: boolean;
+  decision?: 'approve' | 'block';
+  hookSpecificOutput?: {
+    hookEventName: string;
+    permissionDecision?: 'allow' | 'deny' | 'ask';
+    updatedInput?: Record<string, unknown>;
+  };
+}
+
+interface Query extends AsyncGenerator<SDKMessage, void> {
+  interrupt(): Promise<void>;
+  setPermissionMode(mode: string): Promise<void>;
+  setModel(model?: string): Promise<void>;
+  supportedModels(): Promise<ModelInfo[]>;
+  accountInfo(): Promise<AccountInfo>;
+}
+
+interface SDKUserMessage {
+  type: 'user';
+  message: {
+    role: 'user';
+    content: string | ContentPart[];
+  };
+}
+
+interface ContentPart {
+  type: 'text' | 'image';
+  text?: string;
+  source?: {
+    type: 'base64';
+    media_type: string;
+    data: string;
+  };
+}
+
+type SDKMessage =
+  | SystemMessage
+  | AssistantMessage
+  | ResultMessage
+  | PartialMessage
+  | StreamEventMessage;
+
+interface SystemMessage {
+  type: 'system';
+  subtype: 'init' | string;
+  session_id: string;
+}
+
+interface AssistantMessage {
+  type: 'assistant';
+  message: {
+    content: ContentBlock[];
+  };
+}
+
+interface ContentBlock {
+  type: 'text' | 'tool_use' | 'thinking';
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: unknown;
+}
+
+interface ResultMessage {
+  type: 'result';
+  subtype: 'success' | 'error_max_turns' | 'error_during_execution' | 'error_max_budget_usd';
+  session_id: string;
+  duration_ms: number;
+  num_turns: number;
+  result: string;
+  total_cost_usd: number;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+}
+
+interface PartialMessage {
+  type: 'partial';
+  content: string;
+}
+
+interface StreamEventMessage {
+  type: 'stream_event';
+  event: StreamEvent;
+}
+
+interface StreamEvent {
+  type: string;
+  delta?: {
+    type: string;
+    text?: string;
+  };
+}
+
+interface ModelInfo {
+  id: string;
+  name: string;
+}
+
+interface AccountInfo {
+  email?: string;
+  plan?: string;
+}
+
+/**
+ * Claude Agent SDK adapter.
+ */
+export class ClaudeAdapter extends BaseAdapter {
+  readonly provider: AgentProvider = 'claude';
+  readonly capabilities: AdapterCapabilities = CLAUDE_CAPABILITIES;
+
+  private sdk: ClaudeSDK | null = null;
+
+  constructor(options?: AdapterOptions) {
+    super(options);
+    this.initLogger(options);
+  }
+
+  /**
+   * Check if Claude is configured with valid credentials.
+   *
+   * Checks for:
+   * 1. ANTHROPIC_API_KEY environment variable
+   * 2. CLAUDE_CODE_OAUTH_TOKEN environment variable
+   * 3. Pre-authenticated Claude Code at ~/.claude/.credentials
+   */
+  isConfigured(): boolean {
+    // Check API key
+    if (process.env['ANTHROPIC_API_KEY']) {
+      return true;
+    }
+
+    // Check OAuth token
+    if (process.env['CLAUDE_CODE_OAUTH_TOKEN']) {
+      return true;
+    }
+
+    // Check for pre-authenticated Claude Code
+    // This is a sync check - we check if the file exists
+    try {
+      const credentialsPath = join(homedir(), '.claude', '.credentials');
+      // Note: This is async but we need sync here
+      // We'll do a best-effort check
+      return this.checkCredentialsFileSync(credentialsPath);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Synchronous check for credentials file.
+   */
+  private checkCredentialsFileSync(path: string): boolean {
+    try {
+      // Use Node.js fs.existsSync for synchronous check
+      const fs = require('node:fs');
+      return fs.existsSync(path);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Load the Claude SDK dynamically.
+   */
+  private async loadSDK(): Promise<ClaudeSDK> {
+    if (this.sdk) {
+      return this.sdk;
+    }
+
+    try {
+      const module = await import('@anthropic-ai/claude-agent-sdk');
+      this.sdk = module as unknown as ClaudeSDK;
+      return this.sdk;
+    } catch (error) {
+      throw new AgentError({
+        code: 'SDK_LOAD_FAILED',
+        message: 'Failed to load Claude Agent SDK. Is @anthropic-ai/claude-agent-sdk installed?',
+        category: 'invalid_input',
+        severity: 'fatal',
+        provider: 'claude',
+        cause: error instanceof Error ? error : undefined,
+      });
+    }
+  }
+
+  /**
+   * Create a new Claude session.
+   */
+  async createSession(config: AgentSessionConfig): Promise<IAgentSession> {
+    this.validateConfig(config);
+
+    if (!this.isConfigured()) {
+      throw new AgentError({
+        code: 'MISSING_CREDENTIALS',
+        message:
+          'Claude credentials not configured. Set ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, or authenticate Claude Code.',
+        category: 'authentication',
+        severity: 'fatal',
+        provider: 'claude',
+      });
+    }
+
+    const sdk = await this.loadSDK();
+    const session = new ClaudeSession(sdk, config, this.logger);
+
+    this.trackSession(session);
+
+    // Setup cleanup on session end
+    session.onEvent(async (event) => {
+      if (event.type === 'session_end') {
+        this.untrackSession(session.id);
+      }
+    });
+
+    return session;
+  }
+}
+
+/**
+ * Claude session implementation.
+ */
+class ClaudeSession extends BaseSession {
+  readonly provider: AgentProvider = 'claude';
+
+  private sdk: ClaudeSDK;
+  private queryInstance: Query | null = null;
+  private abortController: AbortController | null = null;
+  private nativeSessionId: string | null = null;
+  private pendingId: string;
+
+  constructor(sdk: ClaudeSDK, config: AgentSessionConfig, logger: Logger) {
+    super(config, logger);
+    this.sdk = sdk;
+    this.pendingId = createPendingSessionId('claude');
+  }
+
+  /**
+   * Session ID in format "claude:{nativeId}".
+   */
+  get id(): string {
+    return this.nativeSessionId ? `claude:${this.nativeSessionId}` : this.pendingId;
+  }
+
+  /**
+   * Send a prompt and get a response.
+   */
+  async prompt(input: string, options?: PromptOptions): Promise<AgentResponse> {
+    this.assertActive();
+
+    const timeout = options?.timeoutMs ?? this.config.timeoutMs ?? 300000;
+    this.abortController = new AbortController();
+
+    const timer = setTimeout(() => {
+      this.abortController?.abort();
+    }, timeout);
+
+    const startTime = Date.now();
+    let response = '';
+    let finishReason: AgentResponse['finishReason'] = 'complete';
+
+    try {
+      const sdkOptions = this.buildSdkOptions();
+      this.queryInstance = this.sdk.query({
+        prompt: input,
+        options: sdkOptions,
+      });
+
+      // Emit input received event
+      await this.emit(
+        this.createEvent('input_received', {
+          content: input,
+          type: 'text',
+        }),
+      );
+
+      // Process messages from the SDK
+      for await (const message of this.queryInstance) {
+        await this.processMessage(message);
+
+        // Extract session ID from init message
+        if (message.type === 'system' && message.subtype === 'init') {
+          this.nativeSessionId = message.session_id;
+        }
+
+        // Extract response from assistant message
+        if (message.type === 'assistant') {
+          response = this.extractContent(message);
+        }
+
+        // Extract result info
+        if (message.type === 'result') {
+          this.updateUsageFromResult(message);
+          finishReason = this.mapFinishReason(message.subtype);
+          response = message.result || response;
+        }
+      }
+
+      return {
+        content: response,
+        finishReason,
+        usage: this.getUsage(),
+        cost: this.getCost() ?? undefined,
+        durationMs: Date.now() - startTime,
+        model: this.config.model ?? 'unknown',
+      };
+    } catch (error) {
+      // Check if it was an abort
+      if (this.abortController?.signal.aborted) {
+        throw new AgentError({
+          code: 'TIMEOUT',
+          message: `Prompt timed out after ${timeout}ms`,
+          category: 'timeout',
+          severity: 'retry',
+          provider: 'claude',
+          sessionId: this.id,
+        });
+      }
+
+      throw wrapError(error, 'claude', this.id);
+    } finally {
+      clearTimeout(timer);
+      this.abortController = null;
+      this.queryInstance = null;
+    }
+  }
+
+  /**
+   * Send a prompt with streaming response.
+   */
+  async promptStreaming(
+    input: string,
+    onChunk: (chunk: string) => void,
+    options?: PromptOptions,
+  ): Promise<AgentResponse> {
+    this.assertActive();
+
+    const timeout = options?.timeoutMs ?? this.config.timeoutMs ?? 300000;
+    this.abortController = new AbortController();
+
+    const timer = setTimeout(() => {
+      this.abortController?.abort();
+    }, timeout);
+
+    const startTime = Date.now();
+    let response = '';
+    let accumulated = '';
+    let finishReason: AgentResponse['finishReason'] = 'complete';
+
+    try {
+      const sdkOptions = this.buildSdkOptions();
+      // Enable partial messages for streaming
+      sdkOptions.includePartialMessages = true;
+
+      this.queryInstance = this.sdk.query({
+        prompt: input,
+        options: sdkOptions,
+      });
+
+      // Emit input received event
+      await this.emit(
+        this.createEvent('input_received', {
+          content: input,
+          type: 'text',
+        }),
+      );
+
+      // Emit response start
+      await this.emit(this.createEvent('response_start', {}));
+
+      // Process messages from the SDK
+      for await (const message of this.queryInstance) {
+        await this.processMessage(message);
+
+        // Extract session ID from init message
+        if (message.type === 'system' && message.subtype === 'init') {
+          this.nativeSessionId = message.session_id;
+        }
+
+        // Handle streaming events
+        if (message.type === 'stream_event') {
+          const event = message.event;
+          if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+            const chunk = event.delta.text ?? '';
+            accumulated += chunk;
+            onChunk(chunk);
+
+            // Emit chunk event
+            await this.emit(
+              this.createEvent('response_chunk', {
+                content: chunk,
+                accumulated,
+              }),
+            );
+          }
+        }
+
+        // Extract final response from assistant message
+        if (message.type === 'assistant') {
+          response = this.extractContent(message);
+        }
+
+        // Extract result info
+        if (message.type === 'result') {
+          this.updateUsageFromResult(message);
+          finishReason = this.mapFinishReason(message.subtype);
+          response = message.result || response;
+        }
+      }
+
+      // Emit response end
+      await this.emit(
+        this.createEvent('response_end', {
+          content: response,
+          finishReason,
+        }),
+      );
+
+      return {
+        content: response,
+        finishReason,
+        usage: this.getUsage(),
+        cost: this.getCost() ?? undefined,
+        durationMs: Date.now() - startTime,
+        model: this.config.model ?? 'unknown',
+      };
+    } catch (error) {
+      if (this.abortController?.signal.aborted) {
+        throw new AgentError({
+          code: 'TIMEOUT',
+          message: `Prompt timed out after ${timeout}ms`,
+          category: 'timeout',
+          severity: 'retry',
+          provider: 'claude',
+          sessionId: this.id,
+        });
+      }
+
+      throw wrapError(error, 'claude', this.id);
+    } finally {
+      clearTimeout(timer);
+      this.abortController = null;
+      this.queryInstance = null;
+    }
+  }
+
+  /**
+   * Cancel the current operation.
+   */
+  async cancel(): Promise<void> {
+    this.logger.info('Cancelling session', { sessionId: this.id });
+
+    this.abortController?.abort();
+
+    if (this.queryInstance) {
+      try {
+        await this.queryInstance.interrupt();
+      } catch (error) {
+        this.logger.warn('Failed to interrupt query', { error: String(error) });
+      }
+    }
+  }
+
+  /**
+   * End the session.
+   */
+  async end(): Promise<void> {
+    if (!this._isActive) {
+      return;
+    }
+
+    this.logger.info('Ending session', { sessionId: this.id });
+
+    await this.cancel();
+    this._isActive = false;
+
+    await this.emit(
+      this.createEvent('session_end', {
+        reason: 'completed',
+        totalDurationMs: this.getDurationMs(),
+      }),
+    );
+
+    // Call session end hook
+    if (this.hooks.onSessionEnd) {
+      await this.hooks.onSessionEnd({
+        sessionId: this.id,
+        reason: 'completed',
+        totalDurationMs: this.getDurationMs(),
+      });
+    }
+  }
+
+  /**
+   * Build SDK options from session config.
+   */
+  private buildSdkOptions(): QueryOptions {
+    const options: QueryOptions = {
+      model: this.config.model,
+      systemPrompt: this.config.systemPrompt,
+      cwd: this.config.cwd,
+      permissionMode: this.mapPermissionMode(),
+      allowedTools: this.config.allowedTools,
+      disallowedTools: this.getDisallowedTools(),
+      maxTurns: this.config.maxTurns,
+      maxBudgetUsd: this.config.maxBudgetUsd,
+      maxThinkingTokens: this.config.maxThinkingTokens,
+      includePartialMessages: this.config.includePartialMessages,
+      abortController: this.abortController ?? undefined,
+      resume: this.config.resume,
+      forkSession: this.config.forkSession,
+      mcpServers: this.config.mcpServers,
+      hooks: this.buildSdkHooks(),
+    };
+
+    return options;
+  }
+
+  /**
+   * Map unified permission config to Claude permission mode.
+   */
+  private mapPermissionMode(): QueryOptions['permissionMode'] {
+    const perms = this.config.permissions;
+
+    if (perms?.executionMode === 'plan') {
+      return 'plan';
+    }
+
+    switch (perms?.approvalLevel) {
+      case 'none':
+        return 'bypassPermissions';
+      case 'trusted':
+        return 'acceptEdits';
+      case 'strict':
+      case 'normal':
+      default:
+        return 'default';
+    }
+  }
+
+  /**
+   * Get disallowed tools from permission config.
+   */
+  private getDisallowedTools(): string[] | undefined {
+    const explicit = this.config.disallowedTools ?? [];
+    const fromPerms =
+      this.config.permissions?.toolPermissions
+        ? Object.entries(this.config.permissions.toolPermissions)
+            .filter(([, v]) => v === 'deny')
+            .map(([k]) => k)
+        : [];
+
+    const combined = [...explicit, ...fromPerms];
+    return combined.length > 0 ? combined : undefined;
+  }
+
+  /**
+   * Build SDK hooks from unified hooks.
+   */
+  private buildSdkHooks(): QueryOptions['hooks'] | undefined {
+    if (!this.hooks) {
+      return undefined;
+    }
+
+    const hooks: QueryOptions['hooks'] = {};
+
+    // PreToolUse hook
+    if (this.hooks.onPreToolUse) {
+      hooks['PreToolUse'] = [
+        {
+          matcher: '.*',
+          hooks: [
+            async (input: HookInput): Promise<HookOutput> => {
+              const result = await this.hooks.onPreToolUse!({
+                sessionId: this.id,
+                toolName: input.tool_name ?? '',
+                toolInput: input.tool_input,
+                toolCallId: generateUUID(),
+              });
+
+              if (!result) {
+                return {};
+              }
+
+              const output: HookOutput = {};
+
+              if (result.allow === false) {
+                output.decision = 'block';
+                output.hookSpecificOutput = {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                };
+              }
+
+              if (result.modifiedInput !== undefined) {
+                output.hookSpecificOutput = {
+                  hookEventName: 'PreToolUse',
+                  updatedInput: result.modifiedInput as Record<string, unknown>,
+                };
+              }
+
+              return output;
+            },
+          ],
+        },
+      ];
+    }
+
+    // PostToolUse hook
+    if (this.hooks.onPostToolUse) {
+      hooks['PostToolUse'] = [
+        {
+          matcher: '.*',
+          hooks: [
+            async (input: HookInput): Promise<HookOutput> => {
+              await this.hooks.onPostToolUse!({
+                sessionId: this.id,
+                toolName: input.tool_name ?? '',
+                toolInput: input.tool_input,
+                toolCallId: generateUUID(),
+                toolOutput: input.tool_response,
+                durationMs: 0, // Not available from SDK
+              });
+              return {};
+            },
+          ],
+        },
+      ];
+    }
+
+    // PostToolUseFailure hook (maps to onToolError)
+    if (this.hooks.onToolError) {
+      hooks['PostToolUseFailure'] = [
+        {
+          matcher: '.*',
+          hooks: [
+            async (input: HookInput): Promise<HookOutput> => {
+              await this.hooks.onToolError!({
+                sessionId: this.id,
+                toolName: input.tool_name ?? '',
+                toolInput: input.tool_input,
+                toolCallId: generateUUID(),
+                error: input.error ?? 'Unknown error',
+                isRetryable: false,
+              });
+              return {};
+            },
+          ],
+        },
+      ];
+    }
+
+    return Object.keys(hooks).length > 0 ? hooks : undefined;
+  }
+
+  /**
+   * Process an SDK message and emit appropriate events.
+   */
+  private async processMessage(message: SDKMessage): Promise<void> {
+    switch (message.type) {
+      case 'system':
+        if (message.subtype === 'init') {
+          await this.emit(
+            this.createEvent('session_start', {
+              provider: 'claude',
+              model: this.config.model ?? 'unknown',
+              config: this.config,
+            }),
+          );
+
+          // Call session start hook
+          if (this.hooks.onSessionStart) {
+            await this.hooks.onSessionStart({
+              sessionId: this.id,
+              provider: 'claude',
+              model: this.config.model ?? 'unknown',
+              config: this.config,
+            });
+          }
+        }
+        break;
+
+      case 'assistant':
+        // Process content blocks for tool calls
+        for (const block of message.message.content) {
+          if (block.type === 'tool_use' && block.name && block.id) {
+            await this.emit(
+              this.createEvent('tool_call_start', {
+                toolName: block.name,
+                toolInput: (block.input as Record<string, unknown>) ?? {},
+                toolCallId: block.id,
+              }),
+            );
+          }
+
+          if (block.type === 'thinking') {
+            await this.emit(this.createEvent('thinking_start', {}));
+            // Note: thinking_end would be emitted when we see the next non-thinking block
+          }
+        }
+        break;
+
+      case 'result':
+        // Result is handled in prompt methods
+        break;
+
+      case 'stream_event':
+        // Stream events are handled in promptStreaming
+        break;
+    }
+  }
+
+  /**
+   * Extract text content from an assistant message.
+   */
+  private extractContent(message: AssistantMessage): string {
+    return message.message.content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text ?? '')
+      .join('');
+  }
+
+  /**
+   * Update usage from a result message.
+   */
+  private updateUsageFromResult(result: ResultMessage): void {
+    this.updateUsage({
+      inputTokens: result.usage.input_tokens,
+      outputTokens: result.usage.output_tokens,
+      cacheReadTokens: result.usage.cache_read_input_tokens,
+      cacheWriteTokens: result.usage.cache_creation_input_tokens,
+    });
+
+    this.cost = {
+      inputCostUsd: 0, // Would need pricing data to calculate
+      outputCostUsd: 0,
+      totalCostUsd: result.total_cost_usd,
+      model: this.config.model ?? 'unknown',
+      provider: 'claude',
+    };
+  }
+
+  /**
+   * Map result subtype to finish reason.
+   */
+  private mapFinishReason(subtype: string): AgentResponse['finishReason'] {
+    switch (subtype) {
+      case 'success':
+        return 'complete';
+      case 'error_max_turns':
+      case 'error_max_budget_usd':
+        return 'max_tokens';
+      case 'error_during_execution':
+        return 'error';
+      default:
+        return 'complete';
+    }
+  }
+}

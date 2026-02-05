@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# LanceDB data
+.lancedb/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Temp files
+tmp/
+temp/
+.cache/
+
+# Claude local settings (keep .claude/settings.json for shared settings)
+.claude/settings.local.json

@@ -1,0 +1,40 @@
+{
+  "name": "animus",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An agentic system with a mind, a spirit, and an inner will that moves with agency to act",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:backend": "npm run dev -w @animus/backend",
+    "dev:frontend": "npm run dev -w @animus/frontend",
+    "build": "npm run build --workspaces --if-present",
+    "build:frontend": "npm run build -w @animus/frontend",
+    "build:backend": "npm run build -w @animus/backend",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint packages --ext .ts,.tsx",
+    "lint:fix": "eslint packages --ext .ts,.tsx --fix",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf packages/*/dist packages/*/.turbo node_modules/.cache"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-react": "^7.35.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "prettier": "^3.3.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "npm@10.0.0"
+}
