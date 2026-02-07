@@ -36,16 +36,17 @@ Animus is an autonomous AI assistant designed to be genuinely helpful while main
 **Backend:**
 - Node.js + Fastify
 - tRPC for type-safe API
-- Three SQLite databases (see below)
+- Four SQLite databases (see below)
 - LanceDB for vector storage/semantic search
 - Agent SDKs: Claude (default), Codex, OpenCode
 
 ### Database Architecture
 
-Three separate SQLite databases with distinct purposes:
+Four separate SQLite databases with distinct purposes and lifecycles:
 
 1. **system.db** - Core configuration (rarely reset)
    - Users and authentication
+   - Contacts and contact channels (identity resolution)
    - System settings
    - Personality configuration
    - API keys (encrypted)
@@ -56,25 +57,34 @@ Three separate SQLite databases with distinct purposes:
    - Tasks and actions
    - TTL-based cleanup
 
-3. **agent_logs.db** - SDK logs (frequent cleanup)
+3. **messages.db** - Conversation history (long-term retention)
+   - Messages (user and Animus, both directions)
+   - Conversations / threads
+   - Channel metadata
+   - Persists across heartbeat resets
+
+4. **agent_logs.db** - SDK logs (frequent cleanup)
    - Agent sessions
    - Events (input, thinking, tool calls, responses)
    - Token usage and costs
    - Tool call logs
 
-### The Heartbeat System
+### The Heartbeat System & The Mind
 
-The heartbeat is the core tick system that drives Animus's inner life. It runs every 5 minutes by default and executes a sequential pipeline:
+The heartbeat is the core tick system that drives Animus's inner life. The mind is a persistent agent session that runs during each tick — the orchestrator that thinks, feels, decides, and replies.
 
-1. **perceive** - Gather inputs, check messages, observe environment
-2. **think** - Process information, generate thoughts
-3. **feel** - Evaluate emotional responses
-4. **decide** - Determine if action is needed
-5. **act** - Execute decided actions
-6. **reflect** - Review what happened
-7. **consolidate** - Update memories, cleanup expired entries
+**Tick Triggers** — Four events can trigger a tick:
+1. **Interval timer** — Regular heartbeat (default 5 min, configurable via UI)
+2. **Message received** — User sends a message through any channel
+3. **Scheduled task fires** — A cron-like task activates
+4. **Sub-agent completion** — A delegated agent finishes its work
 
-Pipeline state is persisted to SQLite, allowing recovery from crashes mid-tick.
+**Pipeline** — Each tick runs three stages:
+1. **Gather Context** (system) — Assemble inputs: trigger context, emotional state, recent thoughts, active goals, running sub-agent status
+2. **Mind Query** (agent session) — Single structured output covering thoughts, experiences, emotion analysis, decisions, and contextually message replies
+3. **Execute** (system) — Persist data, send replies, spawn sub-agents, cleanup expired entries
+
+The mind is a top-level orchestrator. It does not perform long-running work — it delegates to sub-agents for complex tasks (research, multi-step workflows, code generation). Sub-agents are independent agent sessions managed by a custom orchestration layer. They carry the full Animus personality and can message the user directly. The mind can forward new information to running sub-agents via `update_agent` decisions. See `docs/architecture/agent-orchestration.md` for the full design. Pipeline state is persisted to SQLite for crash recovery.
 
 ### The Agents Package (`@animus/agents`)
 
@@ -222,6 +232,33 @@ All agent interactions must be logged. The agent abstraction layer handles this 
 4. **Observable**: Extensive logging for debugging agent behavior.
 5. **Recoverable**: Persist state to survive crashes gracefully.
 6. **Open Source Ready**: Clean code that others can understand and contribute to.
+
+## Documentation (MANDATORY)
+
+**IMPORTANT: Before implementing any feature, fixing any bug, or making any non-trivial change, you MUST use `/doc-explorer <topic>` to load the relevant documentation context first.** This is not optional. The `/docs` folder contains critical design decisions, architectural patterns, and constraints that must be followed. Implementing without reading the docs risks building something inconsistent with the project's design. After creating new documents you need to make sure that they are referenced in the Doc Explorer. 
+
+Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to explore documentation for a specific area, or invoke it without arguments to see all available topics.
+
+**Available documentation areas:**
+- **Vision & Identity**: `docs/project-vision.md`, `docs/brand-vision.md`
+- **Architecture**: `docs/architecture/heartbeat.md`, `docs/architecture/agent-orchestration.md`, `docs/architecture/contacts.md`, `docs/architecture/channels.md`, `docs/architecture/persona.md`, `docs/architecture/tech-stack.md`
+- **Architecture**: `docs/architecture/goals.md` (goal system, seeds, plans, salience)
+- **Architecture (Under Construction)**: `docs/architecture/mind-prompt.md` (TODO), `docs/architecture/memory.md`, `docs/architecture/tasks-system.md`
+- **Open Questions**: `docs/architecture/open-questions.md`
+- **Frontend Design**: `docs/frontend/design-principles.md`, `docs/frontend/onboarding.md`
+- **Guides**: `docs/guides/getting-started.md`
+- **Agent SDKs**: `docs/agents/` (README + individual SDK research + architecture overview)
+
+**When to use `/doc-explorer`:**
+- Starting work on any feature → `/doc-explorer` with the relevant topic
+- Working on frontend/UI → `/doc-explorer design` and `/doc-explorer brand`
+- Working on contacts/identity/permissions → `/doc-explorer contacts`
+- Working on channels/SMS/Discord/API → `/doc-explorer channels`
+- Working on persona/personality system → `/doc-explorer persona`
+- Working on the heartbeat system → `/doc-explorer heartbeat`
+- Working on agent SDKs → `/doc-explorer agents`
+- Working on backend/API → `/doc-explorer architecture`
+- Unsure about project conventions → `/doc-explorer` (no args, see everything)
 
 ## File Locations
 

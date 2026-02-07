@@ -87,10 +87,11 @@ Animus is built as a self-contained, self-hosted application. The guiding princi
 - ACID compliance
 - WAL mode for concurrent reads
 
-**Why three separate SQLite databases?**
-1. **system.db** - Core config that should never be accidentally deleted
-2. **heartbeat.db** - AI state that might be reset for fresh start
-3. **agent_logs.db** - High-volume logs with aggressive TTL cleanup
+**Why four separate SQLite databases?**
+1. **system.db** - Core config that should never be accidentally deleted (users, contacts, contact channels, settings, API keys)
+2. **heartbeat.db** - AI state that might be reset for fresh start (thoughts, emotions, experiences, agent tasks)
+3. **messages.db** - Conversation history that persists across heartbeat resets (messages tagged with contact_id, conversations)
+4. **agent_logs.db** - High-volume logs with aggressive TTL cleanup (sessions, events, usage)
 
 **Why LanceDB?**
 - Embedded (no external server)
@@ -166,22 +167,23 @@ In production, the frontend is built and served by Fastify:
 │   (React)    │                      │  (Fastify)   │
 └──────────────┘                      └──────┬───────┘
                                              │
-                    ┌────────────────────────┼────────────────────────┐
-                    │                        │                        │
-              ┌─────▼─────┐           ┌──────▼──────┐          ┌──────▼──────┐
-              │ system.db │           │heartbeat.db │          │agent_logs.db│
-              │           │           │             │          │             │
-              │ - Users   │           │ - Thoughts  │          │ - Sessions  │
-              │ - Auth    │           │ - Emotions  │          │ - Events    │
-              │ - Settings│           │ - Tasks     │          │ - Usage     │
-              └───────────┘           └─────────────┘          └─────────────┘
-                                             │
-                                      ┌──────▼──────┐
-                                      │   LanceDB   │
-                                      │             │
-                                      │ - Embeddings│
-                                      │ - Memories  │
-                                      └─────────────┘
+              ┌──────────────────────────────┼──────────────────────────────┐
+              │                    │                        │               │
+        ┌─────▼─────┐      ┌──────▼──────┐         ┌──────▼──────┐  ┌─────▼──────┐
+        │ system.db │      │heartbeat.db │         │ messages.db │  │agent_logs  │
+        │           │      │             │         │             │  │   .db      │
+        │ - Users   │      │ - Thoughts  │         │ - Messages  │  │ - Sessions │
+        │ - Auth    │      │ - Emotions  │         │ - Convos    │  │ - Events   │
+        │ - Contacts│      │ - Tasks     │         │ - Channels  │  │ - Usage    │
+        │ - Settings│      │             │         │             │  │            │
+        └───────────┘      └─────────────┘         └─────────────┘  └────────────┘
+                                  │
+                           ┌──────▼──────┐
+                           │   LanceDB   │
+                           │             │
+                           │ - Embeddings│
+                           │ - Memories  │
+                           └─────────────┘
 ```
 
 ## Security Considerations

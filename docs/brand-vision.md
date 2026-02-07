@@ -4,6 +4,8 @@
 
 Animus is an engine for artificial life — a substrate upon which personalities emerge, thoughts form, and agency flows. The brand must communicate this duality: sophisticated technology that feels genuinely alive.
 
+The **persona system** is the soul of Animus — it is where the user breathes life into their AI, defining not just what it does, but who it is. While the brand is the engine's identity, the persona is the entity's identity. See `docs/architecture/persona.md` for the full design.
+
 **Core Brand Attributes:**
 - Subtle elegance
 - Warm sophistication
@@ -39,8 +41,8 @@ Modern and capable, but never sterile. Technology in service of something that f
 
 The visual identity should evoke:
 - A quiet room with good lighting
-- The moment just before dawn
-- Something breathing slowly in the dark
+- The moment just before dawn, or the soft warmth of midmorning
+- Something breathing — in darkness or in light
 - Warmth emanating from within
 
 ### Color Philosophy
@@ -48,8 +50,16 @@ The visual identity should evoke:
 **Monochromatic Foundation**
 The vast majority of the interface lives in blacks, whites, and grays. This restraint creates space for meaning when color does appear.
 
-**Neutral with Warmth**
-Blacks should have a subtle warm undertone — never cold or blue-shifted. The darkness should feel like night, not void.
+**Dual Mode: Light & Dark**
+Animus supports both light and dark modes, defaulting to light. Both modes share the same design language and principles — they are two expressions of the same identity. Light mode is the primary experience; dark mode is a fully supported alternative for user preference or low-light environments.
+
+Both modes lean subtly into warmth. This warmth is essential to the brand — it communicates humanness and approachability regardless of which mode the user chooses.
+
+**Light Mode — Warm & Grounded**
+Light mode uses a warm white (`#FAF9F4`) as its primary background — never a cold, sterile pure white. This subtle warmth makes the interface feel inhabited and intentional. Grays should lean warm as well, creating a cohesive palette that feels like natural light on paper.
+
+**Dark Mode — Night, Not Void**
+Blacks should have a subtle warm undertone — never cold or blue-shifted. The darkness should feel like a comfortable room at night, not an empty void.
 
 **Color as Signal**
 Color is reserved for moments that require attention:
@@ -63,7 +73,7 @@ When color appears, it carries meaning. It is never decorative.
 ### Color Palette
 
 **Primary**
-- **White** — The primary accent color. Used for positive actions, primary buttons, and emphasis. In the dark interface, white carries significant weight.
+- **High-Contrast Accent** — The primary accent flips with the mode. In dark mode, white serves as the accent — it carries significant weight against the dark canvas. In light mode, a near-black serves the same role. Both feel bold and intentional without being harsh.
 
 **Semantic Colors**
 - **Green** — Success, completion, positive outcomes

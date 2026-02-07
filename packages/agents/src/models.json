@@ -1,0 +1,208 @@
+{
+  "$schema": "./models.schema.json",
+  "claude": {
+    "claude-opus-4-6": {
+      "name": "Claude Opus 4.6",
+      "contextWindow": 200000,
+      "maxOutputTokens": 128000,
+      "inputPricePer1M": 5.00,
+      "outputPricePer1M": 25.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Latest and most capable model. Supports 1M context in beta. Uses adaptive thinking."
+    },
+    "claude-sonnet-4-5-20250929": {
+      "name": "Claude Sonnet 4.5",
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "inputPricePer1M": 3.00,
+      "outputPricePer1M": 15.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Excellent balance of speed and capability. Supports 1M context in beta."
+    },
+    "claude-haiku-4-5-20251001": {
+      "name": "Claude Haiku 4.5",
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "inputPricePer1M": 1.00,
+      "outputPricePer1M": 5.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Fastest model with near-frontier intelligence."
+    },
+    "claude-opus-4-5-20251101": {
+      "name": "Claude Opus 4.5",
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "inputPricePer1M": 5.00,
+      "outputPricePer1M": 25.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Previous flagship model."
+    },
+    "claude-opus-4-1-20250805": {
+      "name": "Claude Opus 4.1",
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "inputPricePer1M": 15.00,
+      "outputPricePer1M": 75.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Legacy Opus model."
+    },
+    "claude-sonnet-4-20250514": {
+      "name": "Claude Sonnet 4",
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "inputPricePer1M": 3.00,
+      "outputPricePer1M": 15.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Previous Sonnet generation. Supports 1M context in beta."
+    },
+    "claude-opus-4-20250514": {
+      "name": "Claude Opus 4",
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "inputPricePer1M": 15.00,
+      "outputPricePer1M": 75.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Previous Opus generation."
+    },
+    "claude-3-7-sonnet-20250219": {
+      "name": "Claude Sonnet 3.7",
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "inputPricePer1M": 3.00,
+      "outputPricePer1M": 15.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Legacy Sonnet model. Returns full thinking output (not summarized)."
+    },
+    "claude-3-5-haiku-20241022": {
+      "name": "Claude Haiku 3.5",
+      "contextWindow": 200000,
+      "maxOutputTokens": 8000,
+      "inputPricePer1M": 0.80,
+      "outputPricePer1M": 4.00,
+      "supportsVision": true,
+      "supportsThinking": false,
+      "notes": "Fast and affordable. No extended thinking support."
+    },
+    "claude-3-haiku-20240307": {
+      "name": "Claude Haiku 3",
+      "contextWindow": 200000,
+      "maxOutputTokens": 4000,
+      "inputPricePer1M": 0.25,
+      "outputPricePer1M": 1.25,
+      "supportsVision": true,
+      "supportsThinking": false,
+      "notes": "Most affordable model. No extended thinking support."
+    }
+  },
+  "codex": {
+    "gpt-5.3-codex": {
+      "name": "GPT-5.3 Codex",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "inputPricePer1M": 1.25,
+      "outputPricePer1M": 10.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Latest and most capable. 77.3% on SWE-Bench Verified. Recommended for most tasks."
+    },
+    "gpt-5.2-codex": {
+      "name": "GPT-5.2 Codex",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "inputPricePer1M": 1.75,
+      "outputPricePer1M": 14.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Advanced coding model with context compaction and enhanced cybersecurity."
+    },
+    "gpt-5.1-codex": {
+      "name": "GPT-5.1 Codex",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "inputPricePer1M": 1.25,
+      "outputPricePer1M": 10.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Previous generation coding model."
+    },
+    "gpt-5.1-codex-max": {
+      "name": "GPT-5.1 Codex Max",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "inputPricePer1M": 1.25,
+      "outputPricePer1M": 10.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Optimized for long-horizon agentic tasks. Can work 24+ hours via context compaction."
+    },
+    "gpt-5.1-codex-mini": {
+      "name": "GPT-5.1 Codex Mini",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "inputPricePer1M": 0.25,
+      "outputPricePer1M": 2.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Smaller, faster, cost-effective version of GPT-5.1-Codex."
+    },
+    "codex-mini-latest": {
+      "name": "Codex Mini",
+      "contextWindow": 200000,
+      "maxOutputTokens": 100000,
+      "inputPricePer1M": 1.50,
+      "outputPricePer1M": 6.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Default model in Codex CLI. Fine-tuned o4-mini for low-latency code Q&A."
+    },
+    "o3": {
+      "name": "o3",
+      "contextWindow": 200000,
+      "maxOutputTokens": 100000,
+      "inputPricePer1M": 2.00,
+      "outputPricePer1M": 8.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Most powerful reasoning model. 69.1% on SWE-Bench Verified."
+    },
+    "o4-mini": {
+      "name": "o4-mini",
+      "contextWindow": 200000,
+      "maxOutputTokens": 100000,
+      "inputPricePer1M": 1.10,
+      "outputPricePer1M": 4.40,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Fast, cost-efficient reasoning model. ~10x cheaper than o3."
+    },
+    "gpt-4.1": {
+      "name": "GPT-4.1",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 32000,
+      "inputPricePer1M": 2.00,
+      "outputPricePer1M": 8.00,
+      "supportsVision": true,
+      "supportsThinking": false,
+      "notes": "Large context model (1M tokens). Standard transformer, no reasoning tokens."
+    },
+    "gpt-4.1-mini": {
+      "name": "GPT-4.1 Mini",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 32000,
+      "inputPricePer1M": 0.40,
+      "outputPricePer1M": 1.60,
+      "supportsVision": true,
+      "supportsThinking": false,
+      "notes": "Cost-effective 1M context model. No reasoning tokens."
+    }
+  },
+  "opencode": {}
+}

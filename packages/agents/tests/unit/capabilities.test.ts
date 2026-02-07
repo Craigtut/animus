@@ -38,7 +38,7 @@ describe('CLAUDE_CAPABILITIES', () => {
 
   it('has supported models', () => {
     expect(CLAUDE_CAPABILITIES.supportedModels.length).toBeGreaterThan(0);
-    expect(CLAUDE_CAPABILITIES.supportedModels).toContain('claude-sonnet-4-5-20250514');
+    expect(CLAUDE_CAPABILITIES.supportedModels).toContain('claude-opus-4-6');
   });
 });
 

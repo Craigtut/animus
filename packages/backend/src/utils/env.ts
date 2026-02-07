@@ -15,6 +15,7 @@ const envSchema = z.object({
   // Database paths
   DB_SYSTEM_PATH: z.string().default('./data/system.db'),
   DB_HEARTBEAT_PATH: z.string().default('./data/heartbeat.db'),
+  DB_MESSAGES_PATH: z.string().default('./data/messages.db'),
   DB_AGENT_LOGS_PATH: z.string().default('./data/agent_logs.db'),
   LANCEDB_PATH: z.string().default('./data/lancedb'),
 

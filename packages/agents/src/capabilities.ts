@@ -28,11 +28,19 @@ export const CLAUDE_CAPABILITIES: AdapterCapabilities = {
   supportsFork: true,
   maxConcurrentSessions: null,
   supportedModels: [
-    'claude-sonnet-4-5-20250514',
+    // Latest models
+    'claude-opus-4-6',
+    'claude-sonnet-4-5-20250929',
+    'claude-haiku-4-5-20251001',
+    // Previous generation
     'claude-opus-4-5-20251101',
-    'claude-3-5-sonnet-20241022',
+    'claude-opus-4-1-20250805',
+    'claude-sonnet-4-20250514',
+    'claude-opus-4-20250514',
+    'claude-3-7-sonnet-20250219',
+    // Legacy models
     'claude-3-5-haiku-20241022',
-    'claude-3-opus-20240229',
+    'claude-3-haiku-20240307',
   ],
 };
 
@@ -56,9 +64,19 @@ export const CODEX_CAPABILITIES: AdapterCapabilities = {
   supportsFork: false,
   maxConcurrentSessions: null,
   supportedModels: [
-    'codex-mini-latest',
-    'gpt-5-codex',
-    'gpt-5',
+    // Latest Codex models
+    'gpt-5.3-codex',
+    'gpt-5.2-codex',
+    'gpt-5.1-codex',
+    'gpt-5.1-codex-max',
+    'gpt-5.1-codex-mini',
+    'codex-mini-latest', // Default in Codex CLI
+    // Reasoning models
+    'o3',
+    'o4-mini',
+    // GPT models
+    'gpt-4.1',
+    'gpt-4.1-mini',
   ],
 };
 

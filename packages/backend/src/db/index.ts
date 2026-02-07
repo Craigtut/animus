@@ -1,9 +1,10 @@
 /**
  * Database Module
  *
- * Manages three SQLite databases:
+ * Manages four SQLite databases:
  * - system.db: Users, auth, settings, personality (rarely reset)
  * - heartbeat.db: Thoughts, experiences, emotions, tasks (the "life state")
+ * - messages.db: Conversations, messages, channels (long-term history)
  * - agent_logs.db: SDK logs, tool calls, token usage (frequent cleanup)
  */
 
@@ -16,6 +17,7 @@ import { env } from '../utils/env.js';
 // Database instances
 let systemDb: Database.Database;
 let heartbeatDb: Database.Database;
+let messagesDb: Database.Database;
 let agentLogsDb: Database.Database;
 
 /**
@@ -36,6 +38,16 @@ export function getHeartbeatDb(): Database.Database {
     throw new Error('Heartbeat database not initialized');
   }
   return heartbeatDb;
+}
+
+/**
+ * Get the messages database instance
+ */
+export function getMessagesDb(): Database.Database {
+  if (!messagesDb) {
+    throw new Error('Messages database not initialized');
+  }
+  return messagesDb;
 }
 
 /**
@@ -68,6 +80,12 @@ export async function initializeDatabases(): Promise<void> {
   heartbeatDb.pragma('foreign_keys = ON');
   initializeHeartbeatSchema(heartbeatDb);
 
+  // Initialize messages database
+  messagesDb = new Database(env.DB_MESSAGES_PATH);
+  messagesDb.pragma('journal_mode = WAL');
+  messagesDb.pragma('foreign_keys = ON');
+  initializeMessagesSchema(messagesDb);
+
   // Initialize agent logs database
   agentLogsDb = new Database(env.DB_AGENT_LOGS_PATH);
   agentLogsDb.pragma('journal_mode = WAL');
@@ -83,6 +101,7 @@ export async function initializeDatabases(): Promise<void> {
 export function closeDatabases(): void {
   systemDb?.close();
   heartbeatDb?.close();
+  messagesDb?.close();
   agentLogsDb?.close();
 }
 
@@ -117,7 +136,7 @@ function initializeSystemSchema(db: Database.Database): void {
       heartbeat_interval_ms INTEGER NOT NULL DEFAULT 300000,
       thought_retention_days INTEGER NOT NULL DEFAULT 30,
       experience_retention_days INTEGER NOT NULL DEFAULT 30,
-      emotion_retention_days INTEGER NOT NULL DEFAULT 7,
+      emotion_history_retention_days INTEGER NOT NULL DEFAULT 30,
       agent_log_retention_days INTEGER NOT NULL DEFAULT 14,
       default_agent_provider TEXT NOT NULL DEFAULT 'claude',
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -172,39 +191,65 @@ function initializeHeartbeatSchema(db: Database.Database): void {
       id TEXT PRIMARY KEY,
       tick_number INTEGER NOT NULL,
       content TEXT NOT NULL,
-      type TEXT NOT NULL,
+      importance REAL NOT NULL DEFAULT 0.5,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       expires_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_thoughts_tick ON thoughts(tick_number);
     CREATE INDEX IF NOT EXISTS idx_thoughts_expires ON thoughts(expires_at);
-    CREATE INDEX IF NOT EXISTS idx_thoughts_type ON thoughts(type);
+    CREATE INDEX IF NOT EXISTS idx_thoughts_importance ON thoughts(importance);
 
     -- Experiences table
     CREATE TABLE IF NOT EXISTS experiences (
       id TEXT PRIMARY KEY,
       tick_number INTEGER NOT NULL,
-      description TEXT NOT NULL,
-      emotional_valence REAL NOT NULL,
-      salience REAL NOT NULL,
+      content TEXT NOT NULL,
+      importance REAL NOT NULL DEFAULT 0.5,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       expires_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_experiences_tick ON experiences(tick_number);
     CREATE INDEX IF NOT EXISTS idx_experiences_expires ON experiences(expires_at);
-    CREATE INDEX IF NOT EXISTS idx_experiences_salience ON experiences(salience);
+    CREATE INDEX IF NOT EXISTS idx_experiences_importance ON experiences(importance);
 
-    -- Emotions table
-    CREATE TABLE IF NOT EXISTS emotions (
+    -- Emotion state table (12 fixed rows, updated in place)
+    CREATE TABLE IF NOT EXISTS emotion_state (
+      emotion TEXT PRIMARY KEY,
+      category TEXT NOT NULL,
+      intensity REAL NOT NULL DEFAULT 0,
+      baseline REAL NOT NULL DEFAULT 0,
+      last_updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Seed emotion state if empty
+    INSERT OR IGNORE INTO emotion_state (emotion, category) VALUES
+      ('joy', 'positive'),
+      ('contentment', 'positive'),
+      ('excitement', 'positive'),
+      ('gratitude', 'positive'),
+      ('confidence', 'positive'),
+      ('stress', 'negative'),
+      ('anxiety', 'negative'),
+      ('frustration', 'negative'),
+      ('sadness', 'negative'),
+      ('boredom', 'negative'),
+      ('curiosity', 'drive'),
+      ('loneliness', 'drive');
+
+    -- Emotion history table (append-only log of changes)
+    CREATE TABLE IF NOT EXISTS emotion_history (
       id TEXT PRIMARY KEY,
       tick_number INTEGER NOT NULL,
-      name TEXT NOT NULL,
-      intensity REAL NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      expires_at TEXT
+      emotion TEXT NOT NULL,
+      delta REAL NOT NULL,
+      reasoning TEXT NOT NULL,
+      intensity_before REAL NOT NULL,
+      intensity_after REAL NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
-    CREATE INDEX IF NOT EXISTS idx_emotions_tick ON emotions(tick_number);
-    CREATE INDEX IF NOT EXISTS idx_emotions_expires ON emotions(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_emotion_history_tick ON emotion_history(tick_number);
+    CREATE INDEX IF NOT EXISTS idx_emotion_history_emotion ON emotion_history(emotion);
+    CREATE INDEX IF NOT EXISTS idx_emotion_history_created ON emotion_history(created_at);
 
     -- Tasks table
     CREATE TABLE IF NOT EXISTS tasks (
@@ -233,6 +278,55 @@ function initializeHeartbeatSchema(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_actions_tick ON actions(tick_number);
     CREATE INDEX IF NOT EXISTS idx_actions_type ON actions(type);
+  `);
+}
+
+function initializeMessagesSchema(db: Database.Database): void {
+  db.exec(`
+    -- Channels (communication endpoints)
+    CREATE TABLE IF NOT EXISTS channels (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      config TEXT NOT NULL DEFAULT '{}',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_channels_type ON channels(type);
+
+    -- Initialize default web channel if not exists
+    INSERT OR IGNORE INTO channels (id, type, name) VALUES ('web-default', 'web', 'Web UI');
+
+    -- Conversations (message threads)
+    CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+      title TEXT,
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_message_at TEXT NOT NULL DEFAULT (datetime('now')),
+      message_count INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversations_channel ON conversations(channel_id);
+    CREATE INDEX IF NOT EXISTS idx_conversations_last_message ON conversations(last_message_at);
+
+    -- Messages (individual messages in both directions)
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      direction TEXT NOT NULL,
+      sender TEXT NOT NULL,
+      content TEXT NOT NULL,
+      channel_type TEXT NOT NULL,
+      tick_number INTEGER,
+      agent_task_id TEXT,
+      metadata TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+    CREATE INDEX IF NOT EXISTS idx_messages_direction ON messages(direction);
+    CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender);
   `);
 }
 

@@ -39,6 +39,7 @@ LOG_LEVEL=info
 # Database paths (relative to backend package)
 DB_SYSTEM_PATH=./data/system.db
 DB_HEARTBEAT_PATH=./data/heartbeat.db
+DB_MESSAGES_PATH=./data/messages.db
 DB_AGENT_LOGS_PATH=./data/agent_logs.db
 LANCEDB_PATH=./data/lancedb
 
@@ -168,13 +169,14 @@ This serves both the API and the built frontend at `http://localhost:3000`.
 
 ## Database Management
 
-Animus uses three SQLite databases that are created automatically on first run:
+Animus uses four SQLite databases that are created automatically on first run:
 
-| Database | Location | Purpose |
-|----------|----------|---------|
-| system.db | `./data/system.db` | Users, settings, API keys |
-| heartbeat.db | `./data/heartbeat.db` | Thoughts, emotions, tasks |
-| agent_logs.db | `./data/agent_logs.db` | Agent sessions, events |
+| Database | Location | Purpose | Lifecycle |
+|----------|----------|---------|-----------|
+| system.db | `./data/system.db` | Users, settings, API keys | Rarely reset |
+| heartbeat.db | `./data/heartbeat.db` | Thoughts, emotions, tasks | Occasional reset |
+| messages.db | `./data/messages.db` | Conversations, messages, channels | Long-term history |
+| agent_logs.db | `./data/agent_logs.db` | Agent sessions, events | Frequent cleanup |
 
 ### Resetting Databases
 
@@ -188,7 +190,7 @@ rm -rf packages/backend/data/*.db
 npm run dev:backend
 ```
 
-To reset only the heartbeat state:
+To reset only the heartbeat state (gives Animus a "fresh mind" without losing conversation history):
 
 ```bash
 rm packages/backend/data/heartbeat.db

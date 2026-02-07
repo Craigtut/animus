@@ -35,6 +35,7 @@ export const registerInputSchema = z.object({
 export const userSchema = z.object({
   id: uuidSchema,
   email: z.string().email(),
+  contactId: uuidSchema.nullable(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
 });
@@ -63,45 +64,69 @@ export const heartbeatStateSchema = z.object({
   isRunning: z.boolean(),
 });
 
-export const thoughtTypeSchema = z.enum([
-  'observation',
-  'reflection',
-  'intention',
-  'question',
-  'insight',
-]);
-
 export const thoughtSchema = z.object({
   id: uuidSchema,
   tickNumber: z.number().int().nonnegative(),
   content: z.string(),
-  type: thoughtTypeSchema,
+  importance: z.number().min(0).max(1),
   createdAt: timestampSchema,
   expiresAt: timestampSchema.nullable(),
 });
 
 export const createThoughtInputSchema = z.object({
   content: z.string().min(1),
-  type: thoughtTypeSchema,
+  importance: z.number().min(0).max(1).default(0.5),
 });
 
 export const experienceSchema = z.object({
   id: uuidSchema,
   tickNumber: z.number().int().nonnegative(),
-  description: z.string(),
-  emotionalValence: z.number().min(-1).max(1),
-  salience: z.number().min(0).max(1),
+  content: z.string(),
+  importance: z.number().min(0).max(1),
   createdAt: timestampSchema,
   expiresAt: timestampSchema.nullable(),
 });
 
-export const emotionSchema = z.object({
+export const emotionNameSchema = z.enum([
+  'joy',
+  'contentment',
+  'excitement',
+  'gratitude',
+  'confidence',
+  'stress',
+  'anxiety',
+  'frustration',
+  'sadness',
+  'boredom',
+  'curiosity',
+  'loneliness',
+]);
+
+export const emotionCategorySchema = z.enum(['positive', 'negative', 'drive']);
+
+export const emotionStateSchema = z.object({
+  emotion: emotionNameSchema,
+  category: emotionCategorySchema,
+  intensity: z.number().min(0).max(1),
+  baseline: z.number().min(0).max(1),
+  lastUpdatedAt: timestampSchema,
+});
+
+export const emotionDeltaSchema = z.object({
+  emotion: emotionNameSchema,
+  delta: z.number(),
+  reasoning: z.string(),
+});
+
+export const emotionHistoryEntrySchema = z.object({
   id: uuidSchema,
   tickNumber: z.number().int().nonnegative(),
-  name: z.string(),
-  intensity: z.number().min(0).max(1),
+  emotion: emotionNameSchema,
+  delta: z.number(),
+  reasoning: z.string(),
+  intensityBefore: z.number().min(0).max(1),
+  intensityAfter: z.number().min(0).max(1),
   createdAt: timestampSchema,
-  expiresAt: timestampSchema.nullable(),
 });
 
 // ============================================================================
@@ -137,6 +162,143 @@ export const updateTaskInputSchema = z.object({
   status: taskStatusSchema.optional(),
   priority: taskPrioritySchema.optional(),
   dueAt: timestampSchema.nullable().optional(),
+});
+
+// ============================================================================
+// Message & Channel Schemas
+// ============================================================================
+
+export const channelTypeSchema = z.enum(['web', 'sms', 'discord', 'api']);
+export const permissionTierSchema = z.enum(['primary', 'standard']);
+export const messageDirectionSchema = z.enum(['inbound', 'outbound']);
+export const messageSenderSchema = z.enum(['user', 'animus', 'sub_agent']);
+
+export const channelSchema = z.object({
+  id: uuidSchema,
+  type: channelTypeSchema,
+  name: z.string(),
+  config: z.record(z.unknown()),
+  isActive: z.boolean(),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+});
+
+export const conversationSchema = z.object({
+  id: uuidSchema,
+  channelId: uuidSchema,
+  title: z.string().nullable(),
+  startedAt: timestampSchema,
+  lastMessageAt: timestampSchema,
+  messageCount: z.number().int().nonnegative(),
+});
+
+export const messageSchema = z.object({
+  id: uuidSchema,
+  conversationId: uuidSchema,
+  direction: messageDirectionSchema,
+  sender: messageSenderSchema,
+  content: z.string(),
+  channelType: channelTypeSchema,
+  tickNumber: z.number().int().nonnegative().nullable(),
+  agentTaskId: uuidSchema.nullable(),
+  metadata: z.record(z.unknown()).nullable(),
+  createdAt: timestampSchema,
+});
+
+export const sendMessageInputSchema = z.object({
+  conversationId: uuidSchema.optional(),
+  channelType: channelTypeSchema,
+  content: z.string().min(1),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+// ============================================================================
+// Contact Schemas
+// ============================================================================
+
+export const contactSchema = z.object({
+  id: uuidSchema,
+  fullName: z.string(),
+  phoneNumber: z.string().nullable(),
+  email: z.string().email().nullable(),
+  isPrimary: z.boolean(),
+  permissionTier: permissionTierSchema,
+  notes: z.string().nullable(),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+});
+
+export const contactChannelSchema = z.object({
+  id: uuidSchema,
+  contactId: uuidSchema,
+  channel: channelTypeSchema,
+  identifier: z.string(),
+  displayName: z.string().nullable(),
+  isVerified: z.boolean(),
+  createdAt: timestampSchema,
+});
+
+// ============================================================================
+// Channel Adapter Schemas
+// ============================================================================
+
+export const mediaAttachmentTypeSchema = z.enum(['image', 'audio', 'video', 'file']);
+
+export const mediaAttachmentSchema = z.object({
+  id: uuidSchema,
+  type: mediaAttachmentTypeSchema,
+  mimeType: z.string(),
+  localPath: z.string(),
+  originalFilename: z.string().nullable(),
+  sizeBytes: z.number().int().nonnegative(),
+});
+
+export const resolvedContactSchema = z.object({
+  id: uuidSchema,
+  fullName: z.string(),
+  permissionTier: permissionTierSchema,
+});
+
+export const incomingMessageSchema = z.object({
+  channel: channelTypeSchema,
+  channelIdentifier: z.string(),
+  contact: resolvedContactSchema.nullable(),
+  conversationId: z.string().nullable(),
+  content: z.string(),
+  media: z.array(mediaAttachmentSchema).optional(),
+  rawMetadata: z.record(z.unknown()),
+  receivedAt: timestampSchema,
+});
+
+// ============================================================================
+// Channel Configuration Schemas
+// ============================================================================
+
+export const channelConfigTypeSchema = z.enum(['sms', 'discord', 'openai_api', 'ollama_api']);
+
+export const smsChannelConfigSchema = z.object({
+  accountSid: z.string().min(1),
+  authToken: z.string().min(1),
+  phoneNumber: z.string().min(1),
+  webhookUrl: z.string().url(),
+});
+
+export const discordChannelConfigSchema = z.object({
+  botToken: z.string().min(1),
+  applicationId: z.string().min(1),
+  allowedGuildIds: z.array(z.string()).default([]),
+});
+
+export const openaiApiChannelConfigSchema = z.object({});
+
+export const ollamaApiChannelConfigSchema = z.object({});
+
+export const channelConfigSchema = z.object({
+  id: uuidSchema,
+  channelType: channelConfigTypeSchema,
+  isEnabled: z.boolean(),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
 });
 
 // ============================================================================
@@ -194,7 +356,7 @@ export const systemSettingsSchema = z.object({
   heartbeatIntervalMs: z.number().int().positive().default(300000), // 5 minutes
   thoughtRetentionDays: z.number().int().positive().default(30),
   experienceRetentionDays: z.number().int().positive().default(30),
-  emotionRetentionDays: z.number().int().positive().default(7),
+  emotionHistoryRetentionDays: z.number().int().positive().default(30),
   agentLogRetentionDays: z.number().int().positive().default(14),
   defaultAgentProvider: agentProviderSchema.default('claude'),
 });

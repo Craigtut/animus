@@ -33,20 +33,30 @@ Animation serves to make the interface feel alive — breathing, present, aware.
 
 ## Visual System
 
-### Dark Mode Foundation
+### Dual Mode: Light & Dark
 
-Animus uses a dark mode interface with a very dark, nearly black background. This creates:
+Animus supports both light and dark modes, with light mode as the default. Both modes share the same design language, component structure, and animation principles — they are two expressions of the same identity.
+
+**Why Both Modes:**
+- Light mode feels warm, open, and grounded — the primary daytime experience
+- Dark mode feels intimate, focused, and calm — ideal for low-light or preference
+- Supporting both reinforces the humanness of the system — real environments shift between light and dark, and so should Animus
+
+**Light Mode (Default)**
+The primary background is a warm white (`#FAF9F4`) — never a cold, sterile pure white. This subtle warmth makes the interface feel inhabited and intentional, like natural light on good paper. Layer slightly darker warm tones to create depth and hierarchy.
+
+**Dark Mode**
+Blacks should have a subtle warm undertone. The darkness should feel like a comfortable room at night, not an empty void. Layer slightly lighter dark tones to create depth and hierarchy.
+
+**Shared Qualities Across Both Modes:**
 - Focus on content
 - Reduced visual fatigue
-- A canvas where light carries meaning
-- An intimate, focused feeling
-
-**Background Tones**
-Blacks should have a subtle warm undertone. The darkness should feel like a comfortable room at night, not an empty void. Layer slightly lighter dark tones to create depth and hierarchy.
+- A canvas where accents carry meaning
+- Warm undertones throughout the entire palette
 
 ### Monochromatic Restraint
 
-The vast majority of UI elements exist in blacks, whites, and grays.
+The vast majority of UI elements exist in warm neutrals — warm whites, warm grays, and warm darks.
 
 **Why Restraint Matters:**
 - When everything is colorful, nothing stands out
@@ -54,17 +64,19 @@ The vast majority of UI elements exist in blacks, whites, and grays.
 - Restraint creates elegance
 - It allows the inner life visualizations to take center stage
 
-**Grays with Warmth:**
-The gray palette should lean warm — never blue or green-shifted. Even neutral colors should feel alive.
+**Neutrals with Warmth:**
+The entire neutral palette should lean warm — never blue or green-shifted. Even the most subtle grays should feel alive. In light mode, this means warm whites and warm light grays. In dark mode, warm darks and warm mid-grays.
 
 ### Color with Purpose
 
 Color appears only when it needs to communicate something specific:
 
-**Primary Accent: White**
+**Primary Accent: High-Contrast**
 - Primary buttons and actions
 - Key interactive elements
 - Maximum emphasis
+- In dark mode: white accent on dark surfaces
+- In light mode: near-black accent on light surfaces
 
 **Semantic Colors:**
 | Color | Usage |
@@ -97,7 +109,7 @@ Generous line height for body text. Headlines can be tighter. Let text breathe.
 ### Spacing & Layout
 
 **Airy & Generous**
-The interface should feel spacious. Information needs room to breathe. Generous whitespace (or rather, darkspace) reinforces the feeling of elegance and calm.
+The interface should feel spacious. Information needs room to breathe. Generous whitespace reinforces the feeling of elegance and calm.
 
 **Consistent Rhythm**
 Use a spacing scale that creates visual rhythm. Common spacings should repeat throughout the interface, creating unconscious harmony.
@@ -111,13 +123,14 @@ Layout should emerge from content needs, not be imposed upon them. Don't force c
 Cards and containers feature subtle gradient borders that imply rim lighting — as if soft light is falling across the edge from above.
 
 **Implementation:**
-- Gradient runs from warm off-white to transparent
 - Positioned to suggest light from a consistent direction (typically top or top-left)
 - Very subtle — noticeable but not attention-grabbing
 - Creates depth and elevation without traditional shadows
+- In dark mode: gradient runs from warm off-white to transparent
+- In light mode: gradient runs from a transparent dark gray to fully transparent, creating a soft edge definition that mirrors the dark mode technique
 
-**Why Not Shadows:**
-In dark interfaces, traditional drop shadows don't work well. The rim lighting technique creates a sense of elevation and depth that feels natural in the dark environment.
+**Why Rim Lighting in Both Modes:**
+This technique unifies both modes under a single elevation language. In dark mode, light edges lift cards from the dark canvas. In light mode, subtle dark edges give cards definition against the warm white background. The effect is the same — gentle depth through edge contrast — adapted to its environment.
 
 **Container Hierarchy:**
 - Primary containers: Full rim lighting
@@ -140,10 +153,10 @@ Nested elements should have coordinated radii that feel harmonious together.
 ### Depth & Layering
 
 **Layered Transparency**
-Create depth through layered, semi-transparent surfaces rather than shadows. Higher elements can be slightly lighter or have reduced transparency, revealing the darkness beneath.
+Create depth through layered, semi-transparent surfaces rather than shadows. In dark mode, higher elements can be slightly lighter, revealing the darkness beneath. In light mode, higher elements can be slightly brighter or use subtle warm shifts to separate from the background.
 
 **Rim Lighting as Elevation**
-The gradient borders serve as the primary indicator of elevation. More prominent rim lighting suggests higher elevation.
+The gradient borders serve as the primary indicator of elevation in both modes. More prominent rim lighting suggests higher elevation.
 
 **No Glow Effects**
 Avoid sci-fi style glow effects. Light should feel warm and natural, not projected or artificial.
@@ -234,16 +247,16 @@ Similar actions should have similar timing. Establish a small set of duration va
 ### Buttons
 
 **Primary Button**
-- White background
-- Dark text
+- High-contrast fill (near-black in light mode, white in dark mode)
+- Inverted text color
 - Rounded corners
 - Subtle scale on hover
 - Used for primary actions only
 
 **Secondary Button**
-- Transparent or subtle dark background
-- Light border or no border
-- White text
+- Transparent or subtle background tint
+- Subtle border or no border
+- Text matches the mode's foreground color
 - Used for secondary actions
 
 **Hierarchy**
@@ -252,7 +265,7 @@ One primary button per view/context. If multiple actions exist, use visual hiera
 ### Inputs
 
 **Text Inputs**
-- Dark background slightly lighter than page
+- Background slightly offset from page (lighter in light mode, darker-shifted in dark mode)
 - Subtle border or rim lighting
 - Clear focus state with rim lighting emphasis
 - Generous padding
@@ -266,7 +279,7 @@ One primary button per view/context. If multiple actions exist, use visual hiera
 ### Cards
 
 **Standard Card**
-- Dark background
+- Background offset from page (warm white surface in light mode, dark surface in dark mode)
 - Gradient border rim lighting
 - Rounded corners
 - Generous internal padding
@@ -283,7 +296,7 @@ One primary button per view/context. If multiple actions exist, use visual hiera
 - Centered or contextually positioned
 - Generous radius
 - Prominent rim lighting (highest elevation)
-- Dark backdrop to focus attention
+- Dimmed backdrop to focus attention
 
 **Animation**
 - Fade and subtle scale on appearance
@@ -316,7 +329,7 @@ Good design in Animus is:
 - **Alive** — subtly breathing, always present
 - **Restrained** — elegant in its economy
 
-The interface should feel like a calm, warm space where something alive resides. It should never overwhelm, never confuse, never demand. It should simply be — present, capable, and quietly beautiful.
+The interface — whether in warm light or comfortable dark — should feel like a calm, warm space where something alive resides. It should never overwhelm, never confuse, never demand. It should simply be — present, capable, and quietly beautiful.
 
 ---
 
