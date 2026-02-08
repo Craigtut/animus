@@ -1,166 +1,141 @@
 # Animus: Open Questions
 
-> Questions and concerns that need resolution before or during implementation. Each entry includes context on why it matters and any preliminary thinking.
+> Questions and concerns that need resolution before or during implementation. Each entry includes context on why it matters, the resolution, and links to updated documentation.
 
-## 1. Concurrent Tick Handling & Race Conditions
+## 1. Concurrent Tick Handling & Race Conditions ✅ RESOLVED
 
 **Context:** Multiple tick triggers can fire simultaneously or in rapid succession — a message arrives while an interval tick is processing, a sub-agent completes during a message-triggered tick, etc.
 
-**The Problem:**
-- If two ticks run concurrently against the same mind session, they could produce conflicting state updates (emotion deltas that double-count, duplicate thoughts, conflicting decisions)
-- If ticks are strictly serialized, message response latency suffers — user sends a message but has to wait for the current interval tick to finish
-- Database writes from the EXECUTE stage could conflict if two ticks try to write simultaneously
+**Resolution:** FIFO priority queue with message coalescing via per-contact debounce.
 
-**Preliminary Thinking:**
-- Sequential processing with a FIFO queue is the simplest safe approach (see heartbeat.md, Mind Session Lifecycle)
-- Message-triggered ticks could potentially preempt interval ticks (interrupt and requeue)
-- The warm session model helps — rapid messages hit the same session rather than spawning separate ticks
-- SQLite's WAL mode handles concurrent reads but writes are serialized, so DB-level conflicts are unlikely if ticks are queued
+- **Priority ordering**: `message` > `agent_complete` > `scheduled_task` > `interval`
+- **Same-contact rapid messages**: Coalesced via ~1.5s debounce — rapid messages from the same contact hit the same warm session, not queued as separate ticks
+- **Cross-contact messages**: Queued normally — different contacts queue separate ticks
+- **Interval tick coalescing**: Only one interval tick can be queued at a time. If one is already queued when another would fire, the new one is dropped
+- **No preemption**: Running ticks are never interrupted. Queue processes strictly FIFO after priority sort
+- **Queue depth cap**: Maximum 10 queued ticks. Beyond that, interval ticks are dropped first, then oldest non-message ticks
+- **Warm session model**: The key insight — rapid messages from the same contact don't need separate ticks because they hit the warm session window
 
-**Needs Resolution:**
-- Should interval ticks be cancellable/preemptable by higher-priority triggers?
-- What happens to queued ticks if the queue grows too large?
-- Is there a maximum queue depth, and what happens when it's exceeded?
+**Updated in:** `docs/architecture/heartbeat.md` (Tick Queuing & Concurrency section)
 
 ---
 
-## 2. Crash Recovery Robustness
+## 2. Crash Recovery Robustness ✅ RESOLVED
 
 **Context:** The heartbeat pipeline persists state to SQLite for crash recovery, but the recovery mechanism has fragile points.
 
-**The Problem:**
-- If a crash occurs mid-EXECUTE (after some writes but before others), the system could be left in an inconsistent state
-- Agent sessions (SDK-level) are lost on crash — the warm session is gone, requiring a cold start
-- Sub-agents that were running at crash time need to be detected and handled on restart
-- Emotion state could be inconsistent if a crash happens between writing emotion deltas and updating emotion_state
+**Resolution:** Single transaction for EXECUTE, discard incomplete ticks, sub-agent re-check.
 
-**Preliminary Thinking:**
-- SQLite transactions should wrap the entire EXECUTE stage's database writes
-- On startup, check for incomplete ticks (status = 'active') and either replay or discard them
-- Sub-agent sessions stored in SQLite can be checked against the SDK on restart
-- A "last known good state" checkpoint could help, but adds complexity
+- **EXECUTE stage**: Wrapped in a single SQLite transaction. All writes (thoughts, experiences, emotion updates, decisions) are committed atomically. If the process dies mid-EXECUTE, the transaction rolls back
+- **Incomplete ticks on startup**: Mark as `failed` and move on. The next tick naturally observes current state and re-thinks. No replay of incomplete ticks
+- **Messages are safe**: Inbound messages are written to `messages.db` at ingestion time (before tick processing), not during EXECUTE. A crash never loses messages
+- **Sub-agent re-check**: On startup, query SQLite for `status = 'running'` tasks and check each against the agent SDK — completed sessions store results and trigger `agent_complete`, dead sessions are marked `failed`, running sessions re-attach event handlers
 
-**Needs Resolution:**
-- How granular should EXECUTE-stage transactions be?
-- Should we attempt to resume incomplete ticks or always discard them?
-- How do we handle sub-agents that completed during downtime (their results may be lost)?
+**Updated in:** `docs/architecture/heartbeat.md` (Crash Recovery section)
 
 ---
 
-## 3. MCP Tool Design for Sub-Agents
+## 3. MCP Tool Design for Sub-Agents ✅ RESOLVED (design approach decided, full spec pending)
 
-**Context:** Sub-agents use MCP tools to interact with the Animus system (sending messages to users, reading memories, updating progress). The tool interface needs to be defined.
+**Context:** Sub-agents use MCP tools to interact with the Animus system (sending messages to users, reading memories, updating progress). The tool interface needs to be designed to work across all three agent SDK providers.
 
-**The Problem:**
-- `send_message` tool — How does the sub-agent specify which contact/channel to message? It needs the originating channel context.
-- `update_progress` tool — What schema does progress reporting follow? How does the mind consume this?
-- `read_memory` tool — Does this go through the same memory retrieval system as the mind's GATHER CONTEXT, or is it a separate query interface?
-- Tool permissions — How are tools filtered by contact permission tier at the MCP level?
+**Resolution:** MCP protocol is the cross-provider standard — all three SDKs support it.
 
-**Preliminary Thinking:**
-- Sub-agents receive channel context in their prompt template, so `send_message` can default to the originating channel
-- The backend (not the agents package) implements MCP tool handlers — the agents package just provides tool definitions
-- Tool list is filtered before session creation based on the triggering contact's permission tier
-- `send_message` should write to `messages.db` and emit a real-time event (tRPC subscription) for the frontend
+- **MCP is the common ground**: Claude (native in-process + stdio), Codex (stdio), and OpenCode (via config) all support MCP servers
+- **Tool definitions in `@animus/shared`**: Provider-agnostic tool schemas (name, description, input/output Zod schemas)
+- **Tool handlers in `@animus/backend`**: Where DB access lives — the backend IS the host process for all SDK subprocesses/servers
+- **MCP server in `@animus/backend`**: Wraps tool handlers as MCP tools. Runs as stdio server that all SDK adapters can connect to
+- **Claude optimization**: Can use `createSdkMcpServer()` for efficient in-process tools (no subprocess overhead)
+- **Permission filtering**: `allowedTools` list filtered by contact permission tier before session creation
+- **Extensible**: Users can add custom MCP servers in the future via configuration
+- **v1 tool set**: Start minimal — `send_message`, `read_memory`, `update_progress`. Expand heavily post-v1
 
-**Needs Resolution:**
-- Full MCP tool schema definitions (input/output for each tool)
-- Whether sub-agents can call tools that trigger side effects beyond messaging (e.g., file operations, web requests)
-- How tool call results flow back to the sub-agent session
-- Whether custom user-defined tools are supported (and how they'd be registered)
+**Further research documented in:** Cross-provider MCP tool abstraction doc (pending)
 
 ---
 
-## 4. Structured Output Across SDK Adapters
+## 4. Structured Output Across SDK Adapters ✅ RESOLVED
 
-**Context:** The mind needs to produce structured JSON output (thoughts, experiences, emotion deltas, decisions) on every tick. Each SDK handles structured output differently.
+**Context:** The mind needs to produce structured JSON output on every tick. Each SDK handles structured output differently, and the reply field needs to stream in real-time.
 
-**The Problem:**
-- **Claude SDK**: Supports `outputFormat: { type: 'json_schema', schema }` for structured output enforcement
-- **Codex SDK**: Supports `outputSchema` parameter on thread creation
-- **OpenCode SDK**: No native structured output — would need to inject schema in prompt and parse JSON from response
+**Resolution:** Zod validation in backend, `llm-json-stream` for field-level streaming.
 
-**Preliminary Thinking:**
-- The `@animus/agents` abstraction layer should expose a unified `outputSchema` option in `PromptOptions`
-- Each adapter maps this to its SDK's native mechanism (or prompt injection for OpenCode)
-- Zod schemas define the output format, compiled to JSON Schema for SDK consumption
-- The MindOutput schema is defined in the heartbeat system and passed through the agents layer
+- **Schema source of truth**: Zod schemas in `@animus/shared`, compiled to JSON Schema for SDK consumption
+- **Per-provider handling**:
+  - Claude: Native `outputFormat: { type: 'json_schema', schema }`
+  - Codex: Native `outputSchema` parameter
+  - OpenCode: Schema injected via system prompt + Zod validation after completion
+- **Validation**: Backend validates with Zod after generation completes. On failure, retry the tick
+- **Streaming**: `llm-json-stream` library parses JSON incrementally, subscribes to `reply.content` path for real-time streaming to frontend
+- **Schema field ordering**: `thoughts` → `experiences` → `emotionDeltas` → `decisions` → `workingMemoryUpdate` → `coreSelfUpdate` → `memoryCandidate` → `reply` (reply LAST so thinking informs the reply)
+- **Parser location**: Lives in `@animus/backend` (heartbeat pipeline), NOT in `@animus/agents`. Agents package just emits raw `response_chunk` text events
+- **Frontend experience**: "Thinking" indicator while fields 1-7 generate, then streaming text when reply starts
 
-**Needs Resolution:**
-- How reliable is prompt-injected schema enforcement for OpenCode? Do we need validation + retry?
-- Should the abstraction layer handle output validation, or leave it to the caller?
-- How do streaming events interact with structured output (partial JSON in chunks)?
-
----
-
-## 5. Claude OAuth Token Restrictions for Agent SDK
-
-**Context:** Claude's Agent SDK supports authentication via long-lived OAuth access tokens (generated by `claude setup-token`, format `sk-ant-oat01-...`, valid ~1 year). These tokens are an alternative to standard API keys and are passed via the `CLAUDE_CODE_OAUTH_TOKEN` environment variable.
-
-**The Problem:**
-- Anthropic's OAuth system distinguishes between first-party use (Anthropic's own apps like Claude Code) and third-party use. Third-party OAuth tokens carry restrictions — limited to specific model tiers and potentially subject to rate limits or revocation.
-- Animus is a third-party application using Anthropic's Agent SDK. It's unclear whether OAuth tokens generated via `claude setup-token` would be treated as first-party (since they go through the Agent SDK, which is Anthropic's product) or third-party (since Animus is not an Anthropic application).
-- If treated as third-party, the tokens may not have access to the same models or capabilities as API key authentication, making them a worse option for users.
-
-**Preliminary Thinking:**
-- For v1, support both API key and OAuth token as authentication options, clearly documented
-- API key is the safe default — no ambiguity about access level
-- OAuth token is a convenience option for users who already have Claude Code configured
-- We should test whether Agent SDK sessions created with OAuth tokens face any restrictions vs. API key sessions
-
-**Needs Resolution:**
-- Do OAuth tokens created via `claude setup-token` face third-party restrictions when used through the Agent SDK?
-- Should we warn users about potential limitations, or test and document the actual behavior?
-- If restrictions exist, should we still offer OAuth token auth or remove it to avoid confusion?
+**Updated in:** `docs/architecture/heartbeat.md` (Combined MindOutput Schema + Streaming Structured Output sections)
 
 ---
 
-## 6. Codex ChatGPT OAuth Implementation
+## 5. Claude OAuth Token Restrictions for Agent SDK ✅ RESOLVED
 
-**Context:** The Codex SDK supports authentication via ChatGPT OAuth (the `codex login` flow), which would let users authenticate with their ChatGPT account instead of providing an API key. This is noted in the onboarding design but not implemented for v1.
+**Context:** Claude's Agent SDK supports authentication via long-lived OAuth access tokens. Unclear whether third-party restrictions apply.
 
-**The Problem:**
-- The `codex login` flow is a device code OAuth flow designed for CLI use — it opens a browser on the machine running the command
-- In a self-hosted web application, the server needs to run this flow, but the browser opens on the server machine, not the user's machine
-- The device code flow displays a URL + code for the user to visit, which could theoretically be proxied through the web UI, but this requires implementing a device code polling flow in the frontend
+**Resolution:** Leave ambiguous, support both options, document clearly.
 
-**Preliminary Thinking:**
-- For v1, Codex auth is API key only. The ChatGPT OAuth option is deferred.
-- A future implementation could: (1) initiate the device code flow on the backend, (2) return the verification URL and user code to the frontend, (3) display these to the user with instructions, (4) poll for completion
-- This is a nice-to-have — API keys work fine for users who want to use Codex
+- **Support both**: API key and OAuth token (long-lived, via `claude setup-token`) as authentication options
+- **API key is the safe default**: No ambiguity about access level
+- **OAuth token as convenience**: For users who already have Claude Code configured (likely Pro/Max subscribers)
+- **No special testing needed**: If restrictions exist, users will encounter them naturally and can switch to API key
+- **Long-lived tokens**: Valid ~1 year, stored at `~/.claude/.credentials`
+- **Environment variable**: `CLAUDE_CODE_OAUTH_TOKEN` for programmatic use
 
-**Needs Resolution:**
-- Is the device code flow worth implementing, or is API key sufficient for Codex users?
-- If implemented, what's the UX for presenting the verification URL and code in the web UI?
-- How do we handle the polling timeout and error states?
+**No doc update needed** — already covered in `docs/agents/claude/sdk-research.md`
 
 ---
 
-## 7. Contact "Notes About You" Storage & Surfacing
+## 6. Codex ChatGPT OAuth Implementation ✅ RESOLVED (must build, not deferred)
 
-**Context:** During onboarding (Step 3: Your Identity), the user provides personal context about themselves — the kind of information that helps their AI know them better. This is a free text field labeled *"Anything your Animus should know about you?"*
+**Context:** The Codex SDK supports authentication via ChatGPT OAuth. Most Codex users authenticate via their ChatGPT account, not API keys — this is a must-build feature.
 
-**The Problem:**
-- This information doesn't map neatly to any existing data structure. It's not a contact field (contacts are messaging identities), not a persona field (persona is the AI's personality), and not a system setting.
-- The data needs to be stored somewhere persistent and surfaced in the mind's context during ticks so the AI actually uses it.
-- It's conceptually "knowledge about the primary contact" but the contact system is designed for identity resolution and permissions, not rich personal profiles.
+**Resolution:** Build a device code OAuth proxy through the Animus web UI.
 
-**Preliminary Thinking:**
-- Could be stored as a field on the primary contact record in `system.db` (simplest, but overloads the contact model)
-- Could be a dedicated `user_profile` table in `system.db` (cleaner, but adds a table for potentially one field)
-- Could be stored as a "pinned memory" in the memory/knowledge system (when it exists)
-- The mind's GATHER CONTEXT stage needs to include this information — it should be part of the base context on every tick, not something retrieved via search
+- **Must build**: Unlike the original "defer" recommendation, this is essential — most Codex users authenticate via ChatGPT, not API keys
+- **Device code proxy flow**:
+  1. Backend initiates OpenAI's device code flow
+  2. Returns verification URL + user code to frontend
+  3. Frontend displays instructions ("Visit this URL and enter this code")
+  4. Backend polls for completion
+  5. On success, store tokens encrypted in DB
+- **OpenAI's flow is non-standard**: Differs significantly from RFC 8628 — two-step process with server-generated PKCE pair
+- **Token storage**: Encrypted in DB (using `IEncryptionService`), cached at runtime
+- **tRPC procedures**: `codexAuth.initiate`, `codexAuth.poll`, `codexAuth.status`
 
-**Needs Resolution:**
-- Where does this data live? Contact record, dedicated table, or memory system?
-- Should it be editable from settings after onboarding? (Probably yes)
-- How does it get into the mind's context — hardcoded in the system prompt, or part of the gathered context?
+**Documented in:** `docs/agents/codex/oauth.md`
+
+---
+
+## 7. Contact "Notes About You" Storage & Surfacing ✅ RESOLVED
+
+**Context:** During onboarding, the user provides personal context about themselves. This needs to be stored and surfaced in the mind's context.
+
+**Resolution:** Store as `notes` field on contacts table (already exists in schema).
+
+- **Storage**: `notes` text field on the contacts table in `system.db` — already exists in the Contact interface and SQL schema
+- **Primary contact notes**: Contain the onboarding "Notes About You" free text
+- **Context surfacing**: Included in the base system prompt every tick via the Context Builder (not retrieved via search)
+- **Editable from settings**: Yes, available in contact settings after onboarding
+- **Soft cap**: ~500 tokens (UI guidance, not hard enforcement)
+- **Not memory system**: This is static user-provided context, not emergent AI knowledge. Memory system is for what the AI learns
+
+**Updated in:** `docs/architecture/contacts.md` (Contact Notes & "Notes About You" section)
 
 ---
 
 ## Related Documents
 
-- `docs/architecture/heartbeat.md` — Tick pipeline, session lifecycle, crash recovery
+- `docs/architecture/heartbeat.md` — Tick pipeline, session lifecycle, crash recovery, streaming output
 - `docs/architecture/agent-orchestration.md` — Sub-agent lifecycle, MCP tools
-- `docs/architecture/contacts.md` — Permission tiers affecting tool access
+- `docs/architecture/contacts.md` — Permission tiers, contact notes
+- `docs/architecture/context-builder.md` — Context assembly, prompt compilation
+- `docs/agents/README.md` — Agent SDK documentation index
+- `docs/agents/codex/oauth.md` — Codex OAuth device code proxy design
 - `docs/frontend/onboarding.md` — Onboarding flow, agent provider auth, persona creation UX

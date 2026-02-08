@@ -1,87 +1,94 @@
-# Agent SDK Research Documentation
+# Agent SDK Documentation
 
-This folder contains comprehensive research on the three agent SDKs that the `@animus/agents` package will unify.
+This folder contains comprehensive research and design documentation for the three agent SDKs that the `@animus/agents` package unifies.
 
-## Documents
+## Structure
+
+```
+docs/agents/
+├── README.md                    # This file
+├── architecture-overview.md  # Cross-cutting: unified abstraction layer design
+├── plugin-extension-systems.md # Plugin/extension comparison & Animus plugin strategy
+├── claude/
+│   └── sdk-research.md          # Claude Agent SDK deep dive
+├── codex/
+│   ├── sdk-research.md          # OpenAI Codex SDK deep dive
+│   └── oauth.md                 # Codex OAuth device code proxy design
+└── opencode/
+    └── sdk-research.md          # OpenCode SDK deep dive
+```
+
+## Per-Provider Documentation
+
+### Claude (`@anthropic-ai/claude-agent-sdk`)
 
 | Document | Description |
 |----------|-------------|
-| [01-claude-agent-sdk.md](./01-claude-agent-sdk.md) | Claude Agent SDK deep dive |
-| [02-openai-codex-sdk.md](./02-openai-codex-sdk.md) | OpenAI Codex SDK deep dive |
-| [03-opencode-sdk.md](./03-opencode-sdk.md) | OpenCode SDK deep dive |
-| [04-architecture-overview.md](./04-architecture-overview.md) | Unified architecture design & concerns |
+| [claude/sdk-research.md](./claude/sdk-research.md) | SDK API, auth methods, streaming, hooks, MCP support |
+
+- **Architecture**: Async generator, spawns Claude Code CLI as subprocess
+- **Auth**: API key or subscription (OAuth token / long-lived token)
+- **Strengths**: Most mature, full hook support (can block/modify), native subagents
+
+### Codex (`@openai/codex-sdk`)
+
+| Document | Description |
+|----------|-------------|
+| [codex/sdk-research.md](./codex/sdk-research.md) | SDK API, thread model, auth, streaming, approval policies |
+| [codex/oauth.md](./codex/oauth.md) | Device code OAuth proxy design for web UI |
+
+- **Architecture**: CLI subprocess (Rust core), thread/turn model
+- **Auth**: API key or ChatGPT OAuth (device code flow)
+- **Limitations**: No cancel/abort, no native subagents, observe-only hooks
+
+### OpenCode (`@opencode-ai/sdk`)
+
+| Document | Description |
+|----------|-------------|
+| [opencode/sdk-research.md](./opencode/sdk-research.md) | SDK API, client/server arch, plugin system, multi-provider |
+
+- **Architecture**: Client/server (REST + SSE)
+- **Auth**: Per-provider API keys
+- **Strengths**: 75+ providers, native plan mode, full tool-level permissions
+
+## Cross-Cutting Documentation
+
+| Document | Description |
+|----------|-------------|
+| [architecture-overview.md](./architecture-overview.md) | Unified abstraction layer design, SDK comparison matrix, interface definitions, design decisions |
+| [plugin-extension-systems.md](./plugin-extension-systems.md) | Plugin/extension system comparison & Animus plugin strategy (skills, tools, hooks, agents) |
 
 ## Quick Reference
 
 ### SDK Comparison
 
-| SDK | Package | Architecture | Auth |
-|-----|---------|--------------|------|
-| Claude | `@anthropic-ai/claude-agent-sdk` | Async generator (spawns CLI) | API key or subscription (OAuth token) |
-| Codex | `@openai/codex-sdk` | CLI subprocess | API key or ChatGPT OAuth |
-| OpenCode | `@opencode-ai/sdk` | Client/Server | Per-provider API keys |
-
-### Key Concerns
-
-1. **Claude SDK subscription auth** requires `CLAUDE_CODE_OAUTH_TOKEN` or pre-authenticated Claude Code (long-lived tokens valid 1 year)
-2. **Codex SDK has no cancel/abort** - operations run to completion
-3. **OpenCode uses client/server** - fundamentally different from the others
-4. **All three have different streaming models** - need unified event normalization
-5. **Session management varies significantly** - needs careful abstraction
+| Aspect | Claude | Codex | OpenCode |
+|--------|--------|-------|----------|
+| Package | `@anthropic-ai/claude-agent-sdk` | `@openai/codex-sdk` | `@opencode-ai/sdk` |
+| Architecture | Async generator (spawns CLI) | CLI subprocess | Client/Server |
+| Auth | API key / OAuth token | API key / ChatGPT OAuth | Per-provider API keys |
+| Streaming | Generator yield | Event iterator | SSE subscription |
+| Cancel/Abort | AbortController | Not supported | session.abort() |
+| Pre-exec hooks | Can block/modify | Observe only | Can block (throw) + modify |
+| Subagents | Task tool | Not native | @mentions |
+| MCP Support | Native (in-process + stdio) | stdio-based | Via config |
 
 ### Design Decisions
 
 | Decision | Approach |
 |----------|----------|
 | OpenCode server | Auto-start via `createOpencode()` |
-| Codex auth | Automatic discovery from `~/.codex/auth.json` |
-| MCP tools | Expose full config, consumer manages MCP server lifecycle |
+| Codex auth | Automatic discovery from `~/.codex/auth.json` + OAuth proxy for web UI |
+| MCP tools | Cross-provider via MCP protocol (all three support it) |
 | Subagents | Unified API with graceful fallback (error for Codex) |
-| Context window | Expose metrics (total/used/remaining), let SDKs handle compaction |
-| Codex cancel | No-op with warning (not supported by SDK) |
-| Permissions | Two-tier model: `executionMode` (plan/build) + `approvalLevel` (strict/normal/trusted/none) |
-| Hooks | Event emitter pattern with graceful degradation (blocking only on Claude) |
-| Session IDs | Pass-through with provider prefix: `{provider}:{native_id}` |
-| Model registry | JSON config with capability metadata (to be populated) |
-| Timeouts | Per-prompt timeout, default 5 minutes, configurable |
-| Concurrency | Fully supported, independent state per session |
-| Retry | Consumer responsibility, provide utility helpers |
-| Logging | Injectable logger with debug/info/warn/error levels |
-| Config validation | Zod schemas with discriminated union by provider |
-| Process cleanup | Register exit handlers, end all sessions gracefully |
+| Context window | Expose metrics, let SDKs handle compaction |
+| Codex cancel | No-op with warning |
+| Permissions | Two-tier: `executionMode` (plan/build) + `approvalLevel` (strict/normal/trusted/none) |
+| Hooks | Event emitter with graceful degradation |
+| Session IDs | Provider prefix: `{provider}:{native_id}` |
+| Streaming output | `llm-json-stream` for field-level streaming from structured JSON |
 
-### Event Normalization
-
-Our unified event types (from `@animus/agents`):
-
-```typescript
-type AgentEventType =
-  | 'session_start'
-  | 'session_end'
-  | 'input_received'
-  | 'thinking_start'
-  | 'thinking_end'
-  | 'tool_call_start'
-  | 'tool_call_end'
-  | 'tool_error'
-  | 'response_start'
-  | 'response_chunk'
-  | 'response_end';
-```
-
-### Built-in Tools (Common Across All)
-
-| Tool | Claude | Codex | OpenCode |
-|------|--------|-------|----------|
-| Read files | Read | ✅ | read |
-| Write files | Write | ✅ | write |
-| Edit files | Edit | ✅ | edit |
-| Run commands | Bash | ✅ | bash |
-| Search patterns | Glob | ✅ | glob |
-| Search content | Grep | ✅ | grep |
-| Web search | WebSearch | ✅ | webfetch |
-
-## Implementation Priority
+### Implementation Priority
 
 1. **Claude Adapter** (first) - Most mature SDK, best documentation
 2. **Codex Adapter** (second) - Popular, subscription auth option
@@ -106,4 +113,4 @@ type AgentEventType =
 
 ---
 
-*Research conducted: 2026-02-04*
+*Research conducted: 2026-02-04, restructured: 2026-02-08*

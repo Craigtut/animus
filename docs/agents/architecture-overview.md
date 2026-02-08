@@ -553,7 +553,7 @@ interface HookResult {
 
 | Hook | Claude | Codex | OpenCode |
 |------|--------|-------|----------|
-| onPreToolUse | Full (block/modify) | Emits event only | Emits event only |
+| onPreToolUse | Full (block/modify) | Emits event only | Can block (throw) + modify args |
 | onPostToolUse | Full | Full (via event stream) | Full |
 | onToolError | Full | Full (via event stream) | Full |
 | onSessionStart | Full | Full | Full |

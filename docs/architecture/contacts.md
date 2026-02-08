@@ -381,6 +381,33 @@ Sub-agents only spawn for primary contact tasks (enforced in EXECUTE), so in pra
 
 ---
 
+## Contact Notes & "Notes About You"
+
+Every contact record has a `notes` text field for freeform context about who that contact is. This is conceptually "knowledge about a contact" — relationship context, preferences, personal details that help Animus interact with them appropriately.
+
+### Primary Contact: "Notes About You"
+
+During onboarding (Step 3: Your Identity), the user provides personal context about themselves — the kind of information that helps Animus know them better. This free text is stored as the primary contact's `notes` field.
+
+**Example content:**
+> "I'm a software engineer living in Austin. I have a dog named Max. I prefer morning meetings and hate being called before 9 AM. I'm working on a home automation project."
+
+### How Notes Are Surfaced
+
+The primary contact's `notes` are included in the **base system prompt on every tick** via the Context Builder (see `docs/architecture/context-builder.md`). They're always present in the mind's context — not retrieved via memory search, but hardcoded alongside the persona. This is user-configured knowledge, not something the AI "learned."
+
+For non-primary contacts, notes are surfaced during GATHER CONTEXT when that contact triggers a tick — as part of the contact identity block.
+
+### Editability
+
+Contact notes are editable from the web UI settings at any time — they're just a text field on the contact record. For the primary contact, this is accessible from both the contact settings and from a "Notes About You" section in the persona/identity settings area.
+
+### Token Budget
+
+The Context Builder allocates a soft cap (~500 tokens) for the primary contact's notes within the system prompt section. If notes exceed this cap, they are truncated with a warning displayed in the settings UI encouraging the user to be more concise.
+
+---
+
 ## Information Sharing Boundaries
 
 ### What IS Shared Across Contacts (Unified Inner Life)

@@ -33,9 +33,10 @@ Onboarding is the user's first impression of the Animus brand. Every screen shou
 │   1. Welcome                                                        │
 │   2. Agent Provider (authentication)                                │
 │   3. Your Identity (primary contact)                                │
-│   4. Messaging Channels (optional, skippable)                       │
-│   5. Persona Creation (9 steps — the soul)                         │
-│   6. Birth → Main App                                               │
+│   4. About You (context for the AI)                                 │
+│   5. Messaging Channels (optional, skippable)                       │
+│   6. Persona Creation (9 steps — the soul)                         │
+│   7. Birth → Main App                                               │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -143,6 +144,7 @@ type OnboardingStep =
   | 'welcome'
   | 'agent_provider'
   | 'identity'
+  | 'about_you'
   | 'channels'
   | 'persona_existence'
   | 'persona_identity'
@@ -167,8 +169,8 @@ Each step saves its data independently. The user can go back to previous steps a
  ● Welcome                             ● Existence
  ● Agent                               ● Identity
  ● You                                 ● Archetype
- ○ Channels                            ○ Dimensions
-                                        ○ Traits
+ ● About You                           ○ Dimensions
+ ○ Channels                            ○ Traits
                                         ○ Values
                                         ○ Background
                                         ○ Review
@@ -331,11 +333,6 @@ The exact validation call (which endpoint, what constitutes "success") will be d
 - **Full Name** (required) — "What should your Animus call you?"
 - **Email** (pre-filled from sign-up, editable) — For contact record, not for login.
 
-**Notes field** (optional, collapsed by default with a "Add a note" link):
-- "Anything your Animus should know about you — preferences, how you like to communicate, your relationship to this AI."
-
-> **Open question:** How and where the "notes about you" field gets stored and surfaced in the mind's context is not yet fully designed. See `docs/architecture/open-questions.md` (question 6). For now, it is stored on the contact record and included in the mind's context when this contact triggers a tick.
-
 **What happens on save:**
 - Creates a `contacts` record in `system.db` with `is_primary = true`
 - Creates a `contact_channels` entry for the web channel: channel `web`, identifier = email
@@ -343,7 +340,37 @@ The exact validation call (which endpoint, what constitutes "success") will be d
 **Actions:**
 - **Continue** — Enabled when name is filled in (minimum required).
 
-### Step 4: Messaging Channels
+### Step 4: About You
+
+**Purpose:** Give the user space to tell their Animus who they are — not just their name, but their life, preferences, and the context that shapes every interaction. These notes are stored on the primary contact record and included in the mind's system prompt on every tick — this is knowledge the AI always carries, not something it has to learn over time.
+
+**Heading:** "What should your Animus know about you?"
+
+**Subheading:** "This is context your Animus will always carry — not something it has to learn over time. Think of it as the things you'd tell someone on day one."
+
+**Layout:** A generous, inviting text area as the centerpiece of the screen. No other form fields. This is a moment to reflect and write freely.
+
+**Writing prompts** (shown as subtle, softly fading hints below the text area — they disappear as the user starts typing):
+- *What do you do? What are you passionate about?*
+- *How do you like to communicate? Quick and direct, or detailed and thoughtful?*
+- *Any preferences, routines, or quirks worth knowing?*
+- *What matters most in your life right now?*
+
+**Example** (shown as a collapsible "See an example" link, dimmed text when expanded):
+
+> "I'm a software engineer living in Austin, TX. I have a dog named Max and I usually work from home. I'm a morning person — don't message me after 10 PM unless it's urgent. I'm working on a home automation project and I'm always interested in new music recommendations. I prefer direct communication — don't sugarcoat things."
+
+**Token guidance:** A subtle, non-intrusive indicator appears when the user approaches the ~500 token soft cap (~2000 characters). Not a hard limit — just a gentle note: "Your Animus always carries this context, so keeping it concise helps it stay focused. You can always add more detail later." The indicator appears inline below the text area, styled as secondary text.
+
+**This step is optional.** The user can proceed without writing anything. They can always add or edit this later from the settings page.
+
+**Actions:**
+- **Continue** — Always enabled (even if the text area is empty).
+- **Skip** — Text link alternative for users who want to defer.
+
+**Data saved:** Stored as the `notes` field on the primary contact record in `system.db`. See `docs/architecture/contacts.md` (Contact Notes & "Notes About You") for how these notes are surfaced in the mind's context.
+
+### Step 5: Messaging Channels
 
 **Purpose:** Let the user see what communication channels are available and optionally configure them.
 
@@ -375,7 +402,7 @@ Each channel card that gets configured shows a green check after successful vali
 
 **Data saved:** Channel configurations to `system.db` (channels table + any required API credentials encrypted).
 
-### Step 5: Persona Creation
+### Step 6: Persona Creation
 
 **Purpose:** The soul of the experience. This is where the user defines who their Animus will be.
 
@@ -390,7 +417,7 @@ but who it is. Take your time. There are no wrong answers.
 
 This interstitial lingers for 2-3 seconds (or until the user clicks continue), then transitions into the first persona step.
 
-#### 5a. Existence Paradigm
+#### 6a. Existence Paradigm
 
 **Purpose:** This is the foundational choice — it frames everything that follows. Before the user starts defining personality traits and values, they need to decide the fundamental nature of the being they're creating. This choice colors how they think about every subsequent step.
 
@@ -425,7 +452,7 @@ Example snippets shown as inspiration:
 
 One option must be selected to proceed. Default: neither selected (force an intentional choice).
 
-#### 5b. Identity
+#### 6b. Identity
 
 **Heading:** "Who are they?"
 
@@ -439,7 +466,7 @@ One option must be selected to proceed. Default: neither selected (force an inte
 
 **Visual:** Clean, spacious form. Each field gets generous vertical spacing. The name field is the most prominent.
 
-#### 5c. Archetype
+#### 6c. Archetype
 
 **Heading:** "Start with an archetype"
 
@@ -482,7 +509,7 @@ Below the carousel: a "Start from scratch" text link that skips archetype select
 
 **Data saved:** Selected archetype (used to pre-fill dimensions and traits in the next steps). The archetype itself is NOT stored permanently — it's scaffolding.
 
-#### 5d. Personality Dimensions
+#### 6d. Personality Dimensions
 
 **Heading:** "Shape their personality"
 
@@ -515,7 +542,7 @@ Below the carousel: a "Start from scratch" text link that skips archetype select
 - A subtle marker or ghost indicator at 0.5 shows the neutral zone (0.45-0.55). If the slider is in this zone, a small "neutral" label appears. Values in the neutral zone are omitted from the compiled prompt.
 - Current value is not shown as a number — the position and label convey enough. This isn't data entry; it's sculpting.
 
-#### 5e. Personality Traits
+#### 6e. Personality Traits
 
 **Heading:** "Add some texture"
 
@@ -536,7 +563,7 @@ Below the carousel: a "Start from scratch" text link that skips archetype select
 - If archetype was selected, some chips are pre-selected.
 - **Keyboard:** Space toggles the focused chip. Tab navigates between chips.
 
-#### 5f. Core Values
+#### 6f. Core Values
 
 **Heading:** "What matters most?"
 
@@ -576,7 +603,7 @@ The 16 available values:
 - Maximum 5. At 5 selections, remaining cards fade slightly.
 - **Keyboard:** Number keys 1-5 can quick-assign rank when a card is focused.
 
-#### 5g. Background & Personality Notes
+#### 6g. Background & Personality Notes
 
 **Heading:** "Give them depth"
 
@@ -601,7 +628,7 @@ The 16 available values:
 
 Both fields are optional. The user can write one sentence or three paragraphs or nothing at all.
 
-#### 5h. Review
+#### 6h. Review
 
 **Heading:** "[Name] — is this who they are?"
 
@@ -624,7 +651,7 @@ Both fields are optional. The user can write one sentence or three paragraphs or
 
 ---
 
-### Step 6: The Birth
+### Step 7: The Birth
 
 **Purpose:** The emotional peak of the entire onboarding. The moment the user's AI comes alive.
 
@@ -730,17 +757,18 @@ The orb and particle field smoothly transition into the main application's ambie
 /onboarding/welcome   → Step 1
 /onboarding/agent     → Step 2: Agent provider
 /onboarding/identity  → Step 3: Your identity
-/onboarding/channels  → Step 4: Messaging channels
+/onboarding/about-you → Step 4: About you
+/onboarding/channels  → Step 5: Messaging channels
 /onboarding/persona   → Redirects to current persona sub-step
-/onboarding/persona/existence   → Step 5a
-/onboarding/persona/identity    → Step 5b
-/onboarding/persona/archetype   → Step 5c
-/onboarding/persona/dimensions  → Step 5d
-/onboarding/persona/traits      → Step 5e
-/onboarding/persona/values      → Step 5f
-/onboarding/persona/background  → Step 5g
-/onboarding/persona/review      → Step 5h
-/onboarding/birth     → Step 6: Birth animation (non-navigable, reached only via review)
+/onboarding/persona/existence   → Step 6a
+/onboarding/persona/identity    → Step 6b
+/onboarding/persona/archetype   → Step 6c
+/onboarding/persona/dimensions  → Step 6d
+/onboarding/persona/traits      → Step 6e
+/onboarding/persona/values      → Step 6f
+/onboarding/persona/background  → Step 6g
+/onboarding/persona/review      → Step 6h
+/onboarding/birth     → Step 7: Birth animation (non-navigable, reached only via review)
 ```
 
 **Route guards:**
@@ -765,7 +793,8 @@ All onboarding data is saved to `system.db` as the user progresses. If they clos
 | Step | Storage | Table |
 |------|---------|-------|
 | Agent Provider | Provider selection + credentials (encrypted API keys or credential references) | `settings`, `api_keys` |
-| Identity | Primary contact record | `contacts`, `contact_channels` |
+| Identity | Primary contact record (name, email) | `contacts`, `contact_channels` |
+| About You | Primary contact notes (freeform text) | `contacts.notes` |
 | Channels | Channel configurations + credentials | `channels`, encrypted credentials |
 | Persona (all sub-steps) | Persona data as partial draft | `persona_draft` (JSON blob, or individual columns) |
 
@@ -791,4 +820,5 @@ The persona data is saved as a draft during creation and only "finalized" (compi
 - `docs/brand-vision.md` — Brand personality, visual identity, "the alive quality"
 - `docs/frontend/design-principles.md` — Component guidelines, animation principles, visual system
 - `docs/architecture/tech-stack.md` — Auth approach, database architecture
-- `docs/architecture/open-questions.md` — Open questions about Claude OAuth restrictions, Codex OAuth implementation, contact notes storage
+- `docs/architecture/context-builder.md` — How contact notes are surfaced in the mind's context
+- `docs/architecture/open-questions.md` — Open questions about Claude OAuth restrictions, Codex OAuth implementation

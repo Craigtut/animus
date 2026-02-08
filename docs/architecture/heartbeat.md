@@ -100,21 +100,78 @@ Even with warmth, sessions don't grow forever. A context budget (default: 70% of
 
 This prevents context degradation (where very old context crowds out recent, relevant information) while allowing conversational continuity during active engagement.
 
-#### Tick Queuing
+#### Tick Queuing & Concurrency
 
-Ticks are processed **sequentially** in FIFO order. If a trigger arrives while a tick is active, it is queued and processed when the current tick completes. This prevents concurrent state mutations and keeps the system simple and predictable.
+Ticks are processed **sequentially** — only one tick runs at a time. This eliminates all race conditions around state mutations (emotion deltas, thoughts, decisions). A priority queue manages pending triggers.
 
 ```
   Interval Timer ─────┐
-                       │
-  User Message ────────┼──→ [Queue] ──→ Agent Session (The Mind) ──→ Structured Output
-                       │
-  Scheduled Task ──────┤
+                       │     ┌──────────────────┐
+  User Message ────────┼──→  │  Priority Queue   │ ──→ Agent Session (The Mind) ──→ Structured Output
+                       │     │  (serialized)     │
+  Scheduled Task ──────┤     └──────────────────┘
                        │
   Sub-Agent Done ──────┘
 ```
 
-See `docs/architecture/open-questions.md` for open questions about tick preemption and queue overflow.
+##### Priority Order
+
+When multiple triggers are queued, higher-priority triggers run first:
+
+| Priority | Trigger | Rationale |
+|---|---|---|
+| 1 (highest) | `message` | User-facing, latency matters |
+| 2 | `agent_complete` | User is waiting for results |
+| 3 | `scheduled_task` | Timed work, but not user-blocking |
+| 4 (lowest) | `interval` | Background processing, can wait |
+
+Same-priority triggers maintain FIFO order within the queue.
+
+##### Message Coalescing (Same-Contact Rapid Messages)
+
+The warm session model allows rapid messages from the same contact to be gathered into a single tick naturally, avoiding unnecessary queueing:
+
+1. **Immediate write**: Messages are written to `messages.db` the instant they arrive (before any tick processing)
+2. **Debounce window**: Message triggers are debounced **per-contact** (~1.5 seconds). If Contact A sends 3 messages in rapid succession, only one tick trigger is created after the debounce expires
+3. **GATHER CONTEXT gathers all**: When the tick fires, GATHER CONTEXT loads all unprocessed messages for that contact from `messages.db` — picking up everything that arrived during the debounce window
+4. **Same-contact deduplication**: If a tick trigger for Contact A is already in the queue, a new message from Contact A does NOT add another queue entry — the existing queued tick will gather the new message when it runs
+5. **Same-contact during active tick**: If a tick is currently running for Contact A and a new message arrives, queue ONE follow-up tick for Contact A (the running tick has already passed GATHER CONTEXT). When that follow-up tick fires, the session is still warm — full conversational continuity, no cold start
+
+```
+Contact A sends 3 messages in 1 second:
+
+  msg1 ──→ write to messages.db, start 1.5s debounce
+  msg2 ──→ write to messages.db, reset debounce
+  msg3 ──→ write to messages.db, reset debounce
+              ... 1.5s ...
+  debounce expires ──→ ONE tick trigger fires
+  GATHER CONTEXT ──→ loads msg1, msg2, msg3 together
+  MIND QUERY ──→ processes all three as one conversation turn
+```
+
+##### Cross-Contact Messages
+
+Different contacts produce separate tick triggers. If Contact A and Contact B both message simultaneously:
+
+- Both messages write to `messages.db` immediately
+- Two separate tick triggers are created (one per contact, each debounced independently)
+- They queue and run sequentially — Contact A's tick first (or B's, depending on arrival order within the same priority level)
+- Each tick loads only its contact's message history (message isolation preserved)
+
+##### Interval Tick Coalescing
+
+Interval ticks coalesce — if an interval tick is queued and another interval timer fires before it runs, collapse them into one. There's never a reason to process two consecutive idle ticks. This prevents queue bloat during periods where higher-priority triggers keep running ahead of interval ticks.
+
+##### No Preemption
+
+Running ticks are NOT preemptable. A message arriving during an interval tick does not interrupt it — the message tick simply runs next (it has higher priority than any other queued interval ticks). Preemption adds significant complexity for minimal gain: ticks are short (one LLM call + DB writes), so the wait is acceptable.
+
+##### Queue Depth & Overflow
+
+- **Maximum queue depth: 10** entries
+- If the queue reaches capacity, the oldest **interval ticks** are dropped first (they're the least important and can be regenerated by the timer)
+- If the queue is full of non-interval ticks (extremely unlikely in practice), the oldest entry is dropped and a warning is logged
+- Queue overflow should essentially never happen — it indicates either a system problem or an extreme burst of concurrent activity
 
 ## The Pipeline
 
@@ -478,9 +535,209 @@ interface MessageReply {
 }
 ```
 
+### Combined MindOutput Schema
+
+The mind produces a single structured JSON output per tick. **Field ordering matters** — the `reply` field is intentionally placed last so that generated thoughts inform and shape the reply content (the model's prior output context influences subsequent generation).
+
+```typescript
+// Zod schema (source of truth, compiled to JSON Schema for SDK consumption)
+const MindOutputSchema = z.object({
+  // Internal cognition (generated first — informs the reply)
+  thoughts: z.array(z.object({
+    content: z.string(),
+    importance: z.number().min(0).max(1),
+  })),
+
+  experiences: z.array(z.object({
+    content: z.string(),
+    importance: z.number().min(0).max(1),
+  })),
+
+  emotionDeltas: z.array(z.object({
+    emotion: EmotionNameSchema,
+    delta: z.number(),
+    reasoning: z.string(),
+  })),
+
+  // Agency
+  decisions: z.array(z.object({
+    type: DecisionTypeSchema,
+    description: z.string(),
+    parameters: z.record(z.unknown()),
+  })),
+
+  // Memory management
+  workingMemoryUpdate: z.string().nullable(),  // Full replacement or null (no change)
+  coreSelfUpdate: z.string().nullable(),       // Full replacement or null (no change)
+  memoryCandidate: z.array(z.object({
+    content: z.string(),
+    type: z.enum(['fact', 'experience', 'procedure', 'outcome']),
+    importance: z.number().min(0).max(1),
+  })).optional(),
+
+  // Reply (generated LAST — benefits from all prior thinking)
+  reply: z.object({
+    content: z.string(),
+    contactId: z.string(),
+    channel: ChannelTypeSchema,
+    replyToMessageId: z.string(),
+    tone: z.string().optional(),
+  }).nullable(),  // null when no reply needed (e.g., idle interval tick)
+});
+```
+
+**Why `reply` is last:** When an LLM generates structured JSON, it outputs fields sequentially. By placing `thoughts` before `reply`, the model first articulates its internal thinking, which then contextualizes and improves the quality of the reply. This is analogous to chain-of-thought prompting but embedded in the output structure itself.
+
+---
+
+## Streaming Structured Output
+
+The mind outputs structured JSON, but the user-facing `reply` field needs to stream in real-time for a responsive experience. We use **`llm-json-stream`** to extract and stream individual fields from the structured JSON output as the LLM generates it.
+
+### The Problem
+
+Without streaming, the user must wait for the entire MindOutput (thoughts + experiences + emotions + decisions + reply) to generate before seeing any response. With a typical tick producing 500-1000 tokens of internal cognition before the reply, this creates a noticeable delay.
+
+### Solution: Field-Level JSON Streaming
+
+**Library**: [`llm-json-stream`](https://www.npmjs.com/package/llm-json-stream) — a provider-agnostic incremental JSON parser that supports path-based property subscriptions and async iterables.
+
+**How it works:**
+1. The `@animus/agents` adapter emits raw `response_chunk` events as the LLM generates text
+2. The backend's heartbeat pipeline feeds these chunks into `llm-json-stream`
+3. The parser incrementally parses the JSON and emits values as specific fields become available
+4. The `reply.content` field is subscribed to and streamed to the frontend via tRPC subscription
+5. When generation completes, the full JSON is validated against the `MindOutputSchema` (Zod)
+6. The validated output is passed to the EXECUTE stage
+
+### Architecture: Where the Parser Lives
+
+```
+┌──────────────────────┐
+│   @animus/agents     │   Adapter emits raw text chunks
+│   (SDK Adapter)      │   via response_chunk events
+└──────────┬───────────┘
+           │ response_chunk (raw text)
+           ▼
+┌──────────────────────┐
+│   @animus/backend    │   Heartbeat pipeline feeds chunks
+│   (Mind Query Stage) │   into llm-json-stream parser
+│                      │
+│   ┌────────────────┐ │
+│   │ llm-json-stream│ │   Incremental JSON parsing
+│   │                │ │   + path subscriptions
+│   └───────┬────────┘ │
+│           │          │
+│     ┌─────┴──────┐   │
+│     ▼            ▼   │
+│  reply.content   Full │
+│  (streaming)     JSON │
+│     │            │    │
+│     │         Zod     │
+│     │       validate  │
+│     │            │    │
+│     │         EXECUTE │
+│     ▼         stage   │
+│  tRPC sub  ──────────►│
+│  (to frontend)        │
+└──────────────────────┘
+```
+
+**The parser lives in `@animus/backend`**, not `@animus/agents`. Rationale:
+- The agents package is a **stateless SDK abstraction** — it shouldn't know about `MindOutput` schemas
+- The agents adapter just emits normalized `response_chunk` events with raw text deltas
+- The backend owns the `MindOutput` schema and decides how to interpret it
+- This keeps the agents package generic and reusable for sub-agents (which have different output schemas)
+
+### Implementation Sketch
+
+```typescript
+import { JsonStream } from 'llm-json-stream';
+
+async function processMindQuery(
+  session: IAgentSession,
+  prompt: string,
+  onReplyChunk: (chunk: string) => void,  // tRPC subscription emit
+): Promise<MindOutput> {
+  const jsonStream = new JsonStream();
+  let fullJson = '';
+
+  // Subscribe to the reply content field for real-time streaming
+  const replyStream = jsonStream.getStringProperty('reply.content');
+
+  // Start consuming reply chunks in parallel
+  const replyPromise = (async () => {
+    for await (const chunk of replyStream) {
+      onReplyChunk(chunk);  // Emit to frontend via tRPC subscription
+    }
+  })();
+
+  // Feed raw text chunks from the agent adapter
+  session.onEvent((event) => {
+    if (event.type === 'response_chunk') {
+      fullJson += event.text;
+      jsonStream.feed(event.text);
+    }
+    if (event.type === 'response_end') {
+      jsonStream.end();
+    }
+  });
+
+  // Send the prompt and wait for completion
+  await session.prompt(prompt);
+
+  // Wait for reply streaming to finish
+  await replyPromise;
+
+  // Validate the complete output
+  const parsed = JSON.parse(fullJson);
+  const validated = MindOutputSchema.parse(parsed);
+
+  return validated;
+}
+```
+
+### Schema Field Ordering & Streaming Behavior
+
+The MindOutput fields are generated in this order:
+
+| Order | Field | Streaming Behavior |
+|-------|-------|--------------------|
+| 1 | `thoughts[]` | Accumulated silently (logged, not streamed to user) |
+| 2 | `experiences[]` | Accumulated silently |
+| 3 | `emotionDeltas[]` | Accumulated silently |
+| 4 | `decisions[]` | Accumulated silently |
+| 5 | `workingMemoryUpdate` | Accumulated silently |
+| 6 | `coreSelfUpdate` | Accumulated silently |
+| 7 | `memoryCandidate[]` | Accumulated silently |
+| 8 | `reply` | **Streamed to frontend in real-time** |
+
+The frontend only receives the `reply.content` stream. All other fields are processed internally during the EXECUTE stage. This means:
+- Users see replies streaming naturally (like any chat interface)
+- Internal cognition (thoughts, emotions, decisions) is processed after the tick completes
+- The UI can show a "thinking" indicator while fields 1-7 generate, then transition to streaming text when the reply starts
+
+### Validation Strategy
+
+The `@animus/agents` abstraction layer does **not** validate structured output — that's the caller's responsibility. The flow:
+
+1. **Adapter**: Emits raw `response_chunk` text events
+2. **Backend**: Feeds chunks to `llm-json-stream`, subscribes to paths
+3. **Backend**: After generation completes, parses full JSON and validates with Zod
+4. **On validation failure**: Log warning, attempt partial extraction of valid fields, retry the tick if critical fields are missing
+
+### Cross-Provider Behavior
+
+All three agent SDKs produce streaming text that `llm-json-stream` can parse:
+- **Claude**: Structured output via `outputFormat: { type: 'json_schema', schema }`. Text arrives via `content_block_delta` events with `text_delta`.
+- **Codex**: Structured output via `outputSchema`. Text arrives via `item/agentMessage/delta` events.
+- **OpenCode**: No native structured output enforcement — schema is injected via system prompt. Text arrives via `message.part.updated` events.
+
+For OpenCode (no native enforcement), we validate with Zod after completion and retry if the output doesn't conform. In practice, modern LLMs follow injected schemas reliably when the schema is clear and included in the prompt.
+
 ## Crash Recovery
 
-The heartbeat system persists state to survive crashes gracefully.
+The heartbeat system persists state to survive crashes gracefully. The design prioritizes **safe recovery** over perfect recovery — losing a single tick is not catastrophic because the next tick observes current state and thinks fresh.
 
 ### How It Works
 
@@ -494,12 +751,18 @@ The heartbeat system persists state to survive crashes gracefully.
    WHERE id = 1;
    ```
 
-2. If the server crashes and restarts:
-   - If it crashed during GATHER CONTEXT → re-gather and re-run the full tick
-   - If it crashed during MIND QUERY → re-run the mind query (the agent session may need to be re-established)
-   - If it crashed during EXECUTE → check what was already persisted and complete remaining operations
+2. **EXECUTE stage is wrapped in a single SQLite transaction.** All writes — thoughts, experiences, emotion updates, decisions — are committed atomically. If the process dies mid-EXECUTE, the transaction rolls back and the tick's side effects never happened. This is the primary crash safety mechanism.
 
-3. The mind's agent session is resumable via the `@animus/agents` session resume capability (`{provider}:{native_id}` format).
+3. **On startup, discard incomplete ticks.** If a tick is found with `current_stage != 'idle'`, mark it as `failed` and move on. The next tick will naturally observe the current state and re-think. Replaying incomplete ticks adds complexity with minimal benefit — the mind is designed to be resilient to missed ticks.
+
+4. **Messages are safe regardless.** Inbound messages are written to `messages.db` at ingestion time (before tick processing), not during EXECUTE. A crash never loses messages — they'll be picked up by the next tick's GATHER CONTEXT.
+
+5. **Sub-agent re-check on startup.** The orchestrator queries SQLite for tasks with `status = 'running'` and checks each against the agent SDK:
+   - If the session completed during downtime: store results, trigger an `agent_complete` tick
+   - If the session died: mark as `failed`, let the mind learn about it on the next tick
+   - If the session is still running: re-attach event handlers and continue tracking
+
+6. The mind's agent session is resumable via the `@animus/agents` session resume capability (`{provider}:{native_id}` format). On crash recovery, the warm session is lost — the next tick starts cold. This is acceptable; cold starts just inject the full system prompt and GATHER CONTEXT.
 
 ### State Schema
 

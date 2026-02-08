@@ -421,4 +421,4 @@ The agent orchestration system uses several shared abstractions (see `docs/archi
 - [Microsoft: AI Agent Orchestration Design Patterns](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns)
 - [Cognition AI: Don't Build Multi-Agents](https://cognition.ai/blog/dont-build-multi-agents)
 - [Google ADK: Multi-Agent Systems](https://google.github.io/adk-docs/agents/multi-agents/)
-- Internal: `docs/agents/04-architecture-overview.md` (SDK comparison and adapter design)
+- Internal: `docs/agents/architecture-overview.md` (SDK comparison and adapter design)

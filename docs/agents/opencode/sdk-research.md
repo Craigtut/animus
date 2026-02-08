@@ -324,11 +324,11 @@ export const MyPlugin: Plugin = async (ctx) => {
 
 ### Unified Hook Model Mapping
 
-OpenCode has **good hook support** via the plugin system, but cannot block execution:
+OpenCode has **good hook support** via the plugin system:
 
 | Unified Hook | OpenCode Plugin Hook | Capabilities |
 |--------------|---------------------|--------------|
-| `onPreToolUse` | `tool.execute.before` | ⚠️ Can emit, **cannot block**, can modify args |
+| `onPreToolUse` | `tool.execute.before` | ✅ Can modify args, **can block by throwing** |
 | `onPostToolUse` | `tool.execute.after` | ✅ Full |
 | `onToolError` | `session.error` | ✅ Full |
 | `onSessionStart` | `session.created` | ✅ Full |
@@ -338,7 +338,7 @@ OpenCode has **good hook support** via the plugin system, but cannot block execu
 
 **Implementation**: The adapter creates a plugin wrapper that listens to OpenCode's plugin hooks and emits normalized events to user's callbacks.
 
-**Limitation**: Unlike Claude, OpenCode's `tool.execute.before` hook **cannot block execution**. If a user's `onPreToolUse` hook returns `{ allow: false }`, the adapter will log a warning but execution will proceed.
+**Blocking**: OpenCode's `tool.execute.before` hook **can block execution** by throwing an error. Hooks run sequentially; if any throws, the tool call is prevented. However, this does NOT intercept subagent tool calls ([Issue #5894](https://github.com/anomalyco/opencode/issues/5894)) or MCP tool calls ([Issue #2319](https://github.com/sst/opencode/issues/2319)).
 
 **Note**: Plugins are file-based in OpenCode, so the adapter must either:
 1. Generate a temporary plugin file, or

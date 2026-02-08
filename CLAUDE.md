@@ -252,10 +252,11 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - **Architecture**: `docs/architecture/goals.md` (goal system, seeds, plans, salience), `docs/architecture/tasks-system.md` (scheduled & deferred tasks, task ticks)
 - **Architecture**: `docs/architecture/memory.md` (four memory layers, memory.db, embeddings, write pipeline, consolidation)
 - **Architecture**: `docs/architecture/context-builder.md` (context assembly, prompt compilation, token budgets, persona compilation)
-- **Open Questions**: `docs/architecture/open-questions.md`
+- **Architecture**: `docs/architecture/mcp-tools.md` (cross-provider MCP tool architecture, tool definitions, handlers, registry, permission filtering)
+- **Open Questions**: `docs/architecture/open-questions.md` (all 7 resolved)
 - **Frontend Design**: `docs/frontend/design-principles.md`, `docs/frontend/onboarding.md`
 - **Guides**: `docs/guides/getting-started.md`
-- **Agent SDKs**: `docs/agents/` (README + individual SDK research + architecture overview)
+- **Agent SDKs**: `docs/agents/` (per-provider folders: claude/, codex/, opencode/ + architecture overview + plugin/extension systems)
 
 **When to use `/doc-explorer`:**
 - Starting work on any feature → `/doc-explorer` with the relevant topic
@@ -267,6 +268,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on memory/knowledge/embeddings → `/doc-explorer memory`
 - Working on context assembly/prompt building → `/doc-explorer context-builder`
 - Working on shared abstractions (embedding, decay, encryption) → `/doc-explorer tech-stack`
+- Working on MCP tools/custom tools → `/doc-explorer mcp-tools`
 - Working on agent SDKs → `/doc-explorer agents`
 - Working on backend/API → `/doc-explorer architecture`
 - Unsure about project conventions → `/doc-explorer` (no args, see everything)
