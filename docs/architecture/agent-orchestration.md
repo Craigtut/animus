@@ -87,7 +87,7 @@ Sub-agents are extensions of the mind. They carry the same personality, emotiona
 
 ## Prompt Template
 
-Sub-agents receive a prompt built from two sources:
+Sub-agent prompts are assembled by the **Context Builder** (see `docs/architecture/context-builder.md`) via its `buildSubAgentPrompt()` method. The builder composes the prompt from two sources:
 
 **Template context (system-assembled):**
 - Animus's personality and behavioral instructions
@@ -400,8 +400,17 @@ Cost controls (per-agent budgets, daily spending limits) are noted as a future c
 
 ---
 
+## Shared Abstractions
+
+The agent orchestration system uses several shared abstractions (see `docs/architecture/tech-stack.md`):
+
+- **Context Builder** — Assembles sub-agent prompts with persona, emotions, contact context, and task instructions (`docs/architecture/context-builder.md`)
+- **Event Bus** — Emits `agent:spawned`, `agent:completed` events consumed by the heartbeat trigger and frontend
+- **Database Stores** — Typed data access for `agent_tasks` table in `heartbeat.db`
+
 ## References
 
+- Internal: `docs/architecture/context-builder.md` (Prompt assembly for sub-agents)
 - Internal: `docs/architecture/contacts.md` (Contact system, permission tiers, identity resolution)
 - [Claude Agent SDK: Subagents](https://platform.claude.com/docs/en/agent-sdk/subagents)
 - [Claude Code: Agent Teams](https://code.claude.com/docs/en/agent-teams) (experimental)

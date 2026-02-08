@@ -36,13 +36,14 @@ Animus is an autonomous AI assistant designed to be genuinely helpful while main
 **Backend:**
 - Node.js + Fastify
 - tRPC for type-safe API
-- Four SQLite databases (see below)
+- Five SQLite databases (see below)
 - LanceDB for vector storage/semantic search
+- Transformers.js + BGE-small-en-v1.5 for local embeddings
 - Agent SDKs: Claude (default), Codex, OpenCode
 
 ### Database Architecture
 
-Four separate SQLite databases with distinct purposes and lifecycles:
+Five separate SQLite databases with distinct purposes and lifecycles:
 
 1. **system.db** - Core configuration (rarely reset)
    - Users and authentication
@@ -57,13 +58,19 @@ Four separate SQLite databases with distinct purposes and lifecycles:
    - Tasks and actions
    - TTL-based cleanup
 
-3. **messages.db** - Conversation history (long-term retention)
+3. **memory.db** - Accumulated knowledge (reset with heartbeat or preserved independently)
+   - Working memory (per-contact notepad)
+   - Core self (agent's self-knowledge, singleton)
+   - Long-term memories (extracted knowledge metadata)
+   - LanceDB stores vector embeddings (search index)
+
+4. **messages.db** - Conversation history (long-term retention)
    - Messages (user and Animus, both directions)
    - Conversations / threads
    - Channel metadata
    - Persists across heartbeat resets
 
-4. **agent_logs.db** - SDK logs (frequent cleanup)
+5. **agent_logs.db** - SDK logs (frequent cleanup)
    - Agent sessions
    - Events (input, thinking, tool calls, responses)
    - Token usage and costs
@@ -242,8 +249,9 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 **Available documentation areas:**
 - **Vision & Identity**: `docs/project-vision.md`, `docs/brand-vision.md`
 - **Architecture**: `docs/architecture/heartbeat.md`, `docs/architecture/agent-orchestration.md`, `docs/architecture/contacts.md`, `docs/architecture/channels.md`, `docs/architecture/persona.md`, `docs/architecture/tech-stack.md`
-- **Architecture**: `docs/architecture/goals.md` (goal system, seeds, plans, salience)
-- **Architecture (Under Construction)**: `docs/architecture/mind-prompt.md` (TODO), `docs/architecture/memory.md`, `docs/architecture/tasks-system.md`
+- **Architecture**: `docs/architecture/goals.md` (goal system, seeds, plans, salience), `docs/architecture/tasks-system.md` (scheduled & deferred tasks, task ticks)
+- **Architecture**: `docs/architecture/memory.md` (four memory layers, memory.db, embeddings, write pipeline, consolidation)
+- **Architecture**: `docs/architecture/context-builder.md` (context assembly, prompt compilation, token budgets, persona compilation)
 - **Open Questions**: `docs/architecture/open-questions.md`
 - **Frontend Design**: `docs/frontend/design-principles.md`, `docs/frontend/onboarding.md`
 - **Guides**: `docs/guides/getting-started.md`
@@ -256,6 +264,9 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on channels/SMS/Discord/API → `/doc-explorer channels`
 - Working on persona/personality system → `/doc-explorer persona`
 - Working on the heartbeat system → `/doc-explorer heartbeat`
+- Working on memory/knowledge/embeddings → `/doc-explorer memory`
+- Working on context assembly/prompt building → `/doc-explorer context-builder`
+- Working on shared abstractions (embedding, decay, encryption) → `/doc-explorer tech-stack`
 - Working on agent SDKs → `/doc-explorer agents`
 - Working on backend/API → `/doc-explorer architecture`
 - Unsure about project conventions → `/doc-explorer` (no args, see everything)

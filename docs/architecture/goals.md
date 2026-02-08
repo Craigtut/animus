@@ -124,7 +124,7 @@ Only thoughts produced during the current tick are checked. Historical thoughts 
 
 ### Seed Decay
 
-Seeds decay exponentially toward zero when not reinforced, similar to emotion decay:
+Seeds decay exponentially toward zero when not reinforced, using the shared **Decay Engine** (see `docs/architecture/tech-stack.md`):
 
 ```
 elapsedHours = (now - lastReinforcedAt) / 3_600_000
@@ -728,12 +728,22 @@ Messages survive heartbeat resets (they live in `messages.db`). So while the AI'
 
 ---
 
+## Shared Abstractions
+
+The goal system uses several shared abstractions (see `docs/architecture/tech-stack.md`):
+
+- **Decay Engine** — Computes seed strength decay and goal staleness
+- **Embedding Provider** — Generates seed embeddings for resonance detection
+- **Context Builder** — Includes salient goals in the mind's context with "goals serve life" framing (`docs/architecture/context-builder.md`)
+- **Event Bus** — Emits `goal:changed` events consumed by the frontend
+- **Database Stores** — Typed data access for goals, seeds, plans, and salience log tables in `heartbeat.db`
+
 ## Related Documents
 
 - `docs/architecture/heartbeat.md` — The tick pipeline where goals feed into GATHER CONTEXT and decisions are processed in EXECUTE
+- `docs/architecture/context-builder.md` — How goals are assembled into the mind's context
 - `docs/architecture/tasks-system.md` — Tasks are the executable actions generated from plans
 - `docs/architecture/contacts.md` — Contact permission tiers affect goal creation and modification
 - `docs/architecture/agent-orchestration.md` — Sub-agents are spawned for planning and task execution
 - `docs/architecture/persona.md` — Persona shapes AI-internal goal formation and emotional baselines
-- `docs/architecture/mind-prompt.md` — System prompt includes goal philosophy instructions
 - `docs/architecture/memory.md` — Future: goal outcomes consolidate into long-term memory

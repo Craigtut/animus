@@ -79,6 +79,7 @@ Animus is built as a self-contained, self-hosted application. The guiding princi
 |------------|---------|---------|
 | **better-sqlite3** | ^11.0 | SQLite driver |
 | **LanceDB** | ^0.12 | Vector database |
+| **Transformers.js** | ^3.0 | Local embedding model (BGE-small-en-v1.5) |
 
 **Why SQLite?**
 - Zero configuration
@@ -87,17 +88,27 @@ Animus is built as a self-contained, self-hosted application. The guiding princi
 - ACID compliance
 - WAL mode for concurrent reads
 
-**Why four separate SQLite databases?**
+**Why five separate SQLite databases?**
 1. **system.db** - Core config that should never be accidentally deleted (users, contacts, contact channels, settings, API keys)
 2. **heartbeat.db** - AI state that might be reset for fresh start (thoughts, emotions, experiences, agent tasks)
-3. **messages.db** - Conversation history that persists across heartbeat resets (messages tagged with contact_id, conversations)
-4. **agent_logs.db** - High-volume logs with aggressive TTL cleanup (sessions, events, usage)
+3. **memory.db** - Accumulated knowledge: working memory (per-contact notepad), core self (agent self-knowledge), long-term memories (extracted knowledge metadata). Reset with heartbeat for full AI reset, or preserved independently for soft reset.
+4. **messages.db** - Conversation history that persists across heartbeat resets (messages tagged with contact_id, conversations)
+5. **agent_logs.db** - High-volume logs with aggressive TTL cleanup (sessions, events, usage)
 
 **Why LanceDB?**
 - Embedded (no external server)
 - Optimized for AI/ML workloads
 - Native vector similarity search
 - Works with SQLite-like simplicity
+- Built-in Transformers.js integration for automatic embedding
+
+**Why Transformers.js + BGE-small-en-v1.5?**
+- Local inference (no API dependency, self-contained)
+- 384-dim embeddings, 512-token context — sufficient for extracted memory text
+- ~32 MB model (int8 quantized), ~50-60 MB RAM during inference
+- 300-700ms for 20 passages on CPU — negligible within a 5-minute heartbeat cycle
+- LanceDB has built-in support, enabling automatic embedding on insert and query
+- OpenAI text-embedding-3-small available as an alternative for users who prefer API-based embedding
 
 ### Agent SDKs
 
@@ -167,29 +178,218 @@ In production, the frontend is built and served by Fastify:
 │   (React)    │                      │  (Fastify)   │
 └──────────────┘                      └──────┬───────┘
                                              │
-              ┌──────────────────────────────┼──────────────────────────────┐
-              │                    │                        │               │
-        ┌─────▼─────┐      ┌──────▼──────┐         ┌──────▼──────┐  ┌─────▼──────┐
-        │ system.db │      │heartbeat.db │         │ messages.db │  │agent_logs  │
-        │           │      │             │         │             │  │   .db      │
-        │ - Users   │      │ - Thoughts  │         │ - Messages  │  │ - Sessions │
-        │ - Auth    │      │ - Emotions  │         │ - Convos    │  │ - Events   │
-        │ - Contacts│      │ - Tasks     │         │ - Channels  │  │ - Usage    │
-        │ - Settings│      │             │         │             │  │            │
-        └───────────┘      └─────────────┘         └─────────────┘  └────────────┘
-                                  │
-                           ┌──────▼──────┐
-                           │   LanceDB   │
-                           │             │
-                           │ - Embeddings│
-                           │ - Memories  │
-                           └─────────────┘
+     ┌───────────────┬───────────────┬───────┼──────────┬───────────────┐
+     │               │               │       │          │               │
+┌────▼────┐   ┌──────▼──────┐  ┌─────▼────┐ │   ┌──────▼──────┐  ┌────▼───────┐
+│system.db│   │heartbeat.db │  │memory.db │ │   │ messages.db │  │agent_logs  │
+│         │   │             │  │          │ │   │             │  │   .db      │
+│- Users  │   │ - Thoughts  │  │- Working │ │   │ - Messages  │  │ - Sessions │
+│- Auth   │   │ - Emotions  │  │  memory  │ │   │ - Convos    │  │ - Events   │
+│- Contacts│  │ - Tasks     │  │- Core    │ │   │ - Channels  │  │ - Usage    │
+│- Settings│  │             │  │  self    │ │   │             │  │            │
+└─────────┘   └─────────────┘  │- Long-   │ │   └─────────────┘  └────────────┘
+                               │  term    │ │
+                               │  memories│ │
+                               └──────────┘ │
+                                     ┌──────▼──────┐
+                                     │   LanceDB   │
+                                     │             │
+                                     │ - Embeddings│
+                                     │  (vectors)  │
+                                     └─────────────┘
 ```
+
+## Shared Abstractions
+
+Several cross-cutting concerns are formalized as abstractions to prevent duplication and ensure consistency across the codebase. Most live in `@animus/shared` (pure logic, no backend dependencies) or `@animus/backend` (requires database access).
+
+### Embedding Provider (`@animus/shared`)
+
+An abstraction over embedding model providers, used by the memory system (write pipeline, retrieval, seed resonance) and any future feature that needs vector similarity.
+
+```typescript
+interface IEmbeddingProvider {
+  readonly dimensions: number;
+  readonly maxTokens: number;
+  readonly modelId: string;
+
+  embed(texts: string[]): Promise<number[][]>;
+  embedSingle(text: string): Promise<number[]>;
+  isReady(): boolean;
+  initialize(): Promise<void>;
+}
+```
+
+**Implementations:**
+| Provider | Package | Model | Dimensions | Latency | Notes |
+|---|---|---|---|---|---|
+| **Local** (default) | `@huggingface/transformers` | BGE-small-en-v1.5 | 384 | 300-700ms / 20 passages | ~32 MB model, no API dependency |
+| **OpenAI** | `openai` | text-embedding-3-small | 1536 | 300-500ms / call | Requires API key |
+
+The embedding model is configured at the system level (`embeddingModel` setting in `system.db`). Changing the model triggers a one-time re-embedding migration on startup because dimensions differ between providers. The provider exposes `dimensions` so the system can detect mismatches.
+
+See `docs/architecture/memory.md` for how embeddings are used in the memory system.
+
+---
+
+### Context Builder (`@animus/backend`)
+
+The centralized system for assembling all LLM prompts and context across Animus. Every place where the system constructs input for an LLM — the mind's system prompt, GATHER CONTEXT payloads, sub-agent prompts, task tick prompts — flows through the Context Builder.
+
+Key responsibilities:
+- **Persona compilation** — Converts slider values, traits, values, and backstory into behavioral prompt text
+- **Context assembly** — Composes context sections (emotions, memories, goals, permissions) for each tick
+- **Token budget management** — Allocates context window space across sections, truncates by priority when needed
+- **Compilation targets** — Produces context for mind ticks, sub-agent sessions, task ticks, and cold session bootstraps
+
+See `docs/architecture/context-builder.md` for the full design including interface, token budget allocation, and context section details.
+
+---
+
+### Decay Engine (`@animus/shared`)
+
+A shared mathematical utility for exponential decay calculations. The same decay pattern appears in five systems with different parameters:
+
+| System | What Decays | Toward | Rate | Reference |
+|---|---|---|---|---|
+| Emotions | Intensity | Personality-driven baseline | Per-emotion (0.192–1.151/hr) | `heartbeat.md` |
+| Seeds | Strength | 0 | 0.027/hr (~7d full reset) | `goals.md` |
+| Memory forgetting | Retention | 0 | Strength-modulated | `memory.md` |
+| Memory retrieval recency | Recency score | 0 | 0.995^hours | `memory.md` |
+| Deferred task staleness | Priority | N/A (boost, not decay) | Linear after 7d | `tasks-system.md` |
+
+```typescript
+interface DecayConfig {
+  decayRate: number;
+  baseline?: number;          // Decay toward this instead of 0 (emotions)
+  strengthMultiplier?: number; // Modulate decay by access count (memories)
+  minThreshold?: number;       // Below this, consider "decayed" (seeds, memories)
+}
+
+class DecayEngine {
+  /** Compute decayed value given elapsed time */
+  static compute(current: number, config: DecayConfig, elapsedHours: number): number;
+
+  /** Compute retention score (0-1) for forgetting decisions */
+  static computeRetention(config: DecayConfig, elapsedHours: number): number;
+
+  /** Helper: hours elapsed since an ISO timestamp */
+  static hoursSince(timestamp: string): number;
+}
+```
+
+Centralizing this prevents formula bugs (getting the math wrong in one system) and makes decay behavior testable independently.
+
+---
+
+### Event Bus (`@animus/shared` interface, `@animus/backend` implementation)
+
+A typed event emitter that decouples event producers from consumers. This is not a distributed message queue — it's a thin type-safe wrapper around Node.js `EventEmitter` that standardizes the event types flowing through the system.
+
+**Problem it solves:** Multiple systems produce events that multiple consumers need:
+
+| Producer | Events | Consumers |
+|---|---|---|
+| Heartbeat pipeline | Tick complete, stage changes | Frontend (tRPC subscription), logging |
+| Emotion engine | Emotion state changes | Frontend visualization, logging |
+| Mind session | Streaming output | Channel adapters (SSE, NDJSON, WebSocket, buffer) |
+| Agent orchestrator | Agent spawned, completed, failed | Frontend, heartbeat trigger |
+| Channel adapters | Message received, sent | Heartbeat pipeline, message storage |
+| Goal system | Goal status changes | Frontend, logging |
+
+Without a bus, each producer-consumer pair is a direct coupling. Adding a new consumer (e.g., webhook notifications, audit logging) requires changing the producer.
+
+```typescript
+interface IEventBus {
+  emit<T extends AnimusEvent>(event: T): void;
+  on<T extends AnimusEvent>(type: T['type'], handler: (event: T) => void): () => void;
+  once<T extends AnimusEvent>(type: T['type'], handler: (event: T) => void): void;
+}
+
+type AnimusEvent =
+  | { type: 'tick:complete'; tickNumber: number; trigger: string }
+  | { type: 'emotion:changed'; changes: EmotionDelta[] }
+  | { type: 'message:received'; message: IncomingMessage }
+  | { type: 'message:sent'; contactId: string; channel: string; content: string }
+  | { type: 'agent:spawned'; agentId: string; taskDescription: string }
+  | { type: 'agent:completed'; agentId: string; status: string }
+  | { type: 'goal:changed'; goalId: string; newStatus: string }
+  | { type: 'task:changed'; taskId: string; newStatus: string }
+  | { type: 'unknown_caller'; channel: string; identifier: string };
+```
+
+The tRPC subscription layer becomes a consumer of the event bus rather than being tightly coupled to each producing system.
+
+---
+
+### Encryption Service (`@animus/shared`)
+
+Centralizes all symmetric encryption for secrets stored in the database — channel credentials, API keys, and any future encrypted configuration.
+
+```typescript
+interface IEncryptionService {
+  encrypt(plaintext: string): string;
+  decrypt(ciphertext: string): string;
+  isConfigured(): boolean;
+}
+```
+
+**Implementation details:**
+- Algorithm: AES-256-GCM (authenticated encryption)
+- Key source: `ANIMUS_ENCRYPTION_KEY` environment variable
+- Key derivation: PBKDF2 from the env var value
+- IV: Random per-encryption, prepended to ciphertext
+- Format: `{iv}:{ciphertext}:{authTag}` (base64-encoded)
+
+If the encryption key is not set, the service should log a warning on startup and fall back to storing secrets as plaintext (acceptable for local development but not production). The `isConfigured()` method lets the UI warn users about unencrypted storage.
+
+Used by the channel configuration system (see `docs/architecture/channels.md`) and API key storage in `system.db`.
+
+---
+
+### Database Stores (`@animus/backend`)
+
+Typed data access modules that encapsulate all SQL operations, organized by database. These are not a full ORM or repository pattern — they're simple functional modules that keep raw SQL centralized and out of business logic code.
+
+**Why not raw SQL everywhere?** SQL scattered across heartbeat pipeline code, GATHER CONTEXT code, and EXECUTE code makes the system hard to test (need a real database for every test) and hard to refactor (schema changes require hunting across the codebase).
+
+**Why not a full ORM?** Drizzle, Kysely, and similar tools add dependencies and abstractions that aren't necessary for SQLite with better-sqlite3. The queries are simple enough that typed functions suffice.
+
+**Structure:** One module per database, exporting typed functions. The database connection is a parameter for testability.
+
+```
+/packages/backend/src/db/
+  stores/
+    system.ts          # Users, contacts, contact channels, settings, API keys
+    heartbeat.ts       # Heartbeat state, thoughts, experiences, emotions, agent tasks, goals, seeds, plans, tasks
+    memory.ts          # Working memory, core self, long-term memories
+    messages.ts        # Conversations, messages
+    agent-logs.ts      # Sessions, events, usage
+  connections.ts       # Database connection setup (WAL mode, pragmas)
+  migrations/          # Schema versioning
+```
+
+```typescript
+// Example: stores/heartbeat.ts
+import type { Database } from 'better-sqlite3';
+
+export function getRecentThoughts(db: Database, limit: number): Thought[] { ... }
+export function insertThought(db: Database, thought: NewThought): void { ... }
+export function getEmotionState(db: Database): EmotionState[] { ... }
+export function updateEmotionIntensity(db: Database, emotion: string, intensity: number): void { ... }
+export function cleanupExpired(db: Database, retentionDays: number): void { ... }
+```
+
+Each function accepts the database instance as its first parameter. In production, the real database connection is passed. In tests, an in-memory SQLite database (`:memory:`) with the same schema can be used.
+
+**Cross-database references:** Contacts live in `system.db` but are referenced by `heartbeat.db`, `memory.db`, and `messages.db` via `contact_id` string fields (not SQLite foreign keys, since they cross database boundaries). Store functions accept the relevant database instance — a function that needs data from two databases accepts both.
+
+---
 
 ## Security Considerations
 
 - **Authentication**: Email/password with session cookies
-- **API Keys**: Stored encrypted in system.db
+- **API Keys**: Stored encrypted in system.db via the Encryption Service
 - **CORS**: Configured for same-origin in production
 - **Input Validation**: All tRPC inputs validated with Zod
 - **SQL Injection**: Prevented by parameterized queries (better-sqlite3)

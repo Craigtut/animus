@@ -49,14 +49,14 @@ Use this index to find the right files to read. Each entry includes the file pat
 |------|------|--------|
 | `docs/architecture/heartbeat.md` | 18 KB | The heartbeat tick system, mind session lifecycle (cold/active/warm states), 3-stage pipeline (GATHER CONTEXT → MIND QUERY → EXECUTE), emotion engine (12 emotions, decay, baselines), structured output schemas, configuration, crash recovery, TTL cleanup, API, real-time monitoring |
 | `docs/architecture/persona.md` | 12 KB | Persona system design - 8-step creation flow, archetypes, personality dimensions (10 sliders), trait chips, ranked values, existence paradigm (Simulated Life vs Digital Consciousness), prompt compilation system, onboarding gate |
-| `docs/architecture/tech-stack.md` | 8 KB | Full technology overview - Frontend (Vite, React 19, Zustand, Emotion, Motion), Backend (Fastify, tRPC, SQLite), four databases (system.db, heartbeat.db, messages.db, agent_logs.db), LanceDB, agent SDKs, deployment |
+| `docs/architecture/tech-stack.md` | 14 KB | Full technology overview - Frontend (Vite, React 19, Zustand, Emotion, Motion), Backend (Fastify, tRPC, SQLite), five databases, LanceDB, agent SDKs, deployment. Shared Abstractions section: Embedding Provider, Context Builder, Decay Engine, Event Bus, Encryption Service, Database Stores |
 | `docs/architecture/agent-orchestration.md` | 14 KB | Sub-agent delegation, custom orchestration layer, prompt template, channel-aware formatting, agent lifecycle, MCP tools, result delivery through heartbeat, failure handling, configuration |
 | `docs/architecture/contacts.md` | 14 KB | Contact system, user-contact linking, primary/standard/unknown tiers, identity resolution, contact channels, permission enforcement, message isolation, message storage (messages.db) |
 | `docs/architecture/channels.md` | 18 KB | Channel adapter layer - IncomingMessage interface, identity resolution, Web/tRPC, SMS/Twilio (webhooks, MMS, signature validation), Discord/discord.js (bot, intents, conversation scoping), OpenAI-compatible API (SSE streaming), Ollama-compatible API (NDJSON streaming), streaming pipeline, media handling, credential management, outbound routing, channel lifecycle |
-| `docs/architecture/mind-prompt.md` | TODO | Mind system prompt design - persona integration, operational instructions, decision types, output schema (stub, not yet designed) |
-| `docs/architecture/memory.md` | Under construction | Memory system design questions - what gets stored, embedding strategy, retrieval, consolidation, context budget |
-| `docs/architecture/goals.md` | Under construction | Goal system - data model, lifecycle, heartbeat integration, permissions |
-| `docs/architecture/tasks-system.md` | Under construction | Task system - scheduling, data model, heartbeat integration, goal relationship |
+| `docs/architecture/context-builder.md` | 16 KB | Context Builder system - centralized context assembly for all LLM prompts (mind ticks, sub-agents, task ticks), prompt compilation, token budget management, persona compilation, four compilation targets |
+| `docs/architecture/memory.md` | 22 KB | Memory system - four layers (short-term, working memory, core self, long-term), memory.db schema, write pipeline (embed → dedup → store), retrieval scoring, consolidation, forgetting, Transformers.js embeddings, structured output additions, pre-session-end flush, MCP tools for sub-agents |
+| `docs/architecture/goals.md` | 20 KB | Goal system - seeds (emergent desires), goals, plans, tasks hierarchy, salience scoring, emotional links, approval modes, cleanup, heartbeat integration |
+| `docs/architecture/tasks-system.md` | 16 KB | Task system - scheduled vs deferred tasks, task ticks, cron support, planning agent, retry logic, heartbeat integration |
 | `docs/architecture/open-questions.md` | 5 KB | Unresolved design questions - concurrent tick handling, crash recovery, MCP tool design, structured output across SDKs |
 
 ### Frontend
@@ -100,6 +100,9 @@ When you need context for a task, follow this approach:
 5. **For frontend work**: Read `docs/frontend/design-principles.md` and `docs/brand-vision.md`
 6. **For persona/personality**: Read `docs/architecture/persona.md` and `docs/brand-vision.md`
 7. **For heartbeat/inner life**: Read `docs/architecture/heartbeat.md` and `docs/project-vision.md`
+7b. **For memory/knowledge/embeddings**: Read `docs/architecture/memory.md` and `docs/architecture/heartbeat.md`
+7c. **For context assembly/prompt building**: Read `docs/architecture/context-builder.md`
+7d. **For shared abstractions (embedding, decay, encryption, event bus)**: Read `docs/architecture/tech-stack.md` (Shared Abstractions section)
 8. **For new contributors**: Read `docs/guides/getting-started.md`
 9. **For channels/messaging/SMS/Discord/API**: Read `docs/architecture/channels.md` and `docs/architecture/contacts.md`
 
@@ -122,8 +125,9 @@ Use this to quickly map user questions to the right docs:
 - **sub-agent, delegation, orchestration, spawn agent, agent lifecycle** -> `docs/architecture/agent-orchestration.md`
 - **contacts, identity, permission, primary, standard, unknown caller** -> `docs/architecture/contacts.md`
 - **channels, adapter, SMS, twilio, discord, API, ollama, openai, streaming, webhook, inbound, outbound, media** -> `docs/architecture/channels.md`
-- **mind prompt, system prompt, mind instructions** -> `docs/architecture/mind-prompt.md`
-- **memory, embedding, retrieval, long-term, lancedb memories** -> `docs/architecture/memory.md`
+- **context builder, context assembly, prompt compilation, token budget, mind prompt, system prompt, mind instructions** -> `docs/architecture/context-builder.md`
+- **shared abstractions, embedding provider, decay engine, encryption service, event bus, database stores** -> `docs/architecture/tech-stack.md`
+- **memory, embedding, retrieval, long-term, lancedb memories, working memory, core self, consolidation, forgetting, transformers.js** -> `docs/architecture/memory.md`
 - **goals, objectives, long-term direction** -> `docs/architecture/goals.md`
 - **tasks, scheduling, cron, scheduled jobs** -> `docs/architecture/tasks-system.md`
 - **open questions, race conditions, crash recovery, structured output** -> `docs/architecture/open-questions.md`

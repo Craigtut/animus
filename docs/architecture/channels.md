@@ -591,7 +591,7 @@ Sending media (MMS images, Discord attachments) is **future work**. The current 
 
 ### Storage
 
-Channel credentials are stored **encrypted** in `system.db`. The encryption key is sourced from an environment variable (`ANIMUS_ENCRYPTION_KEY`).
+Channel credentials are stored **encrypted** in `system.db` using the **Encryption Service** (see `docs/architecture/tech-stack.md`, Shared Abstractions). The encryption key is sourced from an environment variable (`ANIMUS_ENCRYPTION_KEY`).
 
 ```sql
 CREATE TABLE channel_configs (
@@ -788,10 +788,19 @@ The `'api'` type covers both OpenAI-compatible and Ollama-compatible endpoints. 
 
 ---
 
+## Shared Abstractions
+
+The channels system uses several shared abstractions (see `docs/architecture/tech-stack.md`):
+
+- **Encryption Service** — Encrypts/decrypts channel credentials stored in `system.db`
+- **Event Bus** — Emits `message:received`, `message:sent`, and `unknown_caller` events
+- **Database Stores** — Typed data access for `channel_configs` and `contact_channels` tables
+
 ## References
 
 - `docs/architecture/contacts.md` — Identity resolution, permission tiers, contact_channels table
 - `docs/architecture/heartbeat.md` — Pipeline that channel adapters feed into
+- `docs/architecture/context-builder.md` — Channel context included in sub-agent prompts
 - `docs/architecture/agent-orchestration.md` — Channel-aware formatting, sub-agent channel context
-- `docs/architecture/tech-stack.md` — Database architecture, Fastify server
+- `docs/architecture/tech-stack.md` — Database architecture, Fastify server, shared abstractions
 - `docs/project-vision.md` — Multi-channel presence vision

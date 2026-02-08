@@ -129,7 +129,7 @@ Each tick executes a pipeline with three stages. The key insight is that the cog
 
 ### Stage 1: GATHER CONTEXT (System)
 
-A system-level operation that assembles the input for the mind query. No LLM inference happens here.
+A system-level operation that assembles the input for the mind query. No LLM inference happens here. Context assembly is handled by the **Context Builder** — see `docs/architecture/context-builder.md` for the full design of how context sections are composed and token budgets are managed.
 
 - Collect the trigger context (message content, task details, sub-agent results, or nothing for interval ticks)
 - If message-triggered: resolve contact identity and permission tier (see `docs/architecture/contacts.md`)
@@ -262,7 +262,7 @@ Emotions don't hold their intensity forever. In the absence of reinforcing input
 
 #### Formula
 
-Decay is applied during the GATHER CONTEXT stage, before the mind sees the current emotional state:
+Decay is applied during the GATHER CONTEXT stage, before the mind sees the current emotional state. The decay calculation uses the shared **Decay Engine** utility (see `docs/architecture/tech-stack.md`, Shared Abstractions) which centralizes exponential decay math across the system:
 
 ```
 elapsedHours = (now - lastUpdatedAt) / 3_600_000
@@ -602,6 +602,15 @@ onHeartbeat: publicProcedure.subscription(() => {
 // Frontend
 const { data: heartbeat } = trpc.onHeartbeat.useSubscription();
 ```
+
+## Shared Abstractions
+
+The heartbeat system uses several shared abstractions (see `docs/architecture/tech-stack.md` for full details):
+
+- **Context Builder** — Assembles the mind's system prompt and GATHER CONTEXT payload each tick (`docs/architecture/context-builder.md`)
+- **Decay Engine** — Computes emotion decay toward baselines between ticks
+- **Event Bus** — Emits tick lifecycle events (`tick:complete`, `emotion:changed`) consumed by the frontend and logging systems
+- **Database Stores** — Typed data access for `heartbeat.db` (thoughts, experiences, emotions, heartbeat state)
 
 ## Future Considerations
 

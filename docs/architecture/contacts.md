@@ -422,8 +422,16 @@ This is a soft boundary. The mind is an LLM and may occasionally leak. Accept th
 
 ---
 
+## Shared Abstractions
+
+The contacts system uses several shared abstractions (see `docs/architecture/tech-stack.md`):
+
+- **Context Builder** — Assembles contact permission blocks and privacy instructions for the mind's context (`docs/architecture/context-builder.md`)
+- **Database Stores** — Typed data access for contacts and contact_channels tables in `system.db`, and conversations/messages in `messages.db`
+
 ## References
 
 - `docs/architecture/heartbeat.md` — Heartbeat pipeline where contact context flows through
+- `docs/architecture/context-builder.md` — How contact context is assembled into the mind's prompt
 - `docs/architecture/agent-orchestration.md` — Sub-agent prompt template and delegation
-- `docs/architecture/tech-stack.md` — Database architecture (four databases)
+- `docs/architecture/tech-stack.md` — Database architecture (five databases), shared abstractions
