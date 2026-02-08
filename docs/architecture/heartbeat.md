@@ -49,7 +49,7 @@ The default rhythm. When no messages arrive and no tasks fire, the heartbeat tic
 **Timer reset behavior:** The interval timer resets after *any* tick, regardless of trigger type. If the interval is 5 minutes and a message arrives at minute 3, the timer resets — the next interval tick won't fire until 5 minutes after that message-triggered tick completes. This prevents unnecessary interval ticks from piling up during periods of activity.
 
 ### 2. Message Received
-When a contact sends a message through any channel (SMS, Discord, voice, API), it triggers a tick — but only if the sender is a **known contact**. Unknown callers receive a canned response and do not trigger a tick (see `docs/architecture/contacts.md`).
+When a contact sends a message through any channel (web, SMS, Discord, API), it triggers a tick — but only if the sender is a **known contact**. Unknown callers receive a canned response and do not trigger a tick (see `docs/architecture/contacts.md`).
 
 The message is tagged with the contact's identity and permission tier during ingestion, before the tick fires. This context flows through the entire pipeline: GATHER CONTEXT loads only the triggering contact's message history, the mind receives the contact's permission constraints, and EXECUTE enforces decision boundaries based on the contact's tier.
 
@@ -102,7 +102,9 @@ This prevents context degradation (where very old context crowds out recent, rel
 
 #### Tick Queuing & Concurrency
 
-Ticks are processed **sequentially** — only one tick runs at a time. This eliminates all race conditions around state mutations (emotion deltas, thoughts, decisions). A priority queue manages pending triggers.
+Ticks are processed **sequentially** — only one tick runs at a time through the main tick queue. This eliminates all race conditions around state mutations (emotion deltas, thoughts, decisions). A priority queue manages pending triggers.
+
+**Exception: Scheduled task ticks** bypass the main queue entirely. They create their own fresh cold sessions and can run in parallel (multiple tasks firing at the same time each get their own session). SQLite WAL mode handles concurrent writes — EXECUTE stages serialize naturally at the DB level. See `docs/architecture/tasks-system.md` for details. The main tick queue handles `message`, `interval`, and `agent_complete` triggers only.
 
 ```
   Interval Timer ─────┐
@@ -524,6 +526,48 @@ interface Decision {
 }
 ```
 
+### Decisions
+
+Decisions are the mind's action outputs — they tell the EXECUTE stage what to do. Each decision is logged for debugging, observability, and "previous tick outcomes" in GATHER CONTEXT.
+
+```typescript
+interface Decision {
+  type: DecisionType;
+  description: string;             // Why the mind is making this decision
+  parameters: Record<string, unknown>;  // Type-specific details
+}
+
+type DecisionType =
+  | 'spawn_agent' | 'update_agent' | 'cancel_agent'
+  | 'send_message'
+  | 'update_goal' | 'propose_goal' | 'create_seed'
+  | 'create_plan' | 'revise_plan'
+  | 'schedule_task' | 'start_task' | 'complete_task' | 'cancel_task' | 'skip_task'
+  | 'no_action';
+```
+
+#### Decisions Log (heartbeat.db)
+
+```sql
+CREATE TABLE tick_decisions (
+  id TEXT PRIMARY KEY,
+  tick_number INTEGER NOT NULL,
+  type TEXT NOT NULL,                -- DecisionType
+  description TEXT NOT NULL,
+  parameters TEXT,                   -- JSON
+  outcome TEXT NOT NULL,             -- 'executed' | 'dropped' | 'failed'
+  outcome_detail TEXT,               -- Why dropped (permission) or error detail
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_tick_decisions_tick ON tick_decisions(tick_number);
+```
+
+TTL cleanup alongside thoughts/experiences (30 days). This table enables:
+- **Previous tick outcomes** in GATHER CONTEXT — the mind sees what it decided last tick and what happened
+- **Permission enforcement visibility** — dropped decisions (e.g., `spawn_agent` for standard contacts) are logged with reason
+- **Debugging and observability** — understand AI behavior patterns
+
 ### Message Reply (contextual)
 ```typescript
 interface MessageReply {
@@ -537,17 +581,29 @@ interface MessageReply {
 
 ### Combined MindOutput Schema
 
-The mind produces a single structured JSON output per tick. **Field ordering matters** — the `reply` field is intentionally placed last so that generated thoughts inform and shape the reply content (the model's prior output context influences subsequent generation).
+The mind produces a single structured JSON output per tick. **Field ordering matters** — the `reply` field is placed immediately after `thoughts` so the mind thinks first, then speaks. The remaining fields (experiences, emotions, decisions, memory) follow as post-reply reflection, allowing the mind to process the full tick — including the act of having replied — before recording experiences and making decisions.
+
+This ordering also serves a practical purpose: streaming. By placing `reply` second, the user sees the response after only `thoughts` have generated, minimizing perceived latency. The internal cognition that follows (experiences, emotions, decisions, memory) processes silently while the reply is already delivered.
 
 ```typescript
 // Zod schema (source of truth, compiled to JSON Schema for SDK consumption)
 const MindOutputSchema = z.object({
-  // Internal cognition (generated first — informs the reply)
+  // Think first
   thoughts: z.array(z.object({
     content: z.string(),
     importance: z.number().min(0).max(1),
   })),
 
+  // Then speak
+  reply: z.object({
+    content: z.string(),
+    contactId: z.string(),
+    channel: ChannelTypeSchema,
+    replyToMessageId: z.string(),
+    tone: z.string().optional(),
+  }).nullable(),  // null when no reply needed (e.g., idle interval tick)
+
+  // Then reflect — process the experience of this tick
   experiences: z.array(z.object({
     content: z.string(),
     importance: z.number().min(0).max(1),
@@ -573,20 +629,13 @@ const MindOutputSchema = z.object({
     content: z.string(),
     type: z.enum(['fact', 'experience', 'procedure', 'outcome']),
     importance: z.number().min(0).max(1),
+    contactId: z.string().optional(),    // If contact-specific
+    keywords: z.array(z.string()).optional(),  // Auto-extracted if not provided
   })).optional(),
-
-  // Reply (generated LAST — benefits from all prior thinking)
-  reply: z.object({
-    content: z.string(),
-    contactId: z.string(),
-    channel: ChannelTypeSchema,
-    replyToMessageId: z.string(),
-    tone: z.string().optional(),
-  }).nullable(),  // null when no reply needed (e.g., idle interval tick)
 });
 ```
 
-**Why `reply` is last:** When an LLM generates structured JSON, it outputs fields sequentially. By placing `thoughts` before `reply`, the model first articulates its internal thinking, which then contextualizes and improves the quality of the reply. This is analogous to chain-of-thought prompting but embedded in the output structure itself.
+**Why this order — Think, Speak, Reflect:** When an LLM generates structured JSON, it outputs fields sequentially. By placing `thoughts` first, the model articulates its thinking before composing the reply (chain-of-thought effect). By placing `reply` before the remaining fields, the user receives the response with minimal latency. The post-reply fields then capture the mind's reflection on the full tick — experiences include the act of having responded, emotions reflect the complete moment, and decisions are informed by everything that happened.
 
 ---
 
@@ -596,7 +645,7 @@ The mind outputs structured JSON, but the user-facing `reply` field needs to str
 
 ### The Problem
 
-Without streaming, the user must wait for the entire MindOutput (thoughts + experiences + emotions + decisions + reply) to generate before seeing any response. With a typical tick producing 500-1000 tokens of internal cognition before the reply, this creates a noticeable delay.
+Without streaming, the user must wait for the entire MindOutput to generate before seeing any response. By placing `reply` second (after only `thoughts`), the streaming latency is minimized — the user starts seeing the reply after just the thoughts generate, while post-reply cognition (experiences, emotions, decisions, memory) processes in the background.
 
 ### Solution: Field-Level JSON Streaming
 
@@ -704,18 +753,18 @@ The MindOutput fields are generated in this order:
 | Order | Field | Streaming Behavior |
 |-------|-------|--------------------|
 | 1 | `thoughts[]` | Accumulated silently (logged, not streamed to user) |
-| 2 | `experiences[]` | Accumulated silently |
-| 3 | `emotionDeltas[]` | Accumulated silently |
-| 4 | `decisions[]` | Accumulated silently |
-| 5 | `workingMemoryUpdate` | Accumulated silently |
-| 6 | `coreSelfUpdate` | Accumulated silently |
-| 7 | `memoryCandidate[]` | Accumulated silently |
-| 8 | `reply` | **Streamed to frontend in real-time** |
+| 2 | `reply` | **Streamed to frontend in real-time** |
+| 3 | `experiences[]` | Accumulated silently |
+| 4 | `emotionDeltas[]` | Accumulated silently |
+| 5 | `decisions[]` | Accumulated silently |
+| 6 | `workingMemoryUpdate` | Accumulated silently |
+| 7 | `coreSelfUpdate` | Accumulated silently |
+| 8 | `memoryCandidate[]` | Accumulated silently |
 
 The frontend only receives the `reply.content` stream. All other fields are processed internally during the EXECUTE stage. This means:
-- Users see replies streaming naturally (like any chat interface)
-- Internal cognition (thoughts, emotions, decisions) is processed after the tick completes
-- The UI can show a "thinking" indicator while fields 1-7 generate, then transition to streaming text when the reply starts
+- The UI shows a "thinking" indicator while `thoughts` generate, then transitions to streaming text when the reply starts
+- Users see replies streaming early — only thoughts precede the reply, minimizing latency
+- Post-reply cognition (experiences, emotions, decisions, memory) processes silently after the reply is already streaming
 
 ### Validation Strategy
 
@@ -734,6 +783,54 @@ All three agent SDKs produce streaming text that `llm-json-stream` can parse:
 - **OpenCode**: No native structured output enforcement — schema is injected via system prompt. Text arrives via `message.part.updated` events.
 
 For OpenCode (no native enforcement), we validate with Zod after completion and retry if the output doesn't conform. In practice, modern LLMs follow injected schemas reliably when the schema is clear and included in the prompt.
+
+## Error Handling Strategy
+
+Errors in the heartbeat pipeline follow a four-tier strategy that prioritizes resilience without hiding failures.
+
+### Tier 1 — Retryable (auto-retry, log warning)
+
+Transient failures that should be retried automatically with exponential backoff:
+- LLM API transient errors (429 rate limit, 500/503 server errors)
+- Embedding computation failures (Transformers.js / OpenAI API)
+- MCP tool execution failures (timeout, network)
+- Network timeouts on external APIs
+
+Max retries: 3 per operation, with 1s / 2s / 4s backoff.
+
+### Tier 2 — Recoverable (log error, graceful degradation)
+
+Failures that don't crash the tick but result in degraded output:
+- **Structured output validation failure** → retry the tick once. If second attempt also fails, extract whatever valid fields exist (thoughts, emotions) and skip the rest. Log the malformed output for debugging.
+- **Sub-agent failure** → mind is informed via the next `agent_complete` tick with `status: 'failed'`. Mind decides to retry, try a different approach, or inform the user.
+- **Channel send failure** (outbound message) → log the error with full context. Do NOT auto-retry (avoid message duplication). Other EXECUTE operations continue.
+- **Memory write failure** (LanceDB, memory.db) → log, continue. Memory is non-critical to the current tick's output.
+- **Seed/goal processing failure** → log, skip. These are background operations.
+
+### Tier 3 — Critical (log error, notify user via reply)
+
+Failures that must be surfaced to the user because they affect the user's experience:
+- **Mind session creation failure** → surface to user on next message: "I'm having trouble thinking right now. My system may need attention."
+- **Database write failure in EXECUTE** (transaction rollback) → the tick's side effects are lost. Surface to user if they're waiting for a reply.
+- **All retries exhausted during an active conversation** → tell the user something went wrong rather than silently failing.
+- **Recurring task failing 5+ consecutive times** → notify primary contact.
+
+### Tier 4 — Fatal (log, don't crash, require manual intervention)
+
+System-level failures that prevent normal operation:
+- **Database corruption** → log critical error, pause the heartbeat. Do not attempt to continue with corrupted state.
+- **Missing encryption key** (`ANIMUS_ENCRYPTION_KEY`) → refuse to start channel adapters that need credentials. Log clear error message.
+- **Agent SDK authentication failure** → disable that provider, log error. If it's the configured provider, pause the heartbeat and notify on next web UI visit.
+
+### General Principles
+
+- **Never crash the server** — catch at the top level, log, continue where possible
+- **Never lose messages** — inbound messages are written to `messages.db` at ingestion time, before any tick processing
+- **Transaction rollback on partial EXECUTE failures** — atomic all-or-nothing for tick side effects
+- **Structured logging with correlation IDs** — every log entry includes tick number, contact ID, and session ID for traceability
+- **The frontend logs errors to the console** — web UI error handling is standard React error boundaries. Backend errors that affect the user are surfaced via reply messages, not UI alerts.
+
+---
 
 ## Crash Recovery
 

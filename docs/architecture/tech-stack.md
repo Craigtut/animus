@@ -128,6 +128,64 @@ The abstraction layer will provide:
 - Token/cost tracking
 - Session lifecycle management
 
+### Authentication
+
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| **@fastify/jwt** | ^10.0 | JWT signing, verification, and route protection |
+| **argon2** | latest | Password hashing (preferred over bcrypt for modern applications) |
+| **@fastify/cookie** | latest | httpOnly cookie transport for JWT tokens |
+
+**Approach: Roll your own** (~150-200 lines as a Fastify plugin).
+
+**Why not Better Auth?** Better Auth is the dominant TypeScript auth framework (24k+ stars, Y Combinator-backed, absorbed Lucia and Auth.js). However, it creates and manages its own 4 tables (user, session, account, verification) with its own schema management — this conflicts with Animus's existing `system.db` user/contact model. Its Fastify integration also works by bridging to the Fetch API internally, bypassing Fastify's native plugin and hook model. For a single-user self-hosted app with email/password only, it brings framework-level complexity for a ~150-line problem.
+
+**Why not Lucia?** Deprecated March 2025. Project archived. Official recommendation is to migrate to Better Auth.
+
+**Implementation:**
+
+```
+packages/backend/src/plugins/auth.ts    # Fastify plugin (~150 lines)
+```
+
+The auth plugin provides:
+
+1. **Password hashing** — argon2 for all password storage (hash on register, verify on login)
+2. **JWT sessions** — Signed tokens with configurable expiry (default 7d), stored in httpOnly cookies for web UI and accepted as `Authorization: Bearer` headers for API channels
+3. **Route protection** — `fastify.authenticate` decorator used as `onRequest` hook on protected routes
+4. **First-user bootstrap** — When `SELECT COUNT(*) FROM users` returns 0, registration is open. After the first user is created, registration is locked (admin-only creation)
+
+```typescript
+// Conceptual structure (not final implementation)
+export default fp(async (fastify) => {
+  fastify.register(fastifyJwt, {
+    secret: process.env.ANIMUS_JWT_SECRET!,
+    sign: { expiresIn: '7d' },
+    cookie: { cookieName: 'animus_session', signed: false },
+  });
+
+  fastify.register(fastifyCookie);
+
+  fastify.decorate('authenticate', async (request, reply) => {
+    try { await request.jwtVerify(); }
+    catch { reply.code(401).send({ error: 'Unauthorized' }); }
+  });
+});
+
+// Endpoints (registered on tRPC or Fastify routes):
+// POST /auth/register  — argon2.hash(password), insert user, sign JWT, set cookie
+// POST /auth/login     — argon2.verify(hash, password), sign JWT, set cookie
+// POST /auth/logout    — clear cookie
+// GET  /auth/me        — return user from JWT payload
+```
+
+**Security properties:**
+- Passwords never stored in plaintext (argon2 with default cost)
+- JWT secret from environment variable (`ANIMUS_JWT_SECRET`)
+- httpOnly cookies prevent XSS-based token theft
+- API channels use Bearer token (same JWT, different transport)
+- No OAuth, social login, or 2FA needed (single-user, self-hosted, LAN)
+
 ## Development Tools
 
 ### Testing
@@ -201,7 +259,7 @@ In production, the frontend is built and served by Fastify:
 
 ## Shared Abstractions
 
-Several cross-cutting concerns are formalized as abstractions to prevent duplication and ensure consistency across the codebase. Most live in `@animus/shared` (pure logic, no backend dependencies) or `@animus/backend` (requires database access).
+Eight cross-cutting concerns are formalized as abstractions to prevent duplication and ensure consistency across the codebase. Most live in `@animus/shared` (pure logic, no backend dependencies) or `@animus/backend` (requires database access).
 
 ### Embedding Provider (`@animus/shared`)
 
@@ -386,10 +444,84 @@ Each function accepts the database instance as its first parameter. In productio
 
 ---
 
+### Database Migrations (`@animus/backend`)
+
+A lightweight, custom migration system for managing schema changes across all five SQLite databases. Zero external dependencies — just ~50 lines of migration runner code.
+
+**Why not an ORM migration tool (Drizzle, Kysely, Knex)?** Animus uses raw SQL by design (no ORM). Adding an ORM's migration runner purely for migrations introduces a heavy dependency for a narrow use case. The five separate databases also make ORM migration tools awkward — they typically assume a single database connection.
+
+**Why not Umzug?** Viable option, but for SQLite with better-sqlite3, the migration problem is simple enough that a dependency isn't justified. Our runner is ~50 lines.
+
+**How it works:**
+
+Each database has a `_migrations` table that tracks which migrations have been applied:
+
+```sql
+CREATE TABLE IF NOT EXISTS _migrations (
+  version INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+Migration files are plain `.sql` files organized by database:
+
+```
+packages/backend/src/db/
+  migrations/
+    system/
+      001_initial.sql
+      002_add_api_keys.sql
+    heartbeat/
+      001_initial.sql
+      002_add_tick_decisions.sql
+    memory/
+      001_initial.sql
+    messages/
+      001_initial.sql
+    agent-logs/
+      001_initial.sql
+```
+
+**Migration runner** (runs at startup, before any other initialization):
+
+```typescript
+function runMigrations(db: Database, migrationsDir: string): void {
+  // 1. Ensure _migrations table exists
+  // 2. Read all .sql files from migrationsDir, sorted by version number
+  // 3. Query _migrations for already-applied versions
+  // 4. For each unapplied migration (in order):
+  //    a. Read the .sql file
+  //    b. Execute it within a transaction
+  //    c. Insert a row into _migrations
+  // 5. Log summary: "system.db: applied 2 new migrations (003, 004)"
+}
+```
+
+**Rules:**
+- Migration files are **append-only** — never edit or delete an applied migration
+- Each migration runs in a **transaction** — if it fails, nothing is applied (SQLite DDL is transactional)
+- Version numbers are extracted from the filename prefix (e.g., `001`, `002`)
+- The runner processes each of the five databases independently
+- Migrations are **forward-only** — no rollback support (if needed, write a new migration that reverses the change)
+
+**Startup sequence:**
+```
+1. Open all 5 database connections (WAL mode, pragmas)
+2. Run migrations for each database
+3. Initialize services (auth, heartbeat, channels, etc.)
+4. Start HTTP server
+```
+
+This approach is robust for long-term use: as the schema evolves, new `.sql` files are added to the appropriate directory and automatically applied on the next startup. The version-tracking table provides a clear audit trail of what's been applied.
+
+---
+
 ## Security Considerations
 
-- **Authentication**: Email/password with session cookies
+- **Authentication**: Email/password with argon2 hashing, JWT in httpOnly cookies (web) or Bearer tokens (API). See Authentication section above.
 - **API Keys**: Stored encrypted in system.db via the Encryption Service
+- **Channel Credentials**: Encrypted in system.db via the Encryption Service (Twilio keys, Discord tokens, etc.)
 - **CORS**: Configured for same-origin in production
 - **Input Validation**: All tRPC inputs validated with Zod
 - **SQL Injection**: Prevented by parameterized queries (better-sqlite3)

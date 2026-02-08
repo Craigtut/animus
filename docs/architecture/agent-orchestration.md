@@ -95,9 +95,9 @@ Sub-agent prompts are assembled by the **Context Builder** (see `docs/architectu
 - Recent thoughts (last ~10, timestamped) — gives the sub-agent a sense of what the mind has been thinking about
 - Recent experiences (last ~10, timestamped) — what's been happening in Animus's inner life
 - Recent conversation messages **from the triggering contact only** (last ~10, timestamped) — the contact/Animus exchange leading up to this task
-- Long-term memory (read-only) — relevant memories retrieved from LanceDB *(details TBD when memory system is fleshed out)*
+- Long-term memory (read-only) — relevant memories retrieved from LanceDB via `read_memory` MCP tool (see `docs/architecture/memory.md`)
 - Contact identity and permission tier — who the sub-agent is working for
-- Channel the original message came from (SMS, Discord, web, voice) — so the sub-agent formats its output appropriately
+- Channel the original message came from (SMS, Discord, web, API) — so the sub-agent formats its output appropriately
 - Time of day, environmental context
 - Available MCP tools and their descriptions (filtered by contact permission tier)
 - Privacy instructions — do not reference other contacts' conversations
@@ -123,9 +123,9 @@ The template ensures every sub-agent has the same foundational context as the mi
 │  │  • Recent thoughts (~10, timestamped)         │  │
 │  │  • Recent experiences (~10, timestamped)      │  │
 │  │  • Recent messages from THIS CONTACT (~10)     │  │
-│  │  • Long-term memory (read-only, TBD)          │  │
+│  │  • Long-term memory (read-only, via MCP tool)  │  │
 │  │  • Contact identity & permission tier         │  │
-│  │  • Channel context (SMS, Discord, voice, etc) │  │
+│  │  • Channel context (SMS, Discord, web, API)    │  │
 │  │  • Available tools (tier-filtered)            │  │
 │  │  • Privacy instructions (cross-contact)       │  │
 │  │  • Environment (time, date, etc)              │  │
@@ -159,7 +159,6 @@ The sub-agent's prompt includes the originating channel so it formats output app
 | SMS | Short, plain text. No markdown. Keep under 160 chars per message when possible. |
 | Discord | Markdown supported. Can use embeds, code blocks, bullet lists. |
 | Web UI | Full markdown. Can be longer and more detailed. |
-| Voice | Conversational, spoken-word friendly. No visual formatting. Short sentences. |
 | API | Structured data preferred. JSON when appropriate. |
 
 ---
@@ -396,7 +395,7 @@ Cost controls (per-agent budgets, daily spending limits) are noted as a future c
 - **Context summarization** — Currently we pass the last ~10 thoughts, experiences, and messages to sub-agents. A future iteration should summarize older history and combine summaries with recent entries for richer context without excessive tokens.
 - **Task priority and urgency** — Task queuing is FIFO for now. A future iteration should add priority levels and urgency scoring so time-sensitive tasks can jump the queue.
 - **Cost budgeting** — Per-agent and daily spending limits. Deferred until cost becomes a practical concern.
-- **Memory system integration** — The full memory system (LanceDB) is not yet designed. When it is, sub-agents will need read access to relevant memories as part of their template context. The mind remains the sole writer of long-term memories.
+- **Memory system integration** — The memory system is fully designed (see `docs/architecture/memory.md`). Sub-agents receive read-only snapshots of working memory and core self in their prompt template, plus access to the `read_memory` MCP tool for long-term memory search. The mind remains the sole writer of long-term memories.
 
 ---
 

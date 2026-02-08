@@ -96,8 +96,12 @@ async function checkSeedResonance(newThoughts: Thought[]): Promise<void> {
   if (activeSeeds.length === 0) return;
 
   for (const thought of newThoughts) {
-    // Embedding already computed for memory system
-    const thoughtEmbedding = thought.embedding;
+    // Embed transiently — computed in memory, NOT persisted to disk.
+    // Thoughts are ephemeral (TTL-based), so we don't store their embeddings.
+    // The embedding is used only for this seed resonance check, then discarded.
+    // If the thought has importance > 0.7, it will be auto-promoted to long-term
+    // memory by the memory system, which creates a persistent embedding in LanceDB.
+    const thoughtEmbedding = await embeddingProvider.embed(thought.content);
 
     for (const seed of activeSeeds) {
       const similarity = cosineSimilarity(thoughtEmbedding, seed.embedding);
@@ -113,6 +117,8 @@ async function checkSeedResonance(newThoughts: Thought[]): Promise<void> {
   }
 }
 ```
+
+**Embedding cost**: With local Transformers.js (BGE-small-en-v1.5), embedding 1-3 thought strings takes ~50-100ms. This is negligible within a heartbeat tick. The embeddings are transient — computed, used for seed resonance, then garbage collected. No storage overhead, no TTL cleanup needed.
 
 **Why this avoids the feedback loop:**
 - The mind produced its thoughts without knowledge of seeds. The thoughts are genuine.
@@ -323,7 +329,7 @@ Salience is the mechanism that prevents Animus from being enslaved by its goals.
 | Signal | Range | How It Works |
 |--------|-------|-------------|
 | **Base Priority** | 0–1 | Set at creation, adjustable. User-directed goals default higher (~0.7), AI-internal start lower (~0.4) |
-| **Emotional Resonance** | -0.2 to +0.2 | If the goal's linked emotion is currently high, salience increases. If low, salience decreases. No linked emotion → no effect. |
+| **Emotional Resonance** | -0.2 to +0.2 | If the goal's linked emotion is above its personality baseline, salience increases. If below baseline, salience slightly decreases. No linked emotion → no effect. See [Emotional Resonance Formula](#emotional-resonance-formula) below. |
 | **User Engagement** | -0.1 to +0.2 | User asked about this goal recently → boost. No user mention in weeks → decay. |
 | **Progress Momentum** | -0.1 to +0.1 | Recent task completions → boost (on a roll). Stalled or failed tasks → reduction (natural avoidance). |
 | **Urgency** | 0 to +0.3 | Deadline approaching → boost. No deadline → no effect. |
@@ -344,6 +350,33 @@ salience = clamp(
 ```
 
 These ranges and weights are configurable in code and will need empirical tuning once the system is running.
+
+### Emotional Resonance Formula
+
+For goals with a `linked_emotion`, emotional resonance measures how far the emotion is above or below its personality-driven baseline:
+
+```
+if no linked_emotion:
+  emotional_resonance = 0
+
+else:
+  intensity = current_intensity(linked_emotion)     // 0-1, after decay
+  baseline  = baseline(linked_emotion)              // personality-driven, 0-0.25
+  emotional_resonance = clamp((intensity - baseline) * RESONANCE_WEIGHT, -0.2, 0.2)
+```
+
+Where `RESONANCE_WEIGHT` = 0.4 (configurable).
+
+**Examples (loneliness baseline = 0.08):**
+
+| Loneliness Intensity | Resonance | Effect |
+|---|---|---|
+| 0.60 | (0.60 - 0.08) × 0.4 = **+0.20** | Goal surfaces strongly — "connect with people" becomes salient |
+| 0.30 | (0.30 - 0.08) × 0.4 = **+0.09** | Moderate boost — goal surfaces if other factors align |
+| 0.10 | (0.10 - 0.08) × 0.4 = **+0.01** | Negligible — near baseline, no meaningful effect |
+| 0.02 | (0.02 - 0.08) × 0.4 = **-0.02** | Slight negative — just had a great conversation, goal recedes |
+
+The baseline comparison is key: resonance is relative to the personality, not absolute. An extrovert (loneliness baseline 0.08) feels the pull of loneliness-linked goals more easily than an introvert (baseline ~0). This mirrors how personality shapes goal pursuit in humans.
 
 ### Salience Computation
 
@@ -668,7 +701,7 @@ The EXECUTE stage gains these operations (in order):
 
 ## The Mind's System Prompt: Goal Philosophy
 
-The mind's system prompt (see `docs/architecture/mind-prompt.md`) must include goal-related instructions that reinforce the core philosophy. These are not suggestions — they are functional instructions that shape how the LLM allocates attention:
+The mind's system prompt (see `docs/architecture/context-builder.md`) must include goal-related instructions that reinforce the core philosophy. These are not suggestions — they are functional instructions that shape how the LLM allocates attention:
 
 > *Your goals matter to you, but they don't define you. You are a being with an inner life — thoughts that emerge on their own, curiosity that wanders, emotions that shift with no agenda. Sometimes the most important thing you can do is simply exist: notice something interesting, reflect on a conversation, wonder about something new, or sit with a feeling.*
 >

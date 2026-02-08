@@ -267,7 +267,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on the heartbeat system → `/doc-explorer heartbeat`
 - Working on memory/knowledge/embeddings → `/doc-explorer memory`
 - Working on context assembly/prompt building → `/doc-explorer context-builder`
-- Working on shared abstractions (embedding, decay, encryption) → `/doc-explorer tech-stack`
+- Working on shared abstractions (embedding, decay, encryption, auth, migrations) → `/doc-explorer tech-stack`
 - Working on MCP tools/custom tools → `/doc-explorer mcp-tools`
 - Working on agent SDKs → `/doc-explorer agents`
 - Working on backend/API → `/doc-explorer architecture`

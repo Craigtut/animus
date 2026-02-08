@@ -339,22 +339,7 @@ When no memories score above the relevance threshold, this section is omitted en
 
 ### Context Budget
 
-Long-term memories compete with other context for the mind's attention. The budget allocation:
-
-| Context Component | Budget |
-|---|---|
-| System prompt + persona + core self | ~20% |
-| Trigger context (message, task) | ~20% |
-| Short-term memory (recent thoughts, experiences, messages) | ~15% |
-| Working memory (contact notepad) | ~5% |
-| Goals + emotional state | ~10% |
-| **Long-term memories** | **~15%** |
-| Response space | ~15% |
-
-These are guidelines, not hard limits. The GATHER CONTEXT stage should be adaptive:
-- During message ticks: prioritize trigger context and short-term memory
-- During idle ticks: more budget for long-term memories and goals
-- When context is tight: fewer memories, higher relevance threshold
+Long-term memories compete with other context for the mind's attention. Long-term memories receive approximately **~15%** of the total context budget. The full budget allocation table and adaptive behavior rules are defined in `docs/architecture/context-builder.md` (Token Budget Allocation section) — that is the canonical source for all context budgeting.
 
 ### Consolidation
 
@@ -472,33 +457,13 @@ Only the **extracted memory content** is embedded — not raw thoughts, messages
 
 ## Structured Output Additions
 
-The mind's structured output schema gains three optional fields for memory management:
+The mind's `MindOutputSchema` (defined in `docs/architecture/heartbeat.md`, Combined MindOutput Schema section) includes three optional memory fields:
 
-```typescript
-interface MindOutput {
-  // Existing fields
-  thoughts: Thought[];
-  experiences: Experience[];
-  emotionDeltas: EmotionDelta[];
-  decisions: Decision[];
-  messageReply?: MessageReply;
+- **`workingMemoryUpdate`**: `string | null` — Full replacement of current contact's notepad
+- **`coreSelfUpdate`**: `string | null` — Full replacement of core self content
+- **`memoryCandidate`**: `MemoryCandidate[]` (optional) — Facts/observations to persist to long-term memory, each with `content`, `type`, `importance`, optional `contactId` and `keywords`
 
-  // Memory fields (all optional)
-  workingMemoryUpdate?: string;              // Full replacement of current contact's notepad
-  coreSelfUpdate?: string;                   // Full replacement of core self content
-  memoryCandidate?: MemoryCandidate[];      // Facts/observations to persist to long-term memory
-}
-
-interface MemoryCandidate {
-  content: string;
-  memoryType: 'fact' | 'experience' | 'procedure' | 'outcome';
-  importance: number;                        // 0-1
-  contactId?: string;
-  keywords?: string[];
-}
-```
-
-All three fields are optional. Most ticks, the mind produces none of them — it only engages with memory when it has something worth updating or storing. This keeps the cognitive load manageable.
+All three fields are optional. Most ticks, the mind produces none of them — it only engages with memory when it has something worth updating or storing. This keeps the cognitive load manageable. The canonical Zod schema lives in `@animus/shared` and is documented in heartbeat.md — that is the single source of truth for the MindOutput structure.
 
 ---
 

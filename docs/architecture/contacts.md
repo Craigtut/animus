@@ -8,7 +8,7 @@ How Animus identifies who it's communicating with, enforces permission boundarie
 
 **Users** are web UI administrators. They authenticate with email/password to access the Animus dashboard, configure settings, manage personality, and observe the heartbeat. A user is the person who runs this Animus instance.
 
-**Contacts** are people Animus communicates with through messaging channels (SMS, Discord, voice, web UI, etc.). A contact represents an identity in Animus's social world. There can be many contacts. One of them is designated the **primary contact** — the person Animus "belongs to."
+**Contacts** are people Animus communicates with through messaging channels (SMS, Discord, web UI, API, etc.). A contact represents an identity in Animus's social world. There can be many contacts. One of them is designated the **primary contact** — the person Animus "belongs to."
 
 Users and contacts are **linked but distinct** concepts. Every web UI user has a corresponding contact record (created automatically at signup). The contact record is what gives the user an identity in Animus's social world — it's how the mind knows who it's talking to, regardless of whether the message came from the web UI, SMS, or Discord.
 
@@ -83,7 +83,7 @@ A single contact can be reachable on multiple channels. The `contact_channels` t
 interface ContactChannel {
   id: UUID;
   contactId: UUID;              // FK → contacts.id
-  channel: ChannelType;         // 'sms' | 'discord' | 'voice' | 'web' | 'api'
+  channel: ChannelType;         // 'sms' | 'discord' | 'web' | 'api'
   identifier: string;           // Channel-specific: phone number, Discord user ID, etc.
   displayName: string | null;   // How they appear on this channel (Discord nickname, etc.)
   isVerified: boolean;          // Has identity been confirmed?
@@ -98,7 +98,6 @@ interface ContactChannel {
 |---|---|---|
 | sms | `+15551234567` | E.164 phone number |
 | discord | `123456789012345678` | Discord user ID (not username — usernames change) |
-| voice | `home_assistant_user_1` | Home Assistant user/device ID |
 | web | `user_abc123` | Web UI user ID — resolves to the linked contact record |
 | api | `api_key_abc123` | API key identifier |
 
@@ -124,7 +123,7 @@ CREATE UNIQUE INDEX idx_contacts_primary
 CREATE TABLE contact_channels (
   id TEXT PRIMARY KEY,
   contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-  channel TEXT NOT NULL,          -- 'sms' | 'discord' | 'voice' | 'api'
+  channel TEXT NOT NULL,          -- 'sms' | 'discord' | 'web' | 'api'
   identifier TEXT NOT NULL,       -- Channel-specific identifier
   display_name TEXT,
   is_verified INTEGER NOT NULL DEFAULT 0,
@@ -405,6 +404,20 @@ Contact notes are editable from the web UI settings at any time — they're just
 ### Token Budget
 
 The Context Builder allocates a soft cap (~500 tokens) for the primary contact's notes within the system prompt section. If notes exceed this cap, they are truncated with a warning displayed in the settings UI encouraging the user to be more concise.
+
+### Contact Notes vs Working Memory
+
+These are distinct concepts that serve different purposes:
+
+| | Contact Notes | Working Memory |
+|---|---|---|
+| **Owner** | User-defined, static | AI-maintained, dynamic |
+| **Content** | User-provided context about themselves (set during onboarding, editable in settings) | AI's evolving observations and relationship knowledge |
+| **Updated by** | The user only | The mind only (via `workingMemoryUpdate` structured output) |
+| **Storage** | `notes` field on `contacts` table in `system.db` | `working_memory` table in `memory.db` |
+| **Example** | "I'm a software engineer, I have a dog named Max" | "Craig prefers concise responses. He's been stressed about work lately." |
+
+Contact notes are the user telling Animus about themselves. Working memory is Animus learning about the user through interaction. Both are loaded during GATHER CONTEXT — contact notes as part of the base persona context, working memory as the contact-specific notepad. See `docs/architecture/memory.md` for the working memory system.
 
 ---
 

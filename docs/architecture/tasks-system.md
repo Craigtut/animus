@@ -187,17 +187,11 @@ During any tick, the mind can create tasks from its own thinking:
 - "I want to check on this research topic periodically" → recurring task
 - "I should look into this when I have time" → deferred task
 
-### Sub-Agent MCP Tool
+### Sub-Agent Results → Mind Creates Follow-Up Tasks
 
-Sub-agents can create follow-up tasks via the `create_task` MCP tool:
+Sub-agents do NOT create tasks directly. When a sub-agent discovers that follow-up work is needed (e.g., "this data updates weekly, check back in 7 days"), it includes this recommendation in its result. When the mind processes the result via the `agent_complete` tick, it can create the follow-up task itself via a `schedule_task` decision.
 
-```
-MCP Tool: create_task
-Input: { title, description, instructions, scheduleType,
-         cronExpression?, scheduledAt?, priority }
-```
-
-A research sub-agent might discover "this data updates weekly, we should check back in 7 days" and create a follow-up one-shot task. The task is written directly to the DB; the task scheduler picks it up at the right time.
+This keeps the mind as the single authority over task creation and scheduling. Sub-agents are executors, not planners — they recommend, the mind decides.
 
 ---
 
@@ -334,24 +328,32 @@ Task ticks produce a modified structured output compared to normal message ticks
 ### Task Tick Output
 
 ```typescript
+// TaskTickOutput is a variant of MindOutput (see docs/architecture/heartbeat.md)
+// that replaces `reply` with `taskResult`. All other fields are shared.
 interface TaskTickOutput {
   // Always produced (same as normal ticks)
   thoughts: Thought[];
   experiences: Experience[];
   emotionDeltas: EmotionDelta[];
 
-  // Task-specific
+  // Decisions (same pool as normal ticks)
+  decisions: Decision[];          // May include spawn_agent, schedule_task, etc.
+
+  // Memory management (same as normal ticks — the mind should maintain
+  // memory during task execution, not just during conversations)
+  workingMemoryUpdate?: string | null;
+  coreSelfUpdate?: string | null;
+  memoryCandidate?: MemoryCandidate[];
+
+  // Task-specific (replaces `reply` from MindOutput)
   taskResult: {
     taskId: string;
     outcome: 'completed' | 'delegated' | 'skipped' | 'failed';
     result?: string;              // What was accomplished (for completed)
     skipReason?: string;          // Why the task was skipped
     failureReason?: string;       // What went wrong (for failed)
-    messageToUser?: string;       // Optional message to send to primary contact
+    messageToUser?: string;       // Optional message to send to the task's contact
   };
-
-  // Decisions (same pool as normal ticks)
-  decisions: Decision[];          // May include spawn_agent, schedule_task, etc.
 }
 ```
 
@@ -521,8 +523,13 @@ CREATE TABLE tasks (
   last_error TEXT,
   result TEXT,                           -- Final output/result for one-shot tasks
 
-  -- Origin
-  created_by TEXT NOT NULL,              -- 'mind' | 'planning_agent' | 'sub_agent' | 'user'
+  -- Origin & Contact
+  created_by TEXT NOT NULL,              -- 'mind' | 'planning_agent' | 'user'
+  contact_id TEXT,                       -- FK reference to system.db contacts.id
+                                         -- Who this task is for / who gets result messages
+                                         -- User-created: the requesting contact (always primary)
+                                         -- Mind-created: primary contact
+                                         -- Planning agent: inherited from parent goal's created_by_contact_id
 
   -- Timestamps
   created_at TEXT NOT NULL,
@@ -568,8 +575,8 @@ Consistent with the contact permission tier system (see `docs/architecture/conta
 - **Primary contact**: Can request task creation through conversation. Mind translates to `schedule_task` decisions.
 - **Standard contacts**: Cannot create tasks. `schedule_task` decisions from standard-contact ticks are dropped by EXECUTE.
 - **The mind**: Can create tasks autonomously (from idle thinking, from goal planning).
-- **Sub-agents**: Can create follow-up tasks via `create_task` MCP tool.
-- **Planning agents**: Create initial tasks as part of plan output.
+- **Sub-agents**: Cannot create tasks directly. They include follow-up recommendations in their results, and the mind creates tasks from those recommendations.
+- **Planning agents**: Return initial tasks as part of their structured output (`PlanningAgentOutput.initialTasks`). The orchestrator processes these — the planning agent doesn't write to the DB directly.
 
 ---
 

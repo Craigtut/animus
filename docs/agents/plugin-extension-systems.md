@@ -551,12 +551,6 @@ Should plugins run in isolated environments?
 
 **Recommendation**: No, not initially. Plugins are trusted (self-hosted, single-user system). MCP servers already run as separate processes with their own isolation. Hooks run as shell commands in separate processes. The only in-process code is the Plugin Manager itself reading manifest files and markdown.
 
-## Corrections to Existing Documentation
-
-Our existing doc at `docs/agents/opencode/sdk-research.md` states that OpenCode's `tool.execute.before` hook **cannot block execution**. This is **incorrect** — it CAN block execution by throwing an error. The hooks run sequentially, and if any hook throws, the tool call is prevented. This is confirmed by community plugins that use `throw new Error(...)` to block dangerous operations.
-
-The unified hook mapping table in `docs/agents/architecture-overview.md` should also be updated to reflect that OpenCode's `tool.execute.before` supports blocking (via throw).
-
 ## References
 
 ### Claude Plugin System

@@ -96,18 +96,13 @@ The web UI is the primary admin interface. It communicates over tRPC (HTTP + Web
 
 **Inbound**: Messages sent through the web chat interface arrive via tRPC procedure calls. The authenticated user session identifies the sender.
 
-**Web User → Contact Linking**: The `users` table gains a `contact_id` foreign key pointing to a contact in `system.db`. When a web user sends a message, the adapter resolves their linked contact. On first setup, persona creation ("Bring to Life") creates the primary contact and links it to the web user automatically.
-
-```sql
--- Addition to system.db users table
-ALTER TABLE users ADD COLUMN contact_id TEXT REFERENCES contacts(id);
-```
+**Web User → Contact Linking**: The `contacts` table has a `user_id` foreign key pointing to the `users` table in `system.db` (see `docs/architecture/contacts.md`). When a web user sends a message, the adapter finds the contact record where `user_id` matches the authenticated user. On first setup, persona creation ("Bring to Life") creates the primary contact with `user_id` set to the web user automatically.
 
 **Outbound**: Replies are pushed to the frontend in real-time via tRPC subscriptions. The web UI receives the full streamed response.
 
 **Streaming**: Full streaming supported. Tokens are pushed to the frontend as they're generated via WebSocket subscription.
 
-**Channel identifier**: The user's `id` from the `users` table (not used for `contact_channels` lookup — the FK handles this directly).
+**Channel identifier**: The user's `id` from the `users` table. The web adapter resolves to the contact via the `contacts.user_id` FK rather than the `contact_channels` lookup (which is used for external channels like SMS and Discord).
 
 ---
 
@@ -564,7 +559,7 @@ When messages include media (MMS images, Discord attachments), the channel adapt
 **TTL Cleanup**: Media files are cleaned up after a configurable retention period (default: 30 days). A cleanup job runs during the EXECUTE stage, same as thought/experience TTL cleanup.
 
 ```sql
--- Addition to heartbeat.db
+-- In messages.db (media is tied to messages, should share their lifecycle)
 CREATE TABLE media_attachments (
   id TEXT PRIMARY KEY,
   message_id TEXT NOT NULL,          -- FK to messages.id in messages.db
@@ -700,7 +695,13 @@ When the EXECUTE stage processes a `send_message` decision (from the mind or a s
 
 ### Routing Logic
 
-Each message is routed based on the **originating channel** — replies go back through the same channel the message came in on.
+**Conversation replies** are routed based on the **originating channel** — replies go back through the same channel the message came in on.
+
+**Proactive outbound messages** (from interval ticks, task results, reminders) don't have an originating channel. For these, routing uses:
+1. The `contact_id` from the task or decision specifies WHO to message
+2. The channel defaults to **web** (always available) unless the `send_message` decision includes an explicit `channel` field
+3. GATHER CONTEXT for interval ticks includes the primary contact's available channels so the mind can choose an appropriate one
+4. Future: a `preferred_channel` field on the contact record for user-configurable default routing
 
 ```typescript
 // Simplified routing
