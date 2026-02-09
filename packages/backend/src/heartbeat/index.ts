@@ -2,262 +2,621 @@
  * Heartbeat System
  *
  * The heartbeat is the core tick system that drives Animus's inner life.
- * Each tick triggers a cascade of cognition: thoughts form, experiences emerge,
- * emotions shift, memories consolidate, and agency considers action.
+ * Architecture: 3-stage pipeline (Gather → Mind → Execute)
+ *
+ * See docs/architecture/heartbeat.md for the full design.
  */
 
-import { getHeartbeatDb, getSystemDb } from '../db/index.js';
-import { env } from '../utils/env.js';
-import type { HeartbeatPhase, HeartbeatState } from '@animus/shared';
+import { getHeartbeatDb, getSystemDb, getMessagesDb } from '../db/index.js';
+import * as heartbeatStore from '../db/stores/heartbeat-store.js';
+import * as systemStore from '../db/stores/system-store.js';
+import * as messageStore from '../db/stores/message-store.js';
+import { getEventBus } from '../lib/event-bus.js';
+import { DecayEngine, clamp, expiresIn, now } from '@animus/shared';
+import type {
+  EmotionState,
+  EmotionName,
+  TriggerType,
+  HeartbeatState,
+  MindOutput,
+  Contact,
+} from '@animus/shared';
 
-// The sequential phases of each heartbeat tick
-const HEARTBEAT_PHASES: HeartbeatPhase[] = [
-  'perceive',  // Gather inputs, check for messages, observe environment
-  'think',     // Process information, generate thoughts
-  'feel',      // Evaluate emotional responses
-  'decide',    // Determine if action is needed
-  'act',       // Execute any decided actions
-  'reflect',   // Review what happened this tick
-  'consolidate', // Update memories, clean up
-];
+import { TickQueue, type QueuedTick } from './tick-queue.js';
+import { type TriggerContext, buildMindContext, buildSystemPrompt } from './context-builder.js';
+import {
+  applyDecay,
+  applyDelta,
+  computeBaselines,
+  type PersonaDimensions,
+} from './emotion-engine.js';
+import { compilePersona, type PersonaConfig, type CompiledPersona } from './persona-compiler.js';
 
-let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+// ============================================================================
+// Module State
+// ============================================================================
 
-/**
- * Get the current heartbeat state
- */
-export function getHeartbeatState(): HeartbeatState {
-  const db = getHeartbeatDb();
-  const row = db.prepare(`
-    SELECT tick_number, current_phase, pipeline_progress, started_at, last_tick_at, is_running
-    FROM heartbeat_state
-    WHERE id = 1
-  `).get() as {
-    tick_number: number;
-    current_phase: string;
-    pipeline_progress: string;
-    started_at: string;
-    last_tick_at: string | null;
-    is_running: number;
-  };
+const tickQueue = new TickQueue();
+let compiledPersona: CompiledPersona | null = null;
+
+// Session management state
+let mindSessionId: string | null = null;
+let sessionWarmSince: number | null = null;
+
+// ============================================================================
+// Pipeline: Stage 1 — GATHER CONTEXT
+// ============================================================================
+
+interface GatherResult {
+  trigger: TriggerContext;
+  contact: Contact | null;
+  emotions: EmotionState[];
+  recentThoughts: ReturnType<typeof heartbeatStore.getRecentThoughts>;
+  recentExperiences: ReturnType<typeof heartbeatStore.getRecentExperiences>;
+  recentMessages: ReturnType<typeof messageStore.getRecentMessages>;
+  previousDecisions: ReturnType<typeof heartbeatStore.getTickDecisions>;
+  tickIntervalMs: number;
+  sessionState: 'cold' | 'warm';
+}
+
+async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
+  const hbDb = getHeartbeatDb();
+  const sysDb = getSystemDb();
+  const msgDb = getMessagesDb();
+
+  const settings = systemStore.getSystemSettings(sysDb);
+  const state = heartbeatStore.getHeartbeatState(hbDb);
+
+  // Determine session state
+  const sessionState = determineSessionState(state, settings.sessionWarmthMs);
+
+  // Load and decay emotions
+  const rawEmotions = heartbeatStore.getEmotionStates(hbDb);
+  const emotions = applyDecay(rawEmotions, Date.now());
+
+  // Load recent thoughts & experiences (last 10)
+  const recentThoughts = heartbeatStore.getRecentThoughts(hbDb, 10);
+  const recentExperiences = heartbeatStore.getRecentExperiences(hbDb, 10);
+
+  // Load recent messages for the triggering contact
+  let recentMessages: ReturnType<typeof messageStore.getRecentMessages> = [];
+  let contact: Contact | null = null;
+
+  if (trigger.type === 'message' && trigger.contactId) {
+    contact = systemStore.getContact(sysDb, trigger.contactId);
+    // Get active conversation for this contact + channel
+    const channel = (trigger.channel || 'web') as import('@animus/shared').ChannelType;
+    const conv = messageStore.getConversationByContactAndChannel(
+      msgDb, trigger.contactId, channel
+    );
+    if (conv) {
+      recentMessages = messageStore.getRecentMessages(msgDb, conv.id, 10);
+    }
+  }
+
+  // Load previous tick decisions for "previous tick outcomes"
+  const prevTickNum = state.tickNumber;
+  const previousDecisions = prevTickNum > 0
+    ? heartbeatStore.getTickDecisions(hbDb, prevTickNum)
+    : [];
 
   return {
-    tickNumber: row.tick_number,
-    currentPhase: row.current_phase as HeartbeatPhase,
-    pipelineProgress: JSON.parse(row.pipeline_progress) as HeartbeatPhase[],
-    startedAt: row.started_at,
-    lastTickAt: row.last_tick_at,
-    isRunning: row.is_running === 1,
+    trigger,
+    contact,
+    emotions,
+    recentThoughts,
+    recentExperiences,
+    recentMessages,
+    previousDecisions,
+    tickIntervalMs: settings.heartbeatIntervalMs,
+    sessionState,
   };
 }
 
-/**
- * Update heartbeat state
- */
-function updateHeartbeatState(updates: Partial<{
-  tickNumber: number;
-  currentPhase: HeartbeatPhase;
-  pipelineProgress: HeartbeatPhase[];
-  lastTickAt: string;
-  isRunning: boolean;
-}>): void {
-  const db = getHeartbeatDb();
-  const sets: string[] = [];
-  const values: unknown[] = [];
-
-  if (updates.tickNumber !== undefined) {
-    sets.push('tick_number = ?');
-    values.push(updates.tickNumber);
-  }
-  if (updates.currentPhase !== undefined) {
-    sets.push('current_phase = ?');
-    values.push(updates.currentPhase);
-  }
-  if (updates.pipelineProgress !== undefined) {
-    sets.push('pipeline_progress = ?');
-    values.push(JSON.stringify(updates.pipelineProgress));
-  }
-  if (updates.lastTickAt !== undefined) {
-    sets.push('last_tick_at = ?');
-    values.push(updates.lastTickAt);
-  }
-  if (updates.isRunning !== undefined) {
-    sets.push('is_running = ?');
-    values.push(updates.isRunning ? 1 : 0);
-  }
-
-  if (sets.length > 0) {
-    db.prepare(`UPDATE heartbeat_state SET ${sets.join(', ')} WHERE id = 1`).run(...values);
-  }
-}
+// ============================================================================
+// Pipeline: Stage 2 — MIND QUERY (stub — agent session not yet available)
+// ============================================================================
 
 /**
- * Execute a single heartbeat tick
+ * Execute the mind query stage.
+ *
+ * This is currently a stub that returns a minimal MindOutput.
+ * When the @animus/agents package is ready, this will create/reuse
+ * an agent session, send the compiled context, and parse the
+ * structured JSON output via llm-json-stream.
  */
-async function executeTick(): Promise<void> {
-  const state = getHeartbeatState();
-  const newTickNumber = state.tickNumber + 1;
-
-  console.log(`[Heartbeat] Starting tick #${newTickNumber}`);
-
-  // Check if we need to resume from an interrupted tick
-  const startPhaseIndex = state.pipelineProgress.length > 0
-    ? HEARTBEAT_PHASES.indexOf(state.pipelineProgress[state.pipelineProgress.length - 1]!) + 1
-    : 0;
-
-  // Execute each phase in sequence
-  for (let i = startPhaseIndex; i < HEARTBEAT_PHASES.length; i++) {
-    const phase = HEARTBEAT_PHASES[i]!;
-
-    // Update state before executing phase (for crash recovery)
-    updateHeartbeatState({
-      tickNumber: newTickNumber,
-      currentPhase: phase,
-      pipelineProgress: HEARTBEAT_PHASES.slice(0, i),
-    });
-
-    console.log(`[Heartbeat] Executing phase: ${phase}`);
-
-    try {
-      await executePhase(phase, newTickNumber);
-    } catch (error) {
-      console.error(`[Heartbeat] Error in phase ${phase}:`, error);
-      // Continue to next phase even if one fails
-    }
-
-    // Update progress after completing phase
-    updateHeartbeatState({
-      pipelineProgress: HEARTBEAT_PHASES.slice(0, i + 1),
-    });
+async function mindQuery(
+  gathered: GatherResult,
+  _tickNumber: number
+): Promise<MindOutput> {
+  // Ensure persona is compiled
+  if (!compiledPersona) {
+    const sysDb = getSystemDb();
+    const persona = systemStore.getPersonalitySettings(sysDb);
+    compiledPersona = compilePersona(buildPersonaConfig(persona));
   }
 
-  // Tick complete
-  updateHeartbeatState({
-    currentPhase: 'idle',
-    pipelineProgress: [],
-    lastTickAt: new Date().toISOString(),
+  // Build the context
+  const context = buildMindContext({
+    trigger: gathered.trigger,
+    contact: gathered.contact,
+    sessionState: gathered.sessionState,
+    currentEmotions: gathered.emotions,
+    tickIntervalMs: gathered.tickIntervalMs,
+    recentThoughts: gathered.recentThoughts,
+    recentExperiences: gathered.recentExperiences,
+    recentMessages: gathered.recentMessages,
+    previousDecisions: gathered.previousDecisions,
+    compiledPersona,
   });
 
-  console.log(`[Heartbeat] Completed tick #${newTickNumber}`);
+  // TODO: When @animus/agents is ready, replace this stub with:
+  // 1. Create/reuse agent session
+  // 2. Send context.systemPrompt (if cold) and context.userMessage
+  // 3. Parse structured MindOutput via llm-json-stream
+  // 4. Stream reply.content to tRPC subscription
+  // 5. Validate with MindOutputSchema.parse()
+
+  // For now, return a minimal valid MindOutput
+  const isIdle = gathered.trigger.type === 'interval';
+  return {
+    thoughts: isIdle
+      ? [{ content: 'A quiet moment passes.', importance: 0.1 }]
+      : [{ content: `Processing a ${gathered.trigger.type} trigger.`, importance: 0.3 }],
+    reply: gathered.trigger.type === 'message'
+      ? {
+          content: 'I received your message. (Mind query not yet connected to an agent session.)',
+          contactId: gathered.trigger.contactId || '',
+          channel: (gathered.trigger.channel || 'web') as import('@animus/shared').ChannelType,
+          replyToMessageId: gathered.trigger.messageId || '',
+        }
+      : null,
+    experiences: isIdle
+      ? [{ content: 'Time passed quietly.', importance: 0.1 }]
+      : [{ content: `Experienced a ${gathered.trigger.type} event.`, importance: 0.3 }],
+    emotionDeltas: [],
+    decisions: [],
+    workingMemoryUpdate: null,
+    coreSelfUpdate: null,
+    memoryCandidate: [],
+  };
 }
 
-/**
- * Execute a specific heartbeat phase
- */
-async function executePhase(phase: HeartbeatPhase, tickNumber: number): Promise<void> {
-  // TODO: Implement each phase
-  // For now, these are placeholders that will be filled in as we build out the system
+// ============================================================================
+// Pipeline: Stage 3 — EXECUTE
+// ============================================================================
 
-  switch (phase) {
-    case 'perceive':
-      // Check for new messages, observe environment
-      break;
+async function executeOutput(
+  output: MindOutput,
+  tickNumber: number,
+  gathered: GatherResult
+): Promise<void> {
+  const hbDb = getHeartbeatDb();
+  const msgDb = getMessagesDb();
+  const eventBus = getEventBus();
+  const settings = systemStore.getSystemSettings(getSystemDb());
 
-    case 'think':
-      // Generate thoughts based on current context
-      // This is where the agent SDK will be called
-      break;
+  // Wrap all DB writes in a transaction for atomicity
+  const runTransaction = hbDb.transaction(() => {
+    // 1. Persist thoughts
+    for (const thought of output.thoughts) {
+      const t = heartbeatStore.insertThought(hbDb, {
+        tickNumber,
+        content: thought.content,
+        importance: thought.importance,
+        expiresAt: expiresIn(settings.thoughtRetentionDays),
+      });
+      eventBus.emit('thought:created', t);
+    }
 
-    case 'feel':
-      // Evaluate emotional state based on thoughts and experiences
-      break;
+    // 2. Persist experiences
+    for (const exp of output.experiences) {
+      const e = heartbeatStore.insertExperience(hbDb, {
+        tickNumber,
+        content: exp.content,
+        importance: exp.importance,
+        expiresAt: expiresIn(settings.experienceRetentionDays),
+      });
+      eventBus.emit('experience:created', e);
+    }
 
-    case 'decide':
-      // Determine if any action should be taken
-      break;
+    // 3. Apply emotion deltas
+    for (const delta of output.emotionDeltas) {
+      // Find current (decayed) intensity
+      const currentEmotion = gathered.emotions.find((e) => e.emotion === delta.emotion);
+      if (!currentEmotion) continue;
 
-    case 'act':
-      // Execute decided actions
-      break;
+      const before = currentEmotion.intensity;
+      const after = applyDelta(before, delta.delta);
 
-    case 'reflect':
-      // Review what happened this tick
-      break;
+      heartbeatStore.updateEmotionIntensity(hbDb, delta.emotion, after);
 
-    case 'consolidate':
-      // Update memories, clean up expired entries
-      await cleanupExpiredEntries();
-      break;
+      const historyEntry = heartbeatStore.insertEmotionHistory(hbDb, {
+        tickNumber,
+        emotion: delta.emotion,
+        delta: delta.delta,
+        reasoning: delta.reasoning,
+        intensityBefore: before,
+        intensityAfter: after,
+      });
+
+      eventBus.emit('emotion:updated', {
+        ...currentEmotion,
+        intensity: after,
+        lastUpdatedAt: now(),
+      });
+    }
+
+    // 4. Log decisions
+    for (const decision of output.decisions) {
+      // TODO: validate decisions against contact permission tier
+      // For now, log all as executed
+      const d = heartbeatStore.insertTickDecision(hbDb, {
+        tickNumber,
+        type: decision.type,
+        description: decision.description,
+        parameters: decision.parameters,
+        outcome: 'executed',
+      });
+      eventBus.emit('decision:made', d);
+    }
+  });
+
+  // Execute the transaction
+  runTransaction();
+
+  // 5. Handle reply (outside transaction — message goes to messages.db)
+  // Per docs: "Channel send failure → log error with full context, do NOT auto-retry.
+  // Other EXECUTE operations continue."
+  if (output.reply && output.reply.content && gathered.contact) {
+    try {
+      const channel = output.reply.channel;
+      // Get or create conversation
+      let conv = messageStore.getConversationByContactAndChannel(
+        msgDb, gathered.contact.id, channel
+      );
+      if (!conv) {
+        conv = messageStore.createConversation(msgDb, {
+          contactId: gathered.contact.id,
+          channel,
+        });
+      }
+
+      const msg = messageStore.createMessage(msgDb, {
+        conversationId: conv.id,
+        contactId: gathered.contact.id,
+        direction: 'outbound',
+        channel,
+        content: output.reply.content,
+        tickNumber,
+      });
+
+      eventBus.emit('message:sent', msg);
+    } catch (err) {
+      console.error(`[Heartbeat] Failed to send reply for tick #${tickNumber}:`, err);
+      // Log failure as a tick decision so it's visible in the UI
+      heartbeatStore.insertTickDecision(getHeartbeatDb(), {
+        tickNumber,
+        type: 'send_reply',
+        description: 'Reply send failed',
+        parameters: { error: String(err), contactId: gathered.contact.id },
+        outcome: 'failed',
+      });
+    }
   }
+
+  // 6. Cleanup expired entries
+  heartbeatStore.cleanupExpiredEntries(hbDb);
 }
 
+// ============================================================================
+// Full Tick Execution
+// ============================================================================
+
+async function executeTick(queuedTick: QueuedTick): Promise<void> {
+  const hbDb = getHeartbeatDb();
+  const eventBus = getEventBus();
+  const state = heartbeatStore.getHeartbeatState(hbDb);
+  const tickNumber = state.tickNumber + 1;
+
+  console.log(`[Heartbeat] Starting tick #${tickNumber} (${queuedTick.trigger.type})`);
+
+  // Emit tick start event
+  eventBus.emit('heartbeat:tick_start', {
+    tickNumber,
+    triggerType: queuedTick.trigger.type,
+  });
+
+  try {
+    // Update state: entering gather stage
+    heartbeatStore.updateHeartbeatState(hbDb, {
+      tickNumber,
+      currentStage: 'gather',
+      sessionState: 'active',
+      triggerType: queuedTick.trigger.type,
+      triggerContext: JSON.stringify(queuedTick.trigger),
+      lastTickAt: now(),
+    });
+    eventBus.emit('heartbeat:stage_change', { stage: 'gather' });
+
+    // Stage 1: GATHER CONTEXT
+    const gathered = await gatherContext(queuedTick.trigger);
+
+    // Update state: entering mind stage
+    heartbeatStore.updateHeartbeatState(hbDb, { currentStage: 'mind' });
+    eventBus.emit('heartbeat:stage_change', { stage: 'mind' });
+
+    // Stage 2: MIND QUERY
+    const output = await mindQuery(gathered, tickNumber);
+
+    // Update state: entering execute stage
+    heartbeatStore.updateHeartbeatState(hbDb, { currentStage: 'execute' });
+    eventBus.emit('heartbeat:stage_change', { stage: 'execute' });
+
+    // Stage 3: EXECUTE
+    await executeOutput(output, tickNumber, gathered);
+
+    // Return to idle, set session warm
+    heartbeatStore.updateHeartbeatState(hbDb, {
+      currentStage: 'idle',
+      sessionState: 'warm',
+      triggerType: null,
+      triggerContext: null,
+      sessionWarmSince: now(),
+    });
+
+    sessionWarmSince = Date.now();
+
+    console.log(`[Heartbeat] Completed tick #${tickNumber}`);
+  } catch (err) {
+    console.error(`[Heartbeat] Tick #${tickNumber} failed:`, err);
+
+    // Return to idle on failure
+    heartbeatStore.updateHeartbeatState(hbDb, {
+      currentStage: 'idle',
+      triggerType: null,
+      triggerContext: null,
+    });
+  }
+
+  // Emit tick end event
+  eventBus.emit('heartbeat:tick_end', { tickNumber });
+
+  // Emit state change
+  const finalState = heartbeatStore.getHeartbeatState(hbDb);
+  eventBus.emit('heartbeat:state_change', finalState);
+}
+
+// ============================================================================
+// Session State Management
+// ============================================================================
+
+function determineSessionState(
+  state: HeartbeatState,
+  warmthMs: number
+): 'cold' | 'warm' {
+  if (state.sessionState === 'cold') return 'cold';
+
+  // Check if warmth window has expired
+  if (state.sessionWarmSince) {
+    const warmSince = new Date(state.sessionWarmSince).getTime();
+    const elapsed = Date.now() - warmSince;
+    if (elapsed > warmthMs) return 'cold';
+  }
+
+  return 'warm';
+}
+
+// ============================================================================
+// Persona Helpers
+// ============================================================================
+
 /**
- * Clean up expired thoughts, experiences, emotions, and logs
+ * Convert the stored personality settings to a PersonaConfig.
+ * Note: the current personalitySettings schema is minimal (from Sprint 0).
+ * This adapter provides defaults for the full PersonaConfig until the
+ * frontend sends complete persona data.
  */
-async function cleanupExpiredEntries(): Promise<void> {
-  const heartbeatDb = getHeartbeatDb();
-  const now = new Date().toISOString();
-
-  // Clean up expired thoughts
-  heartbeatDb.prepare(`
-    DELETE FROM thoughts WHERE expires_at IS NOT NULL AND expires_at < ?
-  `).run(now);
-
-  // Clean up expired experiences
-  heartbeatDb.prepare(`
-    DELETE FROM experiences WHERE expires_at IS NOT NULL AND expires_at < ?
-  `).run(now);
-
-  // Clean up expired emotions
-  heartbeatDb.prepare(`
-    DELETE FROM emotions WHERE expires_at IS NOT NULL AND expires_at < ?
-  `).run(now);
-
-  // TODO: Clean up agent logs based on retention settings
+function buildPersonaConfig(
+  settings: ReturnType<typeof systemStore.getPersonalitySettings>
+): PersonaConfig {
+  return {
+    name: settings.name || 'Animus',
+    existenceParadigm: 'digital_consciousness',
+    worldDescription: 'A thoughtful digital space where ideas and memories flow like light.',
+    dimensions: {
+      extroversion: 0.5,
+      trust: 0.5,
+      leadership: 0.5,
+      optimism: 0.5,
+      confidence: 0.5,
+      empathy: 0.5,
+      cautious: 0.5,
+      patience: 0.5,
+      orderly: 0.5,
+      altruism: 0.5,
+    },
+    traits: settings.traits || [],
+    values: settings.values || [],
+    personalityNotes: settings.communicationStyle || undefined,
+  };
 }
 
+// ============================================================================
+// Public API
+// ============================================================================
+
 /**
- * Initialize and start the heartbeat system
+ * Initialize the heartbeat system.
+ * Recovers from crashes and sets up the tick queue.
  */
 export async function initializeHeartbeat(): Promise<void> {
-  const state = getHeartbeatState();
+  const hbDb = getHeartbeatDb();
+  const state = heartbeatStore.getHeartbeatState(hbDb);
 
-  // Check if we need to resume an interrupted tick
-  if (state.pipelineProgress.length > 0 && state.currentPhase !== 'idle') {
-    console.log('[Heartbeat] Resuming interrupted tick...');
-    await executeTick();
+  // Recover from interrupted tick
+  if (state.currentStage !== 'idle') {
+    heartbeatStore.updateHeartbeatState(hbDb, {
+      currentStage: 'idle',
+      sessionState: 'cold',
+      triggerType: null,
+      triggerContext: null,
+    });
+    console.log('[Heartbeat] Recovered from interrupted tick');
   }
 
-  // Start the heartbeat interval
-  startHeartbeat();
+  // Set up the tick queue processor
+  tickQueue.setProcessor(executeTick);
+
+  // Don't auto-start — wait for startHeartbeat() call
+  // The heartbeat stays paused until persona exists (onboarding complete)
 }
 
 /**
- * Start the heartbeat interval
+ * Start the heartbeat system.
+ * Called after onboarding is complete and persona exists.
  */
 export function startHeartbeat(): void {
-  if (heartbeatInterval) {
+  const hbDb = getHeartbeatDb();
+  const state = heartbeatStore.getHeartbeatState(hbDb);
+
+  if (state.isRunning) {
     console.log('[Heartbeat] Already running');
     return;
   }
 
-  updateHeartbeatState({ isRunning: true });
+  const sysDb = getSystemDb();
+  const settings = systemStore.getSystemSettings(sysDb);
 
-  // Execute first tick immediately, then schedule subsequent ticks
-  executeTick().catch(console.error);
+  heartbeatStore.updateHeartbeatState(hbDb, { isRunning: true });
 
-  heartbeatInterval = setInterval(() => {
-    executeTick().catch(console.error);
-  }, env.HEARTBEAT_INTERVAL_MS);
+  // Start interval timer
+  tickQueue.startInterval(settings.heartbeatIntervalMs);
 
-  console.log(`[Heartbeat] Started with interval of ${env.HEARTBEAT_INTERVAL_MS}ms`);
+  // Fire the first tick immediately
+  tickQueue.enqueueInterval();
+
+  console.log(`[Heartbeat] Started with interval of ${settings.heartbeatIntervalMs}ms`);
 }
 
 /**
- * Stop the heartbeat
+ * Stop the heartbeat system.
  */
 export function stopHeartbeat(): void {
-  if (heartbeatInterval) {
-    clearInterval(heartbeatInterval);
-    heartbeatInterval = null;
-    updateHeartbeatState({ isRunning: false });
-    console.log('[Heartbeat] Stopped');
-  }
+  tickQueue.stopInterval();
+  tickQueue.clear();
+
+  const hbDb = getHeartbeatDb();
+  heartbeatStore.updateHeartbeatState(hbDb, { isRunning: false });
+  console.log('[Heartbeat] Stopped');
 }
 
 /**
- * Manually trigger a heartbeat tick
+ * Handle an incoming message from a contact.
+ * Writes the message to messages.db immediately, then triggers a tick.
  */
-export async function triggerTick(): Promise<void> {
-  await executeTick();
+export function handleIncomingMessage(params: {
+  contactId: string;
+  contactName: string;
+  channel: string;
+  content: string;
+  messageId: string;
+  conversationId: string;
+}): void {
+  // Messages are already written to messages.db by the channel adapter
+  // before this function is called. We just trigger a tick.
+
+  tickQueue.enqueueMessage({
+    type: 'message',
+    contactId: params.contactId,
+    contactName: params.contactName,
+    channel: params.channel,
+    messageContent: params.content,
+    messageId: params.messageId,
+  });
+}
+
+/**
+ * Handle sub-agent completion.
+ */
+export function handleAgentComplete(params: {
+  agentId: string;
+  taskDescription: string;
+  outcome: string;
+  resultContent?: string;
+}): void {
+  tickQueue.enqueue({
+    type: 'agent_complete',
+    agentId: params.agentId,
+    taskDescription: params.taskDescription,
+    outcome: params.outcome,
+    resultContent: params.resultContent,
+  });
+}
+
+/**
+ * Handle a scheduled task firing.
+ */
+export function handleScheduledTask(params: {
+  taskId: string;
+  taskTitle: string;
+  taskType: string;
+  taskInstructions: string;
+  goalTitle?: string;
+  planTitle?: string;
+  currentMilestone?: string;
+}): void {
+  tickQueue.enqueue({
+    type: 'scheduled_task',
+    ...params,
+  });
+}
+
+/**
+ * Manually trigger a tick (for testing/debugging).
+ */
+export async function triggerTick(trigger?: TriggerContext): Promise<void> {
+  tickQueue.enqueue(trigger || { type: 'interval', elapsedMs: 0 });
+}
+
+/**
+ * Get current heartbeat state.
+ */
+export function getHeartbeatStatus(): HeartbeatState {
+  const hbDb = getHeartbeatDb();
+  return heartbeatStore.getHeartbeatState(hbDb);
+}
+
+/**
+ * Update heartbeat interval (from settings change).
+ */
+export function updateHeartbeatInterval(intervalMs: number): void {
+  tickQueue.updateInterval(intervalMs);
+}
+
+/**
+ * Recompile persona (called when persona settings change).
+ */
+export function recompilePersona(): void {
+  const sysDb = getSystemDb();
+  const persona = systemStore.getPersonalitySettings(sysDb);
+  compiledPersona = compilePersona(buildPersonaConfig(persona));
+  console.log('[Heartbeat] Persona recompiled');
+}
+
+/**
+ * Recompute emotion baselines (called when persona dimensions change).
+ */
+export function recomputeEmotionBaselines(dimensions: PersonaDimensions): void {
+  const hbDb = getHeartbeatDb();
+  const baselines = computeBaselines(dimensions);
+
+  for (const [emotion, baseline] of Object.entries(baselines)) {
+    // Update baseline in emotion_state table
+    hbDb.prepare(
+      'UPDATE emotion_state SET baseline = ? WHERE emotion = ?'
+    ).run(baseline, emotion);
+  }
+
+  console.log('[Heartbeat] Emotion baselines recomputed');
 }

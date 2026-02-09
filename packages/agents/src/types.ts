@@ -523,7 +523,20 @@ export interface IAgentAdapter {
  * Interface for an active agent session.
  */
 export interface IAgentSession {
-  /** Unique session identifier (format: "{provider}:{nativeId}") */
+  /**
+   * Unique session identifier (format: "{provider}:{nativeId}").
+   *
+   * **Lifecycle note**: Session IDs may be "pending" immediately after
+   * `createSession()` returns, using a temporary UUID. The stable native ID
+   * is assigned by the provider SDK during the first prompt interaction
+   * (e.g., Claude's `system.init` message). After the first prompt, the ID
+   * stabilizes and remains constant for the session's lifetime.
+   *
+   * Consumers should be aware that:
+   * - Events emitted before the first prompt use the pending ID
+   * - The ID returned by `createSession()` may differ from the ID after first prompt
+   * - Crash recovery requires the stable (post-first-prompt) ID
+   */
   readonly id: string;
 
   /** Provider this session is using */

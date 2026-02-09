@@ -283,6 +283,16 @@ export class OpenCodeAdapter extends BaseAdapter {
   async createSession(config: AgentSessionConfig): Promise<IAgentSession> {
     this.validateConfig(config);
 
+    if (config.provider !== this.provider) {
+      throw new AgentError({
+        code: 'PROVIDER_MISMATCH',
+        message: `Config provider "${config.provider}" does not match adapter provider "${this.provider}"`,
+        category: 'invalid_input',
+        severity: 'fatal',
+        provider: this.provider,
+      });
+    }
+
     if (!this.isConfigured()) {
       throw new AgentError({
         code: 'MISSING_CREDENTIALS',
@@ -314,9 +324,19 @@ export class OpenCodeAdapter extends BaseAdapter {
    * Resume an existing OpenCode session.
    */
   override async resumeSession(sessionId: string): Promise<IAgentSession> {
-    const { nativeId } = await import('../utils/index.js').then((m) =>
+    const { provider, nativeId } = await import('../utils/index.js').then((m) =>
       m.parseSessionId(sessionId),
     );
+
+    if (provider !== this.provider) {
+      throw new AgentError({
+        code: 'PROVIDER_MISMATCH',
+        message: `Session ${sessionId} belongs to ${provider}, not ${this.provider}`,
+        category: 'invalid_input',
+        severity: 'fatal',
+        provider: this.provider,
+      });
+    }
 
     const client = await this.getClient({ provider: 'opencode' });
     const session = new OpenCodeSession(client, { provider: 'opencode' }, this.logger, nativeId);

@@ -164,7 +164,22 @@ export {
   AgentManager,
   createAgentManager,
   type AgentManagerConfig,
+  type SessionWarmth,
+  type WarmthThresholds,
+  type SessionInfo,
 } from './manager.js';
+
+// ============================================================================
+// Event Logging
+// ============================================================================
+
+export {
+  createLoggingHandler,
+  logSessionUsage,
+  attachSessionLogging,
+  type AgentLogStore,
+  type LoggingHookOptions,
+} from './logging-hook.js';
 
 // ============================================================================
 // Adapters

@@ -1,0 +1,186 @@
+/**
+ * Memory Store — data access for memory.db
+ *
+ * Tables: working_memory, core_self, long_term_memories
+ */
+
+import type Database from 'better-sqlite3';
+import { generateUUID, now } from '@animus/shared';
+import type {
+  WorkingMemory,
+  CoreSelf,
+  LongTermMemory,
+  MemoryType,
+  MemorySourceType,
+} from '@animus/shared';
+import { snakeToCamel } from '../utils.js';
+
+// ============================================================================
+// Working Memory
+// ============================================================================
+
+export function getWorkingMemory(
+  db: Database.Database,
+  contactId: string
+): WorkingMemory | null {
+  const row = db
+    .prepare('SELECT * FROM working_memory WHERE contact_id = ?')
+    .get(contactId) as Record<string, unknown> | undefined;
+  return row ? snakeToCamel<WorkingMemory>(row) : null;
+}
+
+export function upsertWorkingMemory(
+  db: Database.Database,
+  contactId: string,
+  content: string,
+  tokenCount: number
+): void {
+  const timestamp = now();
+  db.prepare(
+    `INSERT INTO working_memory (contact_id, content, token_count, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(contact_id) DO UPDATE SET
+       content = excluded.content,
+       token_count = excluded.token_count,
+       updated_at = excluded.updated_at`
+  ).run(contactId, content, tokenCount, timestamp, timestamp);
+}
+
+// ============================================================================
+// Core Self (singleton)
+// ============================================================================
+
+export function getCoreSelf(db: Database.Database): CoreSelf | null {
+  const row = db
+    .prepare('SELECT * FROM core_self WHERE id = 1')
+    .get() as Record<string, unknown> | undefined;
+  return row ? snakeToCamel<CoreSelf>(row) : null;
+}
+
+export function upsertCoreSelf(
+  db: Database.Database,
+  content: string,
+  tokenCount: number
+): void {
+  const timestamp = now();
+  db.prepare(
+    `UPDATE core_self SET content = ?, token_count = ?, updated_at = ? WHERE id = 1`
+  ).run(content, tokenCount, timestamp);
+}
+
+// ============================================================================
+// Long-Term Memory
+// ============================================================================
+
+export function insertLongTermMemory(
+  db: Database.Database,
+  data: {
+    content: string;
+    importance: number;
+    memoryType: MemoryType;
+    sourceType?: MemorySourceType | null;
+    sourceId?: string | null;
+    contactId?: string | null;
+    keywords?: string[];
+  }
+): LongTermMemory {
+  const id = generateUUID();
+  const timestamp = now();
+  db.prepare(
+    `INSERT INTO long_term_memories
+       (id, content, importance, memory_type, source_type, source_id, contact_id, keywords, strength, created_at, last_accessed_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
+  ).run(
+    id,
+    data.content,
+    data.importance,
+    data.memoryType,
+    data.sourceType ?? null,
+    data.sourceId ?? null,
+    data.contactId ?? null,
+    JSON.stringify(data.keywords ?? []),
+    timestamp,
+    timestamp,
+    timestamp
+  );
+  return {
+    id,
+    content: data.content,
+    importance: data.importance,
+    memoryType: data.memoryType,
+    sourceType: data.sourceType ?? null,
+    sourceId: data.sourceId ?? null,
+    contactId: data.contactId ?? null,
+    keywords: data.keywords ?? [],
+    strength: 1,
+    createdAt: timestamp,
+    lastAccessedAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+export function getLongTermMemory(
+  db: Database.Database,
+  id: string
+): LongTermMemory | null {
+  const row = db
+    .prepare('SELECT * FROM long_term_memories WHERE id = ?')
+    .get(id) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  const mem = snakeToCamel<LongTermMemory>(row);
+  return {
+    ...mem,
+    keywords: typeof mem.keywords === 'string' ? JSON.parse(mem.keywords) : mem.keywords,
+  };
+}
+
+export function searchLongTermMemories(
+  db: Database.Database,
+  opts: { contactId?: string; memoryType?: MemoryType; limit?: number }
+): LongTermMemory[] {
+  let sql = 'SELECT * FROM long_term_memories WHERE 1=1';
+  const params: unknown[] = [];
+  if (opts.contactId) {
+    sql += ' AND contact_id = ?';
+    params.push(opts.contactId);
+  }
+  if (opts.memoryType) {
+    sql += ' AND memory_type = ?';
+    params.push(opts.memoryType);
+  }
+  sql += ' ORDER BY importance DESC, last_accessed_at DESC LIMIT ?';
+  params.push(opts.limit ?? 50);
+
+  const rows = db.prepare(sql).all(...params) as Array<Record<string, unknown>>;
+  return rows.map((row) => {
+    const mem = snakeToCamel<LongTermMemory>(row);
+    return {
+      ...mem,
+      keywords: typeof mem.keywords === 'string' ? JSON.parse(mem.keywords) : mem.keywords,
+    };
+  });
+}
+
+export function updateMemoryAccess(db: Database.Database, id: string): void {
+  db.prepare(
+    'UPDATE long_term_memories SET strength = strength + 1, last_accessed_at = ?, updated_at = ? WHERE id = ?'
+  ).run(now(), now(), id);
+}
+
+export function pruneDecayedMemories(
+  db: Database.Database,
+  retentionThreshold: number = 0.1,
+  importanceThreshold: number = 0.3
+): number {
+  // Prune memories that have decayed below threshold and are not important
+  // retention < threshold AND importance < importanceThreshold
+  // Since retention is computed in-app, we approximate by pruning old low-importance, low-strength memories
+  const result = db
+    .prepare(
+      `DELETE FROM long_term_memories
+       WHERE importance < ? AND strength <= 1
+       AND last_accessed_at < datetime('now', '-30 days')`
+    )
+    .run(importanceThreshold);
+  return result.changes;
+}

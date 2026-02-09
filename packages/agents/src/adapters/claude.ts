@@ -23,7 +23,8 @@ import { AgentError, wrapError } from '../errors.js';
 import { createTaggedLogger, type Logger } from '../logger.js';
 import { CLAUDE_CAPABILITIES } from '../capabilities.js';
 import { BaseAdapter, BaseSession, type AdapterOptions } from './base.js';
-import { generateUUID, now, createPendingSessionId, fileExists } from '../utils/index.js';
+import { generateUUID, now, createPendingSessionId } from '../utils/index.js';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -214,25 +215,9 @@ export class ClaudeAdapter extends BaseAdapter {
     }
 
     // Check for pre-authenticated Claude Code
-    // This is a sync check - we check if the file exists
     try {
       const credentialsPath = join(homedir(), '.claude', '.credentials');
-      // Note: This is async but we need sync here
-      // We'll do a best-effort check
-      return this.checkCredentialsFileSync(credentialsPath);
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Synchronous check for credentials file.
-   */
-  private checkCredentialsFileSync(path: string): boolean {
-    try {
-      // Use Node.js fs.existsSync for synchronous check
-      const fs = require('node:fs');
-      return fs.existsSync(path);
+      return existsSync(credentialsPath);
     } catch {
       return false;
     }
@@ -267,6 +252,16 @@ export class ClaudeAdapter extends BaseAdapter {
    */
   async createSession(config: AgentSessionConfig): Promise<IAgentSession> {
     this.validateConfig(config);
+
+    if (config.provider !== this.provider) {
+      throw new AgentError({
+        code: 'PROVIDER_MISMATCH',
+        message: `Config provider "${config.provider}" does not match adapter provider "${this.provider}"`,
+        category: 'invalid_input',
+        severity: 'fatal',
+        provider: this.provider,
+      });
+    }
 
     if (!this.isConfigured()) {
       throw new AgentError({

@@ -14,6 +14,7 @@ import {
   type IAgentSession,
   type AgentSessionConfig,
   type AdapterCapabilities,
+  type AgentEventHandler,
 } from '../../src/index.js';
 
 // Mock adapter for testing
@@ -21,11 +22,32 @@ function createMockAdapter(
   provider: 'claude' | 'codex' | 'opencode',
   isConfigured = true,
 ): IAgentAdapter {
-  const mockSession: IAgentSession = {
-    id: `${provider}:mock-session`,
+  const mockSession = createMockSession(provider);
+
+  return {
+    provider,
+    capabilities:
+      provider === 'claude' ? CLAUDE_CAPABILITIES : CODEX_CAPABILITIES,
+    isConfigured: () => isConfigured,
+    createSession: vi.fn().mockResolvedValue(mockSession),
+    resumeSession: vi.fn().mockResolvedValue(mockSession),
+  };
+}
+
+// Create a mock session that supports event handlers
+function createMockSession(
+  provider: 'claude' | 'codex' | 'opencode',
+  id?: string,
+): IAgentSession {
+  const handlers: AgentEventHandler[] = [];
+
+  return {
+    id: id ?? `${provider}:mock-session`,
     provider,
     isActive: true,
-    onEvent: vi.fn(),
+    onEvent: vi.fn((handler: AgentEventHandler) => {
+      handlers.push(handler);
+    }),
     registerHooks: vi.fn(),
     prompt: vi.fn().mockResolvedValue({
       content: 'Mock response',
@@ -45,15 +67,6 @@ function createMockAdapter(
     end: vi.fn().mockResolvedValue(undefined),
     getUsage: vi.fn().mockReturnValue({ inputTokens: 10, outputTokens: 20, totalTokens: 30 }),
     getCost: vi.fn().mockReturnValue(null),
-  };
-
-  return {
-    provider,
-    capabilities:
-      provider === 'claude' ? CLAUDE_CAPABILITIES : CODEX_CAPABILITIES,
-    isConfigured: () => isConfigured,
-    createSession: vi.fn().mockResolvedValue(mockSession),
-    resumeSession: vi.fn().mockResolvedValue(mockSession),
   };
 }
 
@@ -261,6 +274,250 @@ describe('AgentManager', () => {
       expect(manager.getActiveSessionCount()).toBe(0);
     });
   });
+
+  // ============================================================================
+  // Session Warmth Tracking
+  // ============================================================================
+
+  describe('session warmth', () => {
+    it('newly created session is warm', async () => {
+      manager.registerAdapter(createMockAdapter('claude'));
+      await manager.createSession({ provider: 'claude' });
+
+      const warmth = manager.getSessionWarmth('claude:mock-session');
+      expect(warmth).toBe('warm');
+    });
+
+    it('returns cold for unknown session', () => {
+      expect(manager.getSessionWarmth('claude:unknown')).toBe('cold');
+    });
+
+    it('getSessionInfos returns info for all sessions', async () => {
+      manager.registerAdapter(createMockAdapter('claude'));
+      await manager.createSession({ provider: 'claude' });
+
+      const infos = manager.getSessionInfos();
+
+      expect(infos).toHaveLength(1);
+      expect(infos[0].id).toBe('claude:mock-session');
+      expect(infos[0].provider).toBe('claude');
+      expect(infos[0].warmth).toBe('warm');
+      expect(infos[0].idleMs).toBeLessThan(1000);
+    });
+
+    it('getColdSessions returns empty for new sessions', async () => {
+      manager.registerAdapter(createMockAdapter('claude'));
+      await manager.createSession({ provider: 'claude' });
+
+      const cold = manager.getColdSessions();
+      expect(cold).toHaveLength(0);
+    });
+
+    it('touchSession updates last activity time', async () => {
+      manager.registerAdapter(createMockAdapter('claude'));
+      await manager.createSession({ provider: 'claude' });
+
+      manager.touchSession('claude:mock-session');
+
+      const infos = manager.getSessionInfos();
+      expect(infos[0].idleMs).toBeLessThan(100);
+    });
+
+    it('session becomes cooling after warmToCoolingMs', async () => {
+      const shortWarmth = new AgentManager({
+        autoRegisterAdapters: false,
+        logger: createSilentLogger(),
+        warmthThresholds: {
+          warmToCoolingMs: 0, // Instant
+          coolingToColdMs: 60000,
+        },
+      });
+
+      shortWarmth.registerAdapter(createMockAdapter('claude'));
+      await shortWarmth.createSession({ provider: 'claude' });
+
+      // Wait a tiny bit
+      await new Promise((r) => setTimeout(r, 5));
+
+      const warmth = shortWarmth.getSessionWarmth('claude:mock-session');
+      expect(warmth).toBe('cooling');
+    });
+
+    it('session becomes cold after coolingToColdMs', async () => {
+      const shortWarmth = new AgentManager({
+        autoRegisterAdapters: false,
+        logger: createSilentLogger(),
+        warmthThresholds: {
+          warmToCoolingMs: 0,
+          coolingToColdMs: 0, // Instant
+        },
+      });
+
+      shortWarmth.registerAdapter(createMockAdapter('claude'));
+      await shortWarmth.createSession({ provider: 'claude' });
+
+      await new Promise((r) => setTimeout(r, 5));
+
+      const warmth = shortWarmth.getSessionWarmth('claude:mock-session');
+      expect(warmth).toBe('cold');
+    });
+  });
+
+  // ============================================================================
+  // Concurrency Limits
+  // ============================================================================
+
+  describe('concurrency limits', () => {
+    it('defaults to unlimited', () => {
+      expect(manager.getMaxConcurrentSessions()).toBeNull();
+    });
+
+    it('accepts limit in config', () => {
+      const limited = new AgentManager({
+        autoRegisterAdapters: false,
+        logger: createSilentLogger(),
+        maxConcurrentSessions: 3,
+      });
+
+      expect(limited.getMaxConcurrentSessions()).toBe(3);
+    });
+
+    it('canCreateSession returns true when under limit', async () => {
+      const limited = new AgentManager({
+        autoRegisterAdapters: false,
+        logger: createSilentLogger(),
+        maxConcurrentSessions: 2,
+      });
+      limited.registerAdapter(createMockAdapter('claude'));
+
+      expect(limited.canCreateSession()).toBe(true);
+
+      await limited.createSession({ provider: 'claude' });
+      expect(limited.canCreateSession()).toBe(true);
+    });
+
+    it('canCreateSession returns false at limit', async () => {
+      const limited = new AgentManager({
+        autoRegisterAdapters: false,
+        logger: createSilentLogger(),
+        maxConcurrentSessions: 1,
+      });
+      limited.registerAdapter(createMockAdapter('claude'));
+
+      await limited.createSession({ provider: 'claude' });
+      expect(limited.canCreateSession()).toBe(false);
+    });
+
+    it('throws CONCURRENCY_LIMIT when limit reached', async () => {
+      const limited = new AgentManager({
+        autoRegisterAdapters: false,
+        logger: createSilentLogger(),
+        maxConcurrentSessions: 1,
+      });
+      limited.registerAdapter(createMockAdapter('claude'));
+
+      await limited.createSession({ provider: 'claude' });
+
+      await expect(
+        limited.createSession({ provider: 'claude' }),
+      ).rejects.toThrow('Maximum concurrent sessions reached');
+    });
+
+    it('setMaxConcurrentSessions updates the limit', () => {
+      manager.setMaxConcurrentSessions(5);
+      expect(manager.getMaxConcurrentSessions()).toBe(5);
+
+      manager.setMaxConcurrentSessions(null);
+      expect(manager.getMaxConcurrentSessions()).toBeNull();
+    });
+
+    it('canCreateSession always returns true when unlimited', async () => {
+      manager.registerAdapter(createMockAdapter('claude'));
+      expect(manager.canCreateSession()).toBe(true);
+
+      await manager.createSession({ provider: 'claude' });
+      expect(manager.canCreateSession()).toBe(true);
+    });
+  });
+
+  // ============================================================================
+  // Crash Recovery
+  // ============================================================================
+
+  describe('crash recovery', () => {
+    it('recovers sessions from persisted IDs', async () => {
+      const adapter = createMockAdapter('claude');
+      manager.registerAdapter(adapter);
+
+      const results = await manager.recoverSessions([
+        'claude:session-1',
+        'claude:session-2',
+      ]);
+
+      expect(results.size).toBe(2);
+      expect(results.get('claude:session-1')?.recovered).toBe(true);
+      expect(results.get('claude:session-2')?.recovered).toBe(true);
+    });
+
+    it('handles recovery failures gracefully', async () => {
+      const adapter = createMockAdapter('claude');
+      (adapter.resumeSession as any).mockRejectedValue(
+        new Error('Session not found'),
+      );
+      manager.registerAdapter(adapter);
+
+      const results = await manager.recoverSessions(['claude:lost-session']);
+
+      expect(results.get('claude:lost-session')?.recovered).toBe(false);
+      expect(results.get('claude:lost-session')?.error).toContain(
+        'Session not found',
+      );
+    });
+
+    it('returns empty map for empty input', async () => {
+      const results = await manager.recoverSessions([]);
+      expect(results.size).toBe(0);
+    });
+
+    it('tracks recovered sessions', async () => {
+      const adapter = createMockAdapter('claude');
+      manager.registerAdapter(adapter);
+
+      await manager.recoverSessions(['claude:recovered-session']);
+
+      expect(manager.getActiveSessionCount()).toBe(1);
+    });
+  });
+
+  // ============================================================================
+  // Additional Session Tracking
+  // ============================================================================
+
+  describe('getActiveSessionIds', () => {
+    it('returns list of active session IDs', async () => {
+      manager.registerAdapter(createMockAdapter('claude'));
+      await manager.createSession({ provider: 'claude' });
+
+      const ids = manager.getActiveSessionIds();
+      expect(ids).toContain('claude:mock-session');
+    });
+
+    it('returns empty array when no sessions', () => {
+      expect(manager.getActiveSessionIds()).toEqual([]);
+    });
+  });
+
+  describe('getActiveSessionCountByProvider', () => {
+    it('counts sessions per provider', async () => {
+      manager.registerAdapter(createMockAdapter('claude'));
+      manager.registerAdapter(createMockAdapter('codex'));
+
+      await manager.createSession({ provider: 'claude' });
+
+      expect(manager.getActiveSessionCountByProvider('claude')).toBe(1);
+      expect(manager.getActiveSessionCountByProvider('codex')).toBe(0);
+    });
+  });
 });
 
 describe('createAgentManager', () => {
@@ -280,5 +537,14 @@ describe('createAgentManager', () => {
     const manager = createAgentManager({ logger });
 
     expect(manager).toBeInstanceOf(AgentManager);
+  });
+
+  it('accepts concurrency limit', () => {
+    const manager = createAgentManager({
+      logger: createSilentLogger(),
+      maxConcurrentSessions: 5,
+    });
+
+    expect(manager.getMaxConcurrentSessions()).toBe(5);
   });
 });

@@ -277,41 +277,55 @@ All of the following must be true before moving to Sprint 1:
 
 ---
 
-## Sprint 1: Core Systems (Agent Team — 3 Teammates)
+## Sprint 1: Core Systems (Agent Team — 4 Teammates)
 
-**Team composition**: `agent-sdk` + `backend-builder` + `product-designer`
+**Team composition**: `agent-sdk` + `backend-builder` + `product-designer` + `frontend-reviewer`
 
-Each teammate owns a completely separate directory. Zero file conflicts.
+Each teammate owns a completely separate domain. Zero file conflicts.
+
+**NOTE on existing work**: The Claude adapter in `packages/agents/src/adapters/claude.ts` is already substantially implemented (838 lines) — not a stub. It has session creation, prompt/streaming, tool call handling, hook integration, and abort support. The Codex and OpenCode adapters also have working implementations. The agent-sdk teammate should build on this existing work, not rewrite it.
+
+**NOTE on design specs**: A product designer has already written comprehensive specs for all frontend pages in `docs/frontend/`. The specs cover: design-principles, onboarding, app-shell, presence (dashboard + chat), mind (emotions, thoughts, memories, goals, agents), people (contacts), settings, and voice-mode. These are detailed and implementation-ready. The product-designer and frontend-reviewer teammates are doing **review/audit** work, not creating new specs.
 
 ### agent-sdk Teammate Tasks
 
-1. **Complete Claude Adapter**
-   - Full `IAgentAdapter` implementation using `@anthropic-ai/claude-agent-sdk`
-   - Session creation with system prompt, structured output (JSON schema)
-   - Streaming with normalized `AgentEvent` emissions
-   - Token usage tracking per session
-   - MCP tool support (in-process server)
+**Owns**: `packages/agents/`
 
-2. **Stub Codex & OpenCode Adapters**
-   - Implement `IAgentAdapter` interface with basic prompt/response
-   - Mark unsupported features (sub-agents, cancel) clearly
+1. **Validate & Harden Claude Adapter**
+   - The adapter is largely implemented — test it against the actual Claude Agent SDK
+   - Ensure structured output (JSON schema) works for MindOutput parsing
+   - Verify streaming with normalized `AgentEvent` emissions is correct
+   - Confirm token usage tracking produces accurate numbers
+   - Fix any bugs found during integration testing
+   - Add MCP tool support if not already working (in-process server)
+
+2. **Validate Codex & OpenCode Adapters**
+   - Verify existing implementations work against real providers
+   - Mark unsupported features (sub-agents, cancel) clearly in code + docs
    - These don't need to be fully functional yet — Claude is the default
 
 3. **Agent Manager Enhancements**
-   - Session warmth tracking (warm/cooling/cold)
+   - Session warmth tracking (warm/cooling/cold) — integrate with heartbeat session state
    - Crash recovery — resume or restart sessions from persisted state
    - Concurrency limits (configurable max sessions)
 
 4. **Event Logging Integration**
-   - All sessions auto-log to agent_logs.db via AgentLogStore
+   - Wire sessions to auto-log to agent_logs.db via the agent-log-store from Sprint 0
    - Session start/end, all inputs/outputs, tool calls, token usage, timing
+   - Create a logging hook that can be attached to any session
+
+5. **Tests**
+   - Unit tests for all adapter logic (mocked SDK calls)
+   - Integration test for Claude adapter (requires API key, can be skipped in CI)
 
 ### backend-builder Teammate Tasks
+
+**Owns**: `packages/backend/src/` (excluding `db/`)
 
 1. **Heartbeat Pipeline — Gather Stage**
    - Assemble tick context: trigger info, emotional state, recent thoughts, active goals, running sub-agents
    - Load contact context when trigger is a message
-   - Respect token budgets per section
+   - Respect token budgets per section (from system_settings.session_context_budget)
 
 2. **Heartbeat Pipeline — Mind Stage**
    - Create/reuse agent session with compiled persona prompt
@@ -320,11 +334,11 @@ Each teammate owns a completely separate directory. Zero file conflicts.
    - Handle streaming with `llm-json-stream`
 
 3. **Heartbeat Pipeline — Execute Stage**
-   - Persist thoughts, experiences to heartbeat.db
-   - Apply emotion deltas with decay
+   - Persist thoughts, experiences to heartbeat.db via heartbeat-store
+   - Apply emotion deltas with decay (using DecayEngine from shared)
    - Execute decisions (send_reply, spawn_agent, create_task, update_agent)
-   - Log tick decisions with outcomes
-   - Cleanup expired entries (TTL-based)
+   - Log tick decisions with outcomes via heartbeat-store
+   - Cleanup expired entries (TTL-based) via heartbeat-store
 
 4. **Tick Trigger System**
    - Interval timer (configurable, default 5 min)
@@ -332,11 +346,12 @@ Each teammate owns a completely separate directory. Zero file conflicts.
    - Scheduled-task trigger
    - Sub-agent completion trigger
    - Tick queue with priority ordering
+   - Use EventBus for trigger coordination
 
 5. **Emotion Engine**
    - 12 fixed emotions with current intensity and personality baseline
    - Delta-based updates from MindOutput
-   - Exponential decay toward baselines between ticks
+   - Exponential decay toward baselines between ticks (using DecayEngine)
    - Baseline computation from persona dimension sliders
 
 6. **Persona Compilation**
@@ -347,53 +362,157 @@ Each teammate owns a completely separate directory. Zero file conflicts.
    - Four compilation targets: mind system prompt, sub-agent prompt, context summary, self-description
 
 7. **tRPC Routes + Subscriptions**
-   - Heartbeat state subscription (real-time tick updates)
+   - Heartbeat state subscription (real-time tick updates via EventBus)
    - Emotion state subscription
-   - Message send/receive routes
-   - Settings CRUD
+   - Message send/receive routes (using message-store from Sprint 0)
    - Onboarding state routes
+
+8. **Tests**
+   - Unit tests for each pipeline stage (mocked agent sessions)
+   - Unit tests for emotion engine, persona compilation
+   - Integration test for full tick cycle
 
 ### product-designer Teammate Tasks
 
-1. **Main Dashboard Spec** — `docs/frontend/specs/dashboard.md`
-   - The primary view after onboarding. What does the user see?
-   - Heartbeat visualization (the "alive" indicator)
-   - Current emotional state display
-   - Recent thoughts/activity feed
-   - Quick message input
+**Owns**: `docs/frontend/` (review + patches only, no new files)
 
-2. **Chat Interface Spec** — `docs/frontend/specs/chat.md`
-   - Conversation view with Animus
-   - Message history, real-time incoming messages
-   - Typing/thinking indicators
-   - Multi-channel awareness
+The product designer has already written comprehensive specs in `docs/frontend/` covering all pages and flows. This teammate reviews and audits what exists rather than creating new specs.
 
-3. **Settings Page Spec** — `docs/frontend/specs/settings.md`
-   - Agent provider configuration
-   - Heartbeat interval control
-   - Channel management
-   - Persona editing (re-access onboarding persona steps)
-   - Contact management
+1. **Spec Consistency Audit**
+   - Read all 8 existing spec files: design-principles, onboarding, app-shell, presence, mind, people, settings, voice-mode
+   - Check for internal consistency: do component names, animation timings, color references, and interaction patterns agree across specs?
+   - Check for completeness: are there any UI states, error states, empty states, or loading states that are unspecified?
+   - Check against architecture docs (`/doc-explorer` each relevant system) — do the specs assume data or behaviors that the architecture doesn't support?
 
-**Deliverable**: The heartbeat can tick, the mind can think, emotions decay, persona compiles into prompts, Claude adapter streams responses, and we have design specs ready for the frontend.
+2. **Gap Report**
+   - Produce a structured report listing:
+     - **Contradictions**: where specs disagree with each other
+     - **Missing states**: unspecified loading, error, empty, offline states
+     - **Architecture mismatches**: where specs assume backend capabilities that don't exist or work differently
+     - **Ambiguities**: where specs are unclear enough that two developers could implement them differently
+   - Write findings to `docs/frontend/spec-review.md`
+
+3. **Spec Patches**
+   - For any issues found, apply fixes directly to the existing spec files
+   - Keep changes minimal and surgical — don't rewrite specs, just fill gaps and resolve conflicts
+
+### frontend-reviewer Teammate Tasks
+
+**Owns**: `docs/frontend/` (review report only, no code changes)
+
+This teammate reviews the existing design specs from an **implementation feasibility** perspective — checking whether the backend architecture actually provides what the frontend specs expect.
+
+1. **Data Contract Audit**
+   - For each spec, enumerate every piece of data the UI needs (tRPC queries, subscriptions, mutations)
+   - Cross-reference against:
+     - Existing tRPC routes in `packages/backend/src/api/`
+     - Database schemas in `packages/shared/src/schemas/`
+     - Store functions in `packages/backend/src/db/stores/`
+     - The heartbeat pipeline outputs (MindOutput schema)
+   - Flag any data the specs expect that doesn't exist in the backend
+
+2. **Real-Time Feasibility Check**
+   - The specs reference several real-time elements (emotional field animation, thought stream, typing indicators, agent progress)
+   - Verify which of these have corresponding tRPC subscriptions or EventBus events defined
+   - Flag any real-time behaviors that have no backend mechanism to support them
+
+3. **Component Complexity Assessment**
+   - Identify the highest-complexity components (emotional field with gradient orbs, voice visualization SVG, persona dimension sliders, birth animation)
+   - For each, note any technical risks or library dependencies needed
+   - Flag anything that might need a prototype or spike before full implementation
+
+4. **Implementation Readiness Report**
+   - Write findings to `docs/frontend/implementation-review.md`
+   - Structure as:
+     - **Ready to build**: specs with full backend support, clear data contracts
+     - **Needs backend work first**: specs that require new tRPC routes, subscriptions, or store functions (list exactly what's missing)
+     - **Needs design clarification**: specs where implementation details are ambiguous
+     - **High-risk components**: components that need spikes or prototyping
+
+**Deliverable**: The heartbeat can tick, the mind can think, emotions decay, persona compiles into prompts, Claude adapter streams responses, and we have reviewed/validated design specs with clear gap reports for frontend implementation.
 
 ---
 
-## Sprint 2: Feature Systems (Agent Team — 4-5 Teammates)
+## Sprint 2: Feature Systems + Frontend Foundation (Agent Team — 5 Teammates)
 
-**Team composition**: `feature-systems` (split across 2-3 teammates by subsystem) + `frontend-builder` + `product-designer`
+**Team composition**: `backend-routes` + `memory-goals` + `mind-integration` + `frontend-builder` + `tasks-channels`
 
-This is the highest-parallelism sprint. Each feature module is independent.
+This sprint has the highest parallelism. Each teammate owns a separate domain with zero file conflicts. The product-designer role is no longer needed — all 8 frontend specs exist and have been reviewed (see `docs/frontend/spec-review.md` and `docs/frontend/implementation-review.md`).
 
-### feature-systems Teammate(s) Tasks
+**Sprint 1 actuals that change Sprint 2 scope**: The heartbeat pipeline (gather/mind/execute), emotion engine, persona compiler, context builder, tick queue, and 4 tRPC routers (auth, settings, heartbeat, messages) with 3 subscriptions are already built. Sprint 2 does NOT need to build these — it builds on top of them.
 
-Split into sub-assignments to avoid file conflicts:
+### backend-routes Teammate Tasks
 
-**Teammate A — Memory + Goals:**
+**Owns**: `packages/backend/src/api/routers/` (new routers), `packages/backend/src/db/` (schema expansion + new store functions), `packages/shared/src/schemas/` (schema updates)
+
+The frontend-builder is blocked on ~15 missing tRPC routers. This teammate's job is to unblock the frontend by building all the routes and supporting infrastructure.
+
+1. **Expand Persona Schema** (migration 002)
+   - The current `personality_settings` table has only 4 columns (name, traits, communication_style, values). The persona spec requires 10+ fields.
+   - Create migration `system/002_persona_expansion.sql` that either expands `personality_settings` or replaces it with a proper `persona` table
+   - Fields needed: existence_paradigm, world_description, gender, age, physical_description, personality_dimensions (JSON with 10 sliders), traits (JSON array), values (JSON array), background, personality_notes, is_finalized (boolean)
+   - Add `onboarding_step` and `onboarding_complete` columns to `system_settings` for onboarding state tracking
+   - Update `packages/shared/src/schemas/system.ts` with expanded persona schema + onboarding state schema
+   - Update `packages/backend/src/db/stores/system-store.ts` with persona CRUD + onboarding state functions
+
+2. **Build Missing tRPC Routers**
+
+   **Contacts Router** (`routers/contacts.ts`):
+   - `getPrimary` query, `getById` query, `list` query (with last-message enrichment from messages.db)
+   - `create` mutation, `update` mutation, `delete` mutation
+   - `getChannels` query, `addChannel` mutation, `removeChannel` mutation
+   - Store functions needed: `deleteContact()`, `deleteContactChannel()`, cross-DB contact-message enrichment
+
+   **Onboarding Router** (`routers/onboarding.ts`):
+   - `getState` query — returns current step + completion status
+   - `updateStep` mutation — saves step progress
+   - Uses the new onboarding columns on `system_settings`
+
+   **Persona Router** (`routers/persona.ts`):
+   - `get` query — returns full persona data
+   - `saveDraft` mutation — saves partial persona during onboarding (progressive save)
+   - `finalize` mutation — compiles persona, computes emotion baselines, starts heartbeat
+   - `update` mutation — updates persona post-creation, triggers recompilation + baseline recomputation
+
+   **Channels Config Router** (`routers/channels.ts`):
+   - `getConfigs` query — all channel configs
+   - `configure` mutation — save channel config (SMS, Discord, API)
+   - `validate` mutation — test channel connection (stub for now, real validation when adapters are built)
+   - Store functions needed: `getChannelConfigs()`, `upsertChannelConfig()` for `channel_configs` table
+
+   **Data Management Router** (`routers/data.ts`):
+   - `softReset` mutation — clear heartbeat.db
+   - `fullReset` mutation — clear heartbeat.db + memory.db
+   - `clearConversations` mutation — clear messages.db
+   - `export` query — export all databases as JSON
+
+   **Provider Router** (`routers/provider.ts`):
+   - `validateKey` mutation — validate agent provider API key (calls adapter.isConfigured())
+   - `saveKey` mutation — save encrypted API key (uses existing systemStore.setApiKey)
+
+3. **Add Missing Store Functions**
+   - `deleteContact()`, `deleteContactChannel()` in system-store
+   - `getEmotionHistory(db, options: { emotion?, since?, limit? })` — range queries for sparklines/charts
+   - `getMessagesByContact(db, contactId, options?)` — cross-conversation query
+   - `listAllWorkingMemories(db)` — all working memories across contacts
+   - `getChannelConfigs(db)`, `upsertChannelConfig(db, data)` for channel_configs table
+
+4. **Add Missing Subscriptions**
+   - `onThoughts` subscription on heartbeat router — bridges `thought:created` EventBus event
+   - `onAgentStatus` subscription — bridges `agent:spawned/completed/failed` events
+   - Add `onExperience` subscription — bridges `experience:created` event
+
+5. **Tests**
+   - Unit tests for all new store functions
+   - Unit tests for all new routers (mocked stores)
+
+### memory-goals Teammate Tasks
+
+**Owns**: `packages/backend/src/memory/`, `packages/backend/src/goals/`
 
 1. **Memory System** — `packages/backend/src/memory/`
    - LanceDB integration for vector storage
-   - Embedding pipeline (text → BGE-small-en-v1.5 → vector)
+   - Embedding pipeline (text → BGE-small-en-v1.5 → vector via Transformers.js)
    - Short-term memory (recent context, in-memory buffer)
    - Working memory CRUD (per-contact notepad, AI-maintained)
    - Core self (singleton, agent's self-knowledge)
@@ -401,6 +520,7 @@ Split into sub-assignments to avoid file conflicts:
    - Retrieval scoring: `0.4 * relevance + 0.3 * importance + 0.3 * recency`
    - Forgetting: `retention = e^(-hours / (strength * 720))`, prune when < 0.1 AND importance < 0.3
    - Memory consolidation (periodic merge of similar memories)
+   - Wire into context builder (add long-term memory section to `buildMindContext`)
 
 2. **Goal System** — `packages/backend/src/goals/`
    - Seeds with transient in-memory embeddings
@@ -409,78 +529,209 @@ Split into sub-assignments to avoid file conflicts:
    - Plans as ordered step sequences
    - Salience scoring for goal prioritization in context
    - Emotional resonance: `clamp((intensity - baseline) * 0.4, -0.2, 0.2)`
+   - Goal/seed/plan store functions (deferred from Sprint 0 — the DB tables exist from migrations)
+   - Wire into context builder (add goals & tasks section to `buildMindContext`)
 
-**Teammate B — Tasks + Contacts + Channels:**
+3. **Tests**
+   - Unit tests for memory pipeline (embedding, retrieval, forgetting)
+   - Unit tests for goal system (seed promotion, salience scoring)
 
-3. **Task System** — `packages/backend/src/tasks/`
-   - Scheduled tasks with cron expressions, recurring support
-   - Deferred tasks (execute on idle ticks)
-   - Task lifecycle, `contact_id` routing, parallel execution
+### mind-integration Teammate Tasks
 
-4. **Contact System** — `packages/backend/src/contacts/`
-   - Multi-channel identity resolution, permission tiers, contact notes vs working memory, message isolation
+**Owns**: `packages/backend/src/heartbeat/index.ts` (mind query section only), `packages/backend/src/heartbeat/agent-orchestrator.ts` (new)
 
-5. **Channel Adapters** — `packages/backend/src/channels/`
-   - Web (finalize), SMS (Twilio), Discord, API (OpenAI/Ollama compatible), channel router
+This is the single most critical blocker for the system being functional. The mind query currently returns placeholder output — it needs to call the real Claude adapter.
 
-**Teammate C — MCP Tools:**
+1. **Wire Mind Query to Agent Session**
+   - Replace the stub in `packages/backend/src/heartbeat/index.ts` (lines 128-183) with real agent session calls
+   - Import `AgentManager` from `@animus/agents`
+   - Create/reuse session based on warmth state (warm = reuse, cold = new session with system prompt)
+   - Send compiled context as prompt via `session.promptStreaming()`
+   - Parse structured MindOutput via `llm-json-stream` (install: `npm install llm-json-stream -w packages/backend`)
+   - Validate output with `MindOutputSchema.parse()`
+   - Handle partial/malformed output gracefully
 
-6. **MCP Tool System** — `packages/backend/src/tools/`
-   - Tool registry, handlers, hybrid transport, permission filtering, tool call logging
+2. **Streaming Reply Subscription**
+   - Add `onReply` tRPC subscription that streams reply.content chunks in real-time
+   - Bridge from the streaming agent response to the subscription via EventBus
+   - Add `reply:chunk` and `reply:complete` event types to EventBus
 
-### product-designer Teammate Tasks
+3. **Agent Log Store Adapter**
+   - Write the currying wrapper that bridges `agentLogStore` functions (which take `db` as first param) to the `AgentLogStore` interface expected by the logging hook
+   - Attach logging to mind sessions via `attachSessionLogging()`
 
-7. **Memory Browser Spec** — `docs/frontend/specs/memory-browser.md`
-8. **Goal & Task Viewer Spec** — `docs/frontend/specs/goals-tasks.md`
-9. **Inner Life Visualization Spec** — `docs/frontend/specs/inner-life.md`
+4. **Agent Orchestration Layer** (`agent-orchestrator.ts`)
+   - Handle `spawn_agent` decisions from MindOutput — create sub-agent sessions
+   - Handle `update_agent` decisions — forward new info to running sub-agents
+   - Handle `cancel_agent` decisions — abort running sub-agents
+   - Track sub-agent sessions in `agent_tasks` table via heartbeat-store
+   - Route `agent_complete` triggers back to the tick queue
+
+5. **Tests**
+   - Unit tests for mind query integration (mocked agent session)
+   - Unit tests for agent orchestration (mocked sessions)
+   - Integration test for streaming reply pipeline
 
 ### frontend-builder Teammate Tasks
 
-10. **Auth Flow** — Sign up, login, route guards, session management
-11. **Onboarding Flow** (from `docs/frontend/onboarding.md`) — All steps including persona creation and birth animation
-12. **Main Dashboard** (from Sprint 1 design spec)
+**Owns**: `packages/frontend/`
 
-**Deliverable**: All feature systems operational, auth + onboarding + dashboard implemented in frontend.
+The frontend-builder can start immediately with auth + app shell (no backend dependency), then move to onboarding (depends on backend-routes completing persona/onboarding routes) and presence (depends on existing heartbeat/messages routes).
+
+See `docs/frontend/implementation-review.md` for the detailed data contract audit and `docs/frontend/spec-review.md` for spec corrections.
+
+1. **Design System & Component Library**
+   - Implement the design primitives from `docs/frontend/design-principles.md`
+   - Button variants, input fields, cards, modals, transitions, theme tokens
+   - Use Emotion for styling, Motion for animations, Phosphor Icons
+
+2. **Auth Flow**
+   - Login page and registration page (from `docs/frontend/onboarding.md`)
+   - Route guards (redirect unauthenticated to login, redirect authenticated to app)
+   - Session management via tRPC `auth.status` + `auth.me` queries
+   - All backend routes exist: `auth.register`, `auth.login`, `auth.logout`, `auth.status`, `auth.me`
+
+3. **App Shell**
+   - Navigation pill (4 spaces: Presence, Mind, People, Settings)
+   - Space transitions with `AnimatePresence`
+   - Connection status indicator (WebSocket health)
+   - Command palette (Cmd+K) — navigation commands only for v1
+   - Responsive layout with scroll behavior per `docs/frontend/app-shell.md`
+
+4. **Onboarding Flow** (from `docs/frontend/onboarding.md`)
+   - All 8 steps: Welcome → Provider Setup → Your Identity → About You → Channels → Persona (8 sub-steps) → Review & Birth → First Conversation
+   - Persona creation: existence paradigm, identity, dimensions (10 sliders), traits, values, background, notes, review
+   - Birth animation (high-risk — see implementation-review.md)
+   - **Depends on**: `onboarding.*`, `persona.*`, `contacts.update`, `provider.*`, `channels.*` routes from backend-routes teammate
+
+5. **Presence Page** (from `docs/frontend/presence.md`)
+   - Emotional field visualization (high-risk — start with simplified version)
+   - Thought stream (recent thoughts/experiences with opacity fading)
+   - Chat interface (message input, message list, streaming replies)
+   - Agent activity sidebar
+   - Real-time subscriptions: `heartbeat.onStateChange`, `heartbeat.onEmotionChange`, `messages.onMessage`
+   - **Depends on**: existing heartbeat + messages routes. `onThoughts` subscription from backend-routes.
+
+6. **Tests**
+   - Component tests for auth flow
+   - Component tests for onboarding steps
+
+### tasks-channels Teammate Tasks
+
+**Owns**: `packages/backend/src/tasks/`, `packages/backend/src/channels/`, `packages/backend/src/contacts/`
+
+1. **Task System** — `packages/backend/src/tasks/`
+   - Scheduled tasks with cron expressions (use `cron-parser` library), recurring support
+   - Deferred tasks (execute on idle ticks)
+   - Task lifecycle: pending → running → completed/failed/cancelled
+   - `contact_id` routing for task results
+   - Parallel execution with configurable concurrency
+   - Wire into tick queue: scheduled tasks fire `scheduled_task` trigger
+
+2. **Contact System Enrichments** — `packages/backend/src/contacts/`
+   - Multi-channel identity resolution (resolve unknown sender → existing contact)
+   - Permission tier enforcement helpers
+   - Contact notes vs working memory distinction
+   - Message isolation by contact (non-primary contacts can't see other conversations)
+
+3. **Channel Adapters** — `packages/backend/src/channels/`
+   - Channel router: routes inbound messages from any channel to `handleIncomingMessage()`
+   - Web channel (finalize — mostly done via messages router)
+   - SMS adapter (Twilio) — stub with inbound webhook handler
+   - Discord adapter — stub with bot event handler
+   - API adapter (OpenAI/Ollama compatible) — stub with REST endpoint
+
+4. **Tests**
+   - Unit tests for task scheduling (cron parsing, lifecycle)
+   - Unit tests for channel routing
+   - Unit tests for contact resolution
+
+**Deliverable**: Mind connected to real AI agent, all tRPC routes for frontend exist, memory system operational, goal system operational, auth + onboarding + presence pages built, task scheduling and channel adapters stubbed.
 
 ---
 
-## Sprint 3: Integration & Polish (Agent Team — 3 Teammates)
+## Sprint 3: Frontend Completion + Polish (Agent Team — 3 Teammates)
 
-**Team composition**: `backend-builder` + `frontend-builder` + `product-designer`
+**Team composition**: `backend-polish` + `frontend-builder` + `frontend-builder-2`
 
-### backend-builder Tasks
+Sprint 1's design spec review revealed comprehensive specs for all pages. Sprint 2 builds the backend infrastructure and the first frontend pages. Sprint 3 completes the remaining frontend pages and polishes the integration.
 
-1. **Context Builder Integration** — Wire all systems into prompt assembly with token budgets
-2. **Sub-Agent Orchestration** — Delegation, progress tracking, result delivery, update forwarding
-3. **End-to-End Pipeline Test** — Full tick cycle, message flow, crash recovery
+### backend-polish Teammate Tasks
 
-### frontend-builder Tasks
+**Owns**: `packages/backend/src/` (integration work, MCP tools)
 
-4. **Chat Interface** (from Sprint 1 design spec)
-5. **Settings Page** (from Sprint 1 design spec)
-6. **Memory Browser** (from Sprint 2 design spec)
-7. **Goal & Task Viewer** (from Sprint 2 design spec)
-8. **Inner Life Visualization** (from Sprint 2 design spec)
-9. **Real-time Subscriptions** — wire all tRPC subscriptions for live updates
+1. **MCP Tool System** — `packages/backend/src/tools/`
+   - Tool registry with tool definitions
+   - Handler implementations for sub-agent tools: `send_message`, `update_progress`, `read_memory`
+   - Hybrid transport (in-process + stdio)
+   - Permission filtering by contact tier
+   - Tool call logging to agent_logs.db
 
-### product-designer Tasks
+2. **Context Builder Completeness**
+   - Wire long-term memories, goals, and agent status into context builder (if not done by memory-goals teammate in Sprint 2)
+   - Token budget tracking and enforcement
+   - Memory flush warning when budget reaches ~85%
 
-10. **Contact Management Spec** — `docs/frontend/specs/contacts.md`
-11. **Agent Logs Viewer Spec** — `docs/frontend/specs/agent-logs.md`
-12. **Final Polish Pass** — review all implemented screens against design principles
+3. **End-to-End Pipeline Test**
+   - Full tick cycle: message → gather → mind (real agent) → execute → reply
+   - Crash recovery test: kill at every stage, verify clean recovery
+   - Sub-agent lifecycle test: spawn → progress → complete → mind receives results
+
+### frontend-builder Teammate Tasks
+
+**Owns**: `packages/frontend/src/pages/` (Settings, People)
+
+4. **Settings Page** (from `docs/frontend/settings.md`)
+   - Persona editor (dimensions, traits, values, identity, background)
+   - Provider configuration (API key validation, provider switching)
+   - Channel configuration (Web, SMS, Discord, API)
+   - Heartbeat settings (interval, warmth window, context budget)
+   - Data management (soft reset, full reset, clear conversations, export)
+   - Password change
+
+5. **People Page** (from `docs/frontend/people.md`)
+   - Contact list with last-message enrichment
+   - Contact detail view with message history, channels, working memory
+   - Add contact modal with channel assignment
+   - Primary contact shared conversation with Presence
+   - Unknown messages section (if backend supports it)
+
+6. **Real-time Subscription Wiring**
+   - Wire all tRPC subscriptions into Zustand stores
+   - Handle reconnection and stale data gracefully
+
+### frontend-builder-2 Teammate Tasks
+
+**Owns**: `packages/frontend/src/pages/` (Mind)
+
+7. **Mind Page** (from `docs/frontend/mind.md`)
+   - Emotions section: current states, history sparklines/charts (24h/7d/30d)
+   - Thoughts & Experiences section: paginated log, importance badges
+   - Memories section: working memory list, core self viewer, long-term memory search
+   - Goals section: active goals, seeds, plans, salience visualization
+   - Agents section: running agents, recent completions, event logs, usage stats
+   - Decisions section: tick decision log
+
+**Deliverable**: All frontend pages built and connected to real backend data, MCP tool system operational, end-to-end pipeline tested.
 
 ---
 
-## Sprint 4: Hardening (Single Session)
+## Sprint 4: Hardening & Voice (Single Session or Small Team)
 
-**Why single session**: Integration testing, bug fixing, and refinement — sequential by nature.
+**Why smaller team**: Integration testing, bug fixing, voice implementation, and refinement — more sequential by nature.
 
-1. **Error handling audit** — verify all 4 tiers (Retryable, Recoverable, Critical, Fatal)
-2. **Crash recovery testing** — kill at every pipeline stage, verify clean recovery
-3. **Performance** — heartbeat tick timing, UI responsiveness
-4. **Security audit** — API key encryption, auth flow, route guards, permission enforcement
-5. **Test coverage** — fill gaps in unit and integration tests
-6. **Documentation** — update any docs that diverged during implementation
+1. **Voice Mode** (from `docs/frontend/voice-mode.md`)
+   - Parakeet TDT v3 (STT) + Kokoro (TTS) via sherpa-onnx npm
+   - Voice tRPC routes: `voice.getStatus`, `voice.transcribe`, `voice.subscribe`
+   - Voice visualization SVG (high-risk component)
+   - Streaming reply + simultaneous TTS pipeline
+
+2. **Error handling audit** — verify all 4 tiers (Retryable, Recoverable, Critical, Fatal)
+3. **Crash recovery testing** — kill at every pipeline stage, verify clean recovery
+4. **Performance** — heartbeat tick timing, UI responsiveness, subscription throughput
+5. **Security audit** — API key encryption, auth flow, route guards, permission enforcement
+6. **Test coverage** — fill gaps in unit and integration tests
+7. **Documentation** — update any docs that diverged during implementation
 
 ---
 

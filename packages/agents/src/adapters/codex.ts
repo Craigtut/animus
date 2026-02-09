@@ -22,7 +22,8 @@ import { AgentError, wrapError } from '../errors.js';
 import { createTaggedLogger, type Logger } from '../logger.js';
 import { CODEX_CAPABILITIES } from '../capabilities.js';
 import { BaseAdapter, BaseSession, type AdapterOptions } from './base.js';
-import { generateUUID, createPendingSessionId, fileExists } from '../utils/index.js';
+import { generateUUID, createPendingSessionId } from '../utils/index.js';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -163,19 +164,7 @@ export class CodexAdapter extends BaseAdapter {
     // Check for pre-authenticated Codex CLI
     try {
       const authPath = join(homedir(), '.codex', 'auth.json');
-      return this.checkAuthFileSync(authPath);
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Synchronous check for auth file.
-   */
-  private checkAuthFileSync(path: string): boolean {
-    try {
-      const fs = require('node:fs');
-      return fs.existsSync(path);
+      return existsSync(authPath);
     } catch {
       return false;
     }
@@ -211,6 +200,16 @@ export class CodexAdapter extends BaseAdapter {
   async createSession(config: AgentSessionConfig): Promise<IAgentSession> {
     this.validateConfig(config);
 
+    if (config.provider !== this.provider) {
+      throw new AgentError({
+        code: 'PROVIDER_MISMATCH',
+        message: `Config provider "${config.provider}" does not match adapter provider "${this.provider}"`,
+        category: 'invalid_input',
+        severity: 'fatal',
+        provider: this.provider,
+      });
+    }
+
     if (!this.isConfigured()) {
       throw new AgentError({
         code: 'MISSING_CREDENTIALS',
@@ -244,9 +243,19 @@ export class CodexAdapter extends BaseAdapter {
    * Resume an existing Codex thread.
    */
   override async resumeSession(sessionId: string): Promise<IAgentSession> {
-    const { nativeId } = await import('../utils/index.js').then((m) =>
+    const { provider, nativeId } = await import('../utils/index.js').then((m) =>
       m.parseSessionId(sessionId),
     );
+
+    if (provider !== this.provider) {
+      throw new AgentError({
+        code: 'PROVIDER_MISMATCH',
+        message: `Session ${sessionId} belongs to ${provider}, not ${this.provider}`,
+        category: 'invalid_input',
+        severity: 'fatal',
+        provider: this.provider,
+      });
+    }
 
     if (!this.isConfigured()) {
       throw new AgentError({

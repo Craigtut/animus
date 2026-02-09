@@ -1,351 +1,223 @@
 /**
- * Shared TypeScript types for Animus
+ * TypeScript types derived from Zod schemas via z.infer<>.
+ *
+ * DO NOT define types manually here — derive them from schemas.
+ * The schemas in /schemas/ are the single source of truth.
  */
 
-// ============================================================================
-// Core Types
-// ============================================================================
-
-/** Unique identifier type */
-export type UUID = string;
-
-/** ISO 8601 timestamp string */
-export type Timestamp = string;
-
-// ============================================================================
-// User & Auth Types
-// ============================================================================
-
-export interface User {
-  id: UUID;
-  email: string;
-  contactId: UUID | null;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
-}
-
-export interface Session {
-  id: UUID;
-  userId: UUID;
-  expiresAt: Timestamp;
-  createdAt: Timestamp;
-}
-
-// ============================================================================
-// Heartbeat Types
-// ============================================================================
-
-/** The current phase of a heartbeat tick */
-export type HeartbeatPhase =
-  | 'idle'
-  | 'perceive'
-  | 'think'
-  | 'feel'
-  | 'decide'
-  | 'act'
-  | 'reflect'
-  | 'consolidate';
-
-export interface HeartbeatState {
-  tickNumber: number;
-  currentPhase: HeartbeatPhase;
-  pipelineProgress: HeartbeatPhase[];
-  startedAt: Timestamp;
-  lastTickAt: Timestamp | null;
-  isRunning: boolean;
-}
-
-export interface Thought {
-  id: UUID;
-  tickNumber: number;
-  content: string;
-  importance: number; // 0 to 1
-  createdAt: Timestamp;
-  expiresAt: Timestamp | null;
-}
-
-export interface Experience {
-  id: UUID;
-  tickNumber: number;
-  content: string;
-  importance: number; // 0 to 1
-  createdAt: Timestamp;
-  expiresAt: Timestamp | null;
-}
-
-/** The 12 fixed emotions */
-export type EmotionName =
-  | 'joy'
-  | 'contentment'
-  | 'excitement'
-  | 'gratitude'
-  | 'confidence'
-  | 'stress'
-  | 'anxiety'
-  | 'frustration'
-  | 'sadness'
-  | 'boredom'
-  | 'curiosity'
-  | 'loneliness';
-
-/** Emotion category for UI aggregation */
-export type EmotionCategory = 'positive' | 'negative' | 'drive';
-
-/** Current state of a single emotion */
-export interface EmotionState {
-  emotion: EmotionName;
-  category: EmotionCategory;
-  intensity: number; // 0 to 1
-  baseline: number; // 0 to 1 (resting state, personality-driven)
-  lastUpdatedAt: Timestamp;
-}
-
-/** Delta output from the mind during a tick */
-export interface EmotionDelta {
-  emotion: EmotionName;
-  delta: number; // e.g., +0.05, -0.03
-  reasoning: string;
-}
-
-/** Historical record of an emotion change */
-export interface EmotionHistoryEntry {
-  id: UUID;
-  tickNumber: number;
-  emotion: EmotionName;
-  delta: number;
-  reasoning: string;
-  intensityBefore: number;
-  intensityAfter: number;
-  createdAt: Timestamp;
-}
-
-export interface Task {
-  id: UUID;
-  title: string;
-  description: string | null;
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
-  priority: 'low' | 'medium' | 'high' | 'urgent';
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
-  dueAt: Timestamp | null;
-  completedAt: Timestamp | null;
-}
+import { z } from 'zod';
+import type {
+  // Common
+  uuidSchema,
+  timestampSchema,
+  channelTypeSchema,
+  permissionTierSchema,
+  agentProviderSchema,
+  paginationInputSchema,
+  // System
+  userSchema,
+  contactSchema,
+  contactChannelSchema,
+  channelConfigTypeSchema,
+  smsChannelConfigSchema,
+  discordChannelConfigSchema,
+  openaiApiChannelConfigSchema,
+  ollamaApiChannelConfigSchema,
+  channelConfigSchema,
+  systemSettingsSchema,
+  personalitySettingsSchema,
+  // Heartbeat
+  heartbeatStageSchema,
+  sessionStateSchema,
+  triggerTypeSchema,
+  heartbeatStateSchema,
+  emotionNameSchema,
+  emotionCategorySchema,
+  emotionStateSchema,
+  emotionDeltaSchema,
+  emotionHistoryEntrySchema,
+  thoughtSchema,
+  experienceSchema,
+  decisionTypeSchema,
+  decisionOutcomeSchema,
+  tickDecisionSchema,
+  seedStatusSchema,
+  seedSourceSchema,
+  goalSeedSchema,
+  goalOriginSchema,
+  goalStatusSchema,
+  goalSchema,
+  planStatusSchema,
+  milestoneStatusSchema,
+  milestoneSchema,
+  planSchema,
+  goalSalienceLogSchema,
+  scheduleTypeSchema,
+  taskStatusSchema,
+  taskCreatedBySchema,
+  taskSchema,
+  taskRunStatusSchema,
+  taskRunSchema,
+  agentTaskStatusSchema,
+  agentTaskSchema,
+  // Memory
+  workingMemorySchema,
+  coreSelfSchema,
+  memoryTypeSchema,
+  memorySourceTypeSchema,
+  longTermMemorySchema,
+  memoryCandidateSchema,
+  // Messages
+  conversationSchema,
+  messageDirectionSchema,
+  messageSchema,
+  mediaAttachmentTypeSchema,
+  storedMediaAttachmentSchema,
+  // Agent logs
+  agentSessionStatusSchema,
+  agentSessionSchema,
+  agentEventTypeSchema,
+  agentEventSchema,
+  agentUsageSchema,
+  // Channels (runtime)
+  resolvedContactSchema,
+  mediaAttachmentSchema,
+  incomingMessageSchema,
+  // Mind output
+  mindOutputSchema,
+  taskResultOutcomeSchema,
+  taskTickOutputSchema,
+} from '../schemas/index.js';
 
 // ============================================================================
-// Message & Channel Types
+// Primitives
 // ============================================================================
 
-/** Supported communication channels */
-export type ChannelType = 'web' | 'sms' | 'discord' | 'api';
-
-/** Contact permission tier */
-export type PermissionTier = 'primary' | 'standard';
-
-/** Direction of a message */
-export type MessageDirection = 'inbound' | 'outbound';
-
-/** Who sent the message */
-export type MessageSender = 'user' | 'animus' | 'sub_agent';
-
-export interface Channel {
-  id: UUID;
-  type: ChannelType;
-  name: string;
-  config: Record<string, unknown>;
-  isActive: boolean;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
-}
-
-export interface Conversation {
-  id: UUID;
-  channelId: UUID;
-  title: string | null;
-  startedAt: Timestamp;
-  lastMessageAt: Timestamp;
-  messageCount: number;
-}
-
-export interface Message {
-  id: UUID;
-  conversationId: UUID;
-  direction: MessageDirection;
-  sender: MessageSender;
-  content: string;
-  channelType: ChannelType;
-  tickNumber: number | null;
-  agentTaskId: UUID | null;
-  metadata: Record<string, unknown> | null;
-  createdAt: Timestamp;
-}
+export type UUID = z.infer<typeof uuidSchema>;
+export type Timestamp = z.infer<typeof timestampSchema>;
 
 // ============================================================================
-// Contact Types
+// Common Enums
 // ============================================================================
 
-export interface Contact {
-  id: UUID;
-  fullName: string;
-  phoneNumber: string | null;
-  email: string | null;
-  isPrimary: boolean;
-  permissionTier: PermissionTier;
-  notes: string | null;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
-}
-
-export interface ContactChannel {
-  id: UUID;
-  contactId: UUID;
-  channel: ChannelType;
-  identifier: string;
-  displayName: string | null;
-  isVerified: boolean;
-  createdAt: Timestamp;
-}
+export type ChannelType = z.infer<typeof channelTypeSchema>;
+export type PermissionTier = z.infer<typeof permissionTierSchema>;
+export type AgentProvider = z.infer<typeof agentProviderSchema>;
 
 // ============================================================================
-// Channel Adapter Types
+// System (system.db)
 // ============================================================================
 
-/** Media attachment type */
-export type MediaAttachmentType = 'image' | 'audio' | 'video' | 'file';
-
-/** A media file downloaded and stored locally by the channel adapter */
-export interface MediaAttachment {
-  id: UUID;
-  type: MediaAttachmentType;
-  mimeType: string;
-  localPath: string;
-  originalFilename: string | null;
-  sizeBytes: number;
-}
-
-/** Contact identity resolved during channel ingestion */
-export interface ResolvedContact {
-  id: UUID;
-  fullName: string;
-  permissionTier: PermissionTier;
-}
-
-/** Normalized message from any channel, ready for heartbeat pipeline */
-export interface IncomingMessage {
-  channel: ChannelType;
-  channelIdentifier: string;
-  contact: ResolvedContact | null;
-  conversationId: string | null;
-  content: string;
-  media?: MediaAttachment[];
-  rawMetadata: Record<string, unknown>;
-  receivedAt: Timestamp;
-}
+export type User = z.infer<typeof userSchema>;
+export type Contact = z.infer<typeof contactSchema>;
+export type ContactChannel = z.infer<typeof contactChannelSchema>;
+export type ChannelConfigType = z.infer<typeof channelConfigTypeSchema>;
+export type SmsChannelConfig = z.infer<typeof smsChannelConfigSchema>;
+export type DiscordChannelConfig = z.infer<typeof discordChannelConfigSchema>;
+export type OpenaiApiChannelConfig = z.infer<typeof openaiApiChannelConfigSchema>;
+export type OllamaApiChannelConfig = z.infer<typeof ollamaApiChannelConfigSchema>;
+export type ChannelConfig = z.infer<typeof channelConfigSchema>;
+export type SystemSettings = z.infer<typeof systemSettingsSchema>;
+export type PersonalitySettings = z.infer<typeof personalitySettingsSchema>;
+export type PaginationInput = z.infer<typeof paginationInputSchema>;
 
 // ============================================================================
-// Channel Configuration Types
+// Heartbeat (heartbeat.db)
 // ============================================================================
 
-export interface SmsChannelConfig {
-  accountSid: string;
-  authToken: string;
-  phoneNumber: string;
-  webhookUrl: string;
-}
+export type HeartbeatStage = z.infer<typeof heartbeatStageSchema>;
+export type SessionState = z.infer<typeof sessionStateSchema>;
+export type TriggerType = z.infer<typeof triggerTypeSchema>;
+export type HeartbeatState = z.infer<typeof heartbeatStateSchema>;
 
-export interface DiscordChannelConfig {
-  botToken: string;
-  applicationId: string;
-  allowedGuildIds: string[];
-}
+export type EmotionName = z.infer<typeof emotionNameSchema>;
+export type EmotionCategory = z.infer<typeof emotionCategorySchema>;
+export type EmotionState = z.infer<typeof emotionStateSchema>;
+export type EmotionDelta = z.infer<typeof emotionDeltaSchema>;
+export type EmotionHistoryEntry = z.infer<typeof emotionHistoryEntrySchema>;
 
-export interface OpenaiApiChannelConfig {
-  // No credentials needed — maps to primary contact
-}
+export type Thought = z.infer<typeof thoughtSchema>;
+export type Experience = z.infer<typeof experienceSchema>;
 
-export interface OllamaApiChannelConfig {
-  // No credentials needed — maps to primary contact
-}
+export type DecisionType = z.infer<typeof decisionTypeSchema>;
+export type DecisionOutcome = z.infer<typeof decisionOutcomeSchema>;
+export type TickDecision = z.infer<typeof tickDecisionSchema>;
 
-/** Channel type identifier for config storage */
-export type ChannelConfigType = 'sms' | 'discord' | 'openai_api' | 'ollama_api';
+export type SeedStatus = z.infer<typeof seedStatusSchema>;
+export type SeedSource = z.infer<typeof seedSourceSchema>;
+export type GoalSeed = z.infer<typeof goalSeedSchema>;
 
-export interface ChannelConfig {
-  id: UUID;
-  channelType: ChannelConfigType;
-  isEnabled: boolean;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
-}
+export type GoalOrigin = z.infer<typeof goalOriginSchema>;
+export type GoalStatus = z.infer<typeof goalStatusSchema>;
+export type Goal = z.infer<typeof goalSchema>;
 
-// ============================================================================
-// Agent Types
-// ============================================================================
+export type PlanStatus = z.infer<typeof planStatusSchema>;
+export type MilestoneStatus = z.infer<typeof milestoneStatusSchema>;
+export type Milestone = z.infer<typeof milestoneSchema>;
+export type Plan = z.infer<typeof planSchema>;
 
-/** Supported agent SDK providers */
-export type AgentProvider = 'claude' | 'codex' | 'opencode';
+export type GoalSalienceLog = z.infer<typeof goalSalienceLogSchema>;
 
-export interface AgentSession {
-  id: UUID;
-  provider: AgentProvider;
-  startedAt: Timestamp;
-  endedAt: Timestamp | null;
-  status: 'active' | 'completed' | 'error' | 'cancelled';
-}
+export type ScheduleType = z.infer<typeof scheduleTypeSchema>;
+export type TaskStatus = z.infer<typeof taskStatusSchema>;
+export type TaskCreatedBy = z.infer<typeof taskCreatedBySchema>;
+export type Task = z.infer<typeof taskSchema>;
 
-export interface AgentEvent {
-  id: UUID;
-  sessionId: UUID;
-  eventType: AgentEventType;
-  data: Record<string, unknown>;
-  createdAt: Timestamp;
-}
+export type TaskRunStatus = z.infer<typeof taskRunStatusSchema>;
+export type TaskRun = z.infer<typeof taskRunSchema>;
 
-export type AgentEventType =
-  | 'session_start'
-  | 'session_end'
-  | 'input_received'
-  | 'thinking_start'
-  | 'thinking_end'
-  | 'tool_call_start'
-  | 'tool_call_end'
-  | 'tool_error'
-  | 'response_start'
-  | 'response_chunk'
-  | 'response_end'
-  | 'error';
-
-export interface AgentUsage {
-  sessionId: UUID;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  costUsd: number | null;
-  model: string;
-  createdAt: Timestamp;
-}
+export type AgentTaskStatus = z.infer<typeof agentTaskStatusSchema>;
+export type AgentTask = z.infer<typeof agentTaskSchema>;
 
 // ============================================================================
-// Settings Types
+// Memory (memory.db)
 // ============================================================================
 
-export interface SystemSettings {
-  heartbeatIntervalMs: number;
-  thoughtRetentionDays: number;
-  experienceRetentionDays: number;
-  emotionHistoryRetentionDays: number;
-  agentLogRetentionDays: number;
-  defaultAgentProvider: AgentProvider;
-}
-
-export interface PersonalitySettings {
-  name: string;
-  traits: string[];
-  communicationStyle: string;
-  values: string[];
-}
+export type WorkingMemory = z.infer<typeof workingMemorySchema>;
+export type CoreSelf = z.infer<typeof coreSelfSchema>;
+export type MemoryType = z.infer<typeof memoryTypeSchema>;
+export type MemorySourceType = z.infer<typeof memorySourceTypeSchema>;
+export type LongTermMemory = z.infer<typeof longTermMemorySchema>;
+export type MemoryCandidate = z.infer<typeof memoryCandidateSchema>;
 
 // ============================================================================
-// API Types
+// Messages (messages.db)
+// ============================================================================
+
+export type Conversation = z.infer<typeof conversationSchema>;
+export type MessageDirection = z.infer<typeof messageDirectionSchema>;
+export type Message = z.infer<typeof messageSchema>;
+export type MediaAttachmentType = z.infer<typeof mediaAttachmentTypeSchema>;
+export type StoredMediaAttachment = z.infer<typeof storedMediaAttachmentSchema>;
+
+// ============================================================================
+// Agent Logs (agent_logs.db)
+// ============================================================================
+
+export type AgentSessionStatus = z.infer<typeof agentSessionStatusSchema>;
+export type AgentSession = z.infer<typeof agentSessionSchema>;
+export type AgentEventType = z.infer<typeof agentEventTypeSchema>;
+export type AgentEvent = z.infer<typeof agentEventSchema>;
+export type AgentUsage = z.infer<typeof agentUsageSchema>;
+
+// ============================================================================
+// Channels (runtime)
+// ============================================================================
+
+export type ResolvedContact = z.infer<typeof resolvedContactSchema>;
+export type MediaAttachment = z.infer<typeof mediaAttachmentSchema>;
+export type IncomingMessage = z.infer<typeof incomingMessageSchema>;
+
+// ============================================================================
+// Mind Output
+// ============================================================================
+
+export type MindOutput = z.infer<typeof mindOutputSchema>;
+export type TaskResultOutcome = z.infer<typeof taskResultOutcomeSchema>;
+export type TaskTickOutput = z.infer<typeof taskTickOutputSchema>;
+
+// ============================================================================
+// API Types (not schema-derived)
 // ============================================================================
 
 export interface ApiError {

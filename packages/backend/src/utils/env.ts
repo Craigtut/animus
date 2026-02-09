@@ -15,6 +15,7 @@ const envSchema = z.object({
   // Database paths
   DB_SYSTEM_PATH: z.string().default('./data/system.db'),
   DB_HEARTBEAT_PATH: z.string().default('./data/heartbeat.db'),
+  DB_MEMORY_PATH: z.string().default('./data/memory.db'),
   DB_MESSAGES_PATH: z.string().default('./data/messages.db'),
   DB_AGENT_LOGS_PATH: z.string().default('./data/agent_logs.db'),
   LANCEDB_PATH: z.string().default('./data/lancedb'),
@@ -25,6 +26,9 @@ const envSchema = z.object({
   // Auth
   JWT_SECRET: z.string().default('change-me-in-production'),
   SESSION_EXPIRY_DAYS: z.coerce.number().default(7),
+
+  // Encryption
+  ANIMUS_ENCRYPTION_KEY: z.string().default(''),
 
   // Agent API keys (optional, users can configure these)
   ANTHROPIC_API_KEY: z.string().optional(),

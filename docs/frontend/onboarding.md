@@ -35,7 +35,7 @@ Onboarding is the user's first impression of the Animus brand. Every screen shou
 │   3. Your Identity (primary contact)                                │
 │   4. About You (context for the AI)                                 │
 │   5. Messaging Channels (optional, skippable)                       │
-│   6. Persona Creation (9 steps — the soul)                         │
+│   6. Persona Creation (8 steps — the soul)                         │
 │   7. Birth → Main App                                               │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘

@@ -525,3 +525,57 @@ This approach is robust for long-term use: as the schema evolves, new `.sql` fil
 - **CORS**: Configured for same-origin in production
 - **Input Validation**: All tRPC inputs validated with Zod
 - **SQL Injection**: Prevented by parameterized queries (better-sqlite3)
+
+---
+
+## Future: Desktop Packaging (Tauri)
+
+Animus is designed to eventually be packaged as a standalone desktop application using [Tauri](https://tauri.app/). This is not being implemented now, but the architecture has been evaluated for compatibility and no changes are required today.
+
+### Approach: Node.js Sidecar (Permanent)
+
+Tauri provides first-class [sidecar support](https://tauri.app/develop/sidecar/) for bundling and lifecycle-managing external processes. The Animus backend will run as a permanent Node.js sidecar — **not** a temporary bridge to a Rust migration. The full Fastify server, agent SDKs, database layer, and all backend logic stay in Node.js.
+
+```
+┌──────────────────────────────────────┐
+│           Tauri App (Rust)           │
+│  ┌────────────────────────────────┐  │
+│  │   Webview (React frontend)    │  │
+│  │       ↕ HTTP / WebSocket      │  │
+│  └────────────────────────────────┘  │
+│  ┌────────────────────────────────┐  │
+│  │   Node.js sidecar process     │  │
+│  │   (Fastify + tRPC + agents)   │  │
+│  │   All backend code, as-is     │  │
+│  └────────────────────────────────┘  │
+└──────────────────────────────────────┘
+```
+
+### Why This Works Today (No Blockers)
+
+The existing architecture is already well-suited for desktop packaging:
+
+- **Self-contained**: SQLite + LanceDB, no external infrastructure to bundle
+- **Single-user**: One instance per user is the desktop app model
+- **Configurable paths**: Data directory paths are set via environment variables (`DB_SYSTEM_PATH`, etc.) — Tauri's Rust shell resolves `app_data_dir()` and passes them to the sidecar
+- **Configurable binding**: `HOST` and `PORT` env vars allow switching to `127.0.0.1:{dynamic_port}` at launch
+- **Frontend is a standard SPA**: Vite-built React app loads in Tauri's webview with no changes
+
+### What Gets Wired Up Later (When Packaging)
+
+These are all configuration-level concerns, not architectural changes:
+
+1. **Data directory** — Tauri resolves the platform-specific app data path (e.g., `~/Library/Application Support/com.animus.app/` on macOS) and passes it to the sidecar via env vars
+2. **Localhost binding** — Sidecar binds to `127.0.0.1` with a dynamic port (not `0.0.0.0:3000`)
+3. **Backend URL** — Tauri passes the sidecar's port to the webview so the frontend knows where to connect
+4. **Process lifecycle** — Tauri starts the sidecar on launch and sends a graceful shutdown signal on quit
+
+### Why Not Electron
+
+Tauri is preferred over Electron for:
+- Smaller bundle size (~10-20 MB vs ~200 MB)
+- Lower memory footprint (native webview vs bundled Chromium)
+- Rust-based security model
+- Better fit for the project's self-hosted ethos
+
+Since Animus requires a Node.js sidecar regardless (for agent SDKs), Electron's advantage of native Node.js support is less relevant — both approaches end up bundling Node.js.

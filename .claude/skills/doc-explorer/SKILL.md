@@ -59,12 +59,20 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/architecture/goals.md` | 20 KB | Goal system - seeds (emergent desires), goals, plans, tasks hierarchy, salience scoring, emotional links, approval modes, cleanup, heartbeat integration |
 | `docs/architecture/tasks-system.md` | 16 KB | Task system - scheduled vs deferred tasks, task ticks, cron support, planning agent, retry logic, heartbeat integration |
 | `docs/architecture/open-questions.md` | 5 KB | Resolved design questions (all 7) - concurrent tick handling, crash recovery, MCP tool design, structured output, Claude OAuth, Codex OAuth, contact notes |
+| `docs/architecture/voice-channel.md` | 20 KB | Voice channel architecture - Parakeet TDT v3 STT + Kokoro TTS (both via sherpa-onnx, native Node.js), frontend voice mode UX, audio pipeline (capture → transcribe → mind → synthesize → playback), sentence-buffered TTS streaming, voice channel adapter, configuration, ffmpeg conversion |
 
 ### Frontend
 
 | File | Size | Covers |
 |------|------|--------|
 | `docs/frontend/design-principles.md` | 11 KB | Core design philosophy, intent-driven design, clarity over cleverness, dark mode foundation, color semantics, emotional state colors, typography, spacing, motion principles, component guidelines, interaction patterns |
+| `docs/frontend/onboarding.md` | 25 KB | Onboarding & authentication flow - sign up/login, 7 onboarding steps, persona creation (8 sub-steps), birth animation, route structure, persistence, responsive design |
+| `docs/frontend/app-shell.md` | 14 KB | App shell & navigation - four spaces (Presence, Mind, People, Settings), floating navigation pill, command palette, connection status indicator, click-deeper transition pattern, space transitions, route structure, responsive behavior |
+| `docs/frontend/presence.md` | 18 KB | Presence space - emotional field visualization, thought stream, goals & agency indicators, embedded conversation, ambient animation, heartbeat pulse, scroll behavior, real-time data sources, responsive design, 9am and complex request scenarios |
+| `docs/frontend/mind.md` | 14 KB | Mind space - emotion detail view (12 emotions, sparklines, history), thought/experience log, memory browser (core self, working memory, long-term search), goal detail views (plans, milestones, salience), agent orchestration view |
+| `docs/frontend/people.md` | 10 KB | People space - contact list, contact detail (conversation, notes, working memory), unknown caller log, channel management, contact editing |
+| `docs/frontend/settings.md` | 12 KB | Settings space - persona editing (all 8 sections), heartbeat configuration, agent provider & credentials, channel configuration, goal settings, system settings (timezone, embedding, data management) |
+| `docs/frontend/voice-mode.md` | 16 KB | Voice mode UX on Presence - entering voice mode, voice surface visualization, listening experience (VAD, transcription flash), thinking state, speaking experience (sentence-level TTS, barge-in interruption), continuous conversation flow, mobile behavior, error states, mixed mode fallback |
 
 ### Guides
 
@@ -94,7 +102,8 @@ When you need context for a task, follow this approach:
 2. **Read the most relevant file(s)** - don't read everything, be targeted
 3. **For architecture questions**: Start with `docs/architecture/tech-stack.md` for overview, then drill into specific docs
 4. **For agent/SDK work**: Start with `docs/agents/README.md` for the overview, then read the specific provider doc
-5. **For frontend work**: Read `docs/frontend/design-principles.md` and `docs/brand-vision.md`
+5. **For frontend work**: Read `docs/frontend/design-principles.md` and `docs/brand-vision.md`. For specific spaces: `docs/frontend/app-shell.md` (navigation, transitions), `docs/frontend/presence.md`, `docs/frontend/mind.md`, `docs/frontend/people.md`, `docs/frontend/settings.md`
+5b. **For frontend onboarding/auth**: Read `docs/frontend/onboarding.md`
 6. **For persona/personality**: Read `docs/architecture/persona.md` and `docs/brand-vision.md`
 7. **For heartbeat/inner life**: Read `docs/architecture/heartbeat.md` and `docs/project-vision.md`
 7b. **For memory/knowledge/embeddings**: Read `docs/architecture/memory.md` and `docs/architecture/heartbeat.md`
@@ -104,6 +113,7 @@ When you need context for a task, follow this approach:
 8. **For new contributors**: Read `docs/guides/getting-started.md`
 9. **For channels/messaging/SMS/Discord/API**: Read `docs/architecture/channels.md` and `docs/architecture/contacts.md`
 10. **For Codex OAuth/authentication**: Read `docs/agents/codex/oauth.md`
+11. **For voice/speech/STT/TTS/audio**: Read `docs/architecture/voice-channel.md`, `docs/frontend/voice-mode.md`, and `docs/architecture/channels.md`
 
 ## Topic Keyword Guide
 
@@ -133,3 +143,11 @@ Use this to quickly map user questions to the right docs:
 - **goals, objectives, long-term direction** -> `docs/architecture/goals.md`
 - **tasks, scheduling, cron, scheduled jobs** -> `docs/architecture/tasks-system.md`
 - **open questions, resolved questions** -> `docs/architecture/open-questions.md`
+- **voice, speech, STT, TTS, speech-to-text, text-to-speech, audio, microphone, parakeet, kokoro, sherpa-onnx, voice channel** -> `docs/architecture/voice-channel.md`
+- **app shell, navigation, nav pill, command palette, connection status, route structure, space transition, click deeper** -> `docs/frontend/app-shell.md`
+- **presence, emotional field, thought stream, conversation, ambient animation, heartbeat pulse** -> `docs/frontend/presence.md`
+- **mind space, emotion detail, thought log, memory browser, goal detail, agent view, inner life observation** -> `docs/frontend/mind.md`
+- **people, contacts UI, contact list, contact detail, unknown caller, working memory UI** -> `docs/frontend/people.md`
+- **settings, persona editing, heartbeat config, provider config, channel config, data management** -> `docs/frontend/settings.md`
+- **onboarding, auth, signup, login, first time, birth animation, persona creation UI** -> `docs/frontend/onboarding.md`
+- **voice mode UI, voice UX, voice surface, listening, speaking, barge-in, continuous conversation, voice visualization, transcription** -> `docs/frontend/voice-mode.md`
