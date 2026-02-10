@@ -26,6 +26,11 @@ import type {
   channelConfigSchema,
   systemSettingsSchema,
   personalitySettingsSchema,
+  onboardingStateSchema,
+  existenceParadigmSchema,
+  personalityDimensionsSchema,
+  archetypeSchema,
+  personaSchema,
   // Heartbeat
   heartbeatStageSchema,
   sessionStateSchema,
@@ -120,6 +125,11 @@ export type ChannelConfig = z.infer<typeof channelConfigSchema>;
 export type SystemSettings = z.infer<typeof systemSettingsSchema>;
 export type PersonalitySettings = z.infer<typeof personalitySettingsSchema>;
 export type PaginationInput = z.infer<typeof paginationInputSchema>;
+export type OnboardingState = z.infer<typeof onboardingStateSchema>;
+export type ExistenceParadigm = z.infer<typeof existenceParadigmSchema>;
+export type PersonalityDimensions = z.infer<typeof personalityDimensionsSchema>;
+export type Archetype = z.infer<typeof archetypeSchema>;
+export type Persona = z.infer<typeof personaSchema>;
 
 // ============================================================================
 // Heartbeat (heartbeat.db)

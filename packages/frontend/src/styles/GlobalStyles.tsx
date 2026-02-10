@@ -7,7 +7,8 @@ export function GlobalStyles() {
   return (
     <Global
       styles={css`
-        /* CSS Reset */
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+
         *,
         *::before,
         *::after {
@@ -16,7 +17,6 @@ export function GlobalStyles() {
           padding: 0;
         }
 
-        /* Root styles */
         :root {
           font-synthesis: none;
           text-rendering: optimizeLegibility;
@@ -24,7 +24,6 @@ export function GlobalStyles() {
           -moz-osx-font-smoothing: grayscale;
         }
 
-        /* Document styles */
         html {
           font-size: 16px;
           scroll-behavior: smooth;
@@ -39,50 +38,29 @@ export function GlobalStyles() {
           min-height: 100vh;
         }
 
-        /* Links */
         a {
-          color: ${theme.colors.primary[400]};
+          color: ${theme.colors.accent};
           text-decoration: none;
-          transition: color ${theme.transitions.fast};
+          transition: opacity ${theme.transitions.fast};
 
           &:hover {
-            color: ${theme.colors.primary[300]};
+            opacity: 0.8;
           }
         }
 
-        /* Headings */
-        h1,
-        h2,
-        h3,
-        h4,
-        h5,
-        h6 {
+        h1, h2, h3, h4, h5, h6 {
           font-weight: ${theme.typography.fontWeight.semibold};
           line-height: ${theme.typography.lineHeight.tight};
         }
 
-        h1 {
-          font-size: ${theme.typography.fontSize['4xl']};
-        }
-        h2 {
-          font-size: ${theme.typography.fontSize['3xl']};
-        }
-        h3 {
-          font-size: ${theme.typography.fontSize['2xl']};
-        }
-        h4 {
-          font-size: ${theme.typography.fontSize.xl};
-        }
-        h5 {
-          font-size: ${theme.typography.fontSize.lg};
-        }
-        h6 {
-          font-size: ${theme.typography.fontSize.base};
-        }
+        h1 { font-size: ${theme.typography.fontSize['4xl']}; }
+        h2 { font-size: ${theme.typography.fontSize['3xl']}; }
+        h3 { font-size: ${theme.typography.fontSize['2xl']}; }
+        h4 { font-size: ${theme.typography.fontSize.xl}; }
+        h5 { font-size: ${theme.typography.fontSize.lg}; }
+        h6 { font-size: ${theme.typography.fontSize.base}; }
 
-        /* Code */
-        code,
-        pre {
+        code, pre {
           font-family: ${theme.typography.fontFamily.mono};
         }
 
@@ -105,7 +83,6 @@ export function GlobalStyles() {
           }
         }
 
-        /* Buttons */
         button {
           font-family: inherit;
           font-size: inherit;
@@ -114,62 +91,56 @@ export function GlobalStyles() {
           background: none;
         }
 
-        /* Inputs */
-        input,
-        textarea,
-        select {
+        input, textarea, select {
           font-family: inherit;
           font-size: inherit;
         }
 
-        /* Images */
-        img,
-        svg {
+        img, svg {
           display: block;
           max-width: 100%;
         }
 
-        /* Lists */
-        ul,
-        ol {
+        ul, ol {
           list-style: none;
         }
 
-        /* Focus styles */
         :focus-visible {
-          outline: 2px solid ${theme.colors.primary[500]};
+          outline: 2px solid ${theme.colors.accent};
           outline-offset: 2px;
         }
 
-        /* Selection */
         ::selection {
-          background-color: ${theme.colors.primary[500]};
-          color: white;
+          background-color: ${theme.colors.accent};
+          color: ${theme.colors.accentForeground};
         }
 
-        /* Scrollbar (WebKit) */
         ::-webkit-scrollbar {
-          width: 8px;
-          height: 8px;
+          width: 6px;
+          height: 6px;
         }
 
         ::-webkit-scrollbar-track {
-          background: ${theme.colors.background.paper};
+          background: transparent;
         }
 
         ::-webkit-scrollbar-thumb {
-          background: ${theme.colors.neutral[600]};
+          background: ${theme.colors.border.default};
           border-radius: ${theme.borderRadius.full};
-
-          &:hover {
-            background: ${theme.colors.neutral[500]};
-          }
         }
 
-        /* Firefox scrollbar */
         * {
           scrollbar-width: thin;
-          scrollbar-color: ${theme.colors.neutral[600]} ${theme.colors.background.paper};
+          scrollbar-color: ${theme.colors.border.default} transparent;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+            scroll-behavior: auto !important;
+          }
         }
       `}
     />

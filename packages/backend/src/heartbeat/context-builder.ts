@@ -62,6 +62,18 @@ export interface MindContextParams {
   workingMemory?: string | null;
   coreSelf?: string | null;
   compiledPersona: CompiledPersona;
+  /** Long-term memories retrieved via semantic search */
+  longTermMemories?: string | null;
+  /** Salient goals formatted for context */
+  goalContext?: string | null;
+  /** Graduating seeds for one-time prompt */
+  graduatingSeedsContext?: string | null;
+  /** Proposed goals awaiting approval */
+  proposedGoalsContext?: string | null;
+  /** Session approaching context limit */
+  memoryFlushPending?: boolean;
+  /** Spawn budget warning/exhaustion note for the mind */
+  spawnBudgetNote?: string | null;
 }
 
 export interface CompiledContext {
@@ -423,10 +435,57 @@ export function buildUserMessage(params: MindContextParams): string {
     sections.push(stmSection);
   }
 
-  // 7. Previous tick outcomes
+  // 7. Long-term memories (retrieved via semantic search)
+  if (params.longTermMemories) {
+    sections.push(
+      '── RELEVANT MEMORIES ──\nThings you\'ve learned that may be relevant right now.\n\n' +
+      params.longTermMemories +
+      '\n\nThese are retrieved from your long-term memory based on relevance\nto the current context.'
+    );
+  }
+
+  // 8. Goals (salient goals, graduating seeds, proposed goals)
+  if (params.goalContext) {
+    sections.push(
+      '── THINGS ON YOUR MIND ──\n' +
+      'These are things you care about. They\'re part of who you are,\n' +
+      'but they don\'t control you. You may advance them, reflect on\n' +
+      'them, or set them aside entirely.\n\n' +
+      params.goalContext
+    );
+  }
+
+  if (params.graduatingSeedsContext) {
+    sections.push('── EMERGING INTEREST ──\n' + params.graduatingSeedsContext);
+  }
+
+  if (params.proposedGoalsContext) {
+    sections.push('── PENDING GOALS ──\n' + params.proposedGoalsContext);
+  }
+
+  // 9. Previous tick outcomes
   const prevSection = buildPreviousDecisionsSection(params.previousDecisions);
   if (prevSection) {
     sections.push(prevSection);
+  }
+
+  // 10. Spawn budget note
+  if (params.spawnBudgetNote) {
+    sections.push(
+      '── SESSION CONTEXT NOTE ──\n' + params.spawnBudgetNote
+    );
+  }
+
+  // 11. Memory flush warning (session approaching context limit)
+  if (params.memoryFlushPending) {
+    sections.push(
+      '── SESSION CONTEXT NOTE ──\n' +
+      'This mind session is approaching its context limit and will end\n' +
+      'after this tick. If there are any important observations, contact\n' +
+      'notes, or self-knowledge you want to preserve, include them in\n' +
+      'your working memory update, core self update, or memory candidates.\n' +
+      'Anything not explicitly saved will be lost when the session resets.'
+    );
   }
 
   return sections.join('\n\n');

@@ -656,9 +656,11 @@ See `docs/frontend/implementation-review.md` for the detailed data contract audi
 
 Sprint 1's design spec review revealed comprehensive specs for all pages. Sprint 2 builds the backend infrastructure and the first frontend pages. Sprint 3 completes the remaining frontend pages and polishes the integration.
 
+**Sprint 2 actuals that change Sprint 3 scope**: The context builder already wires in long-term memories, goals, and agent status with token budget tracking. The agent orchestrator handles spawn/update/cancel. All 10 tRPC routers and 7 subscriptions exist. PresencePage is fully wired with real-time subscriptions. However, the Mind page needs query endpoints for memories, goals, and agent logs that don't have tRPC routes yet (store functions exist but aren't exposed). Settings, People, and Mind pages are still placeholders/shells.
+
 ### backend-polish Teammate Tasks
 
-**Owns**: `packages/backend/src/` (integration work, MCP tools)
+**Owns**: `packages/backend/src/` (integration work, MCP tools, missing routes)
 
 1. **MCP Tool System** — `packages/backend/src/tools/`
    - Tool registry with tool definitions
@@ -667,12 +669,20 @@ Sprint 1's design spec review revealed comprehensive specs for all pages. Sprint
    - Permission filtering by contact tier
    - Tool call logging to agent_logs.db
 
-2. **Context Builder Completeness**
-   - Wire long-term memories, goals, and agent status into context builder (if not done by memory-goals teammate in Sprint 2)
-   - Token budget tracking and enforcement
-   - Memory flush warning when budget reaches ~85%
+2. **Missing Query Routes for Mind Page** (unblocks frontend-builder-2)
+   - **Memory router** (`routers/memory.ts`): `getWorkingMemories` (all contacts), `getCoreSelf`, `searchLongTermMemories` (text query → vector search)
+   - **Goals router** (`routers/goals.ts`): `getGoals` (by status), `getSeeds` (by status), `getPlans` (by goal ID)
+   - **Agent logs router** (`routers/agent-logs.ts`): `getSessions` (recent, paginated), `getSessionEvents` (by session ID), `getUsage` (aggregate stats)
+   - **Extend heartbeat router**: `getRecentDecisions` query (all recent decisions across ticks, not just by single tick number)
+   - NOTE: All underlying store functions already exist — this is tRPC wrapper work, not new business logic
 
-3. **End-to-End Pipeline Test**
+3. **Context Builder Audit**
+   - Verify context builder completeness (long-term memories, goals, agent status already wired in Sprint 2)
+   - Verify token budget tracking and enforcement works correctly
+   - Verify memory flush warning when budget reaches ~85%
+   - Fix any gaps found during audit
+
+4. **End-to-End Pipeline Test**
    - Full tick cycle: message → gather → mind (real agent) → execute → reply
    - Crash recovery test: kill at every stage, verify clean recovery
    - Sub-agent lifecycle test: spawn → progress → complete → mind receives results
@@ -704,13 +714,15 @@ Sprint 1's design spec review revealed comprehensive specs for all pages. Sprint
 
 **Owns**: `packages/frontend/src/pages/` (Mind)
 
+**Depends on**: backend-polish completing task #2 (Missing Query Routes) for memories, goals, and agent logs endpoints. Emotions, thoughts, experiences, and decisions can be built immediately using existing heartbeat router endpoints.
+
 7. **Mind Page** (from `docs/frontend/mind.md`)
-   - Emotions section: current states, history sparklines/charts (24h/7d/30d)
-   - Thoughts & Experiences section: paginated log, importance badges
-   - Memories section: working memory list, core self viewer, long-term memory search
-   - Goals section: active goals, seeds, plans, salience visualization
-   - Agents section: running agents, recent completions, event logs, usage stats
-   - Decisions section: tick decision log
+   - Emotions section: current states, history sparklines/charts (24h/7d/30d) — uses existing `heartbeat.getEmotions`, `heartbeat.getEmotionHistory`, `heartbeat.onEmotionChange`
+   - Thoughts & Experiences section: paginated log, importance badges — uses existing `heartbeat.getRecentThoughts`, `heartbeat.getRecentExperiences`, `heartbeat.onThoughts`, `heartbeat.onExperience`
+   - Memories section: working memory list, core self viewer, long-term memory search — **needs `memory.*` routes from backend-polish**
+   - Goals section: active goals, seeds, plans, salience visualization — **needs `goals.*` routes from backend-polish**
+   - Agents section: running agents, recent completions, event logs, usage stats — **needs `agentLogs.*` routes from backend-polish**, uses existing `heartbeat.onAgentStatus` subscription
+   - Decisions section: tick decision log — uses existing `heartbeat.getTickDecisions`, **needs `heartbeat.getRecentDecisions` from backend-polish**
 
 **Deliverable**: All frontend pages built and connected to real backend data, MCP tool system operational, end-to-end pipeline tested.
 

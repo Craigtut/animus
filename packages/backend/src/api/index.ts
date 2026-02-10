@@ -13,6 +13,15 @@ import { authRouter } from './routers/auth.js';
 import { settingsRouter } from './routers/settings.js';
 import { heartbeatRouter } from './routers/heartbeat.js';
 import { messagesRouter } from './routers/messages.js';
+import { contactsRouter } from './routers/contacts.js';
+import { onboardingRouter } from './routers/onboarding.js';
+import { personaRouter } from './routers/persona.js';
+import { channelsRouter } from './routers/channels.js';
+import { dataRouter } from './routers/data.js';
+import { providerRouter } from './routers/provider.js';
+import { memoryRouter } from './routers/memory.js';
+import { goalsRouter } from './routers/goals.js';
+import { agentLogsRouter } from './routers/agent-logs.js';
 
 // ============================================================================
 // App Router
@@ -27,6 +36,15 @@ export const appRouter = router({
   settings: settingsRouter,
   heartbeat: heartbeatRouter,
   messages: messagesRouter,
+  contacts: contactsRouter,
+  onboarding: onboardingRouter,
+  persona: personaRouter,
+  channels: channelsRouter,
+  data: dataRouter,
+  provider: providerRouter,
+  memory: memoryRouter,
+  goals: goalsRouter,
+  agentLogs: agentLogsRouter,
 });
 
 export type AppRouter = typeof appRouter;

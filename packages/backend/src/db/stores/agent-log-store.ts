@@ -59,6 +59,71 @@ export function getSession(db: Database.Database, id: string): AgentSession | nu
   return row ? snakeToCamel<AgentSession>(row) : null;
 }
 
+export function listSessions(
+  db: Database.Database,
+  options: { limit?: number; offset?: number; status?: AgentSessionStatus } = {}
+): { sessions: AgentSession[]; total: number } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (options.status) {
+    conditions.push('status = ?');
+    params.push(options.status);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limit = options.limit ?? 20;
+  const offset = options.offset ?? 0;
+
+  const totalRow = db
+    .prepare(`SELECT COUNT(*) as count FROM agent_sessions ${where}`)
+    .get(...params) as { count: number };
+
+  const rows = db
+    .prepare(`SELECT * FROM agent_sessions ${where} ORDER BY started_at DESC LIMIT ? OFFSET ?`)
+    .all(...params, limit, offset) as Array<Record<string, unknown>>;
+
+  return {
+    sessions: rows.map((row) => snakeToCamel<AgentSession>(row)),
+    total: totalRow.count,
+  };
+}
+
+export function getAggregateUsage(
+  db: Database.Database,
+  options: { since?: string } = {}
+): { totalInputTokens: number; totalOutputTokens: number; totalTokens: number; totalCostUsd: number; sessionCount: number } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (options.since) {
+    conditions.push('created_at >= ?');
+    params.push(options.since);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const row = db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(input_tokens), 0) as total_input_tokens,
+         COALESCE(SUM(output_tokens), 0) as total_output_tokens,
+         COALESCE(SUM(total_tokens), 0) as total_tokens,
+         COALESCE(SUM(cost_usd), 0) as total_cost_usd,
+         COUNT(DISTINCT session_id) as session_count
+       FROM agent_usage ${where}`
+    )
+    .get(...params) as Record<string, number>;
+
+  return {
+    totalInputTokens: row.total_input_tokens,
+    totalOutputTokens: row.total_output_tokens,
+    totalTokens: row.total_tokens,
+    totalCostUsd: row.total_cost_usd,
+    sessionCount: row.session_count,
+  };
+}
+
 // ============================================================================
 // Agent Events
 // ============================================================================

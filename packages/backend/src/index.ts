@@ -98,7 +98,7 @@ async function main() {
   // Graceful shutdown handler
   const shutdown = async () => {
     console.log('Shutting down...');
-    stopHeartbeat();
+    await stopHeartbeat();
     await fastify.close();
     closeDatabases();
     process.exit(0);

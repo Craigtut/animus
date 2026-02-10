@@ -255,6 +255,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - **Architecture**: `docs/architecture/mcp-tools.md` (cross-provider MCP tool architecture, tool definitions, handlers, registry, permission filtering)
 - **Architecture**: `docs/architecture/voice-channel.md` (voice channel — Parakeet TDT v3 STT + Kokoro TTS, both via sherpa-onnx, frontend voice mode, audio pipeline)
 - **Open Questions**: `docs/architecture/open-questions.md` (all 7 resolved)
+- **Open Concerns**: `docs/architecture/open-concerns.md` (known acceptable concerns)
 - **Frontend Design**: `docs/frontend/design-principles.md`, `docs/frontend/onboarding.md`
 - **Frontend Specs**: `docs/frontend/app-shell.md` (navigation, transitions, routes), `docs/frontend/presence.md` (main space), `docs/frontend/mind.md` (inner life detail), `docs/frontend/people.md` (contacts), `docs/frontend/settings.md` (configuration), `docs/frontend/voice-mode.md` (voice interaction)
 - **Guides**: `docs/guides/getting-started.md`

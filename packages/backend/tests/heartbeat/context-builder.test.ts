@@ -246,5 +246,60 @@ describe('context-builder', () => {
       expect(msg).not.toContain('RECENT MESSAGES');
       expect(msg).not.toContain('PREVIOUS TICK OUTCOMES');
     });
+
+    it('includes long-term memories when provided', () => {
+      const msg = buildUserMessage(makeParams({
+        longTermMemories: '- User prefers dark mode (2d ago)\n- User is a Python developer (1w ago)',
+      }));
+
+      expect(msg).toContain('RELEVANT MEMORIES');
+      expect(msg).toContain('User prefers dark mode');
+      expect(msg).toContain('Python developer');
+    });
+
+    it('includes goal context when provided', () => {
+      const msg = buildUserMessage(makeParams({
+        goalContext: '1. Learn Rust\n   Why: Want to expand systems knowledge',
+      }));
+
+      expect(msg).toContain('THINGS ON YOUR MIND');
+      expect(msg).toContain('Learn Rust');
+    });
+
+    it('includes graduating seeds when provided', () => {
+      const msg = buildUserMessage(makeParams({
+        graduatingSeedsContext: 'A pattern has emerged: you\'ve been drawn toward "music composition".',
+      }));
+
+      expect(msg).toContain('EMERGING INTEREST');
+      expect(msg).toContain('music composition');
+    });
+
+    it('includes proposed goals when provided', () => {
+      const msg = buildUserMessage(makeParams({
+        proposedGoalsContext: 'Proposed goal awaiting approval: "Write a blog post"',
+      }));
+
+      expect(msg).toContain('PENDING GOALS');
+      expect(msg).toContain('Write a blog post');
+    });
+
+    it('includes memory flush warning when pending', () => {
+      const msg = buildUserMessage(makeParams({
+        memoryFlushPending: true,
+      }));
+
+      expect(msg).toContain('SESSION CONTEXT NOTE');
+      expect(msg).toContain('approaching its context limit');
+      expect(msg).toContain('working memory update');
+    });
+
+    it('omits memory flush warning when not pending', () => {
+      const msg = buildUserMessage(makeParams({
+        memoryFlushPending: false,
+      }));
+
+      expect(msg).not.toContain('SESSION CONTEXT NOTE');
+    });
   });
 });

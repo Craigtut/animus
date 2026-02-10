@@ -167,6 +167,13 @@ export function updateMemoryAccess(db: Database.Database, id: string): void {
   ).run(now(), now(), id);
 }
 
+export function listAllWorkingMemories(db: Database.Database): WorkingMemory[] {
+  const rows = db
+    .prepare('SELECT * FROM working_memory ORDER BY updated_at DESC')
+    .all() as Array<Record<string, unknown>>;
+  return rows.map((row) => snakeToCamel<WorkingMemory>(row));
+}
+
 export function pruneDecayedMemories(
   db: Database.Database,
   retentionThreshold: number = 0.1,

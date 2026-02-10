@@ -171,3 +171,37 @@ export function getRecentMessages(
     .all(conversationId, limit) as Array<Record<string, unknown>>;
   return rows.map(rowToMessage);
 }
+
+export function getMessagesByContact(
+  db: Database.Database,
+  contactId: string,
+  options: { limit?: number; since?: string } = {}
+): Message[] {
+  const limit = options.limit ?? 50;
+  const conditions = ['contact_id = ?'];
+  const params: unknown[] = [contactId];
+
+  if (options.since) {
+    conditions.push('created_at >= ?');
+    params.push(options.since);
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT * FROM messages WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC LIMIT ?`
+    )
+    .all(...params, limit) as Array<Record<string, unknown>>;
+  return rows.map(rowToMessage);
+}
+
+export function getLastMessageForContact(
+  db: Database.Database,
+  contactId: string
+): Message | null {
+  const row = db
+    .prepare(
+      'SELECT * FROM messages WHERE contact_id = ? ORDER BY created_at DESC LIMIT 1'
+    )
+    .get(contactId) as Record<string, unknown> | undefined;
+  return row ? rowToMessage(row) : null;
+}

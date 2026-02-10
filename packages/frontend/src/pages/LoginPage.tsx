@@ -4,36 +4,46 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Eye, EyeSlash } from '@phosphor-icons/react';
+import { Button, Input } from '../components/ui';
+import { useAuthStore } from '../store';
+import { trpc } from '../utils/trpc';
 
 export function LoginPage() {
   const theme = useTheme();
   const navigate = useNavigate();
+  const { setUser } = useAuthStore();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showForgotHelp, setShowForgotHelp] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const { data: status } = trpc.auth.status.useQuery(undefined, {
+    retry: false,
+  });
+
+  const loginMutation = trpc.auth.login.useMutation({
+    onSuccess: (data) => {
+      setUser(data);
+      navigate('/');
+    },
+    onError: () => {
+      setError('Invalid email or password');
+    },
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setIsLoading(true);
-
-    try {
-      // TODO: Implement actual login via tRPC
-      console.log('Login attempt:', { email, password });
-
-      // Simulate login delay
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Navigate to dashboard on success
-      navigate('/dashboard');
-    } catch (err) {
-      setError('Invalid email or password');
-    } finally {
-      setIsLoading(false);
-    }
+    loginMutation.mutate({ email, password });
   };
+
+  // If no user exists yet, redirect to register
+  if (status && !status.hasUser) {
+    navigate('/register', { replace: true });
+    return null;
+  }
 
   return (
     <div
@@ -43,41 +53,48 @@ export function LoginPage() {
         align-items: center;
         justify-content: center;
         padding: ${theme.spacing[6]};
+        background: ${theme.colors.background.default};
       `}
     >
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
+        transition={{ duration: 0.4, ease: 'easeOut' }}
         css={css`
           width: 100%;
           max-width: 400px;
-          padding: ${theme.spacing[8]};
-          background: ${theme.colors.background.paper};
-          border: 1px solid ${theme.colors.border.default};
-          border-radius: ${theme.borderRadius.lg};
         `}
       >
         <h1
           css={css`
-            font-size: ${theme.typography.fontSize['2xl']};
-            font-weight: ${theme.typography.fontWeight.semibold};
+            font-size: ${theme.typography.fontSize['3xl']};
+            font-weight: ${theme.typography.fontWeight.light};
             text-align: center;
-            margin-bottom: ${theme.spacing[6]};
+            margin-bottom: ${theme.spacing[1]};
           `}
         >
-          Sign in to Animus
+          Welcome back
         </h1>
+        <p
+          css={css`
+            text-align: center;
+            color: ${theme.colors.text.secondary};
+            font-size: ${theme.typography.fontSize.base};
+            margin-bottom: ${theme.spacing[8]};
+          `}
+        >
+          Sign in to your Animus instance.
+        </p>
 
         <form onSubmit={handleSubmit}>
           {error && (
             <div
               css={css`
                 padding: ${theme.spacing[3]} ${theme.spacing[4]};
-                background: ${theme.colors.error.dark}33;
-                border: 1px solid ${theme.colors.error.main};
+                background: ${theme.colors.error.main}12;
+                border: 1px solid ${theme.colors.error.main}40;
                 border-radius: ${theme.borderRadius.default};
-                color: ${theme.colors.error.light};
+                color: ${theme.colors.error.main};
                 font-size: ${theme.typography.fontSize.sm};
                 margin-bottom: ${theme.spacing[4]};
               `}
@@ -86,161 +103,90 @@ export function LoginPage() {
             </div>
           )}
 
-          <div
-            css={css`
-              margin-bottom: ${theme.spacing[4]};
-            `}
-          >
-            <label
-              htmlFor="email"
-              css={css`
-                display: block;
-                font-size: ${theme.typography.fontSize.sm};
-                font-weight: ${theme.typography.fontWeight.medium};
-                color: ${theme.colors.text.secondary};
-                margin-bottom: ${theme.spacing[2]};
-              `}
-            >
-              Email
-            </label>
-            <input
-              id="email"
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+            <Input
+              label="Email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              css={css`
-                width: 100%;
-                padding: ${theme.spacing[3]};
-                background: ${theme.colors.background.default};
-                border: 1px solid ${theme.colors.border.light};
-                border-radius: ${theme.borderRadius.default};
-                color: ${theme.colors.text.primary};
-                transition: border-color ${theme.transitions.fast};
-
-                &:focus {
-                  outline: none;
-                  border-color: ${theme.colors.primary[500]};
-                }
-
-                &::placeholder {
-                  color: ${theme.colors.text.disabled};
-                }
-              `}
+              onChange={(e) => setEmail((e.target as HTMLInputElement).value)}
               placeholder="you@example.com"
+              required
+              autoFocus
             />
-          </div>
 
-          <div
-            css={css`
-              margin-bottom: ${theme.spacing[6]};
-            `}
-          >
-            <label
-              htmlFor="password"
-              css={css`
-                display: block;
-                font-size: ${theme.typography.fontSize.sm};
-                font-weight: ${theme.typography.fontWeight.medium};
-                color: ${theme.colors.text.secondary};
-                margin-bottom: ${theme.spacing[2]};
-              `}
-            >
-              Password
-            </label>
-            <div
-              css={css`
-                position: relative;
-              `}
-            >
-              <input
-                id="password"
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                css={css`
-                  width: 100%;
-                  padding: ${theme.spacing[3]};
-                  padding-right: ${theme.spacing[10]};
-                  background: ${theme.colors.background.default};
-                  border: 1px solid ${theme.colors.border.light};
-                  border-radius: ${theme.borderRadius.default};
-                  color: ${theme.colors.text.primary};
-                  transition: border-color ${theme.transitions.fast};
-
-                  &:focus {
-                    outline: none;
-                    border-color: ${theme.colors.primary[500]};
-                  }
-                `}
-                placeholder="Enter your password"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                css={css`
-                  position: absolute;
-                  right: ${theme.spacing[3]};
-                  top: 50%;
-                  transform: translateY(-50%);
-                  color: ${theme.colors.text.secondary};
-                  transition: color ${theme.transitions.fast};
-
-                  &:hover {
-                    color: ${theme.colors.text.primary};
-                  }
-                `}
-              >
-                {showPassword ? <EyeSlash size={20} /> : <Eye size={20} />}
-              </button>
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={isLoading}
-            css={css`
-              width: 100%;
-              padding: ${theme.spacing[3]};
-              background: ${theme.colors.primary[600]};
-              color: white;
-              font-weight: ${theme.typography.fontWeight.medium};
-              border-radius: ${theme.borderRadius.default};
-              transition: background ${theme.transitions.fast};
-
-              &:hover:not(:disabled) {
-                background: ${theme.colors.primary[500]};
+            <Input
+              label="Password"
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword((e.target as HTMLInputElement).value)}
+              placeholder="Enter your password"
+              required
+              rightElement={
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  css={css`
+                    color: ${theme.colors.text.hint};
+                    transition: color ${theme.transitions.fast};
+                    display: flex;
+                    padding: 0;
+                    &:hover { color: ${theme.colors.text.primary}; }
+                  `}
+                >
+                  {showPassword ? <EyeSlash size={18} /> : <Eye size={18} />}
+                </button>
               }
+            />
 
-              &:disabled {
-                opacity: 0.7;
-                cursor: not-allowed;
-              }
-            `}
-          >
-            {isLoading ? 'Signing in...' : 'Sign in'}
-          </button>
+            <Button
+              type="submit"
+              loading={loginMutation.isPending}
+              css={css`width: 100%; margin-top: ${theme.spacing[2]};`}
+            >
+              Sign in
+            </Button>
+          </div>
         </form>
 
-        <p
-          css={css`
-            text-align: center;
-            margin-top: ${theme.spacing[6]};
-            font-size: ${theme.typography.fontSize.sm};
-            color: ${theme.colors.text.secondary};
-          `}
-        >
-          Don't have an account?{' '}
-          <Link
-            to="/register"
+        <div css={css`text-align: center; margin-top: ${theme.spacing[6]};`}>
+          <button
+            type="button"
+            onClick={() => setShowForgotHelp(!showForgotHelp)}
             css={css`
-              color: ${theme.colors.primary[400]};
+              font-size: ${theme.typography.fontSize.sm};
+              color: ${theme.colors.text.hint};
+              cursor: pointer;
+              &:hover { color: ${theme.colors.text.secondary}; }
             `}
           >
-            Sign up
-          </Link>
-        </p>
+            Forgot your password?
+          </button>
+          {showForgotHelp && (
+            <motion.p
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              css={css`
+                font-size: ${theme.typography.fontSize.xs};
+                color: ${theme.colors.text.hint};
+                margin-top: ${theme.spacing[2]};
+                line-height: ${theme.typography.lineHeight.relaxed};
+              `}
+            >
+              Since Animus is self-hosted, you can reset your password from the
+              server terminal. Run{' '}
+              <code css={css`
+                font-family: ${theme.typography.fontFamily.mono};
+                background: ${theme.colors.background.elevated};
+                padding: 0.15em 0.4em;
+                border-radius: ${theme.borderRadius.sm};
+                font-size: 0.9em;
+              `}>
+                npm run reset-password
+              </code>{' '}
+              in the project directory.
+            </motion.p>
+          )}
+        </div>
       </motion.div>
     </div>
   );

@@ -1,100 +1,142 @@
 /**
  * Animus Theme
  *
- * Centralized theme configuration for Emotion styling.
- * Edit this file to customize the look and feel of the entire application.
+ * Design-spec aligned theme with warm neutrals, Plus Jakarta Sans,
+ * gradient rim lighting, and dual-mode support (light default).
+ *
+ * See docs/frontend/design-principles.md and docs/brand-vision.md.
  */
 
-export const theme = {
-  colors: {
-    // Primary palette
-    primary: {
-      50: '#f0f9ff',
-      100: '#e0f2fe',
-      200: '#bae6fd',
-      300: '#7dd3fc',
-      400: '#38bdf8',
-      500: '#0ea5e9',
-      600: '#0284c7',
-      700: '#0369a1',
-      800: '#075985',
-      900: '#0c4a6e',
-    },
-
-    // Neutral/gray palette
-    neutral: {
-      50: '#fafafa',
-      100: '#f4f4f5',
-      200: '#e4e4e7',
-      300: '#d4d4d8',
-      400: '#a1a1aa',
-      500: '#71717a',
-      600: '#52525b',
-      700: '#3f3f46',
-      800: '#27272a',
-      900: '#18181b',
-      950: '#09090b',
-    },
-
-    // Semantic colors
-    success: {
-      light: '#86efac',
-      main: '#22c55e',
-      dark: '#15803d',
-    },
-    warning: {
-      light: '#fcd34d',
-      main: '#f59e0b',
-      dark: '#b45309',
-    },
-    error: {
-      light: '#fca5a5',
-      main: '#ef4444',
-      dark: '#b91c1c',
-    },
-    info: {
-      light: '#93c5fd',
-      main: '#3b82f6',
-      dark: '#1d4ed8',
-    },
-
-    // Background colors
-    background: {
-      default: '#09090b',
-      paper: '#18181b',
-      elevated: '#27272a',
-    },
-
-    // Text colors
-    text: {
-      primary: '#fafafa',
-      secondary: '#a1a1aa',
-      disabled: '#52525b',
-    },
-
-    // Border colors
-    border: {
-      default: '#27272a',
-      light: '#3f3f46',
-    },
+// --------------------------------------------------------------------------
+// Light Mode (default)
+// --------------------------------------------------------------------------
+const lightColors = {
+  // Canvas & surfaces
+  background: {
+    default: '#FAF9F4',       // warm white canvas
+    paper: '#F5F4EE',         // slightly darker warm surface (cards)
+    elevated: '#EFEDE6',      // elevated surfaces
   },
 
+  // Text
+  text: {
+    primary: '#1A1816',       // near-black, warm
+    secondary: 'rgba(26, 24, 22, 0.55)',
+    disabled: 'rgba(26, 24, 22, 0.35)',
+    hint: 'rgba(26, 24, 22, 0.45)',
+  },
+
+  // Borders — rim-lighting gradients defined per component
+  border: {
+    default: 'rgba(26, 24, 22, 0.10)',
+    light: 'rgba(26, 24, 22, 0.06)',
+    focus: 'rgba(26, 24, 22, 0.25)',
+  },
+
+  // High-contrast accent (near-black in light mode)
+  accent: '#1A1816',
+  accentForeground: '#FAF9F4',
+
+  // Rim-lighting gradient (from subtle dark to transparent)
+  rimGradient: 'linear-gradient(180deg, rgba(26, 24, 22, 0.08) 0%, transparent 100%)',
+
+  // Semantic
+  success: { light: '#86efac', main: '#16a34a', dark: '#15803d' },
+  warning: { light: '#fcd34d', main: '#d97706', dark: '#b45309' },
+  error:   { light: '#fca5a5', main: '#dc2626', dark: '#b91c1c' },
+  info:    { light: '#a5b4fc', main: '#4f46e5', dark: '#4338ca' },
+};
+
+// --------------------------------------------------------------------------
+// Dark Mode
+// --------------------------------------------------------------------------
+const darkColors = {
+  background: {
+    default: '#1C1A18',       // warm dark canvas
+    paper: '#242220',         // warm dark surface
+    elevated: '#2E2C29',      // elevated
+  },
+
+  text: {
+    primary: '#FAF9F4',
+    secondary: 'rgba(250, 249, 244, 0.55)',
+    disabled: 'rgba(250, 249, 244, 0.35)',
+    hint: 'rgba(250, 249, 244, 0.45)',
+  },
+
+  border: {
+    default: 'rgba(250, 249, 244, 0.10)',
+    light: 'rgba(250, 249, 244, 0.06)',
+    focus: 'rgba(250, 249, 244, 0.25)',
+  },
+
+  accent: '#FAF9F4',
+  accentForeground: '#1C1A18',
+
+  rimGradient: 'linear-gradient(180deg, rgba(250, 249, 244, 0.10) 0%, transparent 100%)',
+
+  success: { light: '#86efac', main: '#22c55e', dark: '#15803d' },
+  warning: { light: '#fcd34d', main: '#f59e0b', dark: '#b45309' },
+  error:   { light: '#fca5a5', main: '#ef4444', dark: '#b91c1c' },
+  info:    { light: '#a5b4fc', main: '#6366f1', dark: '#4f46e5' },
+};
+
+// --------------------------------------------------------------------------
+// Emotion Color Palette (shared across both modes)
+// --------------------------------------------------------------------------
+export const emotionColors = {
+  light: {
+    joy:          'hsl(38, 65%, 72%)',
+    contentment:  'hsl(25, 55%, 78%)',
+    excitement:   'hsl(15, 60%, 70%)',
+    gratitude:    'hsl(42, 50%, 76%)',
+    confidence:   'hsl(35, 70%, 68%)',
+    stress:       'hsl(220, 20%, 68%)',
+    anxiety:      'hsl(260, 18%, 72%)',
+    frustration:  'hsl(5, 25%, 65%)',
+    sadness:      'hsl(210, 15%, 70%)',
+    boredom:      'hsl(30, 8%, 72%)',
+    curiosity:    'hsl(175, 35%, 62%)',
+    loneliness:   'hsl(280, 25%, 65%)',
+  },
+  dark: {
+    joy:          'hsl(38, 55%, 45%)',
+    contentment:  'hsl(25, 45%, 42%)',
+    excitement:   'hsl(15, 50%, 40%)',
+    gratitude:    'hsl(42, 40%, 40%)',
+    confidence:   'hsl(35, 60%, 38%)',
+    stress:       'hsl(220, 25%, 35%)',
+    anxiety:      'hsl(260, 22%, 38%)',
+    frustration:  'hsl(5, 30%, 35%)',
+    sadness:      'hsl(210, 20%, 32%)',
+    boredom:      'hsl(30, 10%, 35%)',
+    curiosity:    'hsl(175, 40%, 35%)',
+    loneliness:   'hsl(280, 30%, 32%)',
+  },
+} as const;
+
+// --------------------------------------------------------------------------
+// Shared design tokens
+// --------------------------------------------------------------------------
+const shared = {
   typography: {
     fontFamily: {
-      sans: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      sans: '"Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       mono: '"JetBrains Mono", "Fira Code", Consolas, monospace',
     },
     fontSize: {
-      xs: '0.75rem',    // 12px
-      sm: '0.875rem',   // 14px
-      base: '1rem',     // 16px
-      lg: '1.125rem',   // 18px
-      xl: '1.25rem',    // 20px
-      '2xl': '1.5rem',  // 24px
+      xs: '0.75rem',     // 12px
+      sm: '0.875rem',    // 14px
+      base: '1rem',      // 16px
+      lg: '1.125rem',    // 18px
+      xl: '1.25rem',     // 20px
+      '2xl': '1.5rem',   // 24px
       '3xl': '1.875rem', // 30px
-      '4xl': '2.25rem', // 36px
+      '4xl': '2.25rem',  // 36px
+      '5xl': '3rem',     // 48px
     },
     fontWeight: {
+      light: 300,
       normal: 400,
       medium: 500,
       semibold: 600,
@@ -102,6 +144,7 @@ export const theme = {
     },
     lineHeight: {
       tight: 1.25,
+      snug: 1.375,
       normal: 1.5,
       relaxed: 1.75,
     },
@@ -109,41 +152,45 @@ export const theme = {
 
   spacing: {
     0: '0',
-    1: '0.25rem',   // 4px
-    2: '0.5rem',    // 8px
-    3: '0.75rem',   // 12px
-    4: '1rem',      // 16px
-    5: '1.25rem',   // 20px
-    6: '1.5rem',    // 24px
-    8: '2rem',      // 32px
-    10: '2.5rem',   // 40px
-    12: '3rem',     // 48px
-    16: '4rem',     // 64px
-    20: '5rem',     // 80px
+    0.5: '0.125rem',  // 2px
+    1: '0.25rem',     // 4px
+    1.5: '0.375rem',  // 6px
+    2: '0.5rem',      // 8px
+    3: '0.75rem',     // 12px
+    4: '1rem',        // 16px
+    5: '1.25rem',     // 20px
+    6: '1.5rem',      // 24px
+    8: '2rem',        // 32px
+    10: '2.5rem',     // 40px
+    12: '3rem',       // 48px
+    16: '4rem',       // 64px
+    20: '5rem',       // 80px
+    24: '6rem',       // 96px
   },
 
   borderRadius: {
     none: '0',
-    sm: '0.25rem',    // 4px
-    default: '0.5rem', // 8px
-    md: '0.75rem',    // 12px
-    lg: '1rem',       // 16px
-    xl: '1.5rem',     // 24px
-    full: '9999px',
+    sm: '0.375rem',    // 6px  — small elements (chips, badges)
+    default: '0.5rem', // 8px  — buttons, inputs
+    md: '0.75rem',     // 12px — cards
+    lg: '1rem',        // 16px — larger cards
+    xl: '1.5rem',      // 24px — modals, major containers
+    full: '9999px',    //        pills, avatars
   },
 
   shadows: {
-    sm: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
-    default: '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
-    md: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
-    lg: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
-    xl: '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
+    sm: '0 1px 2px 0 rgb(0 0 0 / 0.04)',
+    default: '0 1px 3px 0 rgb(0 0 0 / 0.06)',
+    md: '0 4px 6px -1px rgb(0 0 0 / 0.06)',
+    lg: '0 10px 15px -3px rgb(0 0 0 / 0.06)',
   },
 
   transitions: {
-    fast: '150ms ease',
-    normal: '200ms ease',
-    slow: '300ms ease',
+    micro: '100ms ease-out',    // micro-interactions
+    fast: '150ms ease-out',     // hover, focus
+    normal: '250ms ease-out',   // standard transitions
+    slow: '400ms ease-out',     // page transitions
+    ambient: '2000ms ease-in-out', // ambient breathing
   },
 
   breakpoints: {
@@ -151,22 +198,49 @@ export const theme = {
     md: '768px',
     lg: '1024px',
     xl: '1280px',
-    '2xl': '1536px',
   },
 
   zIndex: {
+    base: 0,
     dropdown: 1000,
     sticky: 1020,
     fixed: 1030,
-    modal: 1040,
-    popover: 1050,
-    tooltip: 1060,
+    modalBackdrop: 1040,
+    modal: 1050,
+    popover: 1060,
+    tooltip: 1070,
+    navPill: 1080,
+    commandPalette: 1090,
   },
 } as const;
 
-export type Theme = typeof theme;
+// --------------------------------------------------------------------------
+// Composed themes
+// --------------------------------------------------------------------------
+type Colors = typeof lightColors;
+
+interface AnimusTheme {
+  colors: Colors;
+  typography: typeof shared.typography;
+  spacing: typeof shared.spacing;
+  borderRadius: typeof shared.borderRadius;
+  shadows: typeof shared.shadows;
+  transitions: typeof shared.transitions;
+  breakpoints: typeof shared.breakpoints;
+  zIndex: typeof shared.zIndex;
+  mode: 'light' | 'dark';
+}
+
+export const lightTheme: AnimusTheme = { colors: lightColors, ...shared, mode: 'light' };
+export const darkTheme: AnimusTheme  = { colors: darkColors as Colors, ...shared, mode: 'dark' };
+
+// Default export (light is default as per spec)
+export const theme = lightTheme;
+
+export type Theme = AnimusTheme;
 
 // Extend Emotion's theme type
 declare module '@emotion/react' {
-  export interface Theme extends typeof theme {}
+  // eslint-disable-next-line @typescript-eslint/no-empty-interface
+  export interface Theme extends AnimusTheme {}
 }

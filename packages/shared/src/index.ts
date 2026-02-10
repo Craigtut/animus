@@ -10,3 +10,4 @@ export * from './utils/index.js';
 export * as DecayEngine from './decay-engine.js';
 export type { AnimusEventMap, IEventBus } from './event-bus.js';
 export type { IEmbeddingProvider } from './embedding-provider.js';
+export * from './tools/index.js';

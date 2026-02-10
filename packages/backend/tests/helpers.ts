@@ -19,6 +19,7 @@ export function createTestSystemDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '001_initial.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '002_persona_expansion.sql'));
   return db;
 }
 

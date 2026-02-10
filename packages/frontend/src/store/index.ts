@@ -1,72 +1,20 @@
 /**
- * Zustand Store
+ * Store Barrel
  *
- * Global state management with persistence support.
+ * Re-exports all Zustand stores for convenient imports.
+ * Individual stores live in their own files for maintainability.
  */
 
-import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
-
-// ============================================================================
-// Auth Store
-// ============================================================================
-
-interface AuthState {
-  isAuthenticated: boolean;
-  user: { id: string; email: string } | null;
-  setUser: (user: { id: string; email: string } | null) => void;
-  logout: () => void;
-}
-
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set) => ({
-      isAuthenticated: false,
-      user: null,
-      setUser: (user) => set({ user, isAuthenticated: !!user }),
-      logout: () => set({ user: null, isAuthenticated: false }),
-    }),
-    {
-      name: 'animus-auth',
-      storage: createJSONStorage(() => localStorage),
-    }
-  )
-);
-
-// ============================================================================
-// UI Store
-// ============================================================================
-
-interface UIState {
-  sidebarOpen: boolean;
-  toggleSidebar: () => void;
-  setSidebarOpen: (open: boolean) => void;
-}
-
-export const useUIStore = create<UIState>()((set) => ({
-  sidebarOpen: true,
-  toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
-  setSidebarOpen: (open) => set({ sidebarOpen: open }),
-}));
-
-// ============================================================================
-// Settings Store (persisted)
-// ============================================================================
-
-interface SettingsState {
-  theme: 'light' | 'dark' | 'system';
-  setTheme: (theme: 'light' | 'dark' | 'system') => void;
-}
-
-export const useSettingsStore = create<SettingsState>()(
-  persist(
-    (set) => ({
-      theme: 'dark',
-      setTheme: (theme) => set({ theme }),
-    }),
-    {
-      name: 'animus-settings',
-      storage: createJSONStorage(() => localStorage),
-    }
-  )
-);
+export { useAuthStore } from './auth-store.js';
+export { useShellStore, type SpaceName } from './ui-store.js';
+export { useSettingsStore } from './settings-store.js';
+export { useOnboardingStore, type OnboardingStep } from './onboarding-store.js';
+export {
+  useHeartbeatStore,
+  selectEmotionsArray,
+  selectEmotion,
+  selectHasRunningAgents,
+  type AgentStatusEvent,
+  type ReplyStreamState,
+} from './heartbeat-store.js';
+export { useMessagesStore } from './messages-store.js';

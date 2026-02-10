@@ -70,7 +70,7 @@ export const mindOutputSchema = z.object({
     .array(
       z.object({
         content: z.string(),
-        memoryType: memoryTypeSchema,
+        type: memoryTypeSchema,
         importance: z.number().min(0).max(1),
         contactId: z.string().optional(),
         keywords: z.array(z.string()).optional(),
@@ -130,7 +130,7 @@ export const taskTickOutputSchema = z.object({
     .array(
       z.object({
         content: z.string(),
-        memoryType: memoryTypeSchema,
+        type: memoryTypeSchema,
         importance: z.number().min(0).max(1),
         contactId: z.string().optional(),
         keywords: z.array(z.string()).optional(),

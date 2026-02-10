@@ -38,10 +38,16 @@ export interface AnimusEventMap {
   // Decisions
   'decision:made': TickDecision;
 
+  // Reply streaming
+  'reply:chunk': { content: string; accumulated: string };
+  'reply:complete': { content: string; tickNumber: number };
+
   // Agent tasks
   'agent:spawned': { taskId: string; provider: string };
   'agent:completed': { taskId: string; result: string | null };
   'agent:failed': { taskId: string; error: string };
+  'agent:cancelled': { taskId: string; reason: string };
+  'agent:rate_limited': { taskId: string; count: number; limit: number };
 
   // System
   'system:settings_updated': Record<string, unknown>;
