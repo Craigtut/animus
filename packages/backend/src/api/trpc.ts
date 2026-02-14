@@ -7,7 +7,24 @@
 
 import { initTRPC, TRPCError } from '@trpc/server';
 import type { CreateFastifyContextOptions } from '@trpc/server/adapters/fastify';
+import { createVerifier } from 'fast-jwt';
 import type { JwtPayload } from '../plugins/auth.js';
+import { env } from '../utils/env.js';
+
+// ============================================================================
+// WebSocket Auth Helpers
+// ============================================================================
+
+const COOKIE_NAME = 'animus_session';
+
+/** Verifier for WebSocket connections where Fastify decorations aren't available */
+const verifyJwt = createVerifier({ key: env.JWT_SECRET });
+
+function extractCookieValue(cookieHeader: string | undefined, name: string): string | null {
+  if (!cookieHeader) return null;
+  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+  return match ? match[1] : null;
+}
 
 // ============================================================================
 // Context
@@ -25,8 +42,18 @@ export async function createTRPCContext({
 }: CreateFastifyContextOptions): Promise<TRPCContext> {
   let userId: string | null = null;
   try {
-    const decoded = await req.jwtVerify<JwtPayload>();
-    userId = decoded.userId;
+    if (typeof (req as any).jwtVerify === 'function') {
+      // Normal HTTP request — use Fastify's JWT decoration
+      const decoded = await (req as any).jwtVerify<JwtPayload>();
+      userId = decoded.userId;
+    } else {
+      // WebSocket raw IncomingMessage — manually verify JWT from cookie
+      const token = extractCookieValue(req.headers.cookie, COOKIE_NAME);
+      if (token) {
+        const decoded = verifyJwt(token) as JwtPayload;
+        userId = decoded.userId;
+      }
+    }
   } catch {
     // Not authenticated — that's fine for public procedures
   }

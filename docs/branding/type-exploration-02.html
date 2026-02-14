@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Animus — Type Exploration 02: Outfit vs DM Sans + Serif Pairings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,200;0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300;1,9..40,400&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Crimson+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400&family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --warm-white: #FAF9F4;
+    --warm-dark: #1C1A18;
+    --text-light: #1A1816;
+    --text-dark: #FAF9F4;
+    --sec-light: rgba(26, 24, 22, 0.5);
+    --sec-dark: rgba(250, 249, 244, 0.5);
+    --border-light: rgba(26, 24, 22, 0.08);
+    --border-dark: rgba(250, 249, 244, 0.08);
+    --surface-light: #F5F4EE;
+    --surface-dark: #242220;
+  }
+
+  body {
+    background: var(--warm-white);
+    color: var(--text-light);
+    font-family: 'Outfit', sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Page header                                                         */
+  /* ------------------------------------------------------------------ */
+  .page-header {
+    padding: 72px 64px 48px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .page-header .label {
+    font-size: 12px; font-weight: 600; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--sec-light); margin-bottom: 16px;
+  }
+  .page-header h1 {
+    font-size: 28px; font-weight: 400; line-height: 1.4; max-width: 720px;
+  }
+  .page-header p {
+    font-size: 15px; color: var(--sec-light); margin-top: 12px; max-width: 640px; line-height: 1.6;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Section headers                                                     */
+  /* ------------------------------------------------------------------ */
+  .section-header {
+    padding: 56px 64px 20px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .section-header .number {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--sec-light); margin-bottom: 8px;
+  }
+  .section-header h2 { font-size: 20px; font-weight: 500; }
+  .section-header p {
+    font-size: 14px; color: var(--sec-light); margin-top: 8px;
+    max-width: 680px; line-height: 1.65;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Dual-pane specimens (light + dark side by side)                     */
+  /* ------------------------------------------------------------------ */
+  .dual-pane { display: grid; grid-template-columns: 1fr 1fr; }
+
+  .pane {
+    padding: 56px 64px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .pane.dark {
+    background: var(--warm-dark);
+    color: var(--text-dark);
+    border-color: var(--border-dark);
+  }
+  .pane .mode-label {
+    font-family: 'Outfit', sans-serif;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; opacity: 0.35; margin-bottom: 36px;
+  }
+
+  /* Type specimens */
+  .wordmark { font-size: 42px; line-height: 1.1; margin-bottom: 6px; letter-spacing: -0.02em; }
+  .tagline { font-size: 15px; font-weight: 400; opacity: 0.5; margin-bottom: 40px; }
+  .display { font-size: 44px; line-height: 1.12; margin-bottom: 24px; letter-spacing: -0.015em; }
+  .h2-text { font-size: 26px; line-height: 1.3; margin-bottom: 16px; }
+  .body-text { font-size: 16px; line-height: 1.7; max-width: 500px; margin-bottom: 16px; }
+  .small-text { font-size: 13px; line-height: 1.55; max-width: 500px; opacity: 0.5; }
+  .ui-text { font-size: 14px; line-height: 1.5; margin-bottom: 8px; }
+
+  /* ------------------------------------------------------------------ */
+  /* Head-to-head comparison strip                                       */
+  /* ------------------------------------------------------------------ */
+  .compare-strip {
+    padding: 56px 64px;
+    background: var(--surface-light);
+    border-bottom: 1px solid var(--border-light);
+  }
+  .compare-strip .label {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--sec-light); margin-bottom: 40px;
+  }
+  .compare-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    margin-bottom: 32px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .compare-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .compare-cell .face-name {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--sec-light); margin-bottom: 12px;
+  }
+  .compare-cell .sample {
+    font-size: 36px; line-height: 1.2; letter-spacing: -0.01em;
+  }
+  .compare-cell .note {
+    font-size: 12px; color: var(--sec-light); margin-top: 10px; line-height: 1.5; max-width: 420px;
+  }
+
+  /* Character detail strip */
+  .char-strip {
+    padding: 48px 64px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .char-strip .label {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--sec-light); margin-bottom: 32px;
+  }
+  .char-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    margin-bottom: 24px;
+  }
+  .char-cell .chars {
+    font-size: 64px; line-height: 1.2; letter-spacing: 0.04em;
+  }
+  .char-cell .char-note {
+    font-size: 12px; color: var(--sec-light); margin-top: 8px; line-height: 1.5;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Serif section                                                       */
+  /* ------------------------------------------------------------------ */
+  .serif-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+  .serif-cell {
+    padding: 48px 48px;
+    border-right: 1px solid var(--border-light);
+    border-bottom: 1px solid var(--border-light);
+  }
+  .serif-cell:last-child { border-right: none; }
+  .serif-cell .serif-name {
+    font-family: 'Outfit', sans-serif;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; opacity: 0.4; margin-bottom: 28px;
+  }
+  .serif-cell .serif-display {
+    font-size: 36px; line-height: 1.18; margin-bottom: 16px;
+  }
+  .serif-cell .serif-body {
+    font-size: 17px; line-height: 1.7; margin-bottom: 16px; max-width: 380px;
+  }
+  .serif-cell .serif-note {
+    font-family: 'Outfit', sans-serif;
+    font-size: 12px; color: var(--sec-light); line-height: 1.55; max-width: 380px;
+  }
+
+  /* Dark serif row */
+  .serif-compare-dark {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    background: var(--warm-dark);
+    color: var(--text-dark);
+  }
+  .serif-compare-dark .serif-cell {
+    border-color: var(--border-dark);
+  }
+  .serif-compare-dark .serif-cell .serif-note {
+    color: var(--sec-dark);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Pairing compositions                                                */
+  /* ------------------------------------------------------------------ */
+  .pairing {
+    border-bottom: 1px solid var(--border-light);
+  }
+  .pairing-header {
+    padding: 48px 64px 16px;
+  }
+  .pairing-header .number {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--sec-light); margin-bottom: 8px;
+  }
+  .pairing-header h3 { font-size: 18px; font-weight: 500; }
+  .pairing-header p {
+    font-size: 14px; color: var(--sec-light); margin-top: 6px; max-width: 640px; line-height: 1.6;
+  }
+
+  .pairing-grid { display: grid; grid-template-columns: 1fr 1fr; }
+
+  .pairing-pane {
+    padding: 48px 64px 56px;
+  }
+  .pairing-pane.dark {
+    background: var(--warm-dark);
+    color: var(--text-dark);
+  }
+  .pairing-pane .mode-label {
+    font-family: 'Outfit', sans-serif;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; opacity: 0.35; margin-bottom: 32px;
+  }
+
+  .pairing-pane .p-display {
+    font-size: 42px; line-height: 1.12; margin-bottom: 20px; letter-spacing: -0.01em;
+  }
+  .pairing-pane .p-h2 {
+    font-size: 22px; line-height: 1.35; margin-bottom: 14px;
+  }
+  .pairing-pane .p-body {
+    font-size: 16px; line-height: 1.7; max-width: 480px; margin-bottom: 20px;
+  }
+  .pairing-pane .p-ui {
+    font-size: 14px; line-height: 1.5; margin-bottom: 6px;
+  }
+  .pairing-pane .p-caption {
+    font-size: 12px; opacity: 0.4; margin-top: 20px;
+  }
+
+  /* Simulated card component inside pairings */
+  .sim-card {
+    margin-top: 28px;
+    padding: 24px;
+    border-radius: 12px;
+    max-width: 400px;
+  }
+  .sim-card.light-card {
+    background: var(--surface-light);
+    border: 1px solid var(--border-light);
+  }
+  .sim-card.dark-card {
+    background: var(--surface-dark);
+    border: 1px solid var(--border-dark);
+  }
+  .sim-card .card-title {
+    font-size: 16px; font-weight: 600; margin-bottom: 6px;
+  }
+  .sim-card .card-body {
+    font-size: 14px; line-height: 1.6; opacity: 0.65;
+  }
+  .sim-card .card-action {
+    margin-top: 16px; font-size: 13px; font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Wordmark exploration                                                */
+  /* ------------------------------------------------------------------ */
+  .wordmark-section {
+    padding: 56px 64px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .wordmark-section .label {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--sec-light); margin-bottom: 40px;
+  }
+  .wordmark-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+  }
+  .wm-cell {
+    padding: 40px;
+    border-radius: 12px;
+    text-align: center;
+  }
+  .wm-cell.light-bg {
+    background: var(--surface-light);
+    border: 1px solid var(--border-light);
+  }
+  .wm-cell.dark-bg {
+    background: var(--warm-dark);
+    color: var(--text-dark);
+    border: 1px solid var(--border-dark);
+  }
+  .wm-cell .wm-text {
+    font-size: 48px;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+  }
+  .wm-cell .wm-sub {
+    font-size: 14px;
+    opacity: 0.4;
+    letter-spacing: 0.02em;
+  }
+
+</style>
+</head>
+<body>
+
+<!-- ====================================================================== -->
+<!-- HEADER                                                                  -->
+<!-- ====================================================================== -->
+<div class="page-header">
+  <div class="label">Animus — Type Exploration 02</div>
+  <h1>Outfit vs DM Sans — with serif pairings</h1>
+  <p>Focused comparison of the two finalists. Lora stays as our anchor serif. Two new serif options join: Crimson Pro and EB Garamond. All set with brand copy, both palettes, and pairing compositions.</p>
+</div>
+
+
+<!-- ====================================================================== -->
+<!-- 1. HEAD-TO-HEAD COMPARISON                                              -->
+<!-- ====================================================================== -->
+<div class="compare-strip">
+  <div class="label">Head to Head — Key differences</div>
+
+  <div class="compare-row">
+    <div class="compare-cell">
+      <div class="face-name">Outfit</div>
+      <div class="sample" style="font-family: 'Outfit'; font-weight: 400;">animus</div>
+      <div class="note">Geometric with rounded, open forms. The 'a' is single-story (round). The 'n' and 'u' have soft shoulders. Inherently warm and friendly. Slightly wider letterforms give it an airy, generous feel.</div>
+    </div>
+    <div class="compare-cell">
+      <div class="face-name">DM Sans</div>
+      <div class="sample" style="font-family: 'DM Sans'; font-weight: 400;">animus</div>
+      <div class="note">Geometric with more structure. The 'a' is double-story at text sizes (optically adjusted). More compact and refined. Feels quietly confident — less friendly, more authoritative. The optical sizing axis adapts letterforms for each size.</div>
+    </div>
+  </div>
+
+  <div class="compare-row">
+    <div class="compare-cell">
+      <div class="face-name">Outfit — Display weight</div>
+      <div class="sample" style="font-family: 'Outfit'; font-weight: 300;">Something that lives alongside you.</div>
+    </div>
+    <div class="compare-cell">
+      <div class="face-name">DM Sans — Display weight</div>
+      <div class="sample" style="font-family: 'DM Sans'; font-weight: 300;">Something that lives alongside you.</div>
+    </div>
+  </div>
+
+  <div class="compare-row">
+    <div class="compare-cell">
+      <div class="face-name">Outfit — Bold</div>
+      <div class="sample" style="font-family: 'Outfit'; font-weight: 700;">Artificial life.</div>
+    </div>
+    <div class="compare-cell">
+      <div class="face-name">DM Sans — Bold</div>
+      <div class="sample" style="font-family: 'DM Sans'; font-weight: 700;">Artificial life.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Character detail -->
+<div class="char-strip">
+  <div class="label">Letterform details — Where they diverge</div>
+  <div class="char-row">
+    <div class="char-cell">
+      <div class="chars" style="font-family: 'Outfit'; font-weight: 400;">a g e s</div>
+      <div class="char-note">Outfit: single-story 'a', open 'e', round 'g', soft 's'. Everything leans organic.</div>
+    </div>
+    <div class="char-cell">
+      <div class="chars" style="font-family: 'DM Sans'; font-weight: 400;">a g e s</div>
+      <div class="char-note">DM Sans: double-story 'a' at text sizes, more closed apertures, sharper terminals. More structure.</div>
+    </div>
+  </div>
+  <div class="char-row">
+    <div class="char-cell">
+      <div class="chars" style="font-family: 'Outfit'; font-weight: 400;">A N I M U S</div>
+      <div class="char-note">Outfit caps: clean, even, generous width. The 'A' has a high crossbar. Very balanced.</div>
+    </div>
+    <div class="char-cell">
+      <div class="chars" style="font-family: 'DM Sans'; font-weight: 400;">A N I M U S</div>
+      <div class="char-note">DM Sans caps: slightly more compact. The 'A' sits differently. More economical, more refined.</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ====================================================================== -->
+<!-- 2. OUTFIT — FULL SPECIMEN                                               -->
+<!-- ====================================================================== -->
+<div class="section-header">
+  <div class="number">Full Specimen — Outfit</div>
+  <h2>The warm, open direction</h2>
+  <p>Outfit in full brand context. Rounded geometric with generous forms. The warmth is built into the letterforms themselves — you don't have to work for it.</p>
+</div>
+<div class="dual-pane">
+  <div class="pane">
+    <div class="mode-label">Light mode</div>
+    <div class="wordmark" style="font-family: 'Outfit'; font-weight: 400;">animus</div>
+    <div class="tagline" style="font-family: 'Outfit';">the animus engine</div>
+    <div class="display" style="font-family: 'Outfit'; font-weight: 300;">Something that lives alongside you.</div>
+    <div class="h2-text" style="font-family: 'Outfit'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+    <div class="body-text" style="font-family: 'Outfit'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+    <div class="ui-text" style="font-family: 'Outfit'; font-weight: 500;">Dashboard</div>
+    <div class="ui-text" style="font-family: 'Outfit'; font-weight: 400;">Animus is thinking about your schedule...</div>
+    <div class="small-text" style="font-family: 'Outfit'; font-weight: 400;">Last active 3 minutes ago · Heartbeat: 2.4s · Mood: contemplative</div>
+  </div>
+  <div class="pane dark">
+    <div class="mode-label">Dark mode</div>
+    <div class="wordmark" style="font-family: 'Outfit'; font-weight: 400;">animus</div>
+    <div class="tagline" style="font-family: 'Outfit';">the animus engine</div>
+    <div class="display" style="font-family: 'Outfit'; font-weight: 300;">Something that lives alongside you.</div>
+    <div class="h2-text" style="font-family: 'Outfit'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+    <div class="body-text" style="font-family: 'Outfit'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+    <div class="ui-text" style="font-family: 'Outfit'; font-weight: 500;">Dashboard</div>
+    <div class="ui-text" style="font-family: 'Outfit'; font-weight: 400;">Animus is thinking about your schedule...</div>
+    <div class="small-text" style="font-family: 'Outfit'; font-weight: 400;">Last active 3 minutes ago · Heartbeat: 2.4s · Mood: contemplative</div>
+  </div>
+</div>
+
+
+<!-- ====================================================================== -->
+<!-- 3. DM SANS — FULL SPECIMEN                                              -->
+<!-- ====================================================================== -->
+<div class="section-header">
+  <div class="number">Full Specimen — DM Sans</div>
+  <h2>The refined, confident direction</h2>
+  <p>DM Sans in full brand context. More structured, more compact, quietly authoritative. The optical sizing means it genuinely adapts between display and text — not just scaling, but reshaping.</p>
+</div>
+<div class="dual-pane">
+  <div class="pane">
+    <div class="mode-label">Light mode</div>
+    <div class="wordmark" style="font-family: 'DM Sans'; font-weight: 400;">animus</div>
+    <div class="tagline" style="font-family: 'DM Sans';">the animus engine</div>
+    <div class="display" style="font-family: 'DM Sans'; font-weight: 300;">Something that lives alongside you.</div>
+    <div class="h2-text" style="font-family: 'DM Sans'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+    <div class="body-text" style="font-family: 'DM Sans'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+    <div class="ui-text" style="font-family: 'DM Sans'; font-weight: 500;">Dashboard</div>
+    <div class="ui-text" style="font-family: 'DM Sans'; font-weight: 400;">Animus is thinking about your schedule...</div>
+    <div class="small-text" style="font-family: 'DM Sans'; font-weight: 400;">Last active 3 minutes ago · Heartbeat: 2.4s · Mood: contemplative</div>
+  </div>
+  <div class="pane dark">
+    <div class="mode-label">Dark mode</div>
+    <div class="wordmark" style="font-family: 'DM Sans'; font-weight: 400;">animus</div>
+    <div class="tagline" style="font-family: 'DM Sans';">the animus engine</div>
+    <div class="display" style="font-family: 'DM Sans'; font-weight: 300;">Something that lives alongside you.</div>
+    <div class="h2-text" style="font-family: 'DM Sans'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+    <div class="body-text" style="font-family: 'DM Sans'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+    <div class="ui-text" style="font-family: 'DM Sans'; font-weight: 500;">Dashboard</div>
+    <div class="ui-text" style="font-family: 'DM Sans'; font-weight: 400;">Animus is thinking about your schedule...</div>
+    <div class="small-text" style="font-family: 'DM Sans'; font-weight: 400;">Last active 3 minutes ago · Heartbeat: 2.4s · Mood: contemplative</div>
+  </div>
+</div>
+
+
+<!-- ====================================================================== -->
+<!-- 4. SERIF OPTIONS — Three serifs side by side                            -->
+<!-- ====================================================================== -->
+<div class="section-header">
+  <div class="number">Serif Companions</div>
+  <h2>Lora + two new options</h2>
+  <p>Lora stays as our anchor. Crimson Pro brings refinement with warmth — think of it as Lora's more elegant sibling. EB Garamond brings old-world warmth with real organic character, rooted in one of the most beloved type traditions. Both are balanced and well-formed — no wonky letters.</p>
+</div>
+
+<!-- Light mode serifs -->
+<div class="serif-compare">
+  <div class="serif-cell">
+    <div class="serif-name">Lora</div>
+    <div class="serif-display" style="font-family: 'Lora'; font-weight: 400;">Something that lives alongside you.</div>
+    <div class="serif-body" style="font-family: 'Lora'; font-weight: 400;">Animus is not just software. It's the beginning of something that lives alongside you. A mind that persists, a spirit that adapts, a will that acts.</div>
+    <div class="serif-note">Warm, well-rooted. Moderate contrast with brushed curves. Trustworthy and grounded — excellent body readability. The most "bookish" of the three. Feels reliable and human.</div>
+  </div>
+  <div class="serif-cell">
+    <div class="serif-name">Crimson Pro</div>
+    <div class="serif-display" style="font-family: 'Crimson Pro'; font-weight: 400;">Something that lives alongside you.</div>
+    <div class="serif-body" style="font-family: 'Crimson Pro'; font-weight: 400;">Animus is not just software. It's the beginning of something that lives alongside you. A mind that persists, a spirit that adapts, a will that acts.</div>
+    <div class="serif-note">Refined, slightly higher contrast than Lora. Clean and elegant without being cold. Variable font with a wide weight range. More modern than Lora — feels like the typography of a well-designed product, not a novel.</div>
+  </div>
+  <div class="serif-cell">
+    <div class="serif-name">EB Garamond</div>
+    <div class="serif-display" style="font-family: 'EB Garamond'; font-weight: 400;">Something that lives alongside you.</div>
+    <div class="serif-body" style="font-family: 'EB Garamond'; font-weight: 400;">Animus is not just software. It's the beginning of something that lives alongside you. A mind that persists, a spirit that adapts, a will that acts.</div>
+    <div class="serif-note">Old-world beauty with organic warmth. Based on the Garamond tradition — one of the most human typeface families ever designed. Slightly narrower, with beautiful italic forms. The most "alive" feeling of the three — letters feel shaped by a hand, not a grid.</div>
+  </div>
+</div>
+
+<!-- Dark mode serifs -->
+<div class="serif-compare-dark">
+  <div class="serif-cell">
+    <div class="serif-name">Lora — Dark</div>
+    <div class="serif-display" style="font-family: 'Lora'; font-weight: 400;">Something that lives alongside you.</div>
+    <div class="serif-body" style="font-family: 'Lora'; font-weight: 400;">A mind that persists, a spirit that adapts, a will that acts on its own initiative.</div>
+  </div>
+  <div class="serif-cell">
+    <div class="serif-name">Crimson Pro — Dark</div>
+    <div class="serif-display" style="font-family: 'Crimson Pro'; font-weight: 400;">Something that lives alongside you.</div>
+    <div class="serif-body" style="font-family: 'Crimson Pro'; font-weight: 400;">A mind that persists, a spirit that adapts, a will that acts on its own initiative.</div>
+  </div>
+  <div class="serif-cell">
+    <div class="serif-name">EB Garamond — Dark</div>
+    <div class="serif-display" style="font-family: 'EB Garamond'; font-weight: 400;">Something that lives alongside you.</div>
+    <div class="serif-body" style="font-family: 'EB Garamond'; font-weight: 400;">A mind that persists, a spirit that adapts, a will that acts on its own initiative.</div>
+  </div>
+</div>
+
+
+<!-- ====================================================================== -->
+<!-- 5. PAIRINGS — Sans + Serif compositions                                 -->
+<!-- ====================================================================== -->
+<div class="section-header">
+  <div class="number">Pairing Compositions</div>
+  <h2>Sans + Serif in context</h2>
+  <p>Showing how each sans pairs with each serif finalist. The serif appears at display/headline scale, the sans carries headings, body, and UI. This is where you see if they create harmony or tension.</p>
+</div>
+
+<!-- Pairing 1: Outfit + Lora -->
+<div class="pairing">
+  <div class="pairing-header">
+    <div class="number">Pairing 01</div>
+    <h3>Lora display + Outfit body</h3>
+    <p>Warm serif meets warm sans. Both faces lean organic. This pairing is the friendliest, most approachable combination. The risk is that it's too soft — but the warmth is undeniable.</p>
+  </div>
+  <div class="pairing-grid">
+    <div class="pairing-pane">
+      <div class="mode-label">Light</div>
+      <div class="p-display" style="font-family: 'Lora'; font-weight: 400;">Something that lives alongside you.</div>
+      <div class="p-h2" style="font-family: 'Outfit'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="p-body" style="font-family: 'Outfit'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — but as a being with its own simulated inner life.</div>
+      <div class="sim-card light-card">
+        <div class="card-title" style="font-family: 'Outfit'; font-weight: 600;">Animus is thinking</div>
+        <div class="card-body" style="font-family: 'Outfit'; font-weight: 400;">Reviewing your calendar for tomorrow. Found 3 conflicts that need attention.</div>
+        <div class="card-action" style="font-family: 'Outfit';">View details</div>
+      </div>
+    </div>
+    <div class="pairing-pane dark">
+      <div class="mode-label">Dark</div>
+      <div class="p-display" style="font-family: 'Lora'; font-weight: 400;">Something that lives alongside you.</div>
+      <div class="p-h2" style="font-family: 'Outfit'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="p-body" style="font-family: 'Outfit'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — but as a being with its own simulated inner life.</div>
+      <div class="sim-card dark-card">
+        <div class="card-title" style="font-family: 'Outfit'; font-weight: 600;">Animus is thinking</div>
+        <div class="card-body" style="font-family: 'Outfit'; font-weight: 400;">Reviewing your calendar for tomorrow. Found 3 conflicts that need attention.</div>
+        <div class="card-action" style="font-family: 'Outfit';">View details</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Pairing 2: Outfit + Crimson Pro -->
+<div class="pairing">
+  <div class="pairing-header">
+    <div class="number">Pairing 02</div>
+    <h3>Crimson Pro display + Outfit body</h3>
+    <p>Elegant serif meets warm sans. Crimson Pro adds a touch of refinement at display scale that Lora doesn't quite have. The contrast between Crimson's precision and Outfit's openness creates a nice tension — sophisticated but never cold.</p>
+  </div>
+  <div class="pairing-grid">
+    <div class="pairing-pane">
+      <div class="mode-label">Light</div>
+      <div class="p-display" style="font-family: 'Crimson Pro'; font-weight: 400;">Something that lives alongside you.</div>
+      <div class="p-h2" style="font-family: 'Outfit'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="p-body" style="font-family: 'Outfit'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — but as a being with its own simulated inner life.</div>
+      <div class="sim-card light-card">
+        <div class="card-title" style="font-family: 'Outfit'; font-weight: 600;">Animus is thinking</div>
+        <div class="card-body" style="font-family: 'Outfit'; font-weight: 400;">Reviewing your calendar for tomorrow. Found 3 conflicts that need attention.</div>
+        <div class="card-action" style="font-family: 'Outfit';">View details</div>
+      </div>
+    </div>
+    <div class="pairing-pane dark">
+      <div class="mode-label">Dark</div>
+      <div class="p-display" style="font-family: 'Crimson Pro'; font-weight: 400;">Something that lives alongside you.</div>
+      <div class="p-h2" style="font-family: 'Outfit'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="p-body" style="font-family: 'Outfit'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — but as a being with its own simulated inner life.</div>
+      <div class="sim-card dark-card">
+        <div class="card-title" style="font-family: 'Outfit'; font-weight: 600;">Animus is thinking</div>
+        <div class="card-body" style="font-family: 'Outfit'; font-weight: 400;">Reviewing your calendar for tomorrow. Found 3 conflicts that need attention.</div>
+        <div class="card-action" style="font-family: 'Outfit';">View details</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Pairing 3: Outfit + EB Garamond -->
+<div class="pairing">
+  <div class="pairing-header">
+    <div class="number">Pairing 03</div>
+    <h3>EB Garamond display + Outfit body</h3>
+    <p>Old-world warmth meets modern geometry. EB Garamond has the most inherent "life" of the three serifs — the letters genuinely feel hand-shaped. Against Outfit's clean openness, it creates a pairing that feels both timeless and contemporary. This is probably the most distinctive combination.</p>
+  </div>
+  <div class="pairing-grid">
+    <div class="pairing-pane">
+      <div class="mode-label">Light</div>
+      <div class="p-display" style="font-family: 'EB Garamond'; font-weight: 400; font-size: 44px;">Something that lives alongside you.</div>
+      <div class="p-h2" style="font-family: 'Outfit'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="p-body" style="font-family: 'Outfit'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — but as a being with its own simulated inner life.</div>
+      <div class="sim-card light-card">
+        <div class="card-title" style="font-family: 'Outfit'; font-weight: 600;">Animus is thinking</div>
+        <div class="card-body" style="font-family: 'Outfit'; font-weight: 400;">Reviewing your calendar for tomorrow. Found 3 conflicts that need attention.</div>
+        <div class="card-action" style="font-family: 'Outfit';">View details</div>
+      </div>
+    </div>
+    <div class="pairing-pane dark">
+      <div class="mode-label">Dark</div>
+      <div class="p-display" style="font-family: 'EB Garamond'; font-weight: 400; font-size: 44px;">Something that lives alongside you.</div>
+      <div class="p-h2" style="font-family: 'Outfit'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="p-body" style="font-family: 'Outfit'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — but as a being with its own simulated inner life.</div>
+      <div class="sim-card dark-card">
+        <div class="card-title" style="font-family: 'Outfit'; font-weight: 600;">Animus is thinking</div>
+        <div class="card-body" style="font-family: 'Outfit'; font-weight: 400;">Reviewing your calendar for tomorrow. Found 3 conflicts that need attention.</div>
+        <div class="card-action" style="font-family: 'Outfit';">View details</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Pairing 4: DM Sans + Lora -->
+<div class="pairing">
+  <div class="pairing-header">
+    <div class="number">Pairing 04</div>
+    <h3>Lora display + DM Sans body</h3>
+    <p>Warm serif meets refined sans. Lora brings warmth at the headline level while DM Sans provides structure and quiet confidence underneath. More polished than Outfit + Lora, with a slightly more serious tone.</p>
+  </div>
+  <div class="pairing-grid">
+    <div class="pairing-pane">
+      <div class="mode-label">Light</div>
+      <div class="p-display" style="font-family: 'Lora'; font-weight: 400;">Something that lives alongside you.</div>
+      <div class="p-h2" style="font-family: 'DM Sans'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="p-body" style="font-family: 'DM Sans'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — but as a being with its own simulated inner life.</div>
+      <div class="sim-card light-card">
+        <div class="card-title" style="font-family: 'DM Sans'; font-weight: 600;">Animus is thinking</div>
+        <div class="card-body" style="font-family: 'DM Sans'; font-weight: 400;">Reviewing your calendar for tomorrow. Found 3 conflicts that need attention.</div>
+        <div class="card-action" style="font-family: 'DM Sans';">View details</div>
+      </div>
+    </div>
+    <div class="pairing-pane dark">
+      <div class="mode-label">Dark</div>
+      <div class="p-display" style="font-family: 'Lora'; font-weight: 400;">Something that lives alongside you.</div>
+      <div class="p-h2" style="font-family: 'DM Sans'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="p-body" style="font-family: 'DM Sans'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — but as a being with its own simulated inner life.</div>
+      <div class="sim-card dark-card">
+        <div class="card-title" style="font-family: 'DM Sans'; font-weight: 600;">Animus is thinking</div>
+        <div class="card-body" style="font-family: 'DM Sans'; font-weight: 400;">Reviewing your calendar for tomorrow. Found 3 conflicts that need attention.</div>
+        <div class="card-action" style="font-family: 'DM Sans';">View details</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Pairing 5: DM Sans + Crimson Pro -->
+<div class="pairing">
+  <div class="pairing-header">
+    <div class="number">Pairing 05</div>
+    <h3>Crimson Pro display + DM Sans body</h3>
+    <p>The most refined combination. Both faces carry elegance — Crimson Pro is precise and beautiful at display, DM Sans is clean and authoritative in body. This feels premium and polished. The question is whether it has enough warmth for Animus, or if it tips toward "luxury tech."</p>
+  </div>
+  <div class="pairing-grid">
+    <div class="pairing-pane">
+      <div class="mode-label">Light</div>
+      <div class="p-display" style="font-family: 'Crimson Pro'; font-weight: 400;">Something that lives alongside you.</div>
+      <div class="p-h2" style="font-family: 'DM Sans'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="p-body" style="font-family: 'DM Sans'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — but as a being with its own simulated inner life.</div>
+      <div class="sim-card light-card">
+        <div class="card-title" style="font-family: 'DM Sans'; font-weight: 600;">Animus is thinking</div>
+        <div class="card-body" style="font-family: 'DM Sans'; font-weight: 400;">Reviewing your calendar for tomorrow. Found 3 conflicts that need attention.</div>
+        <div class="card-action" style="font-family: 'DM Sans';">View details</div>
+      </div>
+    </div>
+    <div class="pairing-pane dark">
+      <div class="mode-label">Dark</div>
+      <div class="p-display" style="font-family: 'Crimson Pro'; font-weight: 400;">Something that lives alongside you.</div>
+      <div class="p-h2" style="font-family: 'DM Sans'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="p-body" style="font-family: 'DM Sans'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — but as a being with its own simulated inner life.</div>
+      <div class="sim-card dark-card">
+        <div class="card-title" style="font-family: 'DM Sans'; font-weight: 600;">Animus is thinking</div>
+        <div class="card-body" style="font-family: 'DM Sans'; font-weight: 400;">Reviewing your calendar for tomorrow. Found 3 conflicts that need attention.</div>
+        <div class="card-action" style="font-family: 'DM Sans';">View details</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Pairing 6: DM Sans + EB Garamond -->
+<div class="pairing">
+  <div class="pairing-header">
+    <div class="number">Pairing 06</div>
+    <h3>EB Garamond display + DM Sans body</h3>
+    <p>The contrast pairing. EB Garamond's organic, hand-shaped warmth at display scale against DM Sans' structured precision in body. Creates strong visual contrast — the headline draws you in with humanity, the body text delivers with confidence. High tension, high interest.</p>
+  </div>
+  <div class="pairing-grid">
+    <div class="pairing-pane">
+      <div class="mode-label">Light</div>
+      <div class="p-display" style="font-family: 'EB Garamond'; font-weight: 400; font-size: 44px;">Something that lives alongside you.</div>
+      <div class="p-h2" style="font-family: 'DM Sans'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="p-body" style="font-family: 'DM Sans'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — but as a being with its own simulated inner life.</div>
+      <div class="sim-card light-card">
+        <div class="card-title" style="font-family: 'DM Sans'; font-weight: 600;">Animus is thinking</div>
+        <div class="card-body" style="font-family: 'DM Sans'; font-weight: 400;">Reviewing your calendar for tomorrow. Found 3 conflicts that need attention.</div>
+        <div class="card-action" style="font-family: 'DM Sans';">View details</div>
+      </div>
+    </div>
+    <div class="pairing-pane dark">
+      <div class="mode-label">Dark</div>
+      <div class="p-display" style="font-family: 'EB Garamond'; font-weight: 400; font-size: 44px;">Something that lives alongside you.</div>
+      <div class="p-h2" style="font-family: 'DM Sans'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="p-body" style="font-family: 'DM Sans'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — but as a being with its own simulated inner life.</div>
+      <div class="sim-card dark-card">
+        <div class="card-title" style="font-family: 'DM Sans'; font-weight: 600;">Animus is thinking</div>
+        <div class="card-body" style="font-family: 'DM Sans'; font-weight: 400;">Reviewing your calendar for tomorrow. Found 3 conflicts that need attention.</div>
+        <div class="card-action" style="font-family: 'DM Sans';">View details</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ====================================================================== -->
+<!-- 6. WORDMARK EXPLORATION                                                 -->
+<!-- ====================================================================== -->
+<div class="section-header">
+  <div class="number">Wordmark Treatments</div>
+  <h2>"animus" across all candidates</h2>
+  <p>How does "animus" feel as a wordmark in each face? Shown at display scale in both modes. The wordmark might use the primary sans, the serif, or get its own custom treatment — but seeing them all here helps anchor the decision.</p>
+</div>
+
+<div class="wordmark-section">
+  <div class="label">Sans wordmark options</div>
+  <div class="wordmark-grid">
+    <div class="wm-cell light-bg">
+      <div class="wm-text" style="font-family: 'Outfit'; font-weight: 300;">animus</div>
+      <div class="wm-sub">Outfit Light</div>
+    </div>
+    <div class="wm-cell dark-bg">
+      <div class="wm-text" style="font-family: 'Outfit'; font-weight: 300;">animus</div>
+      <div class="wm-sub">Outfit Light</div>
+    </div>
+    <div class="wm-cell light-bg">
+      <div class="wm-text" style="font-family: 'Outfit'; font-weight: 400;">animus</div>
+      <div class="wm-sub">Outfit Regular</div>
+    </div>
+    <div class="wm-cell dark-bg">
+      <div class="wm-text" style="font-family: 'Outfit'; font-weight: 400;">animus</div>
+      <div class="wm-sub">Outfit Regular</div>
+    </div>
+    <div class="wm-cell light-bg">
+      <div class="wm-text" style="font-family: 'DM Sans'; font-weight: 300;">animus</div>
+      <div class="wm-sub">DM Sans Light</div>
+    </div>
+    <div class="wm-cell dark-bg">
+      <div class="wm-text" style="font-family: 'DM Sans'; font-weight: 300;">animus</div>
+      <div class="wm-sub">DM Sans Light</div>
+    </div>
+    <div class="wm-cell light-bg">
+      <div class="wm-text" style="font-family: 'DM Sans'; font-weight: 400;">animus</div>
+      <div class="wm-sub">DM Sans Regular</div>
+    </div>
+    <div class="wm-cell dark-bg">
+      <div class="wm-text" style="font-family: 'DM Sans'; font-weight: 400;">animus</div>
+      <div class="wm-sub">DM Sans Regular</div>
+    </div>
+  </div>
+</div>
+
+<div class="wordmark-section">
+  <div class="label">Serif wordmark options</div>
+  <div class="wordmark-grid">
+    <div class="wm-cell light-bg">
+      <div class="wm-text" style="font-family: 'Lora'; font-weight: 400;">animus</div>
+      <div class="wm-sub">Lora Regular</div>
+    </div>
+    <div class="wm-cell dark-bg">
+      <div class="wm-text" style="font-family: 'Lora'; font-weight: 400;">animus</div>
+      <div class="wm-sub">Lora Regular</div>
+    </div>
+    <div class="wm-cell light-bg">
+      <div class="wm-text" style="font-family: 'Crimson Pro'; font-weight: 400;">animus</div>
+      <div class="wm-sub">Crimson Pro Regular</div>
+    </div>
+    <div class="wm-cell dark-bg">
+      <div class="wm-text" style="font-family: 'Crimson Pro'; font-weight: 400;">animus</div>
+      <div class="wm-sub">Crimson Pro Regular</div>
+    </div>
+    <div class="wm-cell light-bg">
+      <div class="wm-text" style="font-family: 'EB Garamond'; font-weight: 400;">animus</div>
+      <div class="wm-sub">EB Garamond Regular</div>
+    </div>
+    <div class="wm-cell dark-bg">
+      <div class="wm-text" style="font-family: 'EB Garamond'; font-weight: 400;">animus</div>
+      <div class="wm-sub">EB Garamond Regular</div>
+    </div>
+    <div class="wm-cell light-bg">
+      <div class="wm-text" style="font-family: 'Lora'; font-weight: 400; font-style: italic;">animus</div>
+      <div class="wm-sub">Lora Italic</div>
+    </div>
+    <div class="wm-cell dark-bg">
+      <div class="wm-text" style="font-family: 'Lora'; font-weight: 400; font-style: italic;">animus</div>
+      <div class="wm-sub">Lora Italic</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

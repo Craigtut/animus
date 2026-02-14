@@ -250,7 +250,7 @@ interface UnknownMessage {
 - `docs/frontend/app-shell.md` -- Navigation, click-deeper transitions
 - `docs/frontend/presence.md` -- Primary contact conversation (shared between Presence and People)
 - `docs/architecture/contacts.md` -- Contact data model, permission tiers, identity resolution, unknown callers
-- `docs/architecture/channels.md` -- Channel types, identifiers
+- `docs/architecture/channel-packages.md` -- Channel types, identifiers, channel adapters
 - `docs/architecture/memory.md` -- Working memory (per-contact notepad, AI-maintained)
 - `docs/frontend/design-principles.md` -- Cards, inputs, typography, animation
 - `docs/brand-vision.md` -- Warm, approachable, clean

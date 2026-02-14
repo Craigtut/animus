@@ -663,7 +663,7 @@ interface VoiceReplyChunk {
 
 ## References
 
-- `docs/architecture/channels.md` — Channel adapter layer, IncomingMessage, outbound routing
+- `docs/architecture/channel-packages.md` — Channel system architecture, IncomingMessage, outbound routing
 - `docs/architecture/heartbeat.md` — Pipeline that voice messages flow through
 - `docs/architecture/contacts.md` — Identity resolution (voice uses web user's contact)
 - `docs/frontend/presence.md` — Presence page where voice mode lives

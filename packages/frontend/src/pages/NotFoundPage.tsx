@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from '../components/ui';
+import { Button, Typography } from '../components/ui';
 
 export function NotFoundPage() {
   const theme = useTheme();
@@ -15,14 +15,15 @@ export function NotFoundPage() {
       align-items: center;
       justify-content: center;
       padding: ${theme.spacing[6]};
+      gap: ${theme.spacing[2]};
       text-align: center;
     `}>
-      <h1 css={css`font-size: ${theme.typography.fontSize['2xl']}; font-weight: ${theme.typography.fontWeight.light}; margin-bottom: ${theme.spacing[2]};`}>
+      <Typography.Title3 css={css`font-weight: ${theme.typography.fontWeight.light};`}>
         Nothing here
-      </h1>
-      <p css={css`color: ${theme.colors.text.secondary}; margin-bottom: ${theme.spacing[6]};`}>
+      </Typography.Title3>
+      <Typography.Body color="secondary" css={css`margin-bottom: ${theme.spacing[4]};`}>
         This page doesn't exist.
-      </p>
+      </Typography.Body>
       <Button onClick={() => navigate('/')}>Go home</Button>
     </div>
   );

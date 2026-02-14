@@ -1,0 +1,509 @@
+/**
+ * Credential Service — detection, loading, saving, and validation of provider credentials.
+ *
+ * Central module for managing agent provider authentication across multiple methods:
+ * API keys, OAuth tokens, CLI detection, and Codex ChatGPT OAuth.
+ */
+
+import { execFile } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import type Database from 'better-sqlite3';
+import * as systemStore from '../db/stores/system-store.js';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('Credentials', 'server');
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export type CredentialType = 'api_key' | 'oauth_token' | 'codex_oauth' | 'cli_detected';
+
+export interface ProviderAuthMethod {
+  method: 'api_key' | 'oauth_token' | 'codex_oauth' | 'cli';
+  available: boolean;
+  source: 'database' | 'environment' | 'filesystem';
+  detail?: string;
+}
+
+export interface ProviderAuthStatus {
+  provider: 'claude' | 'codex';
+  configured: boolean;
+  methods: ProviderAuthMethod[];
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  message: string;
+}
+
+// ============================================================================
+// Credential Type Inference
+// ============================================================================
+
+/**
+ * Auto-detect credential type from the key prefix.
+ */
+export function inferCredentialType(
+  provider: string,
+  key: string
+): CredentialType {
+  if (provider === 'claude') {
+    if (key.startsWith('sk-ant-oat01-')) return 'oauth_token';
+    if (key.startsWith('sk-ant-api03-')) return 'api_key';
+    if (key.startsWith('sk-ant-')) return 'api_key';
+    return 'api_key';
+  }
+  if (provider === 'codex') {
+    if (key.startsWith('sk-proj-')) return 'api_key';
+    return 'api_key';
+  }
+  return 'api_key';
+}
+
+// ============================================================================
+// Environment Loading
+// ============================================================================
+
+/** Map of provider + credential type → env var name */
+const ENV_MAP: Record<string, string> = {
+  'claude:api_key': 'ANTHROPIC_API_KEY',
+  'claude:oauth_token': 'CLAUDE_CODE_OAUTH_TOKEN',
+  'codex:api_key': 'OPENAI_API_KEY',
+};
+
+/**
+ * Load all stored credentials into process.env at startup.
+ * Called once after database initialization.
+ */
+export function loadCredentialsIntoEnv(db: Database.Database): void {
+  let credentials: systemStore.Credential[];
+  try {
+    credentials = systemStore.getAllCredentials(db);
+  } catch (err) {
+    // Table may not exist yet on fresh install
+    log.info('Could not load credentials:', err instanceof Error ? err.message : err);
+    return;
+  }
+
+  log.info(`Found ${credentials.length} stored credential(s): ${credentials.map(c => `${c.provider}/${c.credentialType}`).join(', ') || 'none'}`);
+
+  for (const cred of credentials) {
+    const key = `${cred.provider}:${cred.credentialType}`;
+    const envVar = ENV_MAP[key];
+
+    if (envVar) {
+      process.env[envVar] = cred.data;
+      log.info(`Loaded ${cred.provider}/${cred.credentialType} into ${envVar}`);
+    } else if (cred.credentialType === 'codex_oauth') {
+      // Set sentinel for Codex OAuth
+      process.env['CODEX_OAUTH_CONFIGURED'] = 'true';
+      log.info('Loaded codex/codex_oauth (sentinel set)');
+    } else if (cred.credentialType === 'cli_detected') {
+      // Set sentinel so adapters know CLI auth is available
+      const sentinelVar = cred.provider === 'claude' ? 'CLAUDE_CLI_CONFIGURED' : 'CODEX_CLI_CONFIGURED';
+      process.env[sentinelVar] = 'true';
+      log.info(`Loaded ${cred.provider}/cli_detected (${sentinelVar} set)`);
+    }
+  }
+}
+
+// ============================================================================
+// Save / Remove
+// ============================================================================
+
+/**
+ * Save a credential: encrypt, store in DB, update process.env.
+ */
+export function saveCredential(
+  db: Database.Database,
+  provider: string,
+  key: string,
+  credentialType?: CredentialType
+): { credentialType: CredentialType } {
+  const type = credentialType ?? inferCredentialType(provider, key);
+
+  systemStore.saveCredential(db, provider, type, key);
+
+  // Update env var immediately
+  const envKey = `${provider}:${type}`;
+  const envVar = ENV_MAP[envKey];
+  if (envVar) {
+    process.env[envVar] = key;
+  }
+
+  // Ensure Claude onboarding file for headless SDK usage
+  if (provider === 'claude') {
+    ensureClaudeOnboardingFile();
+  }
+
+  return { credentialType: type };
+}
+
+/**
+ * Save a CLI detection sentinel.
+ */
+export function saveCliDetected(
+  db: Database.Database,
+  provider: string
+): void {
+  systemStore.saveCredential(db, provider, 'cli_detected', 'detected');
+  // Set sentinel env var immediately so adapters see it
+  const sentinelVar = provider === 'claude' ? 'CLAUDE_CLI_CONFIGURED' : 'CODEX_CLI_CONFIGURED';
+  process.env[sentinelVar] = 'true';
+}
+
+/**
+ * Remove credentials for a provider and clear env vars.
+ */
+export function removeCredential(
+  db: Database.Database,
+  provider: string,
+  credentialType?: CredentialType
+): void {
+  // Find what we're about to delete so we can clear the right env var
+  if (credentialType) {
+    const envKey = `${provider}:${credentialType}`;
+    const envVar = ENV_MAP[envKey];
+    if (envVar) {
+      delete process.env[envVar];
+    }
+    if (credentialType === 'codex_oauth') {
+      delete process.env['CODEX_OAUTH_CONFIGURED'];
+    }
+    if (credentialType === 'cli_detected') {
+      delete process.env[provider === 'claude' ? 'CLAUDE_CLI_CONFIGURED' : 'CODEX_CLI_CONFIGURED'];
+    }
+  } else {
+    // Removing all for provider — clear all possible env vars
+    for (const [key, envVar] of Object.entries(ENV_MAP)) {
+      if (key.startsWith(`${provider}:`)) {
+        delete process.env[envVar];
+      }
+    }
+    if (provider === 'codex') {
+      delete process.env['CODEX_OAUTH_CONFIGURED'];
+      delete process.env['CODEX_CLI_CONFIGURED'];
+    }
+    if (provider === 'claude') {
+      delete process.env['CLAUDE_CLI_CONFIGURED'];
+    }
+  }
+
+  systemStore.deleteCredential(db, provider, credentialType);
+}
+
+// ============================================================================
+// Detection
+// ============================================================================
+
+/**
+ * Detect available authentication methods for all providers.
+ */
+export async function detectProviderAuth(
+  db: Database.Database
+): Promise<ProviderAuthStatus[]> {
+  const [claude, codex] = await Promise.all([
+    detectClaudeAuth(db),
+    detectCodexAuth(db),
+  ]);
+  return [claude, codex];
+}
+
+async function detectClaudeAuth(db: Database.Database): Promise<ProviderAuthStatus> {
+  const methods: ProviderAuthMethod[] = [];
+
+  // Check env vars
+  if (process.env['ANTHROPIC_API_KEY']) {
+    methods.push({
+      method: 'api_key',
+      available: true,
+      source: 'environment',
+      detail: 'ANTHROPIC_API_KEY set',
+    });
+  }
+
+  if (process.env['CLAUDE_CODE_OAUTH_TOKEN']) {
+    methods.push({
+      method: 'oauth_token',
+      available: true,
+      source: 'environment',
+      detail: 'CLAUDE_CODE_OAUTH_TOKEN set',
+    });
+  }
+
+  // Check DB credentials (if not already found via env)
+  try {
+    const dbCreds = systemStore.getCredentialMetadata(db, 'claude');
+    for (const cred of dbCreds) {
+      const alreadyFound = methods.some(
+        (m) => m.method === cred.credentialType || (m.method === 'api_key' && cred.credentialType === 'api_key')
+      );
+      if (!alreadyFound && cred.credentialType !== 'cli_detected') {
+        methods.push({
+          method: cred.credentialType as ProviderAuthMethod['method'],
+          available: true,
+          source: 'database',
+        });
+      }
+    }
+  } catch {
+    // Table may not exist yet
+  }
+
+  // Check filesystem — ~/.claude/.credentials or ~/.claude/.credentials.json
+  try {
+    const home = homedir();
+    const credsPath = join(home, '.claude', '.credentials');
+    const credsJsonPath = join(home, '.claude', '.credentials.json');
+    if (existsSync(credsPath) || existsSync(credsJsonPath)) {
+      const alreadyHasCli = methods.some((m) => m.method === 'cli');
+      if (!alreadyHasCli) {
+        methods.push({
+          method: 'cli',
+          available: true,
+          source: 'filesystem',
+          detail: 'Claude Code credentials found',
+        });
+      }
+    }
+  } catch {
+    // Ignore filesystem errors
+  }
+
+  // Check for claude CLI binary
+  if (!methods.some((m) => m.method === 'cli')) {
+    const hasCli = await checkBinaryExists('claude');
+    if (hasCli) {
+      methods.push({
+        method: 'cli',
+        available: true,
+        source: 'filesystem',
+        detail: 'claude binary found in PATH',
+      });
+    }
+  }
+
+  return {
+    provider: 'claude',
+    configured: methods.some((m) => m.available),
+    methods,
+  };
+}
+
+async function detectCodexAuth(db: Database.Database): Promise<ProviderAuthStatus> {
+  const methods: ProviderAuthMethod[] = [];
+
+  // Check env vars
+  if (process.env['OPENAI_API_KEY']) {
+    methods.push({
+      method: 'api_key',
+      available: true,
+      source: 'environment',
+      detail: 'OPENAI_API_KEY set',
+    });
+  }
+
+  // Check DB credentials
+  try {
+    const dbCreds = systemStore.getCredentialMetadata(db, 'codex');
+    for (const cred of dbCreds) {
+      if (cred.credentialType === 'cli_detected') continue;
+      const alreadyFound = methods.some((m) => m.method === cred.credentialType);
+      if (!alreadyFound) {
+        const entry: ProviderAuthMethod = {
+          method: cred.credentialType as ProviderAuthMethod['method'],
+          available: true,
+          source: 'database',
+        };
+        if (cred.credentialType === 'codex_oauth') {
+          entry.detail = `ChatGPT OAuth (${(cred.metadata as Record<string, unknown>)?.['accountId'] ?? 'connected'})`;
+        }
+        methods.push(entry);
+      }
+    }
+  } catch {
+    // Table may not exist yet
+  }
+
+  // Check filesystem — ~/.codex/auth.json
+  try {
+    const authPath = join(homedir(), '.codex', 'auth.json');
+    if (existsSync(authPath)) {
+      const alreadyHasCli = methods.some((m) => m.method === 'cli');
+      if (!alreadyHasCli) {
+        methods.push({
+          method: 'cli',
+          available: true,
+          source: 'filesystem',
+          detail: 'Codex auth.json found',
+        });
+      }
+    }
+  } catch {
+    // Ignore
+  }
+
+  // Check for codex CLI binary
+  if (!methods.some((m) => m.method === 'cli')) {
+    const hasCli = await checkBinaryExists('codex');
+    if (hasCli) {
+      methods.push({
+        method: 'cli',
+        available: true,
+        source: 'filesystem',
+        detail: 'codex binary found in PATH',
+      });
+    }
+  }
+
+  return {
+    provider: 'codex',
+    configured: methods.some((m) => m.available),
+    methods,
+  };
+}
+
+// ============================================================================
+// Validation
+// ============================================================================
+
+/**
+ * Validate a credential against the provider's API.
+ */
+export async function validateCredential(
+  provider: string,
+  key: string,
+  credentialType: CredentialType
+): Promise<ValidationResult> {
+  try {
+    if (provider === 'claude') {
+      return await validateClaudeCredential(key, credentialType);
+    }
+    if (provider === 'codex') {
+      return await validateCodexCredential(key);
+    }
+    return { valid: false, message: `Unknown provider: ${provider}` };
+  } catch (err) {
+    return {
+      valid: false,
+      message: err instanceof Error ? err.message : 'Validation failed',
+    };
+  }
+}
+
+async function validateClaudeCredential(
+  key: string,
+  credentialType: CredentialType
+): Promise<ValidationResult> {
+  const headers: Record<string, string> = {
+    'anthropic-version': '2023-06-01',
+  };
+
+  if (credentialType === 'oauth_token') {
+    headers['Authorization'] = `Bearer ${key}`;
+  } else {
+    headers['x-api-key'] = key;
+  }
+
+  const response = await fetch('https://api.anthropic.com/v1/models', {
+    method: 'GET',
+    headers,
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (response.ok) {
+    return { valid: true, message: 'Credential verified successfully' };
+  }
+
+  if (response.status === 401) {
+    return { valid: false, message: 'Invalid credential — authentication failed' };
+  }
+
+  if (response.status === 403) {
+    // 403 can mean the key is valid but lacks certain permissions — still valid
+    return { valid: true, message: 'Credential accepted (limited permissions)' };
+  }
+
+  return {
+    valid: false,
+    message: `Validation failed with status ${response.status}`,
+  };
+}
+
+async function validateCodexCredential(key: string): Promise<ValidationResult> {
+  const response = await fetch('https://api.openai.com/v1/models', {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${key}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (response.ok) {
+    return { valid: true, message: 'API key verified successfully' };
+  }
+
+  if (response.status === 401) {
+    return { valid: false, message: 'Invalid API key — authentication failed' };
+  }
+
+  return {
+    valid: false,
+    message: `Validation failed with status ${response.status}`,
+  };
+}
+
+// ============================================================================
+// Claude Onboarding File
+// ============================================================================
+
+/**
+ * Ensure ~/.claude.json has hasCompletedOnboarding: true.
+ * Required for headless Claude SDK usage.
+ */
+export function ensureClaudeOnboardingFile(): void {
+  try {
+    const filePath = join(homedir(), '.claude.json');
+
+    if (existsSync(filePath)) {
+      const content = readFileSync(filePath, 'utf8');
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(content) as Record<string, unknown>;
+      } catch {
+        // Corrupt file — overwrite
+        data = {};
+      }
+
+      if (data['hasCompletedOnboarding'] === true) {
+        return; // Already set
+      }
+
+      data['hasCompletedOnboarding'] = true;
+      writeFileSync(filePath, JSON.stringify(data, null, 2));
+    } else {
+      writeFileSync(filePath, JSON.stringify({ hasCompletedOnboarding: true }, null, 2));
+    }
+  } catch (err) {
+    log.warn('Failed to ensure Claude onboarding file:', err);
+  }
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Check if a binary exists in PATH with a timeout.
+ */
+function checkBinaryExists(name: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const cmd = process.platform === 'win32' ? 'where' : 'which';
+    const child = execFile(cmd, [name], { timeout: 2000 }, (err) => {
+      resolve(!err);
+    });
+    // Ensure cleanup on timeout
+    child.on('error', () => resolve(false));
+  });
+}

@@ -8,3 +8,6 @@ export { Toggle } from './Toggle';
 export { Slider } from './Slider';
 export { IconButton } from './IconButton';
 export { Tooltip } from './Tooltip';
+export { Typography } from './Typography';
+export { CityAutocomplete } from './CityAutocomplete';
+export { TimezoneSelect } from './TimezoneSelect';

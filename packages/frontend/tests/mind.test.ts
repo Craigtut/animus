@@ -15,16 +15,16 @@ import { describe, it, expect } from 'vitest';
 import { getActiveSection } from '../src/components/mind/MindSubNav.js';
 
 describe('getActiveSection', () => {
-  it('returns "emotions" for /mind', () => {
-    expect(getActiveSection('/mind')).toBe('emotions');
+  it('returns "journal" for /mind', () => {
+    expect(getActiveSection('/mind')).toBe('journal');
   });
 
   it('returns "emotions" for /mind/emotions', () => {
     expect(getActiveSection('/mind/emotions')).toBe('emotions');
   });
 
-  it('returns "thoughts" for /mind/thoughts', () => {
-    expect(getActiveSection('/mind/thoughts')).toBe('thoughts');
+  it('returns "journal" for /mind/journal', () => {
+    expect(getActiveSection('/mind/journal')).toBe('journal');
   });
 
   it('returns "memories" for /mind/memories', () => {
@@ -39,8 +39,8 @@ describe('getActiveSection', () => {
     expect(getActiveSection('/mind/agents')).toBe('agents');
   });
 
-  it('returns "emotions" for unknown sub-path', () => {
-    expect(getActiveSection('/mind/unknown')).toBe('emotions');
+  it('returns "journal" for unknown sub-path', () => {
+    expect(getActiveSection('/mind/unknown')).toBe('journal');
   });
 
   it('handles goal detail routes', () => {

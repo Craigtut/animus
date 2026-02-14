@@ -2,8 +2,9 @@
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Input } from '../../components/ui';
+import { Input, Typography } from '../../components/ui';
 import { useOnboardingStore } from '../../store';
+import { OnboardingNav } from './OnboardingNav';
 
 export function IdentityStep() {
   const theme = useTheme();
@@ -23,33 +24,28 @@ export function IdentityStep() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div>
-        <h2
-          css={css`
-            font-size: ${theme.typography.fontSize['2xl']};
-            font-weight: ${theme.typography.fontWeight.light};
-            margin-bottom: ${theme.spacing[2]};
-          `}
-        >
-          Tell your Animus who you are
-        </h2>
-        <p css={css`color: ${theme.colors.text.secondary};`}>
-          This is how your Animus will know you across every channel.
-        </p>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+        <Typography.Title2 serif>
+          Tell your AI who you are
+        </Typography.Title2>
+        <Typography.Body color="secondary">
+          This is how your AI will know you across every channel.
+        </Typography.Body>
       </div>
 
       <Input
-        label="What should your Animus call you?"
+        label="What should your AI call you?"
         value={fullName}
         onChange={(e) => setFullName((e.target as HTMLInputElement).value)}
         placeholder="Your name"
         autoFocus
       />
 
-      <div css={css`display: flex; justify-content: space-between; margin-top: ${theme.spacing[4]};`}>
-        <Button variant="ghost" onClick={handleBack}>Back</Button>
-        <Button onClick={handleContinue} disabled={!fullName.trim()}>Continue</Button>
-      </div>
+      <OnboardingNav
+        onBack={handleBack}
+        onContinue={handleContinue}
+        continueDisabled={!fullName.trim()}
+      />
     </div>
   );
 }

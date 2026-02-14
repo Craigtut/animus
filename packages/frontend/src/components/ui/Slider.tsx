@@ -40,17 +40,25 @@ export function Slider({
       const rect = trackRef.current.getBoundingClientRect();
       const raw = (clientX - rect.left) / rect.width;
       const clamped = Math.max(0, Math.min(1, raw));
-      const stepped = Math.round(clamped / step) * step;
-      const scaled = min + stepped * (max - min);
-      onChange(Math.round(scaled * 100) / 100);
+      const scaled = min + clamped * (max - min);
+      const snapped = Math.round((scaled - min) / step) * step + min;
+      onChange(Math.max(min, Math.min(max, Math.round(snapped * 100) / 100)));
     },
     [min, max, step, onChange, disabled]
   );
 
+  const pointerIdRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!dragging) return;
     const onMove = (e: PointerEvent) => updateValue(e.clientX);
-    const onUp = () => setDragging(false);
+    const onUp = () => {
+      setDragging(false);
+      if (pointerIdRef.current !== null && trackRef.current) {
+        try { trackRef.current.releasePointerCapture(pointerIdRef.current); } catch {}
+        pointerIdRef.current = null;
+      }
+    };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     return () => {
@@ -100,6 +108,9 @@ export function Slider({
         tabIndex={disabled ? -1 : 0}
         onPointerDown={(e) => {
           if (disabled) return;
+          e.preventDefault();
+          pointerIdRef.current = e.pointerId;
+          trackRef.current?.setPointerCapture(e.pointerId);
           setDragging(true);
           updateValue(e.clientX);
         }}
@@ -171,6 +182,7 @@ export function Slider({
             transform: translateX(-50%);
             transition: ${dragging ? 'none' : `left 50ms ease-out`};
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+            pointer-events: none;
 
             &:hover {
               box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2);

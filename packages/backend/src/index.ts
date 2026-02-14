@@ -13,24 +13,36 @@ import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { initializeDatabases, closeDatabases } from './db/index.js';
+import { initializeDatabases, closeDatabases, getSystemDb } from './db/index.js';
 import { createTRPCContext, appRouter } from './api/index.js';
 import authPlugin from './plugins/auth.js';
 import { initializeHeartbeat, stopHeartbeat } from './heartbeat/index.js';
+import { loadCredentialsIntoEnv, ensureClaudeOnboardingFile } from './services/credential-service.js';
 import { env } from './utils/env.js';
+import { createLogger, updateCategoryCache } from './lib/logger.js';
+import * as systemStore from './db/stores/system-store.js';
+
+const log = createLogger('Server', 'server');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
   // Initialize databases (opens 5 DBs, runs migrations)
-  console.log('Initializing databases...');
+  log.info('Initializing databases...');
   await initializeDatabases();
+
+  // Load log category settings into logger cache
+  const logCategories = systemStore.getLogCategories(getSystemDb());
+  updateCategoryCache(logCategories);
+
+  // Load stored credentials into environment
+  log.info('Loading stored credentials...');
+  loadCredentialsIntoEnv(getSystemDb());
+  ensureClaudeOnboardingFile();
 
   // Create Fastify instance
   const fastify = Fastify({
-    logger: {
-      level: env.LOG_LEVEL,
-    },
+    logger: false,
   });
 
   // Register plugins
@@ -54,6 +66,7 @@ async function main() {
   // tRPC integration via Fastify adapter
   await fastify.register(fastifyTRPCPlugin, {
     prefix: '/api/trpc',
+    useWSS: true,
     trpcOptions: {
       router: appRouter,
       createContext: createTRPCContext,
@@ -79,7 +92,7 @@ async function main() {
   }
 
   // Initialize heartbeat system
-  console.log('Initializing heartbeat system...');
+  log.info('Initializing heartbeat system...');
   await initializeHeartbeat();
 
   // Start server
@@ -88,16 +101,16 @@ async function main() {
       port: env.PORT,
       host: env.HOST,
     });
-    console.log(`Server listening at ${address}`);
-    console.log(`Environment: ${env.NODE_ENV}`);
+    log.info(`Listening at ${address}`);
+    log.info(`Environment: ${env.NODE_ENV}`);
   } catch (err) {
-    fastify.log.error(err);
+    log.error('Server start failed:', err);
     process.exit(1);
   }
 
   // Graceful shutdown handler
   const shutdown = async () => {
-    console.log('Shutting down...');
+    log.info('Shutting down...');
     await stopHeartbeat();
     await fastify.close();
     closeDatabases();
@@ -109,6 +122,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('Failed to start server:', err);
+  log.error('Failed to start server:', err);
   process.exit(1);
 });

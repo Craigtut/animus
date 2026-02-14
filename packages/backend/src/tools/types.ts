@@ -7,7 +7,7 @@
  * See docs/architecture/mcp-tools.md
  */
 
-import type { AnimusToolName } from '@animus/shared';
+import type { AnimusToolName, ChannelType, Contact, ContactChannel } from '@animus/shared';
 import type { IEventBus } from '@animus/shared';
 
 /**
@@ -57,6 +57,20 @@ export interface ToolHandlerContext {
           importance: number;
         }>
       >;
+    };
+    /** Contact store — only provided in mind context (not sub-agents). */
+    contacts?: {
+      getContact(id: string): Contact | null;
+      listContacts(): Contact[];
+      getContactChannels(contactId: string): ContactChannel[];
+    };
+    /** Channel router — only provided in mind context (not sub-agents). */
+    channels?: {
+      sendOutbound(params: {
+        contactId: string;
+        channel: ChannelType;
+        content: string;
+      }): Promise<{ id: string } | null>;
     };
   };
 

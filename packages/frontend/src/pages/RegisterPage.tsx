@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Eye, EyeSlash } from '@phosphor-icons/react';
-import { Button, Input } from '../components/ui';
+import { Button, Input, Typography } from '../components/ui';
 import { useAuthStore } from '../store';
 import { trpc } from '../utils/trpc';
 
@@ -79,42 +79,28 @@ export function RegisterPage() {
         transition={{ duration: 0.4, ease: 'easeOut' }}
         css={css`width: 100%; max-width: 400px;`}
       >
-        <h1
-          css={css`
-            font-size: ${theme.typography.fontSize['3xl']};
-            font-weight: ${theme.typography.fontWeight.light};
-            text-align: center;
-            margin-bottom: ${theme.spacing[1]};
-          `}
-        >
+        <Typography.Title serif css={css`text-align: center; margin-bottom: ${theme.spacing[1]};`}>
           Create your account
-        </h1>
-        <p
-          css={css`
-            text-align: center;
-            color: ${theme.colors.text.secondary};
-            font-size: ${theme.typography.fontSize.base};
-            margin-bottom: ${theme.spacing[8]};
-          `}
-        >
+        </Typography.Title>
+        <Typography.Body color="secondary" css={css`text-align: center; margin-bottom: ${theme.spacing[8]};`}>
           You'll be the only one who can access this Animus instance.
-        </p>
+        </Typography.Body>
 
         <form onSubmit={handleSubmit}>
           {error && (
-            <div
+            <Typography.SmallBody
+              as="div"
+              color={theme.colors.error.main}
               css={css`
                 padding: ${theme.spacing[3]} ${theme.spacing[4]};
                 background: ${theme.colors.error.main}12;
                 border: 1px solid ${theme.colors.error.main}40;
                 border-radius: ${theme.borderRadius.default};
-                color: ${theme.colors.error.main};
-                font-size: ${theme.typography.fontSize.sm};
                 margin-bottom: ${theme.spacing[4]};
               `}
             >
               {error}
-            </div>
+            </Typography.SmallBody>
           )}
 
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>

@@ -3,9 +3,11 @@
  */
 
 import { z } from 'zod';
+import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';
 import { getMemoryDb } from '../../db/index.js';
 import * as memoryStore from '../../db/stores/memory-store.js';
+import { getEventBus } from '../../lib/event-bus.js';
 
 export const memoryRouter = router({
   /**
@@ -53,4 +55,27 @@ export const memoryRouter = router({
         limit: input?.limit ?? 50,
       });
     }),
+
+  /**
+   * Subscribe to memory changes across all layers.
+   */
+  onMemoryChange: protectedProcedure.subscription(() => {
+    return observable<{ type: 'working' | 'core' | 'stored' | 'pruned'; detail?: any }>((emit) => {
+      const eventBus = getEventBus();
+      const onWorking = (data: { contactId: string }) => emit.next({ type: 'working', detail: data });
+      const onCore = () => emit.next({ type: 'core' });
+      const onStored = (mem: any) => emit.next({ type: 'stored', detail: mem });
+      const onPruned = (data: { count: number }) => emit.next({ type: 'pruned', detail: data });
+      eventBus.on('memory:working_updated', onWorking);
+      eventBus.on('memory:core_updated', onCore);
+      eventBus.on('memory:stored', onStored);
+      eventBus.on('memory:pruned', onPruned);
+      return () => {
+        eventBus.off('memory:working_updated', onWorking);
+        eventBus.off('memory:core_updated', onCore);
+        eventBus.off('memory:stored', onStored);
+        eventBus.off('memory:pruned', onPruned);
+      };
+    });
+  }),
 });

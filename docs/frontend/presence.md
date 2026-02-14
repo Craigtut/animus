@@ -164,7 +164,7 @@ Surface the being's recent inner monologue. Not a log or a feed -- a stream of c
 
 **Layout:** Thoughts stack vertically, left-aligned. Each thought is a line or short paragraph of text. Generous vertical spacing between thoughts: 16-20px.
 
-**Typography:** Plus Jakarta Sans, body size (15-16px). Primary text color for the most recent thought.
+**Typography:** Outfit, body size (15-16px). Primary text color for the most recent thought.
 
 ### Opacity Gradient (Recency)
 

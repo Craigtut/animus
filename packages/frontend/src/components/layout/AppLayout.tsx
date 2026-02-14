@@ -1,8 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
-import { Outlet } from 'react-router-dom';
-import { AnimatePresence, motion } from 'motion/react';
-import { useLocation } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
+import { motion } from 'motion/react';
 import { NavigationPill } from './NavigationPill';
 import { CommandPalette } from './CommandPalette';
 import { useSubscriptionManager } from '../../hooks/useSubscriptionManager';
@@ -15,7 +14,7 @@ export function AppLayout() {
   const theme = useTheme();
   const location = useLocation();
 
-  // Determine the current space for AnimatePresence key
+  // Determine the current space for animation key
   const getSpaceKey = () => {
     const path = location.pathname;
     if (path.startsWith('/mind')) return 'mind';
@@ -34,27 +33,24 @@ export function AppLayout() {
       <NavigationPill />
       <CommandPalette />
 
-      <AnimatePresence mode="wait">
-        <motion.main
-          key={getSpaceKey()}
-          initial={{ opacity: 0, x: 10 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -10 }}
-          transition={{ duration: 0.2, ease: 'easeOut' }}
-          css={css`
-            /* Desktop: leave room for pill at top */
-            padding-top: 60px;
+      <motion.main
+        key={getSpaceKey()}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2, ease: 'easeOut' }}
+        css={css`
+          /* Desktop: leave room for pill at top (except presence — edge-to-edge) */
+          padding-top: ${getSpaceKey() === 'presence' ? '0' : '60px'};
 
-            /* Mobile: leave room for bottom nav */
-            @media (max-width: ${theme.breakpoints.md}) {
-              padding-top: ${theme.spacing[4]};
-              padding-bottom: 72px;
-            }
-          `}
-        >
-          <Outlet />
-        </motion.main>
-      </AnimatePresence>
+          /* Mobile: leave room for bottom nav */
+          @media (max-width: ${theme.breakpoints.md}) {
+            padding-top: ${getSpaceKey() === 'presence' ? '0' : theme.spacing[4]};
+            padding-bottom: 72px;
+          }
+        `}
+      >
+        <Outlet />
+      </motion.main>
     </div>
   );
 }

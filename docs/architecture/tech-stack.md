@@ -67,7 +67,7 @@ Animus is built as a self-contained, self-hosted application. The guiding princi
 
 | Technology | Version | Purpose |
 |------------|---------|---------|
-| **Node.js** | ^20.0 | Runtime |
+| **Node.js** | ^24.0 | Runtime |
 | **Fastify** | ^5.0 | HTTP server |
 | **tRPC** | ^11.0 | API framework |
 
@@ -401,7 +401,7 @@ interface IEncryptionService {
 
 If the encryption key is not set, the service should log a warning on startup and fall back to storing secrets as plaintext (acceptable for local development but not production). The `isConfigured()` method lets the UI warn users about unencrypted storage.
 
-Used by the channel configuration system (see `docs/architecture/channels.md`) and API key storage in `system.db`.
+Used by the channel configuration system (see `docs/architecture/channel-packages.md`) and API key storage in `system.db`.
 
 ---
 

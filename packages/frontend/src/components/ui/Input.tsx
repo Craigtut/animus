@@ -29,6 +29,8 @@ export const Input = forwardRef<HTMLInputElement | HTMLTextAreaElement, InputPro
       padding: ${theme.spacing[3]};
       ${rightElement ? `padding-right: ${theme.spacing[10]};` : ''}
       background: ${theme.colors.background.paper};
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       border: 1px solid ${error ? theme.colors.error.main : theme.colors.border.default};
       border-radius: ${theme.borderRadius.default};
       color: ${theme.colors.text.primary};

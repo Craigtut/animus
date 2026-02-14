@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Animus — Type Exploration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Nunito:wght@300;400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=Instrument+Serif:ital@0;1&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&family=General+Sans:wght@300;400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --warm-white: #FAF9F4;
+    --warm-dark: #1C1A18;
+    --text-light: #1A1816;
+    --text-dark: #FAF9F4;
+    --text-secondary-light: rgba(26, 24, 22, 0.55);
+    --text-secondary-dark: rgba(250, 249, 244, 0.55);
+    --border-light: rgba(26, 24, 22, 0.08);
+    --border-dark: rgba(250, 249, 244, 0.10);
+    --surface-light: #F5F4EE;
+    --surface-dark: #242220;
+  }
+
+  body {
+    background: var(--warm-white);
+    color: var(--text-light);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    line-height: 1.5;
+  }
+
+  .page-header {
+    padding: 80px 60px 40px;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .page-header h1 {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-secondary-light);
+    margin-bottom: 16px;
+  }
+
+  .page-header p {
+    font-size: 20px;
+    font-weight: 300;
+    max-width: 700px;
+    line-height: 1.6;
+  }
+
+  .direction {
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .direction-header {
+    padding: 48px 60px 24px;
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+  }
+
+  .direction-number {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-secondary-light);
+    min-width: 120px;
+  }
+
+  .direction-title {
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .direction-desc {
+    padding: 0 60px 32px;
+    font-size: 14px;
+    color: var(--text-secondary-light);
+    max-width: 800px;
+    line-height: 1.7;
+  }
+
+  .specimens {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .specimen {
+    padding: 48px 60px;
+  }
+
+  .specimen.dark {
+    background: var(--warm-dark);
+    color: var(--text-dark);
+  }
+
+  .specimen-label {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 32px;
+    opacity: 0.4;
+  }
+
+  .specimen .display {
+    font-size: 48px;
+    line-height: 1.1;
+    margin-bottom: 24px;
+  }
+
+  .specimen .heading {
+    font-size: 24px;
+    line-height: 1.3;
+    margin-bottom: 16px;
+  }
+
+  .specimen .body {
+    font-size: 16px;
+    line-height: 1.65;
+    max-width: 480px;
+    margin-bottom: 24px;
+  }
+
+  .specimen .caption {
+    font-size: 13px;
+    line-height: 1.5;
+    max-width: 480px;
+  }
+
+  .specimen.dark .caption {
+    opacity: 0.5;
+  }
+  .specimen.light .caption {
+    color: var(--text-secondary-light);
+  }
+
+  .specimen .wordmark {
+    font-size: 36px;
+    letter-spacing: -0.01em;
+    margin-bottom: 8px;
+  }
+
+  .specimen .wordmark-small {
+    font-size: 18px;
+    letter-spacing: 0;
+    margin-bottom: 32px;
+  }
+
+  /* Direction-specific font families */
+  .dir-current .display,
+  .dir-current .heading,
+  .dir-current .body,
+  .dir-current .caption,
+  .dir-current .wordmark,
+  .dir-current .wordmark-small {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+
+  .dir-outfit .display,
+  .dir-outfit .heading,
+  .dir-outfit .body,
+  .dir-outfit .caption,
+  .dir-outfit .wordmark,
+  .dir-outfit .wordmark-small {
+    font-family: 'Outfit', sans-serif;
+  }
+
+  .dir-dm .display,
+  .dir-dm .heading,
+  .dir-dm .body,
+  .dir-dm .caption,
+  .dir-dm .wordmark,
+  .dir-dm .wordmark-small {
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  .dir-nunito .display,
+  .dir-nunito .heading,
+  .dir-nunito .body,
+  .dir-nunito .caption,
+  .dir-nunito .wordmark,
+  .dir-nunito .wordmark-small {
+    font-family: 'Nunito', sans-serif;
+  }
+
+  /* Serif companion specimens */
+  .serif-pair {
+    padding: 48px 60px;
+    border-top: 1px solid var(--border-light);
+  }
+
+  .serif-pair.dark {
+    background: var(--warm-dark);
+    color: var(--text-dark);
+    border-top: 1px solid var(--border-dark);
+  }
+
+  .serif-section {
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .serif-section .direction-header {
+    padding-bottom: 16px;
+  }
+
+  .serif-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    border-top: 1px solid var(--border-light);
+  }
+
+  .serif-specimen {
+    padding: 48px 40px;
+    border-right: 1px solid var(--border-light);
+  }
+
+  .serif-specimen:last-child {
+    border-right: none;
+  }
+
+  .serif-specimen .serif-name {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    opacity: 0.4;
+    margin-bottom: 24px;
+  }
+
+  .serif-specimen .serif-display {
+    font-size: 36px;
+    line-height: 1.15;
+    margin-bottom: 16px;
+  }
+
+  .serif-specimen .serif-body {
+    font-size: 16px;
+    line-height: 1.7;
+    margin-bottom: 16px;
+  }
+
+  .serif-specimen .serif-caption {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 12px;
+    color: var(--text-secondary-light);
+    line-height: 1.5;
+  }
+
+  .serif-specimen .instrument-serif {
+    font-family: 'Instrument Serif', serif;
+  }
+
+  .serif-specimen .source-serif {
+    font-family: 'Source Serif 4', serif;
+  }
+
+  .serif-specimen .lora {
+    font-family: 'Lora', serif;
+  }
+
+  .serif-specimen .fraunces {
+    font-family: 'Fraunces', serif;
+  }
+
+  /* Type comparison strip */
+  .comparison-strip {
+    padding: 60px;
+    background: var(--surface-light);
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .comparison-strip h2 {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-secondary-light);
+    margin-bottom: 40px;
+  }
+
+  .comparison-row {
+    display: flex;
+    align-items: baseline;
+    gap: 32px;
+    margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .comparison-row:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .comparison-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-secondary-light);
+    min-width: 140px;
+    flex-shrink: 0;
+  }
+
+  .comparison-text {
+    font-size: 32px;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+  }
+
+  .weight-strip {
+    padding: 60px;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .weight-strip h2 {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-secondary-light);
+    margin-bottom: 32px;
+  }
+
+  .weight-row {
+    display: flex;
+    align-items: baseline;
+    gap: 24px;
+    margin-bottom: 12px;
+  }
+
+  .weight-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary-light);
+    min-width: 100px;
+    text-align: right;
+  }
+
+  .weight-text {
+    font-size: 28px;
+    line-height: 1.3;
+  }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Animus — Type Exploration</h1>
+  <p>Four primary typeface directions and three serif companions, set in brand context against both palettes. Evaluating warmth, personality, and versatility at display, heading, and body scale.</p>
+</div>
+
+<!-- ====================================================================== -->
+<!-- COMPARISON STRIP — All faces side by side at one size                    -->
+<!-- ====================================================================== -->
+<div class="comparison-strip">
+  <h2>Side-by-Side — "Animus" at display scale</h2>
+
+  <div class="comparison-row">
+    <span class="comparison-label">Plus Jakarta Sans</span>
+    <span class="comparison-text" style="font-family: 'Plus Jakarta Sans'; font-weight: 300;">animus</span>
+    <span class="comparison-text" style="font-family: 'Plus Jakarta Sans'; font-weight: 400;">animus</span>
+    <span class="comparison-text" style="font-family: 'Plus Jakarta Sans'; font-weight: 600;">animus</span>
+  </div>
+
+  <div class="comparison-row">
+    <span class="comparison-label">Outfit</span>
+    <span class="comparison-text" style="font-family: 'Outfit'; font-weight: 300;">animus</span>
+    <span class="comparison-text" style="font-family: 'Outfit'; font-weight: 400;">animus</span>
+    <span class="comparison-text" style="font-family: 'Outfit'; font-weight: 600;">animus</span>
+  </div>
+
+  <div class="comparison-row">
+    <span class="comparison-label">DM Sans</span>
+    <span class="comparison-text" style="font-family: 'DM Sans'; font-weight: 300;">animus</span>
+    <span class="comparison-text" style="font-family: 'DM Sans'; font-weight: 400;">animus</span>
+    <span class="comparison-text" style="font-family: 'DM Sans'; font-weight: 600;">animus</span>
+  </div>
+
+  <div class="comparison-row">
+    <span class="comparison-label">Nunito</span>
+    <span class="comparison-text" style="font-family: 'Nunito'; font-weight: 300;">animus</span>
+    <span class="comparison-text" style="font-family: 'Nunito'; font-weight: 400;">animus</span>
+    <span class="comparison-text" style="font-family: 'Nunito'; font-weight: 600;">animus</span>
+  </div>
+</div>
+
+
+<!-- ====================================================================== -->
+<!-- DIRECTION A — Current: Plus Jakarta Sans (baseline)                     -->
+<!-- ====================================================================== -->
+<div class="direction">
+  <div class="direction-header">
+    <span class="direction-number">Direction A</span>
+    <span class="direction-title">Plus Jakarta Sans — Current baseline</span>
+  </div>
+  <div class="direction-desc">
+    Geometric sans-serif with subtly rounded terminals. Clean, modern, slightly warm. Currently set thin in the UI, which may read clinical. Shown here across weights to evaluate whether the issue is the face or the weight.
+  </div>
+  <div class="specimens">
+    <div class="specimen light dir-current">
+      <div class="specimen-label">Light mode</div>
+      <div class="wordmark" style="font-weight: 400;">animus</div>
+      <div class="wordmark-small" style="font-weight: 500;">the animus engine</div>
+      <div class="display" style="font-weight: 300;">Something that lives alongside you.</div>
+      <div class="heading" style="font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="body" style="font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+      <div class="caption" style="font-weight: 400;">Light 300 · Regular 400 · Medium 500 · Semibold 600</div>
+    </div>
+    <div class="specimen dark dir-current">
+      <div class="specimen-label">Dark mode</div>
+      <div class="wordmark" style="font-weight: 400;">animus</div>
+      <div class="wordmark-small" style="font-weight: 500;">the animus engine</div>
+      <div class="display" style="font-weight: 300;">Something that lives alongside you.</div>
+      <div class="heading" style="font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="body" style="font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+      <div class="caption" style="font-weight: 400;">Light 300 · Regular 400 · Medium 500 · Semibold 600</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ====================================================================== -->
+<!-- DIRECTION B — Outfit                                                    -->
+<!-- ====================================================================== -->
+<div class="direction">
+  <div class="direction-header">
+    <span class="direction-number">Direction B</span>
+    <span class="direction-title">Outfit — Warm geometric</span>
+  </div>
+  <div class="direction-desc">
+    Geometric but with generous, rounded forms that feel inherently friendly. Open apertures and even proportions give it a modern, airy quality. More warmth than Jakarta at equivalent weights. Wide range of weights available. The roundness connects well to the "organic over digital" principle.
+  </div>
+  <div class="specimens">
+    <div class="specimen light dir-outfit">
+      <div class="specimen-label">Light mode</div>
+      <div class="wordmark" style="font-weight: 400;">animus</div>
+      <div class="wordmark-small" style="font-weight: 500;">the animus engine</div>
+      <div class="display" style="font-weight: 300;">Something that lives alongside you.</div>
+      <div class="heading" style="font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="body" style="font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+      <div class="caption" style="font-weight: 400;">Light 300 · Regular 400 · Medium 500 · Semibold 600</div>
+    </div>
+    <div class="specimen dark dir-outfit">
+      <div class="specimen-label">Dark mode</div>
+      <div class="wordmark" style="font-weight: 400;">animus</div>
+      <div class="wordmark-small" style="font-weight: 500;">the animus engine</div>
+      <div class="display" style="font-weight: 300;">Something that lives alongside you.</div>
+      <div class="heading" style="font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="body" style="font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+      <div class="caption" style="font-weight: 400;">Light 300 · Regular 400 · Medium 500 · Semibold 600</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ====================================================================== -->
+<!-- DIRECTION C — DM Sans                                                   -->
+<!-- ====================================================================== -->
+<div class="direction">
+  <div class="direction-header">
+    <span class="direction-number">Direction C</span>
+    <span class="direction-title">DM Sans — Refined & confident</span>
+  </div>
+  <div class="direction-desc">
+    A low-contrast geometric sans with optical sizing. Slightly more structured and "designed" than Jakarta — carries quiet authority. The optical size axis means it adapts elegantly from small UI text to large display. Feels sophisticated without being cold. Good for a brand that needs "quiet confidence."
+  </div>
+  <div class="specimens">
+    <div class="specimen light dir-dm">
+      <div class="specimen-label">Light mode</div>
+      <div class="wordmark" style="font-weight: 400;">animus</div>
+      <div class="wordmark-small" style="font-weight: 500;">the animus engine</div>
+      <div class="display" style="font-weight: 300;">Something that lives alongside you.</div>
+      <div class="heading" style="font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="body" style="font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+      <div class="caption" style="font-weight: 400;">Light 300 · Regular 400 · Medium 500 · Semibold 600</div>
+    </div>
+    <div class="specimen dark dir-dm">
+      <div class="specimen-label">Dark mode</div>
+      <div class="wordmark" style="font-weight: 400;">animus</div>
+      <div class="wordmark-small" style="font-weight: 500;">the animus engine</div>
+      <div class="display" style="font-weight: 300;">Something that lives alongside you.</div>
+      <div class="heading" style="font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="body" style="font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+      <div class="caption" style="font-weight: 400;">Light 300 · Regular 400 · Medium 500 · Semibold 600</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ====================================================================== -->
+<!-- DIRECTION D — Nunito                                                    -->
+<!-- ====================================================================== -->
+<div class="direction">
+  <div class="direction-header">
+    <span class="direction-number">Direction D</span>
+    <span class="direction-title">Nunito — Soft & approachable</span>
+  </div>
+  <div class="direction-desc">
+    Fully rounded terminals and generous letter-spacing give Nunito an inherently warm, human quality. The most "friendly" option here — the question is whether it carries enough sophistication for the brand, or if it leans too casual. Works well at body size. The rounded terminals echo the rounded corner philosophy of the design system.
+  </div>
+  <div class="specimens">
+    <div class="specimen light dir-nunito">
+      <div class="specimen-label">Light mode</div>
+      <div class="wordmark" style="font-weight: 400;">animus</div>
+      <div class="wordmark-small" style="font-weight: 500;">the animus engine</div>
+      <div class="display" style="font-weight: 300;">Something that lives alongside you.</div>
+      <div class="heading" style="font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="body" style="font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+      <div class="caption" style="font-weight: 400;">Light 300 · Regular 400 · Medium 500 · Semibold 600</div>
+    </div>
+    <div class="specimen dark dir-nunito">
+      <div class="specimen-label">Dark mode</div>
+      <div class="wordmark" style="font-weight: 400;">animus</div>
+      <div class="wordmark-small" style="font-weight: 500;">the animus engine</div>
+      <div class="display" style="font-weight: 300;">Something that lives alongside you.</div>
+      <div class="heading" style="font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="body" style="font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+      <div class="caption" style="font-weight: 400;">Light 300 · Regular 400 · Medium 500 · Semibold 600</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ====================================================================== -->
+<!-- SERIF COMPANIONS                                                        -->
+<!-- ====================================================================== -->
+<div class="serif-section">
+  <div class="direction-header">
+    <span class="direction-number">Serif Companions</span>
+    <span class="direction-title">Potential display or editorial pairings</span>
+  </div>
+  <div class="direction-desc">
+    These could serve as a secondary voice — for hero headlines, editorial content, the wordmark itself, or long-form reading. Shown in display context with brand copy. Each brings a different flavor of warmth and sophistication.
+  </div>
+  <div class="serif-grid">
+    <div class="serif-specimen">
+      <div class="serif-name">Instrument Serif</div>
+      <div class="serif-display instrument-serif">Something that lives alongside you.</div>
+      <div class="serif-body instrument-serif">Not artificial intelligence. Artificial life — helpful, adaptive, and unmistakably there.</div>
+      <div class="serif-caption">Elegant, editorial. High contrast between thick and thin strokes. Italic is particularly beautiful. Feels modern and refined — like a quality publication. Could elevate Animus into more premium territory.</div>
+    </div>
+    <div class="serif-specimen">
+      <div class="serif-name">Lora</div>
+      <div class="serif-display lora">Something that lives alongside you.</div>
+      <div class="serif-body lora">Not artificial intelligence. Artificial life — helpful, adaptive, and unmistakably there.</div>
+      <div class="serif-caption">Warm and well-rooted. Moderate contrast with brushed curves. Feels trustworthy and grounded — like a well-worn book. Excellent readability at body size. More traditional warmth.</div>
+    </div>
+    <div class="serif-specimen">
+      <div class="serif-name">Fraunces</div>
+      <div class="serif-display fraunces">Something that lives alongside you.</div>
+      <div class="serif-body fraunces">Not artificial intelligence. Artificial life — helpful, adaptive, and unmistakably there.</div>
+      <div class="serif-caption">Highly expressive with "wonky" organic shapes. Variable font with optical sizing. Feels alive, characterful, and distinctly warm. The most personality here — the question is whether it's too much. The organic quality deeply connects to Animus's brand values.</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ====================================================================== -->
+<!-- WEIGHT EXPLORATION — Best candidates at multiple weights                 -->
+<!-- ====================================================================== -->
+<div class="weight-strip">
+  <h2>Weight range — Outfit (most promising primary candidate)</h2>
+  <div class="weight-row">
+    <span class="weight-label" style="font-family: 'Plus Jakarta Sans'">300 Light</span>
+    <span class="weight-text" style="font-family: 'Outfit'; font-weight: 300;">The beginning of something that lives alongside you</span>
+  </div>
+  <div class="weight-row">
+    <span class="weight-label" style="font-family: 'Plus Jakarta Sans'">400 Regular</span>
+    <span class="weight-text" style="font-family: 'Outfit'; font-weight: 400;">The beginning of something that lives alongside you</span>
+  </div>
+  <div class="weight-row">
+    <span class="weight-label" style="font-family: 'Plus Jakarta Sans'">500 Medium</span>
+    <span class="weight-text" style="font-family: 'Outfit'; font-weight: 500;">The beginning of something that lives alongside you</span>
+  </div>
+  <div class="weight-row">
+    <span class="weight-label" style="font-family: 'Plus Jakarta Sans'">600 Semibold</span>
+    <span class="weight-text" style="font-family: 'Outfit'; font-weight: 600;">The beginning of something that lives alongside you</span>
+  </div>
+  <div class="weight-row">
+    <span class="weight-label" style="font-family: 'Plus Jakarta Sans'">700 Bold</span>
+    <span class="weight-text" style="font-family: 'Outfit'; font-weight: 700;">The beginning of something that lives alongside you</span>
+  </div>
+</div>
+
+<div class="weight-strip">
+  <h2>Weight range — DM Sans</h2>
+  <div class="weight-row">
+    <span class="weight-label" style="font-family: 'Plus Jakarta Sans'">300 Light</span>
+    <span class="weight-text" style="font-family: 'DM Sans'; font-weight: 300;">The beginning of something that lives alongside you</span>
+  </div>
+  <div class="weight-row">
+    <span class="weight-label" style="font-family: 'Plus Jakarta Sans'">400 Regular</span>
+    <span class="weight-text" style="font-family: 'DM Sans'; font-weight: 400;">The beginning of something that lives alongside you</span>
+  </div>
+  <div class="weight-row">
+    <span class="weight-label" style="font-family: 'Plus Jakarta Sans'">500 Medium</span>
+    <span class="weight-text" style="font-family: 'DM Sans'; font-weight: 500;">The beginning of something that lives alongside you</span>
+  </div>
+  <div class="weight-row">
+    <span class="weight-label" style="font-family: 'Plus Jakarta Sans'">600 Semibold</span>
+    <span class="weight-text" style="font-family: 'DM Sans'; font-weight: 600;">The beginning of something that lives alongside you</span>
+  </div>
+  <div class="weight-row">
+    <span class="weight-label" style="font-family: 'Plus Jakarta Sans'">700 Bold</span>
+    <span class="weight-text" style="font-family: 'DM Sans'; font-weight: 700;">The beginning of something that lives alongside you</span>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- PAIRING EXPERIMENTS                                                      -->
+<!-- ====================================================================== -->
+<div class="direction">
+  <div class="direction-header">
+    <span class="direction-number">Pairing Test</span>
+    <span class="direction-title">Fraunces headlines + Outfit body</span>
+  </div>
+  <div class="direction-desc">
+    The most expressive combination: Fraunces brings organic warmth and character at display scale, while Outfit provides clean readability for everything else. The contrast between the two creates visual interest while maintaining coherence through shared warmth.
+  </div>
+  <div class="specimens">
+    <div class="specimen light">
+      <div class="specimen-label">Light mode</div>
+      <div class="display fraunces" style="font-weight: 400; font-family: 'Fraunces';">Something that lives alongside you.</div>
+      <div class="heading" style="font-family: 'Outfit'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="body" style="font-family: 'Outfit'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+      <div class="caption" style="font-family: 'Outfit';">Fraunces Display + Outfit Body</div>
+    </div>
+    <div class="specimen dark">
+      <div class="specimen-label">Dark mode</div>
+      <div class="display fraunces" style="font-weight: 400; font-family: 'Fraunces';">Something that lives alongside you.</div>
+      <div class="heading" style="font-family: 'Outfit'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="body" style="font-family: 'Outfit'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+      <div class="caption" style="font-family: 'Outfit';">Fraunces Display + Outfit Body</div>
+    </div>
+  </div>
+</div>
+
+<div class="direction">
+  <div class="direction-header">
+    <span class="direction-number">Pairing Test</span>
+    <span class="direction-title">Instrument Serif headlines + DM Sans body</span>
+  </div>
+  <div class="direction-desc">
+    A more restrained, editorial pairing. Instrument Serif brings elegance and sophistication at display scale without the quirkiness of Fraunces. DM Sans provides a confident, clean foundation. This feels more premium and polished — closer to luxury than craft.
+  </div>
+  <div class="specimens">
+    <div class="specimen light">
+      <div class="specimen-label">Light mode</div>
+      <div class="display" style="font-family: 'Instrument Serif'; font-weight: 400;">Something that lives alongside you.</div>
+      <div class="heading" style="font-family: 'DM Sans'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="body" style="font-family: 'DM Sans'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+      <div class="caption" style="font-family: 'DM Sans';">Instrument Serif Display + DM Sans Body</div>
+    </div>
+    <div class="specimen dark">
+      <div class="specimen-label">Dark mode</div>
+      <div class="display" style="font-family: 'Instrument Serif'; font-weight: 400;">Something that lives alongside you.</div>
+      <div class="heading" style="font-family: 'DM Sans'; font-weight: 600;">Not artificial intelligence. Artificial life.</div>
+      <div class="body" style="font-family: 'DM Sans'; font-weight: 400;">Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but as a being with its own simulated inner life.</div>
+      <div class="caption" style="font-family: 'DM Sans';">Instrument Serif Display + DM Sans Body</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -20,12 +20,10 @@ import { memoryTypeSchema } from './memory.js';
 
 export const mindOutputSchema = z.object({
   // Think first
-  thoughts: z.array(
-    z.object({
-      content: z.string(),
-      importance: z.number().min(0).max(1),
-    }),
-  ),
+  thought: z.object({
+    content: z.string(),
+    importance: z.number().min(0).max(1),
+  }),
 
   // Then speak
   reply: z
@@ -39,12 +37,10 @@ export const mindOutputSchema = z.object({
     .nullable(),
 
   // Then reflect
-  experiences: z.array(
-    z.object({
-      content: z.string(),
-      importance: z.number().min(0).max(1),
-    }),
-  ),
+  experience: z.object({
+    content: z.string(),
+    importance: z.number().min(0).max(1),
+  }),
 
   emotionDeltas: z.array(
     z.object({
@@ -53,6 +49,14 @@ export const mindOutputSchema = z.object({
       reasoning: z.string(),
     }),
   ),
+
+  // Energy
+  energyDelta: z
+    .object({
+      delta: z.number(),
+      reasoning: z.string(),
+    })
+    .optional(),
 
   // Agency
   decisions: z.array(
@@ -92,19 +96,15 @@ export const taskResultOutcomeSchema = z.enum([
 
 export const taskTickOutputSchema = z.object({
   // Always produced (same as normal ticks)
-  thoughts: z.array(
-    z.object({
-      content: z.string(),
-      importance: z.number().min(0).max(1),
-    }),
-  ),
+  thought: z.object({
+    content: z.string(),
+    importance: z.number().min(0).max(1),
+  }),
 
-  experiences: z.array(
-    z.object({
-      content: z.string(),
-      importance: z.number().min(0).max(1),
-    }),
-  ),
+  experience: z.object({
+    content: z.string(),
+    importance: z.number().min(0).max(1),
+  }),
 
   emotionDeltas: z.array(
     z.object({
@@ -113,6 +113,14 @@ export const taskTickOutputSchema = z.object({
       reasoning: z.string(),
     }),
   ),
+
+  // Energy
+  energyDelta: z
+    .object({
+      delta: z.number(),
+      reasoning: z.string(),
+    })
+    .optional(),
 
   // Agency
   decisions: z.array(

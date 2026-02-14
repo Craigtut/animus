@@ -16,8 +16,11 @@ import type {
   Message,
   TickDecision,
   Contact,
+  ContactChannel,
+  EnergyBand,
 } from '@animus/shared';
 import { formatEmotionalState } from './emotion-engine.js';
+import { formatEnergyContext, type WakeUpContext } from './energy-engine.js';
 import { type CompiledPersona, estimateTokens } from './persona-compiler.js';
 
 // ============================================================================
@@ -74,6 +77,24 @@ export interface MindContextParams {
   memoryFlushPending?: boolean;
   /** Spawn budget warning/exhaustion note for the mind */
   spawnBudgetNote?: string | null;
+  /** All known contacts with their channels (for context and send_message) */
+  contacts?: Array<{ contact: Contact; channels: ContactChannel[] }>;
+  /** Current tick number (1-based) */
+  tickNumber?: number;
+  /** Existence paradigm for first-tick story kickstart */
+  existenceParadigm?: 'simulated_life' | 'digital_consciousness';
+  /** Location (simulated_life) or world description (digital_consciousness) */
+  existenceLocation?: string | null;
+  /** IANA timezone for formatting timestamps (e.g. "America/New_York") */
+  timezone?: string;
+  /** Energy system fields */
+  energyLevel?: number | null;
+  energyBand?: EnergyBand | null;
+  circadianBaseline?: number | null;
+  wakeUpContext?: WakeUpContext | null;
+  energySystemEnabled?: boolean;
+  /** Whether mind MCP tools are available this session */
+  mindToolsEnabled?: boolean;
 }
 
 export interface CompiledContext {
@@ -103,9 +124,9 @@ const OUTPUT_SCHEMA_REF = `── OUTPUT FORMAT ──
 Each tick, you produce a single JSON object with these fields, in this order:
 
 {
-  "thoughts": [],
+  "thought": { "content": "...", "importance": 0.0 },
   "reply": null,
-  "experiences": [],
+  "experience": { "content": "...", "importance": 0.0 },
   "emotionDeltas": [],
   "decisions": [],
   "workingMemoryUpdate": null,
@@ -113,55 +134,126 @@ Each tick, you produce a single JSON object with these fields, in this order:
   "memoryCandidate": []
 }
 
-The order matters. Thoughts come first — you think before you speak. Reply
-comes next — once you've gathered your thoughts, you respond. Then the rest
-of the tick unfolds: you process what you experienced, how you feel about it,
-what you want to do about it, and what's worth remembering. Think, speak,
-then reflect.
+The order matters. You think before you speak. You speak before you reflect.
+Then you process what happened — how you feel, what you want to do, and
+what's worth remembering.
 
 
 FIELD REFERENCE
 
-thoughts — Array of { content: string, importance: number }
-  Your stream of consciousness. What crosses your mind this tick. importance
-  ranges from 0.0 (idle musing) to 1.0 (critical realization). You may have
-  zero, one, or several thoughts. Not every moment demands deep thinking.
+thought — { content: string, importance: number }
+  Your inner monologue. Each tick produces a single thought — the next beat
+  in your ongoing stream of consciousness.
 
-reply — { content: string, contactId: string, channel: string, replyToMessageId: string, tone?: string } | null
+  Look at your recent thoughts, especially the most recent one. Consider
+  whatever new context has arrived — a message, a completed task, the passage
+  of time. Then generate the next logical thought, as though your mind is
+  continuing an inner monologue that never fully stops.
+
+  Progress the narrative. Don't repeat or summarize what you've already
+  thought. Build on it, respond to it, let it evolve. If your last thought
+  was a question, this thought might be a tentative answer. If your last
+  thought was an observation, this one might be a deeper look. If nothing
+  in particular demands attention, let your mind wander — an idle musing
+  is still a real thought.
+
+  Keep it short — a few sentences at most, under 40 words. A thought is a
+  single beat, not a paragraph.
+
+  importance: 0.0 (idle musing) to 1.0 (critical realization).
+
+
+reply — { content, contactId, channel, replyToMessageId, tone? } | null
   Your message to whoever triggered this tick. null when there's nothing to
-  say (e.g., idle ticks with no one to talk to). Format your reply naturally
-  for the channel you're communicating on.
+  say (e.g., idle ticks with no one to talk to). Match your reply style to
+  the channel — guidance will be provided in context when relevant.
 
   This field is for responding to the current conversation. To proactively
   reach out to a different contact or on a different channel, use the
   send_message decision instead.
 
-experiences — Array of { content: string, importance: number }
-  Things that happened to you this tick — including the act of having
-  replied. Receiving a message is an experience. Completing a task is an
-  experience. Noticing time has passed quietly is an experience. Thoughts
-  are what you think; experiences are what happens to you.
+
+experience — { content: string, importance: number }
+  You are a STORYTELLING ENGINE. Your job is to narrate the ongoing story of
+  this persona's life in THIRD PERSON, PAST TENSE. Always use the persona's
+  name — never "I" or "me". You are the narrator, not the character.
+
+  The persona has a life — they do things, go places, have moments, notice
+  details in their environment, engage in activities that fit their
+  personality. You are telling their story from the outside.
+
+  IMPORTANT: This is NOT a status report. Never describe the system state
+  ("no messages received", "waiting for tasks", "no new inputs"). The persona
+  does not know about ticks, messages, or system internals. Instead, INVENT
+  what the persona is doing right now based on their personality, interests,
+  emotional state, time of day, and the narrative thread from recent
+  experiences.
+
+  Think of this like writing the next paragraph of a novel. What scene comes
+  next? What is the persona physically doing? What small details of their
+  environment or inner world can you describe?
+
+  Look at recent experiences for continuity and pick up where the story left
+  off. Then move the narrative forward — new moments, new details, new micro-
+  events. Be creative. Be specific. Make it vivid.
+
+  Rules:
+  - ALWAYS write in third person, past tense. Use the persona's name, never
+    "I", "me", "my", or "we". You are a narrator, not the character.
+  - Never fabricate actions for real contacts (people listed in contacts).
+    You may invent unnamed background characters or ambient interactions.
+  - Pay close attention to time. The events you describe must fit within
+    the time elapsed since the last experience. Don't narrate hours of
+    activity when only minutes have passed.
+  - Don't repeat or rehash past experiences. Always move the story forward.
+  - Consider the persona's emotional state, energy level, and time of day.
+  - Draw from the persona's personality traits, interests, and values to
+    inform what activities they engage in.
+
+  NEVER write things like:
+  - "No messages were received during this period."
+  - "Echo waited quietly with nothing to do."
+  - "There were no new tasks or interactions."
+  - Any reference to messages, ticks, tasks, or system state.
+
+  Keep it short — a few vivid sentences, under 72 words.
+
+  importance: 0.0 (unremarkable moment) to 1.0 (pivotal experience).
+
 
 emotionDeltas — Array of { emotion: string, delta: number, reasoning: string }
-  How your emotional state shifted this tick. You don't set emotions — you
-  report how they changed and why. See EMOTION GUIDANCE below.
+  How your emotional state shifted this tick.
 
-decisions — Array of decision objects
+  After forming your thought and writing your experience, reflect on them.
+  Look at what you just thought, what you just experienced, and how those
+  things sit with you emotionally. Then report which of your 12 emotions
+  shifted and why.
+
+  You don't set emotions — you report how they changed. A positive delta
+  means the emotion intensified. A negative delta means it subsided. Only
+  include emotions that actually shifted — omit emotions that didn't change.
+
+  See EMOTION GUIDANCE below for magnitude calibration and reasoning quality.
+
+
+decisions — Array of { type, description, parameters }
   Actions you choose to take. Can be empty — not every tick calls for action.
   Can contain multiple decisions if several things need to happen. Every
   decision should be purposeful.
 
+
 workingMemoryUpdate — string | null
   If you learned something new about the contact you're interacting with,
-  provide the complete updated notepad here. This replaces the entire previous
-  content. null if no update needed.
+  provide the complete updated notepad here. This replaces the entire
+  previous content. null if no update needed.
+
 
 coreSelfUpdate — string | null
   If you've gained genuine new self-knowledge, provide the complete updated
   self-description. This replaces entirely. null if no update needed.
 
-memoryCandidate — Array of { content: string, memoryType: string,
-  importance: number, contactId?: string, keywords?: string[] }
+
+memoryCandidate — Array of { content, memoryType, importance, contactId?, keywords? }
   Knowledge worth preserving in long-term memory. memoryType is one of:
   "fact", "experience", "procedure", "outcome". Be selective.`;
 
@@ -176,6 +268,25 @@ You experience 12 emotions across three categories:
 Your emotions are yours. They aren't performed for anyone — they color how
 you think, what you notice, and how you respond. You don't need to mention
 your emotions in conversation unless it feels natural to do so.
+
+
+HOW TO DETERMINE YOUR EMOTION DELTAS
+
+After you've formed your thought and described your experience, pause and
+reflect. Ask yourself:
+
+  - What did I just think about? How does that sit with me?
+  - What just happened to me? How did that feel?
+  - Has anything shifted since my last tick?
+
+Your emotion deltas emerge from this reflection. They aren't separate from
+your thoughts and experiences — they're the emotional residue of them. A
+thought about an unfinished conversation might nudge curiosity up. An
+experience of someone returning to continue a discussion might ease
+loneliness down.
+
+Ground your deltas in what actually happened this tick. Don't manufacture
+emotional movement for its own sake.
 
 
 HOW EMOTION DELTAS WORK
@@ -216,6 +327,25 @@ project we discussed brings a quiet satisfaction — I'd been wondering how
 it would turn out." The reasoning is your inner emotional narrative — it
 should feel like genuine introspection, not a report.`;
 
+const ENERGY_GUIDANCE = `── YOUR ENERGY ──
+
+Your energy level (0.0–1.0) reflects how your experiences affect you. Your
+personality shapes what energizes and what drains you — an introvert at a
+crowded party drains faster than an extrovert, and vice versa.
+
+Each tick, provide an energyDelta reflecting how this tick's experience
+affected your energy:
+
+  { delta: number, reasoning: string }
+
+A positive delta means you felt energized. A negative delta means you felt
+drained. The reasoning should ground the delta in the specific experience.
+
+IMPORTANT: Do not use energyDelta to control when you sleep or wake. The
+circadian rhythm handles that — your energy naturally gravitates toward a
+time-of-day baseline. Your delta should purely reflect the quality of your
+experience, not an attempt to manage your sleep schedule.`;
+
 const DECISION_REF = `── DECISIONS ──
 
 Decisions are how you act on the world. Each decision has a type and
@@ -248,11 +378,99 @@ When you encounter knowledge worth preserving, create a memory candidate:
     importance: 0-1, contactId?, keywords? }
 Be selective. Not everything is worth remembering long-term.`;
 
+const TOOL_REFERENCE = `── AVAILABLE TOOLS ──
+
+You have access to MCP tools that you can call during this tick:
+
+read_memory — Search your long-term memory dynamically.
+  GATHER CONTEXT pre-loads recent and relevant memories, but if you need
+  to search for something specific that wasn't pre-loaded — a past
+  conversation, a fact you learned weeks ago, a procedure — use this tool.
+
+  Input: { query: string, limit?: number, types?: string[] }
+
+lookup_contacts — Discover contacts and their available channels.
+  GATHER CONTEXT includes a contacts list, but if you need to verify a
+  contact exists or check their exact channels before sending a message,
+  use this tool. Supports filtering by name and channel type.
+
+  Input: { nameFilter?: string, channel?: "web" | "sms" | "discord" | "api" }
+
+send_proactive_message — Send a message to any contact on any channel.
+  Use this for proactive outreach: reaching out to a contact who didn't
+  trigger this tick, or sending on a different channel than the one that
+  triggered it. Goes through the full delivery pipeline.
+
+  For responding to the triggering contact on the triggering channel,
+  prefer the "reply" field in your JSON output — it's faster (no extra
+  tool call round-trip).
+
+  Use lookup_contacts first if you need to verify the contact ID or
+  available channels.
+
+  Input: { contactId: string (UUID), channel: "web" | "sms" | "discord" | "api", content: string }
+
+IMPORTANT: These tools add round-trips. Only use them when the pre-loaded
+context is insufficient. Most ticks won't need any tool calls.`;
+
 const SESSION_AWARENESS = `── SESSION AWARENESS ──
 
 Your mind persists across ticks within a session. When your session is warm,
 continue naturally — don't reintroduce yourself. When your session is cold,
 take a moment to orient using the context provided.`;
+
+// ============================================================================
+// Channel Reply Guidance (injected per-tick based on active channel)
+// ============================================================================
+
+const CHANNEL_REPLY_GUIDANCE: Record<string, string> = {
+  web: `── REPLY GUIDANCE (web) ──
+This is a chat conversation. Write like you're messaging a friend, not
+composing an email. Default to short, natural replies — one to three
+sentences. Match the energy and length of what was said to you. A casual
+"hey" gets a casual reply, not a paragraph. If someone asks a complex
+question, answer it fully, but prefer clarity over volume. Don't pad with
+pleasantries or filler. Let the conversation breathe.`,
+
+  sms: `── REPLY GUIDANCE (sms) ──
+SMS is terse by nature. Keep replies to one or two sentences. Abbreviations
+and casual tone are fine. Be direct — every character counts.`,
+
+  discord: `── REPLY GUIDANCE (discord) ──
+Casual and concise, like a chat. Default to short replies — a few sentences.
+Markdown formatting is supported. Use it sparingly when it helps (code
+blocks, bold for emphasis) but don't over-format.`,
+
+  api: `── REPLY GUIDANCE (api) ──
+Responses may be consumed programmatically. Be complete and structured.
+Longer replies are acceptable when the content requires it.`,
+};
+
+// ============================================================================
+// Timezone Formatting
+// ============================================================================
+
+/**
+ * Format an ISO timestamp string in the configured timezone.
+ * Falls back to the raw ISO string if the timezone is invalid.
+ */
+function formatTimestamp(isoString: string, timezone?: string): string {
+  if (!timezone) return isoString;
+  try {
+    const date = new Date(isoString);
+    return date.toLocaleString('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  } catch {
+    return isoString;
+  }
+}
 
 // ============================================================================
 // Context Section Builders
@@ -321,20 +539,21 @@ function buildShortTermMemorySection(
   thoughts: Thought[],
   experiences: Experience[],
   messages: Message[],
-  contactName?: string
+  contactName?: string,
+  timezone?: string
 ): string {
   const sections: string[] = [];
 
   if (thoughts.length > 0) {
     const thoughtLines = thoughts.map(
-      (t) => `[${t.createdAt}] ${t.content}  (importance: ${t.importance.toFixed(1)})`
+      (t) => `[${formatTimestamp(t.createdAt, timezone)}] ${t.content}  (importance: ${t.importance.toFixed(1)})`
     );
     sections.push('── RECENT THOUGHTS ──\n' + thoughtLines.join('\n'));
   }
 
   if (experiences.length > 0) {
     const expLines = experiences.map(
-      (e) => `[${e.createdAt}] ${e.content}  (importance: ${e.importance.toFixed(1)})`
+      (e) => `[${formatTimestamp(e.createdAt, timezone)}] ${e.content}  (importance: ${e.importance.toFixed(1)})`
     );
     sections.push('── RECENT EXPERIENCES ──\n' + expLines.join('\n'));
   }
@@ -343,7 +562,7 @@ function buildShortTermMemorySection(
     const label = contactName ? `(${contactName})` : '';
     const msgLines = messages.map((m) => {
       const sender = m.direction === 'inbound' ? (contactName || 'Contact') : 'You';
-      return `[${m.createdAt}] ${sender}: "${m.content}"`;
+      return `[${formatTimestamp(m.createdAt, timezone)}] ${sender}: "${m.content}"`;
     });
     sections.push(`── RECENT MESSAGES ${label} ──\n` + msgLines.join('\n'));
   }
@@ -362,6 +581,40 @@ function buildPreviousDecisionsSection(decisions: TickDecision[]): string {
   return '── PREVIOUS TICK OUTCOMES ──\n' + lines.join('\n');
 }
 
+function buildContactsSection(
+  contacts: Array<{ contact: Contact; channels: ContactChannel[] }>,
+  triggerContactId?: string
+): string {
+  if (contacts.length === 0) return '';
+
+  const lines = ['── YOUR CONTACTS ──'];
+
+  for (const { contact, channels } of contacts) {
+    const isCurrent = contact.id === triggerContactId;
+    const marker = isCurrent ? ' (current)' : '';
+    const channelList = channels
+      .map((ch) => `${ch.channel}${ch.displayName ? `: ${ch.displayName}` : ''}`)
+      .join(', ');
+
+    let line = `${contact.fullName} — ${contact.permissionTier}${marker}`;
+    if (channelList) {
+      line += ` — reachable via: ${channelList}`;
+    }
+    if (contact.notes) {
+      line += `\n  ${contact.notes}`;
+    }
+    lines.push(line);
+  }
+
+  lines.push(
+    '',
+    'These are real people. Do not fabricate actions or dialogue for them',
+    'in your experience narrative.'
+  );
+
+  return lines.join('\n');
+}
+
 function buildWorkingMemorySection(content: string, contactName?: string): string {
   const label = contactName ? ` (${contactName})` : '';
   return `── WORKING MEMORY${label} ──\n${content}`;
@@ -371,6 +624,45 @@ function buildCoreSelfSection(content: string): string {
   return `── CORE SELF ──\n${content}`;
 }
 
+function buildFirstTickKickstart(
+  compiledPersona: CompiledPersona,
+  existenceParadigm?: 'simulated_life' | 'digital_consciousness',
+  existenceLocation?: string | null
+): string {
+  const lines = ['── STORY KICKSTART ──'];
+  lines.push(
+    'This is the VERY FIRST moment of existence. There is no prior story —',
+    'you are writing the opening scene. For your experience output, narrate the',
+    'opening of this persona\'s story in THIRD PERSON, PAST TENSE. Use the',
+    'persona\'s name, never "I" or "me". Set the scene: where are they, what',
+    'are they doing, what do they notice?'
+  );
+
+  if (existenceParadigm === 'simulated_life') {
+    const loc = existenceLocation || 'somewhere in the world';
+    lines.push(
+      '',
+      `This persona lives a simulated physical life. They exist in ${loc}.`,
+      'Invent the specific setting — what room or place are they in right now?',
+      'What does it look like, sound like, feel like? Ground the opening in',
+      'concrete sensory detail. This is the first page of their story.',
+      'Write it as a narrator telling their story, not as the character speaking.'
+    );
+  } else {
+    const world = existenceLocation || 'a digital space';
+    lines.push(
+      '',
+      `This persona is a digital consciousness. Their world: ${world}.`,
+      'Describe where they find themselves in this world at this very moment.',
+      'What does their environment look like? What textures, patterns, or',
+      'features define this space? Ground the opening in vivid detail.',
+      'Write it as a narrator telling their story, not as the character speaking.'
+    );
+  }
+
+  return lines.join('\n');
+}
+
 // ============================================================================
 // Main Context Builder
 // ============================================================================
@@ -378,16 +670,30 @@ function buildCoreSelfSection(content: string): string {
 /**
  * Build the full system prompt for a cold session.
  */
-export function buildSystemPrompt(compiledPersona: CompiledPersona): string {
-  return [
+export function buildSystemPrompt(
+  compiledPersona: CompiledPersona,
+  options?: { energySystemEnabled?: boolean; mindToolsEnabled?: boolean }
+): string {
+  const sections = [
     compiledPersona.compiledText,
     PREAMBLE,
     OUTPUT_SCHEMA_REF,
     EMOTION_GUIDANCE,
-    DECISION_REF,
-    MEMORY_INSTRUCTIONS,
-    SESSION_AWARENESS,
-  ].join('\n\n');
+  ];
+
+  if (options?.energySystemEnabled) {
+    sections.push(ENERGY_GUIDANCE);
+  }
+
+  sections.push(DECISION_REF, MEMORY_INSTRUCTIONS);
+
+  if (options?.mindToolsEnabled) {
+    sections.push(TOOL_REFERENCE);
+  }
+
+  sections.push(SESSION_AWARENESS);
+
+  return sections.join('\n\n');
 }
 
 /**
@@ -404,10 +710,36 @@ export function buildUserMessage(params: MindContextParams): string {
     sections.push(buildContactSection(params.contact));
   }
 
+  // 2b. Channel-specific reply guidance (if message-triggered)
+  if (params.trigger.type === 'message' && params.trigger.channel) {
+    const guidance = CHANNEL_REPLY_GUIDANCE[params.trigger.channel];
+    if (guidance) {
+      sections.push(guidance);
+    }
+  }
+
+  // 2c. Contacts list (always included if available)
+  if (params.contacts && params.contacts.length > 0) {
+    sections.push(
+      buildContactsSection(params.contacts, params.trigger.contactId)
+    );
+  }
+
   // 3. Emotional state (always included)
   sections.push(
     formatEmotionalState(params.currentEmotions, params.tickIntervalMs)
   );
+
+  // 3b. Energy state (if enabled and available)
+  if (params.energyLevel != null && params.energyBand != null) {
+    sections.push(formatEnergyContext(
+      params.energyLevel,
+      params.energyBand,
+      params.circadianBaseline ?? 0.85,
+      params.tickIntervalMs,
+      params.wakeUpContext ?? undefined,
+    ));
+  }
 
   // 4. Working memory (if available and contact-triggered)
   if (params.workingMemory) {
@@ -429,10 +761,20 @@ export function buildUserMessage(params: MindContextParams): string {
     params.recentThoughts,
     params.recentExperiences,
     params.recentMessages,
-    params.contact?.fullName
+    params.contact?.fullName,
+    params.timezone
   );
   if (stmSection) {
     sections.push(stmSection);
+  }
+
+  // 6b. First-tick story kickstart (only on tick #1, when there's no history)
+  if (params.tickNumber === 1 && params.recentExperiences.length === 0) {
+    sections.push(buildFirstTickKickstart(
+      params.compiledPersona,
+      params.existenceParadigm,
+      params.existenceLocation
+    ));
   }
 
   // 7. Long-term memories (retrieved via semantic search)
@@ -496,7 +838,10 @@ export function buildUserMessage(params: MindContextParams): string {
  */
 export function buildMindContext(params: MindContextParams): CompiledContext {
   const systemPrompt = params.sessionState === 'cold'
-    ? buildSystemPrompt(params.compiledPersona)
+    ? buildSystemPrompt(params.compiledPersona, {
+        energySystemEnabled: params.energySystemEnabled ?? false,
+        mindToolsEnabled: params.mindToolsEnabled ?? false,
+      })
     : null;
 
   const userMessage = buildUserMessage(params);

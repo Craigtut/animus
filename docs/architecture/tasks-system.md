@@ -704,4 +704,4 @@ The task system uses several shared abstractions (see `docs/architecture/tech-st
 - `docs/architecture/goals.md` — Goals, plans, seeds, and salience that drive task creation
 - `docs/architecture/agent-orchestration.md` — Sub-agents spawned to execute complex tasks
 - `docs/architecture/contacts.md` — Permission tiers affect task creation
-- `docs/architecture/channels.md` — Task result messages routed through channel adapters
+- `docs/architecture/channel-packages.md` — Task result messages routed through channel adapters

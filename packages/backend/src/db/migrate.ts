@@ -8,6 +8,9 @@
 import Database from 'better-sqlite3';
 import { readdirSync, readFileSync } from 'fs';
 import path from 'path';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('Migrations', 'database');
 
 /**
  * Run all pending migrations for a database.
@@ -68,8 +71,8 @@ export function runMigrations(
   }
 
   if (appliedCount > 0) {
-    console.log(
-      `[Migrations] ${dbName}: applied ${appliedCount} migration${appliedCount > 1 ? 's' : ''} (${files
+    log.info(
+      `${dbName}: applied ${appliedCount} migration${appliedCount > 1 ? 's' : ''} (${files
         .map((f) => path.basename(f, '.sql'))
         .slice(-appliedCount)
         .join(', ')})`

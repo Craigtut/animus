@@ -34,9 +34,8 @@ Onboarding is the user's first impression of the Animus brand. Every screen shou
 │   2. Agent Provider (authentication)                                │
 │   3. Your Identity (primary contact)                                │
 │   4. About You (context for the AI)                                 │
-│   5. Messaging Channels (optional, skippable)                       │
-│   6. Persona Creation (8 steps — the soul)                         │
-│   7. Birth → Main App                                               │
+│   5. Persona Creation (8 steps — the soul)                         │
+│   6. Birth → Main App                                               │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -145,7 +144,6 @@ type OnboardingStep =
   | 'agent_provider'
   | 'identity'
   | 'about_you'
-  | 'channels'
   | 'persona_existence'
   | 'persona_identity'
   | 'persona_archetype'
@@ -170,7 +168,7 @@ Each step saves its data independently. The user can go back to previous steps a
  ● Agent                               ● Identity
  ● You                                 ● Archetype
  ● About You                           ○ Dimensions
- ○ Channels                            ○ Traits
+                                       ○ Traits
                                         ○ Values
                                         ○ Background
                                         ○ Review
@@ -179,7 +177,7 @@ Each step saves its data independently. The user can go back to previous steps a
 **Navigation controls:**
 - **Back** — Always available (except on Welcome). Returns to previous step without losing data.
 - **Continue** — Primary button. Validates current step, saves data, advances. **Keyboard: Enter** or **Cmd/Ctrl+Enter**.
-- **Skip** — Available on optional steps only (Channels). Styled as a text link, not a button.
+- **Skip** — Not currently used (no optional steps remain). Reserved for future use.
 
 ### Keyboard Shortcuts
 
@@ -370,39 +368,7 @@ The exact validation call (which endpoint, what constitutes "success") will be d
 
 **Data saved:** Stored as the `notes` field on the primary contact record in `system.db`. See `docs/architecture/contacts.md` (Contact Notes & "Notes About You") for how these notes are surfaced in the mind's context.
 
-### Step 5: Messaging Channels
-
-**Purpose:** Let the user see what communication channels are available and optionally configure them.
-
-**Heading:** "How will you reach each other?"
-
-**Subheading:** "Animus can communicate through multiple channels. The web interface is always available — set up additional channels now or later from settings."
-
-**Layout:** Channel cards in a vertical list. Each card shows:
-
-| Channel | Status | Description |
-|---------|--------|-------------|
-| **Web** | Always on | "Chat with Animus right here in the browser. Always available." |
-| **SMS** | Requires setup | "Text Animus from your phone. Requires a Twilio account." |
-| **Discord** | Requires setup | "Talk to Animus in your Discord server. Requires a bot token." |
-| **API** | Always on | "Connect Animus to other services via API." |
-
-- **Web** and **API** cards are shown as "enabled" — no setup needed.
-- **SMS** and **Discord** cards have a "Set up" button that expands the card to show configuration fields:
-  - SMS: Twilio Account SID, Auth Token, Phone Number. If the user entered a phone number during identity setup, it is pre-filled here.
-  - Discord: Bot Token, Guild ID (with a link to setup instructions)
-
-Each channel card that gets configured shows a green check after successful validation.
-
-**This step is optional.** The user can proceed without configuring any additional channels — the web interface and API are available by default.
-
-**Actions:**
-- **Continue** — Always enabled (even if no channels are configured).
-- **Skip** — Text link alternative to "Continue" for users who want to defer channel setup.
-
-**Data saved:** Channel configurations to `system.db` (channels table + any required API credentials encrypted).
-
-### Step 6: Persona Creation
+### Step 5: Persona Creation
 
 **Purpose:** The soul of the experience. This is where the user defines who their Animus will be.
 
@@ -758,17 +724,16 @@ The orb and particle field smoothly transition into the main application's ambie
 /onboarding/agent     → Step 2: Agent provider
 /onboarding/identity  → Step 3: Your identity
 /onboarding/about-you → Step 4: About you
-/onboarding/channels  → Step 5: Messaging channels
 /onboarding/persona   → Redirects to current persona sub-step
-/onboarding/persona/existence   → Step 6a
-/onboarding/persona/identity    → Step 6b
-/onboarding/persona/archetype   → Step 6c
-/onboarding/persona/dimensions  → Step 6d
-/onboarding/persona/traits      → Step 6e
-/onboarding/persona/values      → Step 6f
-/onboarding/persona/background  → Step 6g
-/onboarding/persona/review      → Step 6h
-/onboarding/birth     → Step 7: Birth animation (non-navigable, reached only via review)
+/onboarding/persona/existence   → Step 5a
+/onboarding/persona/identity    → Step 5b
+/onboarding/persona/archetype   → Step 5c
+/onboarding/persona/dimensions  → Step 5d
+/onboarding/persona/traits      → Step 5e
+/onboarding/persona/values      → Step 5f
+/onboarding/persona/background  → Step 5g
+/onboarding/persona/review      → Step 5h
+/onboarding/birth     → Step 6: Birth animation (non-navigable, reached only via review)
 ```
 
 **Route guards:**
@@ -795,7 +760,6 @@ All onboarding data is saved to `system.db` as the user progresses. If they clos
 | Agent Provider | Provider selection + credentials (encrypted API keys or credential references) | `settings`, `api_keys` |
 | Identity | Primary contact record (name, email) | `contacts`, `contact_channels` |
 | About You | Primary contact notes (freeform text) | `contacts.notes` |
-| Channels | Channel configurations + credentials | `channels`, encrypted credentials |
 | Persona (all sub-steps) | Persona data as partial draft | `persona_draft` (JSON blob, or individual columns) |
 
 The persona data is saved as a draft during creation and only "finalized" (compiled into the system prompt) when the user hits "Bring to Life." This allows partial saves without affecting the running system.

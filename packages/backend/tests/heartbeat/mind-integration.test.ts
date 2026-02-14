@@ -243,19 +243,278 @@ describe('Reply streaming via EventBus', () => {
 // Test MindOutput validation with the real schema
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Test incremental JSON streaming via llm-json-stream
+// ---------------------------------------------------------------------------
+
+import { JsonStream } from 'llm-json-stream';
+
+/**
+ * Helper: creates the same async chunk channel used in the heartbeat module.
+ * This is a copy of the module-private function for testing purposes.
+ */
+function createChunkChannel(): {
+  push: (chunk: string) => void;
+  end: () => void;
+  iterable: AsyncIterable<string>;
+} {
+  let resolve: ((value: IteratorResult<string>) => void) | null = null;
+  const buffer: string[] = [];
+  let done = false;
+
+  const iterable: AsyncIterable<string> = {
+    [Symbol.asyncIterator]() {
+      return {
+        next(): Promise<IteratorResult<string>> {
+          if (buffer.length > 0) {
+            return Promise.resolve({ value: buffer.shift()!, done: false });
+          }
+          if (done) {
+            return Promise.resolve({ value: undefined as any, done: true });
+          }
+          return new Promise((r) => { resolve = r; });
+        },
+      };
+    },
+  };
+
+  return {
+    push(chunk: string) {
+      if (resolve) {
+        const r = resolve;
+        resolve = null;
+        r({ value: chunk, done: false });
+      } else {
+        buffer.push(chunk);
+      }
+    },
+    end() {
+      done = true;
+      if (resolve) {
+        const r = resolve;
+        resolve = null;
+        r({ value: undefined as any, done: true });
+      }
+    },
+    iterable,
+  };
+}
+
+describe('Incremental reply streaming via llm-json-stream', () => {
+  it('emits reply:chunk events incrementally as JSON streams in', async () => {
+    const eventBus = createMockEventBus();
+    const chunks: { content: string; accumulated: string }[] = [];
+
+    eventBus.on('reply:chunk', (data: { content: string; accumulated: string }) => {
+      chunks.push({ ...data });
+    });
+
+    // Simulate what mindQuery does: feed JSON character-by-character through
+    // the chunk channel and consume reply.content incrementally
+    const channel = createChunkChannel();
+    const parser = JsonStream.parse(channel.iterable);
+    const replyContentStream = parser.get<string>('reply.content');
+
+    let replyAccumulated = '';
+    const replyPromise = (async () => {
+      for await (const chunk of replyContentStream) {
+        replyAccumulated += chunk;
+        eventBus.emit('reply:chunk', { content: chunk, accumulated: replyAccumulated });
+      }
+    })();
+
+    // Feed a complete MindOutput JSON, simulating an LLM streaming tokens
+    const json = JSON.stringify({
+      thought: { content: 'Thinking about things', importance: 0.5 },
+      reply: {
+        content: 'Hello world',
+        contactId: 'c1',
+        channel: 'web',
+        replyToMessageId: 'msg-1',
+      },
+      experience: { content: 'Had a chat', importance: 0.3 },
+      emotionDeltas: [],
+      decisions: [],
+      workingMemoryUpdate: null,
+      coreSelfUpdate: null,
+      memoryCandidate: [],
+    });
+
+    // Feed character-by-character to simulate LLM streaming
+    for (const char of json) {
+      channel.push(char);
+    }
+    channel.end();
+
+    await replyPromise;
+    await parser.dispose();
+
+    // Verify we got incremental chunks (not a single bulk emission)
+    expect(chunks.length).toBeGreaterThan(1);
+
+    // Verify the final accumulated value matches the reply content
+    const lastChunk = chunks[chunks.length - 1]!;
+    expect(lastChunk.accumulated).toBe('Hello world');
+
+    // Verify accumulated values are monotonically growing
+    for (let i = 1; i < chunks.length; i++) {
+      expect(chunks[i]!.accumulated.length).toBeGreaterThan(chunks[i - 1]!.accumulated.length);
+    }
+  });
+
+  it('handles null reply gracefully (parser stream ends without error)', async () => {
+    const channel = createChunkChannel();
+    const parser = JsonStream.parse(channel.iterable);
+    const replyContentStream = parser.get<string>('reply.content');
+
+    // Catch the internal promise rejection (fires when path not found in JSON)
+    // This prevents unhandled rejection warnings
+    (replyContentStream as Promise<string>).catch(() => {});
+
+    let replyAccumulated = '';
+    const replyPromise = (async () => {
+      try {
+        for await (const chunk of replyContentStream) {
+          replyAccumulated += chunk;
+        }
+      } catch {
+        // Expected: parser rejects when reply.content doesn't exist (reply is null)
+      }
+    })();
+
+    // Feed JSON with null reply
+    const json = JSON.stringify({
+      thought: { content: 'Idle', importance: 0.1 },
+      reply: null,
+      experience: { content: 'Quiet', importance: 0.1 },
+      emotionDeltas: [],
+      decisions: [],
+      workingMemoryUpdate: null,
+      coreSelfUpdate: null,
+      memoryCandidate: [],
+    });
+
+    for (const char of json) {
+      channel.push(char);
+    }
+    channel.end();
+
+    await replyPromise;
+    await parser.dispose();
+
+    // With null reply, the stream errors or yields nothing — both acceptable
+    // The key is it doesn't hang or throw an unhandled rejection
+    expect(replyAccumulated).toBe('');
+  });
+
+  it('streams reply in multi-character chunks', async () => {
+    const channel = createChunkChannel();
+    const parser = JsonStream.parse(channel.iterable);
+    const replyContentStream = parser.get<string>('reply.content');
+
+    const receivedChunks: string[] = [];
+    const replyPromise = (async () => {
+      for await (const chunk of replyContentStream) {
+        receivedChunks.push(chunk);
+      }
+    })();
+
+    // Feed in larger chunks (simulating real API token boundaries)
+    const json = JSON.stringify({
+      thought: { content: 'test', importance: 0.1 },
+      reply: { content: 'The quick brown fox jumps', contactId: 'c1', channel: 'web', replyToMessageId: 'msg-1' },
+      experience: { content: 'test', importance: 0.1 },
+      emotionDeltas: [],
+      decisions: [],
+      workingMemoryUpdate: null,
+      coreSelfUpdate: null,
+      memoryCandidate: [],
+    });
+
+    // Push in word-sized chunks
+    const chunkSize = 10;
+    for (let i = 0; i < json.length; i += chunkSize) {
+      channel.push(json.slice(i, i + chunkSize));
+    }
+    channel.end();
+
+    await replyPromise;
+    await parser.dispose();
+
+    expect(receivedChunks.length).toBeGreaterThan(0);
+    expect(receivedChunks.join('')).toBe('The quick brown fox jumps');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test createChunkChannel async iterator behavior
+// ---------------------------------------------------------------------------
+
+describe('createChunkChannel', () => {
+  it('yields pushed values in order', async () => {
+    const channel = createChunkChannel();
+    channel.push('a');
+    channel.push('b');
+    channel.push('c');
+    channel.end();
+
+    const result: string[] = [];
+    for await (const chunk of channel.iterable) {
+      result.push(chunk);
+    }
+    expect(result).toEqual(['a', 'b', 'c']);
+  });
+
+  it('awaits push when buffer is empty', async () => {
+    const channel = createChunkChannel();
+
+    // Start consuming before pushing
+    const resultPromise = (async () => {
+      const result: string[] = [];
+      for await (const chunk of channel.iterable) {
+        result.push(chunk);
+      }
+      return result;
+    })();
+
+    // Push after a microtask delay
+    await new Promise((r) => setTimeout(r, 10));
+    channel.push('delayed');
+    channel.end();
+
+    const result = await resultPromise;
+    expect(result).toEqual(['delayed']);
+  });
+
+  it('completes immediately when end() is called on empty buffer', async () => {
+    const channel = createChunkChannel();
+    channel.end();
+
+    const result: string[] = [];
+    for await (const chunk of channel.iterable) {
+      result.push(chunk);
+    }
+    expect(result).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test MindOutput validation with the real schema
+// ---------------------------------------------------------------------------
+
 import { mindOutputSchema } from '@animus/shared';
 
 describe('MindOutput schema validation', () => {
   it('validates a complete MindOutput', () => {
     const output = {
-      thoughts: [{ content: 'A quiet thought', importance: 0.5 }],
+      thought: { content: 'A quiet thought', importance: 0.5 },
       reply: {
         content: 'Hello there',
         contactId: 'c1',
         channel: 'web',
         replyToMessageId: 'msg-1',
       },
-      experiences: [{ content: 'Talked with a user', importance: 0.4 }],
+      experience: { content: 'Talked with a user', importance: 0.4 },
       emotionDeltas: [{ emotion: 'curiosity', delta: 0.1, reasoning: 'Interesting topic' }],
       decisions: [],
       workingMemoryUpdate: null,
@@ -269,9 +528,9 @@ describe('MindOutput schema validation', () => {
 
   it('validates MindOutput with null reply', () => {
     const output = {
-      thoughts: [{ content: 'Idle reflection', importance: 0.2 }],
+      thought: { content: 'Idle reflection', importance: 0.2 },
       reply: null,
-      experiences: [],
+      experience: { content: 'A quiet moment passed.', importance: 0.1 },
       emotionDeltas: [],
       decisions: [],
       workingMemoryUpdate: null,
@@ -284,9 +543,9 @@ describe('MindOutput schema validation', () => {
 
   it('rejects MindOutput with invalid emotion name', () => {
     const output = {
-      thoughts: [],
+      thought: { content: '', importance: 0 },
       reply: null,
-      experiences: [],
+      experience: { content: '', importance: 0 },
       emotionDeltas: [{ emotion: 'rage', delta: 0.5, reasoning: 'angry' }],
       decisions: [],
       workingMemoryUpdate: null,
@@ -299,9 +558,9 @@ describe('MindOutput schema validation', () => {
 
   it('validates MindOutput with decisions', () => {
     const output = {
-      thoughts: [{ content: 'Need to delegate', importance: 0.7 }],
+      thought: { content: 'Need to delegate', importance: 0.7 },
       reply: null,
-      experiences: [],
+      experience: { content: 'Realized this task needs a specialist.', importance: 0.5 },
       emotionDeltas: [],
       decisions: [
         {
@@ -318,10 +577,10 @@ describe('MindOutput schema validation', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects when thoughts is missing', () => {
+  it('rejects when thought is missing', () => {
     const output = {
       reply: null,
-      experiences: [],
+      experience: { content: '', importance: 0 },
       emotionDeltas: [],
       decisions: [],
       workingMemoryUpdate: null,
@@ -330,5 +589,128 @@ describe('MindOutput schema validation', () => {
 
     const result = mindOutputSchema.safeParse(output);
     expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test session cleanup on mind query failure (leak prevention)
+// ---------------------------------------------------------------------------
+
+import { AgentManager } from '@animus/agents';
+
+describe('AgentManager.removeTrackedSession', () => {
+  it('force-removes a tracked session without calling end()', async () => {
+    AgentManager.resetGlobalCleanup();
+    const manager = new AgentManager({
+      autoRegisterAdapters: false,
+      maxConcurrentSessions: 4,
+    });
+
+    // Create a mock adapter that produces mock sessions
+    const mockSession = {
+      id: 'claude:test-session-1',
+      provider: 'claude' as const,
+      isActive: true,
+      onEvent: vi.fn(),
+      prompt: vi.fn(),
+      promptStreaming: vi.fn(),
+      cancel: vi.fn(),
+      end: vi.fn(),
+      getUsage: vi.fn(() => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0 })),
+      getHistory: vi.fn(() => []),
+    };
+
+    const mockAdapter = {
+      provider: 'claude' as const,
+      capabilities: {
+        streaming: true,
+        subAgents: false,
+        maxContextTokens: 200000,
+        supportedModels: ['claude-sonnet-4-5-20250514'],
+      },
+      isConfigured: () => true,
+      createSession: vi.fn(async () => mockSession),
+      resumeSession: vi.fn(),
+      validateConfig: vi.fn(),
+    };
+
+    manager.registerAdapter(mockAdapter as any);
+
+    // Create a session (tracked internally)
+    await manager.createSession({ provider: 'claude' });
+    expect(manager.getActiveSessionCount()).toBe(1);
+
+    // Force-remove it (simulating the fallback path when end() fails)
+    const removed = manager.removeTrackedSession('claude:test-session-1');
+    expect(removed).toBe(true);
+    expect(manager.getActiveSessionCount()).toBe(0);
+
+    // Should be able to create new sessions (no concurrency exhaustion)
+    expect(manager.canCreateSession()).toBe(true);
+  });
+
+  it('returns false when removing a non-existent session', () => {
+    AgentManager.resetGlobalCleanup();
+    const manager = new AgentManager({
+      autoRegisterAdapters: false,
+      maxConcurrentSessions: 4,
+    });
+
+    const removed = manager.removeTrackedSession('nonexistent');
+    expect(removed).toBe(false);
+  });
+
+  it('prevents concurrency exhaustion from leaked sessions', async () => {
+    AgentManager.resetGlobalCleanup();
+    const manager = new AgentManager({
+      autoRegisterAdapters: false,
+      maxConcurrentSessions: 2,
+    });
+
+    let sessionCounter = 0;
+    const mockAdapter = {
+      provider: 'claude' as const,
+      capabilities: {
+        streaming: true,
+        subAgents: false,
+        maxContextTokens: 200000,
+        supportedModels: ['claude-sonnet-4-5-20250514'],
+      },
+      isConfigured: () => true,
+      createSession: vi.fn(async () => {
+        sessionCounter++;
+        return {
+          id: `claude:session-${sessionCounter}`,
+          provider: 'claude' as const,
+          isActive: true,
+          onEvent: vi.fn(),
+          prompt: vi.fn(),
+          promptStreaming: vi.fn(),
+          cancel: vi.fn(),
+          end: vi.fn(),
+          getUsage: vi.fn(() => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0 })),
+          getHistory: vi.fn(() => []),
+        };
+      }),
+      resumeSession: vi.fn(),
+      validateConfig: vi.fn(),
+    };
+
+    manager.registerAdapter(mockAdapter as any);
+
+    // Create and "leak" sessions by force-removing (simulating end() + null)
+    const s1 = await manager.createSession({ provider: 'claude' });
+    manager.removeTrackedSession(s1.id);
+
+    const s2 = await manager.createSession({ provider: 'claude' });
+    manager.removeTrackedSession(s2.id);
+
+    // Should still be able to create sessions despite 2 having been created
+    expect(manager.getActiveSessionCount()).toBe(0);
+    expect(manager.canCreateSession()).toBe(true);
+
+    const s3 = await manager.createSession({ provider: 'claude' });
+    expect(s3.id).toBe('claude:session-3');
+    expect(manager.getActiveSessionCount()).toBe(1);
   });
 });

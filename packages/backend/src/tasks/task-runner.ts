@@ -10,8 +10,11 @@
 import { getHeartbeatDb } from '../db/index.js';
 import * as taskStore from '../db/stores/task-store.js';
 import { getEventBus } from '../lib/event-bus.js';
+import { createLogger } from '../lib/logger.js';
 import { now } from '@animus/shared';
 import type { Task, TaskStatus } from '@animus/shared';
+
+const log = createLogger('TaskRunner', 'heartbeat');
 
 // ============================================================================
 // Constants
@@ -73,7 +76,7 @@ export class TaskRunner {
     const task = taskStore.getTask(db, taskId);
 
     if (!task) {
-      console.error(`[TaskRunner] Task not found: ${taskId}`);
+      log.error(`Task not found: ${taskId}`);
       return 'failed';
     }
 

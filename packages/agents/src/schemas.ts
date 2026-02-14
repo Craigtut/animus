@@ -100,8 +100,14 @@ export const baseSessionConfigSchema = z.object({
   /** Unified permission configuration */
   permissions: permissionConfigSchema.optional(),
 
-  /** MCP server configurations */
-  mcpServers: z.record(mcpServerConfigSchema).optional(),
+  /**
+   * MCP server configurations.
+   *
+   * Values can be standard MCP configs (stdio/HTTP) or opaque SDK-specific
+   * objects (e.g., Claude SDK's in-process server from createSdkMcpServer()).
+   * We use passthrough() to preserve unknown fields like `type`, `name`, `instance`.
+   */
+  mcpServers: z.record(z.record(z.unknown())).optional(),
 
   // Note: hooks are not validated with Zod since they contain functions
 });
@@ -139,6 +145,12 @@ export const claudeConfigSchema = baseSessionConfigSchema.extend({
 
   /** Include partial messages for streaming */
   includePartialMessages: z.boolean().optional(),
+
+  /** Output format for structured responses (constrained decoding) */
+  outputFormat: z.object({
+    type: z.literal('json_schema'),
+    schema: z.record(z.unknown()),
+  }).optional(),
 });
 
 /**

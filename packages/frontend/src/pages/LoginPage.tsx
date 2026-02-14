@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Eye, EyeSlash } from '@phosphor-icons/react';
-import { Button, Input } from '../components/ui';
+import { Button, Input, Typography } from '../components/ui';
 import { useAuthStore } from '../store';
 import { trpc } from '../utils/trpc';
 
@@ -65,42 +65,28 @@ export function LoginPage() {
           max-width: 400px;
         `}
       >
-        <h1
-          css={css`
-            font-size: ${theme.typography.fontSize['3xl']};
-            font-weight: ${theme.typography.fontWeight.light};
-            text-align: center;
-            margin-bottom: ${theme.spacing[1]};
-          `}
-        >
+        <Typography.Title serif css={css`text-align: center; margin-bottom: ${theme.spacing[1]};`}>
           Welcome back
-        </h1>
-        <p
-          css={css`
-            text-align: center;
-            color: ${theme.colors.text.secondary};
-            font-size: ${theme.typography.fontSize.base};
-            margin-bottom: ${theme.spacing[8]};
-          `}
-        >
+        </Typography.Title>
+        <Typography.Body color="secondary" css={css`text-align: center; margin-bottom: ${theme.spacing[8]};`}>
           Sign in to your Animus instance.
-        </p>
+        </Typography.Body>
 
         <form onSubmit={handleSubmit}>
           {error && (
-            <div
+            <Typography.SmallBody
+              as="div"
+              color={theme.colors.error.main}
               css={css`
                 padding: ${theme.spacing[3]} ${theme.spacing[4]};
                 background: ${theme.colors.error.main}12;
                 border: 1px solid ${theme.colors.error.main}40;
                 border-radius: ${theme.borderRadius.default};
-                color: ${theme.colors.error.main};
-                font-size: ${theme.typography.fontSize.sm};
                 margin-bottom: ${theme.spacing[4]};
               `}
             >
               {error}
-            </div>
+            </Typography.SmallBody>
           )}
 
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
@@ -149,28 +135,25 @@ export function LoginPage() {
         </form>
 
         <div css={css`text-align: center; margin-top: ${theme.spacing[6]};`}>
-          <button
+          <Typography.SmallBody
+            as="button"
             type="button"
+            color="hint"
             onClick={() => setShowForgotHelp(!showForgotHelp)}
             css={css`
-              font-size: ${theme.typography.fontSize.sm};
-              color: ${theme.colors.text.hint};
               cursor: pointer;
               &:hover { color: ${theme.colors.text.secondary}; }
             `}
           >
             Forgot your password?
-          </button>
+          </Typography.SmallBody>
           {showForgotHelp && (
-            <motion.p
+            <Typography.Caption
+              as={motion.p}
+              color="hint"
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
-              css={css`
-                font-size: ${theme.typography.fontSize.xs};
-                color: ${theme.colors.text.hint};
-                margin-top: ${theme.spacing[2]};
-                line-height: ${theme.typography.lineHeight.relaxed};
-              `}
+              css={css`margin-top: ${theme.spacing[2]};`}
             >
               Since Animus is self-hosted, you can reset your password from the
               server terminal. Run{' '}
@@ -184,7 +167,7 @@ export function LoginPage() {
                 npm run reset-password
               </code>{' '}
               in the project directory.
-            </motion.p>
+            </Typography.Caption>
           )}
         </div>
       </motion.div>

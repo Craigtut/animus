@@ -5,8 +5,9 @@
 import { z } from 'zod';
 import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';
-import { getHeartbeatDb } from '../../db/index.js';
+import { getHeartbeatDb, getAgentLogsDb } from '../../db/index.js';
 import * as heartbeatStore from '../../db/stores/heartbeat-store.js';
+import * as agentLogStore from '../../db/stores/agent-log-store.js';
 import {
   startHeartbeat,
   stopHeartbeat,
@@ -16,7 +17,10 @@ import {
   recompilePersona,
 } from '../../heartbeat/index.js';
 import { getEventBus } from '../../lib/event-bus.js';
-import type { HeartbeatState, EmotionState, Thought, Experience } from '@animus/shared';
+import type { HeartbeatState, EmotionState, Thought, Experience, TickDecision, EnergyBand, EnergyHistoryEntry } from '@animus/shared';
+import * as systemStore from '../../db/stores/system-store.js';
+import { getSystemDb } from '../../db/index.js';
+import { getEnergyBand, computeCircadianBaseline } from '../../heartbeat/energy-engine.js';
 
 export const heartbeatRouter = router({
   /**
@@ -52,6 +56,46 @@ export const heartbeatRouter = router({
     .query(({ input }) => {
       const db = getHeartbeatDb();
       return heartbeatStore.getRecentExperiences(db, input?.limit ?? 20);
+    }),
+
+  /**
+   * Paginated thoughts for the journal.
+   */
+  getThoughtsPaginated: protectedProcedure
+    .input(z.object({
+      limit: z.number().int().positive().max(50).default(20),
+      cursor: z.string().optional(),
+      importantOnly: z.boolean().optional(),
+    }))
+    .query(({ input }) => {
+      const db = getHeartbeatDb();
+      const items = heartbeatStore.getThoughtsPaginated(db, input.limit + 1, input.cursor, input.importantOnly);
+      const hasMore = items.length > input.limit;
+      const results = hasMore ? items.slice(0, input.limit) : items;
+      return {
+        items: results,
+        nextCursor: hasMore ? results[results.length - 1]?.createdAt : undefined,
+      };
+    }),
+
+  /**
+   * Paginated experiences for the journal.
+   */
+  getExperiencesPaginated: protectedProcedure
+    .input(z.object({
+      limit: z.number().int().positive().max(50).default(20),
+      cursor: z.string().optional(),
+      importantOnly: z.boolean().optional(),
+    }))
+    .query(({ input }) => {
+      const db = getHeartbeatDb();
+      const items = heartbeatStore.getExperiencesPaginated(db, input.limit + 1, input.cursor, input.importantOnly);
+      const hasMore = items.length > input.limit;
+      const results = hasMore ? items.slice(0, input.limit) : items;
+      return {
+        items: results,
+        nextCursor: hasMore ? results[results.length - 1]?.createdAt : undefined,
+      };
     }),
 
   /**
@@ -192,7 +236,7 @@ export const heartbeatRouter = router({
    */
   onAgentStatus: protectedProcedure.subscription(() => {
     return observable<{
-      type: 'spawned' | 'completed' | 'failed';
+      type: 'spawned' | 'completed' | 'failed' | 'cancelled' | 'rate_limited';
       taskId: string;
       detail?: string;
     }>((emit) => {
@@ -212,16 +256,38 @@ export const heartbeatRouter = router({
       const onFailed = (data: { taskId: string; error: string }) => {
         emit.next({ type: 'failed', taskId: data.taskId, detail: data.error });
       };
+      const onCancelled = (data: { taskId: string; reason: string }) => {
+        emit.next({ type: 'cancelled', taskId: data.taskId, detail: data.reason });
+      };
+      const onRateLimited = (data: { taskId: string; count: number; limit: number }) => {
+        emit.next({ type: 'rate_limited', taskId: data.taskId, detail: `${data.count}/${data.limit}` });
+      };
 
       eventBus.on('agent:spawned', onSpawned);
       eventBus.on('agent:completed', onCompleted);
       eventBus.on('agent:failed', onFailed);
+      eventBus.on('agent:cancelled', onCancelled);
+      eventBus.on('agent:rate_limited', onRateLimited);
 
       return () => {
         eventBus.off('agent:spawned', onSpawned);
         eventBus.off('agent:completed', onCompleted);
         eventBus.off('agent:failed', onFailed);
+        eventBus.off('agent:cancelled', onCancelled);
+        eventBus.off('agent:rate_limited', onRateLimited);
       };
+    });
+  }),
+
+  /**
+   * Subscribe to tick decisions in real time.
+   */
+  onDecision: protectedProcedure.subscription(() => {
+    return observable<TickDecision>((emit) => {
+      const eventBus = getEventBus();
+      const handler = (decision: TickDecision) => emit.next(decision);
+      eventBus.on('decision:made', handler);
+      return () => eventBus.off('decision:made', handler);
     });
   }),
 
@@ -267,6 +333,240 @@ export const heartbeatRouter = router({
       return () => {
         eventBus.off('reply:chunk', chunkHandler);
         eventBus.off('reply:complete', completeHandler);
+      };
+    });
+  }),
+
+  // ========================================================================
+  // Energy
+  // ========================================================================
+
+  /**
+   * Get current energy state.
+   */
+  getEnergyState: protectedProcedure.query(() => {
+    const hbDb = getHeartbeatDb();
+    const sysDb = getSystemDb();
+    const settings = systemStore.getSystemSettings(sysDb);
+
+    if (!settings.energySystemEnabled) {
+      return { energyLevel: null, energyBand: null, circadianBaseline: null, enabled: false };
+    }
+
+    const { energyLevel } = heartbeatStore.getEnergyLevel(hbDb);
+    const circadianBaseline = computeCircadianBaseline(
+      new Date(),
+      settings.sleepStartHour,
+      settings.sleepEndHour,
+      settings.timezone || 'UTC'
+    );
+
+    return {
+      energyLevel,
+      energyBand: getEnergyBand(energyLevel),
+      circadianBaseline,
+      enabled: true,
+    };
+  }),
+
+  /**
+   * Get energy history for visualization.
+   */
+  getEnergyHistory: protectedProcedure
+    .input(
+      z.object({
+        limit: z.number().int().positive().max(500).default(100),
+      }).optional()
+    )
+    .query(({ input }) => {
+      const db = getHeartbeatDb();
+      return heartbeatStore.getEnergyHistory(db, { limit: input?.limit ?? 100 });
+    }),
+
+  /**
+   * Subscribe to energy state changes.
+   */
+  onEnergyChange: protectedProcedure.subscription(() => {
+    return observable<{ energyLevel: number; band: EnergyBand }>((emit) => {
+      const eventBus = getEventBus();
+      const handler = (data: { energyLevel: number; band: EnergyBand }) => {
+        emit.next(data);
+      };
+      eventBus.on('energy:updated', handler);
+
+      return () => {
+        eventBus.off('energy:updated', handler);
+      };
+    });
+  }),
+
+  // ========================================================================
+  // Tick Inspector (Heartbeats tab)
+  // ========================================================================
+
+  /**
+   * List ticks with summary info, paginated.
+   */
+  listTicks: protectedProcedure
+    .input(
+      z.object({
+        limit: z.number().int().positive().max(50).default(20),
+        offset: z.number().int().nonnegative().default(0),
+      }).optional()
+    )
+    .query(({ input }) => {
+      const agentLogsDb = getAgentLogsDb();
+      const hbDb = getHeartbeatDb();
+      const limit = input?.limit ?? 20;
+      const offset = input?.offset ?? 0;
+
+      const { events, total } = agentLogStore.listTickEvents(agentLogsDb, { limit, offset });
+
+      interface TickInputData {
+        tickNumber: number;
+        triggerType: string;
+        sessionState: string;
+        tokenBreakdown?: Record<string, number>;
+      }
+
+      interface TickOutputData {
+        durationMs?: number | null;
+      }
+
+      const ticks = events.map((event) => {
+        const data = event.data as unknown as TickInputData;
+
+        // Get thought preview from heartbeat.db
+        const thought = hbDb
+          .prepare('SELECT content FROM thoughts WHERE tick_number = ? LIMIT 1')
+          .get(data.tickNumber) as { content: string } | undefined;
+
+        // Get duration from tick_output event
+        const { output } = agentLogStore.getTickEvents(agentLogsDb, data.tickNumber);
+        const outData = output ? (output.data as unknown as TickOutputData) : null;
+
+        return {
+          tickNumber: data.tickNumber,
+          triggerType: data.triggerType,
+          sessionState: data.sessionState,
+          tokenBreakdown: data.tokenBreakdown,
+          thoughtPreview: thought?.content?.slice(0, 100) ?? null,
+          durationMs: outData?.durationMs ?? null,
+          createdAt: event.createdAt,
+        };
+      });
+
+      return { ticks, total };
+    }),
+
+  /**
+   * Get full tick detail for inspection.
+   */
+  getTickDetail: protectedProcedure
+    .input(z.object({ tickNumber: z.number().int().positive() }))
+    .query(({ input }) => {
+      const agentLogsDb = getAgentLogsDb();
+      const hbDb = getHeartbeatDb();
+      const { tickNumber } = input;
+
+      const { input: tickInput, output: tickOutput } = agentLogStore.getTickEvents(
+        agentLogsDb,
+        tickNumber
+      );
+
+      if (!tickInput) {
+        return null;
+      }
+
+      interface TickInputData {
+        tickNumber: number;
+        triggerType: string;
+        triggerContext: unknown;
+        sessionState: string;
+        systemPrompt: string | null;
+        userMessage: string;
+        tokenBreakdown?: Record<string, number>;
+      }
+
+      interface TickOutputData {
+        rawOutput: unknown;
+        durationMs: number | null;
+      }
+
+      const inputData = tickInput.data as unknown as TickInputData;
+      const outputData = tickOutput
+        ? (tickOutput.data as unknown as TickOutputData)
+        : null;
+
+      // For warm sessions, resolve the system prompt from the last cold session
+      let systemPrompt = inputData.systemPrompt;
+      if (!systemPrompt) {
+        systemPrompt = agentLogStore.getLastColdSystemPrompt(agentLogsDb);
+      }
+
+      // Get related data from heartbeat.db
+      const thoughts = hbDb
+        .prepare('SELECT * FROM thoughts WHERE tick_number = ? ORDER BY created_at')
+        .all(tickNumber) as Array<Record<string, unknown>>;
+
+      const experiences = hbDb
+        .prepare('SELECT * FROM experiences WHERE tick_number = ? ORDER BY created_at')
+        .all(tickNumber) as Array<Record<string, unknown>>;
+
+      const emotionHistory = hbDb
+        .prepare('SELECT * FROM emotion_history WHERE tick_number = ? ORDER BY created_at')
+        .all(tickNumber) as Array<Record<string, unknown>>;
+
+      const decisions = heartbeatStore.getTickDecisions(hbDb, tickNumber);
+
+      // Get usage from agent_usage for this session
+      let usage = null;
+      if (tickInput.sessionId) {
+        const usages = agentLogStore.getSessionUsage(agentLogsDb, tickInput.sessionId);
+        if (usages.length > 0) {
+          usage = usages[usages.length - 1]!;
+        }
+      }
+
+      return {
+        tickNumber,
+        triggerType: inputData.triggerType,
+        triggerContext: inputData.triggerContext,
+        sessionState: inputData.sessionState,
+        systemPrompt,
+        userMessage: inputData.userMessage,
+        tokenBreakdown: inputData.tokenBreakdown,
+        rawOutput: outputData?.rawOutput ?? null,
+        durationMs: outputData?.durationMs ?? null,
+        thoughts,
+        experiences,
+        emotionHistory,
+        decisions,
+        usage,
+        createdAt: tickInput.createdAt,
+      };
+    }),
+
+  /**
+   * Subscribe to tick context stored events (real-time).
+   */
+  onTickStored: protectedProcedure.subscription(() => {
+    type TickStoredPayload = {
+      tickNumber: number;
+      triggerType: string;
+      sessionState: string;
+      durationMs: number | null;
+      createdAt: string;
+    };
+
+    return observable<TickStoredPayload>((emit) => {
+      const eventBus = getEventBus();
+      const handler = (data: TickStoredPayload) => {
+        emit.next(data);
+      };
+      eventBus.on('tick:context_stored', handler);
+      return () => {
+        eventBus.off('tick:context_stored', handler);
       };
     });
   }),

@@ -48,7 +48,7 @@ A floating, translucent pill anchored to the top-center of the viewport. It cont
 
 ### Space Labels
 
-The four space names are rendered as text labels inside the pill: **Presence**, **Mind**, **People**, **Settings**. Each uses Plus Jakarta Sans at Regular weight, small body size (13-14px).
+The four space names are rendered as text labels inside the pill: **Presence**, **Mind**, **People**, **Settings**. Each uses Outfit at Regular weight, small body size (13-14px).
 
 **Active state:** The currently active space label is rendered in Semibold weight with full opacity (1.0). A small dot (4px diameter, high-contrast accent color) sits below the active label, centered.
 

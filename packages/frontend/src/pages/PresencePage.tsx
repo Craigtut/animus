@@ -1,108 +1,16 @@
 /** @jsxImportSource @emotion/react */
-import { css, useTheme, keyframes } from '@emotion/react';
+import { css, useTheme } from '@emotion/react';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { PaperPlaneRight } from '@phosphor-icons/react';
-import { motion, AnimatePresence } from 'motion/react';
-import { emotionColors } from '../styles/theme';
+import { useNavigate } from 'react-router-dom';
+import { PaperPlaneRight, Moon } from '@phosphor-icons/react';
+import { motion, AnimatePresence, useScroll, useTransform } from 'motion/react';
+import { Typography } from '../components/ui';
+import { FluidBackground } from '../components/effects/FluidBackground';
 import { trpc } from '../utils/trpc';
-import type { EmotionState } from '@animus/shared';
+import { useHeartbeatStore } from '../store/heartbeat-store';
 
 // ============================================================================
-// Emotional Field
-// ============================================================================
-
-function EmotionalField() {
-  const theme = useTheme();
-  const mode = theme.mode;
-  const colors = emotionColors[mode];
-
-  // Load initial emotion data, then update via subscription
-  const { data: emotions } = trpc.heartbeat.getEmotions.useQuery(undefined, {
-    retry: false,
-  });
-
-  const [liveEmotions, setLiveEmotions] = useState<EmotionState[]>([]);
-
-  // Subscribe to real-time emotion updates
-  trpc.heartbeat.onEmotionChange.useSubscription(undefined, {
-    onData: (emotion: EmotionState) => {
-      setLiveEmotions((prev) => {
-        const idx = prev.findIndex((e) => e.emotion === emotion.emotion);
-        if (idx >= 0) {
-          const next = [...prev];
-          next[idx] = emotion;
-          return next;
-        }
-        return [...prev, emotion];
-      });
-    },
-  });
-
-  const currentEmotions = liveEmotions.length > 0 ? liveEmotions : emotions;
-
-  // Determine dominant emotions for orb colors
-  const getOrbColors = () => {
-    if (!currentEmotions || currentEmotions.length === 0) {
-      // Default calm state
-      return [colors.contentment, colors.joy, colors.curiosity];
-    }
-    // Sort by intensity and pick top 3
-    const sorted = [...currentEmotions].sort((a, b) => b.intensity - a.intensity);
-    return sorted.slice(0, 3).map((e) => {
-      const name = e.emotion as keyof typeof colors;
-      return colors[name] || colors.contentment;
-    });
-  };
-
-  const orbColors = getOrbColors();
-
-  return (
-    <div
-      aria-hidden="true"
-      css={css`
-        position: relative;
-        width: 100%;
-        height: clamp(200px, 28vh, 360px);
-        overflow: hidden;
-        mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
-        -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
-      `}
-    >
-      {orbColors.map((color, i) => (
-        <div
-          key={i}
-          css={css`
-            position: absolute;
-            border-radius: 50%;
-            filter: blur(${90 + i * 15}px);
-            will-change: transform, opacity;
-            background: ${color};
-            opacity: 0.35;
-            animation: orb-drift-${i} ${4200 + i * 1600}ms ease-in-out infinite alternate;
-
-            ${i === 0
-              ? `width: 55%; height: 80%; top: 10%; left: 20%;`
-              : i === 1
-                ? `width: 45%; height: 70%; top: 20%; left: 40%;`
-                : `width: 50%; height: 60%; top: 5%; left: 10%;`}
-
-            @keyframes orb-drift-${i} {
-              0% { transform: translate(0, 0) scale(1); }
-              100% { transform: translate(${15 - i * 10}px, ${8 - i * 5}px) scale(${1.03 + i * 0.01}); }
-            }
-
-            @media (prefers-reduced-motion: reduce) {
-              animation: none;
-            }
-          `}
-        />
-      ))}
-    </div>
-  );
-}
-
-// ============================================================================
-// Thought Stream
+// Thought Stream (reworked — 3 thoughts, receding upward)
 // ============================================================================
 
 interface ThoughtData {
@@ -114,25 +22,24 @@ interface ThoughtData {
 
 function ThoughtStream() {
   const theme = useTheme();
+  const navigate = useNavigate();
 
   const { data: thoughts } = trpc.heartbeat.getRecentThoughts.useQuery(undefined, {
     retry: false,
   });
 
-  const [liveThoughts, setLiveThoughts] = useState<ThoughtData[]>([]);
-
-  // Subscribe to real-time thought updates
-  trpc.heartbeat.onThoughts.useSubscription(undefined, {
-    onData: (thought) => {
-      setLiveThoughts((prev) => [thought as ThoughtData, ...prev].slice(0, 4));
-    },
-  });
-
-  const allThoughts = liveThoughts.length > 0 ? liveThoughts : (thoughts ?? []);
-  const displayThoughts: ThoughtData[] = allThoughts.slice(0, 4);
-  const opacities = [1, 0.6, 0.3, 0.12];
+  const storeThoughts = useHeartbeatStore(s => s.recentThoughts);
+  const allThoughts = storeThoughts.length > 0 ? storeThoughts : (thoughts ?? []);
+  const displayThoughts: ThoughtData[] = allThoughts.slice(0, 3);
 
   if (displayThoughts.length === 0) return null;
+
+  // Visual treatment per layer (bottom = newest = index 0 in reversed display)
+  const layers = [
+    { opacity: 1, blur: 0, scale: 1 },         // newest (bottom)
+    { opacity: 0.56, blur: 1.5, scale: 0.92 },  // second
+    { opacity: 0.25, blur: 3, scale: 0.84 },     // third (top)
+  ];
 
   return (
     <div
@@ -140,32 +47,162 @@ function ThoughtStream() {
       aria-live="polite"
       css={css`
         display: flex;
-        flex-direction: column;
-        gap: ${theme.spacing[4]};
-        padding: ${theme.spacing[6]} 0;
+        flex-direction: column-reverse;
+        align-items: center;
+        gap: ${theme.spacing[3]};
+        padding: 0 ${theme.spacing[6]};
+
+        @media (max-width: ${theme.breakpoints.md}) {
+          padding: 0 ${theme.spacing[4]};
+        }
       `}
     >
       <AnimatePresence>
-        {displayThoughts.map((thought, i) => (
-          <motion.p
-            key={thought.id}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: opacities[i] ?? 0.12, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.4, ease: 'easeOut' }}
-            css={css`
-              font-size: ${theme.typography.fontSize.base};
-              line-height: ${theme.typography.lineHeight.relaxed};
-              font-weight: ${thought.importance > 0.7
-                ? theme.typography.fontWeight.semibold
-                : theme.typography.fontWeight.normal};
-              color: ${theme.colors.text.primary};
-            `}
-          >
-            {thought.content}
-          </motion.p>
-        ))}
+        {displayThoughts.map((thought, i) => {
+          const layer = layers[i] ?? layers[layers.length - 1];
+          return (
+            <Typography.Body
+              key={thought.id}
+              as={motion.p}
+              serif
+              initial={{ opacity: 0, y: 12 }}
+              animate={{
+                opacity: layer.opacity,
+                y: 0,
+                filter: layer.blur > 0 ? `blur(${layer.blur}px)` : 'blur(0px)',
+                scale: layer.scale,
+              }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.5, ease: 'easeOut' }}
+              color="primary"
+              onClick={() => navigate('/mind/journal')}
+              css={css`
+                text-align: center;
+                max-width: 520px;
+                line-height: ${theme.typography.lineHeight.relaxed};
+                cursor: pointer;
+
+                /* 2-line clamp with ellipsis */
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+              `}
+            >
+              {thought.content}
+            </Typography.Body>
+          );
+        })}
       </AnimatePresence>
+    </div>
+  );
+}
+
+// ============================================================================
+// Three Dots Divider
+// ============================================================================
+
+function DotsDivider() {
+  const theme = useTheme();
+  return (
+    <div
+      aria-hidden="true"
+      css={css`
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        padding: ${theme.spacing[4]} 0;
+      `}
+    >
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          css={css`
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: ${theme.colors.text.hint};
+            opacity: 0.4;
+          `}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ============================================================================
+// Scroll-linked message fade (per-message viewport tracking)
+// ============================================================================
+
+function FadingMessage({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Track the element's position through the viewport:
+  // scrollYProgress goes 0→1 as the element's top moves from 30vh to 50vh
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ['start 0.3', 'start 0.5'],
+  });
+  const opacity = useTransform(scrollYProgress, [0, 1], [0, 1]);
+
+  return (
+    <motion.div ref={ref} style={{ opacity }}>
+      {children}
+    </motion.div>
+  );
+}
+
+// ============================================================================
+// Streaming indicators
+// ============================================================================
+
+function BlinkingCursor() {
+  const theme = useTheme();
+  return (
+    <span
+      css={css`
+        display: inline-block;
+        width: 2px;
+        height: 1em;
+        background: ${theme.colors.text.primary};
+        margin-left: 1px;
+        vertical-align: text-bottom;
+        animation: blink 1s step-end infinite;
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
+        }
+      `}
+    />
+  );
+}
+
+function ThinkingDots() {
+  const theme = useTheme();
+  return (
+    <div
+      css={css`
+        display: flex;
+        gap: 4px;
+        padding: ${theme.spacing[2]} 0;
+      `}
+    >
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          css={css`
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: ${theme.colors.text.hint};
+            animation: thinkFade 1.4s ease-in-out ${i * 0.2}s infinite;
+            @keyframes thinkFade {
+              0%, 80%, 100% { opacity: 0.2; }
+              40% { opacity: 1; }
+            }
+          `}
+        />
+      ))}
     </div>
   );
 }
@@ -187,20 +224,16 @@ function mapDirectionToRole(direction: string): 'user' | 'assistant' {
 
 function Conversation() {
   const theme = useTheme();
-  const utils = trpc.useUtils();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
+  const hasMountedRef = useRef(false);
+  const replyStream = useHeartbeatStore((s) => s.replyStream);
+  const heartbeatState = useHeartbeatStore((s) => s.heartbeatState);
 
   const { data: messagesData } = trpc.messages.getRecent.useQuery(
     { limit: 50 },
     { retry: false }
   );
-
-  // Subscribe to new messages in real-time
-  trpc.messages.onMessage.useSubscription(undefined, {
-    onData: () => {
-      // Invalidate the query to get the latest messages
-      utils.messages.getRecent.invalidate();
-    },
-  });
 
   const messages: MessageData[] = (messagesData ?? []).map((m: any) => ({
     id: m.id,
@@ -209,75 +242,165 @@ function Conversation() {
     createdAt: m.createdAt,
   }));
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Sort chronologically — newest at bottom
+  const sorted = [...messages].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
 
+  // Track whether user is near the bottom of the scroll container
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const threshold = 100;
+    isNearBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+  }, []);
+
+  // Auto-scroll: instant on mount, smooth for new messages, only if near bottom
   useEffect(() => {
-    // Defer scroll to next frame to ensure DOM is updated
-    requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    });
-  }, [messages.length]);
+    const el = scrollRef.current;
+    if (!el || sorted.length === 0) return;
 
-  if (messages.length === 0) {
-    return (
-      <div css={css`
-        text-align: center;
-        padding: ${theme.spacing[16]} 0;
-        color: ${theme.colors.text.hint};
-        font-size: ${theme.typography.fontSize.base};
-      `}>
-        Say something.
-      </div>
-    );
-  }
+    requestAnimationFrame(() => {
+      if (!hasMountedRef.current) {
+        // First render — jump to bottom instantly
+        el.scrollTop = el.scrollHeight;
+        hasMountedRef.current = true;
+      } else if (isNearBottomRef.current) {
+        // New message while user is near bottom — smooth scroll
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      }
+      // If user has scrolled up, do nothing
+    });
+  }, [sorted.length]);
+
+  // Auto-scroll when streaming chunks arrive
+  useEffect(() => {
+    if (replyStream.isStreaming && isNearBottomRef.current) {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  }, [replyStream.accumulated]);
+
+  // Clear streaming state after the persisted message arrives in the query cache
+  useEffect(() => {
+    if (!replyStream.isStreaming && replyStream.accumulated && messages.length > 0) {
+      const timer = setTimeout(() => useHeartbeatStore.getState().clearReplyStream(), 300);
+      return () => clearTimeout(timer);
+    }
+  }, [replyStream.isStreaming, messages.length]);
+
+  const isThinking = heartbeatState?.currentStage === 'mind' && !replyStream.isStreaming;
 
   return (
     <div
-      role="log"
-      aria-live="polite"
+      ref={scrollRef}
+      onScroll={handleScroll}
       css={css`
-        display: flex;
-        flex-direction: column;
-        gap: ${theme.spacing[3]};
-        padding: ${theme.spacing[4]} 0;
-        padding-bottom: ${theme.spacing[20]};
+        height: 100%;
+        overflow-y: auto;
+        scrollbar-width: none;
+        &::-webkit-scrollbar { display: none; }
       `}
     >
-      {messages.map((msg) => (
-        <div
-          key={msg.id}
-          css={css`
-            display: flex;
-            justify-content: ${msg.role === 'user' ? 'flex-end' : 'flex-start'};
-          `}
-        >
-          <div
+      {/* Inner wrapper: fills height, pushes sparse messages to bottom */}
+      <div
+        css={css`
+          max-width: 720px;
+          margin: 0 auto;
+          min-height: 100%;
+          display: flex;
+          flex-direction: column;
+          justify-content: flex-end;
+        `}
+      >
+        {sorted.length === 0 && !isThinking && !replyStream.isStreaming ? (
+          <Typography.Body
+            color="hint"
             css={css`
-              max-width: ${msg.role === 'user' ? '80%' : '85%'};
-              ${msg.role === 'user'
-                ? `
-                  background: ${theme.mode === 'light' ? 'hsl(30, 20%, 92%)' : 'hsl(30, 15%, 22%)'};
-                  border-radius: 16px;
-                  padding: ${theme.spacing[3]} ${theme.spacing[4]};
-                `
-                : ''}
-              font-size: ${theme.typography.fontSize.base};
-              line-height: ${theme.typography.lineHeight.normal};
-              color: ${theme.colors.text.primary};
-              white-space: pre-wrap;
+              text-align: center;
+              padding: ${theme.spacing[16]} 0;
             `}
           >
-            {msg.content}
+            Say something.
+          </Typography.Body>
+        ) : (
+          <div
+            role="log"
+            aria-live="polite"
+            css={css`
+              display: flex;
+              flex-direction: column;
+              gap: ${theme.spacing[3]};
+              padding: ${theme.spacing[4]} ${theme.spacing[6]};
+              padding-bottom: 120px;
+
+              @media (max-width: ${theme.breakpoints.md}) {
+                padding: ${theme.spacing[4]};
+                padding-bottom: 140px;
+              }
+            `}
+          >
+            {sorted.map((msg) => (
+              <FadingMessage key={msg.id}>
+                <div
+                  css={css`
+                    display: flex;
+                    justify-content: ${msg.role === 'user' ? 'flex-end' : 'flex-start'};
+                  `}
+                >
+                  <Typography.Body
+                    as="div"
+                    color="primary"
+                    css={css`
+                      max-width: ${msg.role === 'user' ? '80%' : '85%'};
+                      ${msg.role === 'user'
+                        ? `
+                          background: ${theme.mode === 'light' ? 'rgba(26, 24, 22, 0.06)' : 'rgba(250, 249, 244, 0.08)'};
+                          border-radius: 16px;
+                          padding: ${theme.spacing[3]} ${theme.spacing[4]};
+                        `
+                        : ''}
+                      white-space: pre-wrap;
+                    `}
+                  >
+                    {msg.content}
+                  </Typography.Body>
+                </div>
+              </FadingMessage>
+            ))}
+
+            {/* Thinking indicator — shows while mind is processing before reply starts */}
+            {isThinking && (
+              <div css={css`display: flex; justify-content: flex-start;`}>
+                <ThinkingDots />
+              </div>
+            )}
+
+            {/* Streaming reply bubble — shows reply text as it arrives */}
+            {replyStream.isStreaming && replyStream.accumulated && (
+              <div css={css`display: flex; justify-content: flex-start;`}>
+                <Typography.Body
+                  as="div"
+                  color="primary"
+                  css={css`
+                    max-width: 85%;
+                    white-space: pre-wrap;
+                  `}
+                >
+                  {replyStream.accumulated}
+                  <BlinkingCursor />
+                </Typography.Body>
+              </div>
+            )}
           </div>
-        </div>
-      ))}
-      <div ref={messagesEndRef} />
+        )}
+      </div>
     </div>
   );
 }
 
 // ============================================================================
-// Message Input
+// Floating Message Input (pill capsule)
 // ============================================================================
 
 function MessageInput() {
@@ -320,27 +443,30 @@ function MessageInput() {
     <div
       css={css`
         position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%);
         z-index: ${theme.zIndex.sticky};
-        padding: ${theme.spacing[3]} ${theme.spacing[4]};
-        padding-bottom: max(${theme.spacing[3]}, env(safe-area-inset-bottom));
-        background: ${theme.colors.background.default};
-        border-top: 1px solid ${theme.colors.border.light};
+        width: min(600px, calc(100vw - 48px));
 
         @media (max-width: ${theme.breakpoints.md}) {
-          bottom: 56px;
+          bottom: calc(56px + 12px + env(safe-area-inset-bottom, 0px));
         }
       `}
     >
       <div
         css={css`
-          max-width: 720px;
-          margin: 0 auto;
           display: flex;
           align-items: flex-end;
           gap: ${theme.spacing[2]};
+          padding: ${theme.spacing[1.5]} ${theme.spacing[1.5]} ${theme.spacing[1.5]} ${theme.spacing[4]};
+          border-radius: ${theme.borderRadius.full};
+          background: ${theme.mode === 'light'
+            ? 'rgba(250, 249, 244, 0.85)'
+            : 'rgba(28, 26, 24, 0.85)'};
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
+          border: 1px solid ${theme.colors.border.light};
         `}
       >
         <textarea
@@ -353,21 +479,17 @@ function MessageInput() {
           rows={1}
           css={css`
             flex: 1;
-            padding: ${theme.spacing[3]} ${theme.spacing[4]};
-            background: ${theme.colors.background.paper};
-            border: 1px solid ${theme.colors.border.default};
-            border-radius: 20px;
+            padding: ${theme.spacing[1.5]} 0;
+            background: transparent;
+            border: none;
             color: ${theme.colors.text.primary};
             font-size: ${theme.typography.fontSize.base};
+            font-family: ${theme.typography.fontFamily.sans};
             line-height: ${theme.typography.lineHeight.normal};
             resize: none;
             outline: none;
             max-height: 120px;
             overflow-y: auto;
-
-            &:focus {
-              border-color: ${theme.colors.border.focus};
-            }
 
             &::placeholder {
               color: ${theme.colors.text.hint};
@@ -382,17 +504,19 @@ function MessageInput() {
             display: flex;
             align-items: center;
             justify-content: center;
-            width: 40px;
-            height: 40px;
+            width: 36px;
+            height: 36px;
             border-radius: 50%;
-            color: ${hasContent ? theme.colors.accent : theme.colors.text.hint};
-            transition: all ${theme.transitions.fast};
             flex-shrink: 0;
             cursor: ${hasContent ? 'pointer' : 'default'};
             padding: 0;
+            border: none;
+            background: ${hasContent ? theme.colors.accent : 'transparent'};
+            color: ${hasContent ? theme.colors.accentForeground : theme.colors.text.hint};
+            transition: all ${theme.transitions.fast};
 
             &:hover:not(:disabled) {
-              background: ${theme.colors.background.elevated};
+              opacity: 0.85;
             }
 
             &:disabled {
@@ -400,10 +524,61 @@ function MessageInput() {
             }
           `}
         >
-          <PaperPlaneRight size={20} weight={hasContent ? 'fill' : 'regular'} />
+          <PaperPlaneRight size={18} weight={hasContent ? 'fill' : 'regular'} />
         </button>
       </div>
     </div>
+  );
+}
+
+// ============================================================================
+// Presence Page
+// ============================================================================
+
+// ============================================================================
+// Sleep Indicator
+// ============================================================================
+
+function SleepIndicator() {
+  const theme = useTheme();
+  const energyBand = useHeartbeatStore((s) => s.energyBand);
+
+  const { data: energyState } = trpc.heartbeat.getEnergyState.useQuery(undefined, {
+    retry: false,
+  });
+  const { data: persona } = trpc.persona.get.useQuery(undefined, { retry: false });
+
+  const isSleeping = energyBand === 'sleeping' || (!energyBand && energyState?.energyBand === 'sleeping');
+  const name = persona?.name;
+
+  if (!isSleeping || !name) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.8, ease: 'easeOut' }}
+      css={css`
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: ${theme.spacing[2]};
+        padding: ${theme.spacing[2]} ${theme.spacing[4]};
+      `}
+    >
+      <Moon size={14} css={css`opacity: 0.4; color: #818cf8;`} />
+      <Typography.Caption
+        serif
+        italic
+        css={css`
+          opacity: 0.45;
+          color: ${theme.colors.text.secondary};
+        `}
+      >
+        {name} is sleeping
+      </Typography.Caption>
+    </motion.div>
   );
 }
 
@@ -416,23 +591,64 @@ export function PresencePage() {
 
   return (
     <div css={css`min-height: 100vh;`}>
-      <EmotionalField />
-
+      {/* ── The Being (fixed top half) ── */}
       <div
         css={css`
-          max-width: 720px;
-          margin: 0 auto;
-          padding: 0 ${theme.spacing[6]};
-
-          @media (max-width: ${theme.breakpoints.md}) {
-            padding: 0 ${theme.spacing[4]};
-          }
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 30vh;
+          z-index: 2;
+          display: flex;
+          flex-direction: column;
+          justify-content: flex-end;
+          overflow: hidden;
         `}
       >
-        <ThoughtStream />
+        {/* WebGL gradient background */}
+        <div
+          css={css`
+            position: absolute;
+            inset: 0;
+            /* Fade to transparent at bottom edge */
+            mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
+            -webkit-mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
+          `}
+        >
+          <FluidBackground mode={theme.mode} />
+        </div>
+
+        {/* Thought stream + divider (positioned at bottom of the being section) */}
+        <div
+          css={css`
+            position: relative;
+            z-index: 1;
+            padding-bottom: ${theme.spacing[1]};
+          `}
+        >
+          <SleepIndicator />
+          <ThoughtStream />
+          <DotsDivider />
+        </div>
+      </div>
+
+      {/* ── The Conversation (fixed scroll container) ── */}
+      <div
+        css={css`
+          position: fixed;
+          top: 30vh;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          z-index: 1;
+          background: ${theme.colors.background.default};
+        `}
+      >
         <Conversation />
       </div>
 
+      {/* ── Floating Message Input ── */}
       <MessageInput />
     </div>
   );

@@ -9,6 +9,7 @@
 
 import {
   ANIMUS_TOOL_DEFS,
+  MIND_TOOL_NAMES,
   getAllowedTools,
   type AnimusToolName,
   type PermissionTier,
@@ -17,6 +18,8 @@ import type { AnimusTool, ToolHandlerContext, ToolResult } from './types.js';
 import { sendMessageHandler } from './handlers/send-message.js';
 import { updateProgressHandler } from './handlers/update-progress.js';
 import { readMemoryHandler } from './handlers/read-memory.js';
+import { lookupContactsHandler } from './handlers/lookup-contacts.js';
+import { sendProactiveMessageHandler } from './handlers/send-proactive-message.js';
 
 /**
  * The complete tool registry: definitions + handlers.
@@ -43,6 +46,20 @@ const TOOL_REGISTRY: Record<AnimusToolName, AnimusTool> = {
     category: ANIMUS_TOOL_DEFS.read_memory.category,
     handler: readMemoryHandler,
   },
+  lookup_contacts: {
+    name: 'lookup_contacts',
+    description: ANIMUS_TOOL_DEFS.lookup_contacts.description,
+    inputSchema: ANIMUS_TOOL_DEFS.lookup_contacts.inputSchema,
+    category: ANIMUS_TOOL_DEFS.lookup_contacts.category,
+    handler: lookupContactsHandler,
+  },
+  send_proactive_message: {
+    name: 'send_proactive_message',
+    description: ANIMUS_TOOL_DEFS.send_proactive_message.description,
+    inputSchema: ANIMUS_TOOL_DEFS.send_proactive_message.inputSchema,
+    category: ANIMUS_TOOL_DEFS.send_proactive_message.category,
+    handler: sendProactiveMessageHandler,
+  },
 };
 
 /**
@@ -65,6 +82,13 @@ export function getTool(name: AnimusToolName): AnimusTool | undefined {
  */
 export function getToolNames(): AnimusToolName[] {
   return Object.keys(TOOL_REGISTRY) as AnimusToolName[];
+}
+
+/**
+ * Get the tools available to the mind session.
+ */
+export function getMindToolRegistry(): AnimusTool[] {
+  return MIND_TOOL_NAMES.map((name) => TOOL_REGISTRY[name]);
 }
 
 /**

@@ -4,7 +4,7 @@ Gap analysis of all frontend design specs against architecture docs and data sch
 
 **Specs reviewed:** design-principles.md, onboarding.md, app-shell.md, presence.md, mind.md, people.md, settings.md, voice-mode.md
 
-**Cross-referenced against:** heartbeat.md, persona.md, contacts.md, channels.md, memory.md, goals.md, tasks-system.md, agent-orchestration.md, voice-channel.md, and all `packages/shared/src/schemas/*.ts`
+**Cross-referenced against:** heartbeat.md, persona.md, contacts.md, channel-packages.md, memory.md, goals.md, tasks-system.md, agent-orchestration.md, voice-channel.md, and all `packages/shared/src/schemas/*.ts`
 
 ---
 
@@ -22,7 +22,7 @@ The heading reads "Persona Creation (9 steps -- the soul)" but only 8 sub-steps 
 
 **Location:** `voice-channel.md` vs `packages/shared/src/schemas/common.ts`
 
-`voice-channel.md` says `ChannelType = 'web' | 'sms' | 'discord' | 'api' | 'voice'`, but the canonical `channelTypeSchema` in `common.ts` only has `['web', 'sms', 'discord', 'api']`. The `channels.md` architecture doc also lists only 4 channels. Meanwhile `voice-mode.md` is a complete frontend spec that depends on voice being a channel type.
+`voice-channel.md` says `ChannelType = 'web' | 'sms' | 'discord' | 'api' | 'voice'`, but the canonical `channelTypeSchema` in `common.ts` only has `['web', 'sms', 'discord', 'api']`. The `channel-packages.md` architecture doc also lists only 4 channels. Meanwhile `voice-mode.md` is a complete frontend spec that depends on voice being a channel type.
 
 **Resolution:** This is intentional phasing. `voice-channel.md` is a future-facing spec. The current schema is correct for the initial build. However, the frontend specs should not reference voice as if it exists today. `voice-mode.md` should note that it depends on the voice channel type being added to the schema first.
 

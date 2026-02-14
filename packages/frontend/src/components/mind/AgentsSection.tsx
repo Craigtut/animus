@@ -14,6 +14,7 @@ import { trpc } from '../../utils/trpc';
 import { useHeartbeatStore, selectHasRunningAgents } from '../../store/index';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
+import { Typography } from '../ui';
 
 // ============================================================================
 // Active Agents Section
@@ -80,38 +81,34 @@ function ActiveAgentsSection() {
         margin-bottom: ${theme.spacing[4]};
       `}>
         <Lightning size={20} css={css`color: ${theme.colors.text.secondary};`} />
-        <h3 css={css`
-          font-size: ${theme.typography.fontSize.base};
+        <Typography.BodyAlt as="h3" css={css`
           font-weight: ${theme.typography.fontWeight.semibold};
         `}>
           Currently running
-        </h3>
+        </Typography.BodyAlt>
       </div>
 
       {mergedAgents.length === 0 ? (
-        <p css={css`
+        <Typography.Body serif italic color="hint" css={css`
           text-align: center;
           padding: ${theme.spacing[8]} 0;
-          color: ${theme.colors.text.hint};
-          font-size: ${theme.typography.fontSize.base};
         `}>
           Nothing running right now.
-        </p>
+        </Typography.Body>
       ) : (
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
           {mergedAgents.map((agent) => (
             <Card key={agent.taskId} variant="elevated" padding="md">
               <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
                 <Robot size={14} css={css`color: ${theme.colors.text.secondary};`} />
-                <span css={css`
-                  font-size: ${theme.typography.fontSize.base};
+                <Typography.BodyAlt as="span" css={css`
                   font-weight: ${theme.typography.fontWeight.semibold};
                   overflow: hidden;
                   text-overflow: ellipsis;
                   white-space: nowrap;
                 `}>
                   {agent.taskId}
-                </span>
+                </Typography.BodyAlt>
                 <div css={css`
                   width: 6px; height: 6px; border-radius: 50%;
                   background: ${theme.colors.success.main};
@@ -126,21 +123,17 @@ function ActiveAgentsSection() {
                 <Badge variant="success">Running</Badge>
               </div>
               {agent.detail && (
-                <p css={css`
+                <Typography.SmallBody color="secondary" css={css`
                   margin-top: ${theme.spacing[2]};
-                  font-size: ${theme.typography.fontSize.sm};
-                  color: ${theme.colors.text.secondary};
                 `}>
                   {agent.detail}
-                </p>
+                </Typography.SmallBody>
               )}
-              <p css={css`
-                font-size: ${theme.typography.fontSize.xs};
-                color: ${theme.colors.text.hint};
+              <Typography.Caption color="hint" css={css`
                 margin-top: ${theme.spacing[1]};
               `}>
                 Started {formatRelativeTime(agent.receivedAt)}
-              </p>
+              </Typography.Caption>
             </Card>
           ))}
         </div>
@@ -235,22 +228,18 @@ function RecentActivitySection() {
         margin-bottom: ${theme.spacing[4]};
       `}>
         <ClockCounterClockwise size={20} css={css`color: ${theme.colors.text.secondary};`} />
-        <h3 css={css`
-          font-size: ${theme.typography.fontSize.base};
+        <Typography.BodyAlt as="h3" css={css`
           font-weight: ${theme.typography.fontWeight.semibold};
         `}>
           Recent
-        </h3>
+        </Typography.BodyAlt>
       </div>
 
       {entries.length === 0 ? (
         <Card variant="outlined" padding="md">
-          <p css={css`
-            color: ${theme.colors.text.hint};
-            font-size: ${theme.typography.fontSize.sm};
-          `}>
+          <Typography.SmallBody serif italic color="hint">
             Agent activity and decision logs will appear here as the system runs.
-          </p>
+          </Typography.SmallBody>
         </Card>
       ) : (
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
@@ -308,18 +297,16 @@ function AgentActivityRow({ entry }: { entry: ActivityEntry }) {
       `} />
       <div css={css`flex: 1; min-width: 0;`}>
         <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
-          <span css={css`
-            font-size: ${theme.typography.fontSize.sm};
-            font-weight: ${theme.typography.fontWeight.medium};
+          <Typography.SmallBodyAlt as="span" css={css`
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
           `}>
             {entry.sessionId}
-          </span>
+          </Typography.SmallBodyAlt>
           <Badge variant={statusVariant}>{statusLabel}</Badge>
           {duration && (
-            <span css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint};`}>
+            <Typography.Caption color="hint">
               {duration}
-            </span>
+            </Typography.Caption>
           )}
         </div>
         <div css={css`
@@ -327,13 +314,13 @@ function AgentActivityRow({ entry }: { entry: ActivityEntry }) {
           margin-top: ${theme.spacing[1]};
         `}>
           {entry.provider && (
-            <span css={css`font-size: 11px; color: ${theme.colors.text.disabled};`}>
+            <Typography.Caption color="disabled">
               {entry.provider}{entry.model ? ` / ${entry.model}` : ''}
-            </span>
+            </Typography.Caption>
           )}
-          <span css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.disabled};`}>
+          <Typography.Caption color="disabled">
             {formatRelativeTime(entry.timestamp)}
-          </span>
+          </Typography.Caption>
         </div>
 
         {expanded && entry.sessionId && (
@@ -388,15 +375,14 @@ function AgentDetailExpanded({ sessionId }: { sessionId: string }) {
 }
 
 function UsageStat({ label, value, unit }: { label: string; value: string; unit?: string }) {
-  const theme = useTheme();
   return (
     <div>
-      <div css={css`font-size: 10px; color: ${theme.colors.text.disabled}; text-transform: uppercase; letter-spacing: 0.5px;`}>
+      <Typography.Caption as="div" color="disabled" css={css`text-transform: uppercase; letter-spacing: 0.5px;`}>
         {label}
-      </div>
-      <div css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary};`}>
-        {value}{unit ? <span css={css`font-size: 10px; color: ${theme.colors.text.hint}; margin-left: 2px;`}>{unit}</span> : null}
-      </div>
+      </Typography.Caption>
+      <Typography.SmallBody as="div" color="secondary">
+        {value}{unit ? <Typography.Caption as="span" color="hint" css={css`margin-left: 2px;`}>{unit}</Typography.Caption> : null}
+      </Typography.SmallBody>
     </div>
   );
 }
@@ -431,47 +417,36 @@ function DecisionActivityRow({ entry }: { entry: ActivityEntry }) {
       `} />
       <div css={css`flex: 1; min-width: 0;`}>
         <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
-          <span css={css`
-            font-size: ${theme.typography.fontSize.sm};
-            font-weight: ${theme.typography.fontWeight.medium};
-          `}>
+          <Typography.SmallBodyAlt as="span">
             {formatDecisionType(entry.decisionType ?? '')}
-          </span>
+          </Typography.SmallBodyAlt>
           <Badge variant={outcomeVariant}>{outcomeLabel}</Badge>
           {entry.tickNumber != null && (
-            <span css={css`font-size: 10px; color: ${theme.colors.text.disabled};`}>
+            <Typography.Caption color="disabled">
               tick #{entry.tickNumber}
-            </span>
+            </Typography.Caption>
           )}
         </div>
         {entry.description && (
-          <p css={css`
-            font-size: ${theme.typography.fontSize.sm};
-            color: ${theme.colors.text.secondary};
+          <Typography.SmallBody color="secondary" css={css`
             margin-top: ${theme.spacing[1]};
-            line-height: ${theme.typography.lineHeight.relaxed};
           `}>
             {entry.description}
-          </p>
+          </Typography.SmallBody>
         )}
         {entry.outcomeDetail && (
-          <p css={css`
-            font-size: ${theme.typography.fontSize.xs};
-            color: ${theme.colors.text.hint};
+          <Typography.Caption serif italic color="hint" css={css`
             margin-top: ${theme.spacing[1]};
-            font-style: italic;
           `}>
             {entry.outcomeDetail}
-          </p>
+          </Typography.Caption>
         )}
-        <span css={css`
-          font-size: ${theme.typography.fontSize.xs};
-          color: ${theme.colors.text.disabled};
+        <Typography.Caption as="span" color="disabled" css={css`
           margin-top: ${theme.spacing[1]};
           display: inline-block;
         `}>
           {formatRelativeTime(entry.timestamp)}
-        </span>
+        </Typography.Caption>
       </div>
     </div>
   );
@@ -504,12 +479,11 @@ function UsageSummarySection() {
         onClick={() => setExpanded(!expanded)}
       >
         <Coins size={20} css={css`color: ${theme.colors.text.secondary};`} />
-        <h3 css={css`
-          font-size: ${theme.typography.fontSize.base};
+        <Typography.BodyAlt as="h3" css={css`
           font-weight: ${theme.typography.fontWeight.semibold};
         `}>
           Usage
-        </h3>
+        </Typography.BodyAlt>
         {expanded
           ? <CaretDown size={14} css={css`color: ${theme.colors.text.hint};`} />
           : <CaretRight size={14} css={css`color: ${theme.colors.text.hint};`} />

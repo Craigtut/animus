@@ -8,7 +8,10 @@
  */
 
 import type { TriggerType } from '@animus/shared';
+import { createLogger } from '../lib/logger.js';
 import type { TriggerContext } from './context-builder.js';
+
+const log = createLogger('TickQueue', 'heartbeat');
 
 // ============================================================================
 // Types
@@ -230,7 +233,7 @@ export class TickQueue {
     try {
       await this.processor(tick);
     } catch (err) {
-      console.error(`[TickQueue] Error processing tick ${tick.id}:`, err);
+      log.error(`Error processing tick ${tick.id}:`, err);
     } finally {
       // Remove contact from queued set AFTER processing completes,
       // so new messages arriving during an active tick are properly
@@ -257,7 +260,7 @@ export class TickQueue {
     // If no interval ticks, drop the oldest entry (last in sorted order)
     const dropped = this.queue.pop();
     if (dropped) {
-      console.warn(`[TickQueue] Queue overflow: dropped tick ${dropped.id} (${dropped.trigger.type})`);
+      log.warn(`Queue overflow: dropped tick ${dropped.id} (${dropped.trigger.type})`);
     }
   }
 }

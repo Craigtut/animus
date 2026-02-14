@@ -55,6 +55,9 @@ export interface PersonaDraft {
   // BackgroundStep
   personalityNotes: string;
   background: string;
+
+  // Timezone (auto-detected or city-derived)
+  timezone: string;
 }
 
 const defaultPersonaDraft: PersonaDraft = {
@@ -83,6 +86,7 @@ const defaultPersonaDraft: PersonaDraft = {
   values: [],
   personalityNotes: '',
   background: '',
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 };
 
 interface OnboardingState {

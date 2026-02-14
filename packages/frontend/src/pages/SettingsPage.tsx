@@ -20,8 +20,17 @@ import {
   Eye,
   EyeSlash,
   Warning,
+  CheckCircle,
+  XCircle,
+  ShieldCheck,
+  Copy,
+  ArrowSquareOut,
+  CircleNotch,
+  Trash,
+  List,
+  X,
 } from '@phosphor-icons/react';
-import { Card, Button, Input, Modal, Badge, Toggle, Slider } from '../components/ui';
+import { Card, Button, Input, Modal, Badge, Toggle, Slider, Typography, CityAutocomplete, TimezoneSelect } from '../components/ui';
 import { trpc } from '../utils/trpc';
 import type { Theme } from '../styles/theme';
 
@@ -139,13 +148,9 @@ function CollapsibleSection({
           margin-bottom: ${expanded ? theme.spacing[4] : '0'};
         `}
       >
-        <h3 css={css`
-          font-size: ${theme.typography.fontSize.lg};
-          font-weight: ${theme.typography.fontWeight.semibold};
-          color: ${theme.colors.text.primary};
-        `}>
+        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
           {title}
-        </h3>
+        </Typography.Subtitle>
         {expanded ? <CaretUp size={16} /> : <CaretDown size={16} />}
       </button>
       <AnimatePresence initial={false}>
@@ -210,6 +215,7 @@ function PersonaSection() {
   const utils = trpc.useUtils();
 
   const { data: persona, isLoading } = trpc.persona.get.useQuery();
+  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
   const updateMutation = trpc.persona.update.useMutation({
     onSuccess: () => {
       utils.persona.get.invalidate();
@@ -218,10 +224,15 @@ function PersonaSection() {
       setDirty(false);
     },
   });
+  const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation({
+    onSuccess: () => utils.settings.getSystemSettings.invalidate(),
+  });
 
   const [dirty, setDirty] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [timezone, setTimezone] = useState('');
+  const timezoneSave = useSaveFlash();
 
   // Draft state
   const [existenceParadigm, setExistenceParadigm] = useState<'simulated_life' | 'digital_consciousness'>('simulated_life');
@@ -254,6 +265,16 @@ function PersonaSection() {
     setPersonalityNotes(persona.personalityNotes ?? '');
     setDirty(false);
   }, [persona]);
+
+  // Populate timezone from system settings (defaults to browser timezone)
+  useEffect(() => {
+    setTimezone(systemSettings?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
+  }, [systemSettings]);
+
+  const handleTimezoneChange = (tz: string) => {
+    setTimezone(tz);
+    updateSettingsMutation.mutate({ timezone: tz }, { onSuccess: () => timezoneSave.flash() });
+  };
 
   const markDirty = useCallback(() => setDirty(true), []);
 
@@ -305,7 +326,7 @@ function PersonaSection() {
   `;
 
   if (isLoading) {
-    return <div css={css`color: ${theme.colors.text.hint}; padding: ${theme.spacing[8]};`}>Loading persona...</div>;
+    return <Typography.Body color="hint" css={css`padding: ${theme.spacing[8]};`}>Loading persona...</Typography.Body>;
   }
 
   return (
@@ -323,7 +344,7 @@ function PersonaSection() {
             >
               <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
                 {existenceParadigm === 'simulated_life' && <Check size={16} weight="bold" />}
-                <span css={css`font-weight: ${theme.typography.fontWeight.medium};`}>Simulated Life</span>
+                <Typography.BodyAlt as="span">Simulated Life</Typography.BodyAlt>
               </div>
             </Card>
             <Card
@@ -335,16 +356,18 @@ function PersonaSection() {
             >
               <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
                 {existenceParadigm === 'digital_consciousness' && <Check size={16} weight="bold" />}
-                <span css={css`font-weight: ${theme.typography.fontWeight.medium};`}>Digital Consciousness</span>
+                <Typography.BodyAlt as="span">Digital Consciousness</Typography.BodyAlt>
               </div>
             </Card>
           </div>
           {existenceParadigm === 'simulated_life' && (
-            <Input
+            <CityAutocomplete
               label="Where do they live?"
               value={location}
-              onChange={(e) => { setLocation((e.target as HTMLInputElement).value); markDirty(); }}
+              onChange={(val) => { setLocation(val); markDirty(); }}
+              onTimezoneDetected={handleTimezoneChange}
               placeholder="A city, a small town, the countryside..."
+              helperText="Type a city name for suggestions, or enter any location."
             />
           )}
           {existenceParadigm === 'digital_consciousness' && (
@@ -356,6 +379,17 @@ function PersonaSection() {
               placeholder="What does their digital space look like?"
             />
           )}
+          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+            <div css={css`flex: 1;`}>
+              <TimezoneSelect
+                label="Timezone"
+                value={timezone}
+                onChange={handleTimezoneChange}
+                helperText="All scheduled tasks and time-based displays use this timezone."
+              />
+            </div>
+            <SaveIndicator show={timezoneSave.show} />
+          </div>
         </div>
       </CollapsibleSection>
 
@@ -396,9 +430,9 @@ function PersonaSection() {
 
       {/* Archetype (read-only) */}
       <CollapsibleSection title="Archetype" defaultExpanded={false}>
-        <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary}; line-height: ${theme.typography.lineHeight.relaxed};`}>
+        <Typography.SmallBody color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
           Your archetype was used as a starting point during creation. It is not stored -- your personality is defined by the dimensions and traits below.
-        </p>
+        </Typography.SmallBody>
       </CollapsibleSection>
 
       {/* Personality Dimensions */}
@@ -406,15 +440,13 @@ function PersonaSection() {
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
           {dimensionGroups.map((group) => (
             <div key={group.title} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-              <h4 css={css`
-                font-size: ${theme.typography.fontSize.xs};
+              <Typography.Caption as="h4" color="hint" css={css`
                 font-weight: ${theme.typography.fontWeight.medium};
-                color: ${theme.colors.text.hint};
                 text-transform: uppercase;
                 letter-spacing: 0.06em;
               `}>
                 {group.title}
-              </h4>
+              </Typography.Caption>
               {group.dimensions.map((dim) => (
                 <Slider
                   key={dim.id}
@@ -460,20 +492,18 @@ function PersonaSection() {
               ))}
             </div>
           )}
-          <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.hint};`}>
+          <Typography.SmallBody color="hint">
             {traits.length} of 8 selected {errors['traits'] && <span css={css`color: ${theme.colors.error.main};`}> -- {errors['traits']}</span>}
-          </p>
+          </Typography.SmallBody>
           {traitCategories.map((cat) => (
             <div key={cat.title} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-              <h4 css={css`
-                font-size: ${theme.typography.fontSize.xs};
+              <Typography.Caption as="h4" color="hint" css={css`
                 font-weight: ${theme.typography.fontWeight.medium};
-                color: ${theme.colors.text.hint};
                 text-transform: uppercase;
                 letter-spacing: 0.06em;
               `}>
                 {cat.title}
-              </h4>
+              </Typography.Caption>
               <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[2]};`}>
                 {cat.traits.map((trait) => {
                   const isSelected = traits.includes(trait);
@@ -515,26 +545,26 @@ function PersonaSection() {
               {values.map((id, i) => {
                 const val = allValues.find((v) => v.id === id);
                 return (
-                  <span
+                  <Typography.SmallBodyAlt
+                    as="span"
                     key={id}
                     css={css`
                       display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
                       padding: ${theme.spacing[1]} ${theme.spacing[3]};
                       background: ${theme.colors.accent}; color: ${theme.colors.accentForeground};
                       border-radius: ${theme.borderRadius.full};
-                      font-size: ${theme.typography.fontSize.sm}; font-weight: ${theme.typography.fontWeight.medium};
                     `}
                   >
-                    <span css={css`opacity: 0.7; font-size: ${theme.typography.fontSize.xs};`}>#{i + 1}</span>
+                    <Typography.Caption as="span" css={css`opacity: 0.7;`}>#{i + 1}</Typography.Caption>
                     {val ? val.name.split(' & ')[0] : id}
-                  </span>
+                  </Typography.SmallBodyAlt>
                 );
               })}
             </div>
           )}
-          <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.hint};`}>
+          <Typography.SmallBody color="hint">
             {values.length} of 5 selected {errors['values'] && <span css={css`color: ${theme.colors.error.main};`}> -- {errors['values']}</span>}
-          </p>
+          </Typography.SmallBody>
           <div css={css`
             display: grid; grid-template-columns: repeat(2, 1fr); gap: ${theme.spacing[3]};
             @media (max-width: ${theme.breakpoints.sm}) { grid-template-columns: 1fr; }
@@ -554,23 +584,23 @@ function PersonaSection() {
                 >
                   <div css={css`display: flex; align-items: flex-start; gap: ${theme.spacing[2]};`}>
                     {isSelected && (
-                      <span css={css`
+                      <Typography.Caption as="span" css={css`
                         display: flex; align-items: center; justify-content: center;
                         width: 20px; height: 20px; border-radius: 50%;
                         background: ${theme.colors.accent}; color: ${theme.colors.accentForeground};
-                        font-size: ${theme.typography.fontSize.xs}; font-weight: ${theme.typography.fontWeight.semibold};
+                        font-weight: ${theme.typography.fontWeight.semibold};
                         flex-shrink: 0; margin-top: 2px;
                       `}>
                         {rank + 1}
-                      </span>
+                      </Typography.Caption>
                     )}
                     <div>
-                      <span css={css`font-weight: ${theme.typography.fontWeight.medium}; font-size: ${theme.typography.fontSize.sm};`}>
+                      <Typography.SmallBodyAlt as="span">
                         {val.name}
-                      </span>
-                      <p css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint}; margin-top: 2px;`}>
+                      </Typography.SmallBodyAlt>
+                      <Typography.Caption as="p" color="hint" css={css`margin-top: 2px;`}>
                         {val.description}
-                      </p>
+                      </Typography.Caption>
                     </div>
                   </div>
                 </Card>
@@ -631,12 +661,10 @@ function PersonaSection() {
               css={css`
                 padding: ${theme.spacing[2]} ${theme.spacing[4]};
                 background: ${theme.colors.success.main}1a;
-                color: ${theme.colors.success.main};
                 border-radius: ${theme.borderRadius.default};
-                font-size: ${theme.typography.fontSize.sm};
               `}
             >
-              {successMessage}
+              <Typography.SmallBody color={theme.colors.success.main}>{successMessage}</Typography.SmallBody>
             </motion.div>
           )}
         </AnimatePresence>
@@ -644,11 +672,11 @@ function PersonaSection() {
           <div css={css`
             padding: ${theme.spacing[2]} ${theme.spacing[4]};
             background: ${theme.colors.error.main}1a;
-            color: ${theme.colors.error.main};
             border-radius: ${theme.borderRadius.default};
-            font-size: ${theme.typography.fontSize.sm};
           `}>
-            Failed to save: {updateMutation.error?.message}
+            <Typography.SmallBody color={theme.colors.error.main}>
+              Failed to save: {updateMutation.error?.message}
+            </Typography.SmallBody>
           </div>
         )}
       </div>
@@ -684,9 +712,30 @@ function HeartbeatSection() {
   const sessionState = hbState?.sessionState ?? 'cold';
   const lastTickAt = hbState?.lastTickAt ?? null;
 
-  const intervalMs = systemSettings?.heartbeatIntervalMs ?? 300000;
-  const warmthMs = systemSettings?.sessionWarmthMs ?? 900000;
-  const contextBudget = systemSettings?.sessionContextBudget ?? 0.7;
+  // Local state for immediate slider feedback (avoids waiting for API round-trip)
+  const [localIntervalMs, setLocalIntervalMs] = useState<number | null>(null);
+  const [localWarmthMs, setLocalWarmthMs] = useState<number | null>(null);
+  const [localBudget, setLocalBudget] = useState<number | null>(null);
+
+  const intervalMs = localIntervalMs ?? systemSettings?.heartbeatIntervalMs ?? 300000;
+  const warmthMs = localWarmthMs ?? systemSettings?.sessionWarmthMs ?? 900000;
+  const contextBudget = localBudget ?? systemSettings?.sessionContextBudget ?? 0.7;
+
+  // Sync local state when server data arrives (and local isn't overriding)
+  useEffect(() => {
+    if (systemSettings && localIntervalMs === null) setLocalIntervalMs(null);
+  }, [systemSettings?.heartbeatIntervalMs]);
+  useEffect(() => {
+    if (systemSettings && localWarmthMs === null) setLocalWarmthMs(null);
+  }, [systemSettings?.sessionWarmthMs]);
+  useEffect(() => {
+    if (systemSettings && localBudget === null) setLocalBudget(null);
+  }, [systemSettings?.sessionContextBudget]);
+
+  // Debounced API persistence
+  const intervalTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const warmthTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const budgetTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const formatInterval = (ms: number) => {
     const mins = Math.round(ms / 60000);
@@ -704,17 +753,29 @@ function HeartbeatSection() {
 
   const handleIntervalChange = (mins: number) => {
     const ms = mins * 60000;
-    updateIntervalMutation.mutate({ intervalMs: ms }, { onSuccess: () => intervalSave.flash() });
-    updateSettingsMutation.mutate({ heartbeatIntervalMs: ms });
+    setLocalIntervalMs(ms);
+    clearTimeout(intervalTimerRef.current);
+    intervalTimerRef.current = setTimeout(() => {
+      updateIntervalMutation.mutate({ intervalMs: ms }, { onSuccess: () => intervalSave.flash() });
+      updateSettingsMutation.mutate({ heartbeatIntervalMs: ms });
+    }, 300);
   };
 
   const handleWarmthChange = (mins: number) => {
     const ms = mins * 60000;
-    updateSettingsMutation.mutate({ sessionWarmthMs: ms }, { onSuccess: () => warmthSave.flash() });
+    setLocalWarmthMs(ms);
+    clearTimeout(warmthTimerRef.current);
+    warmthTimerRef.current = setTimeout(() => {
+      updateSettingsMutation.mutate({ sessionWarmthMs: ms }, { onSuccess: () => warmthSave.flash() });
+    }, 300);
   };
 
   const handleBudgetChange = (val: number) => {
-    updateSettingsMutation.mutate({ sessionContextBudget: val }, { onSuccess: () => budgetSave.flash() });
+    setLocalBudget(val);
+    clearTimeout(budgetTimerRef.current);
+    budgetTimerRef.current = setTimeout(() => {
+      updateSettingsMutation.mutate({ sessionContextBudget: val }, { onSuccess: () => budgetSave.flash() });
+    }, 300);
   };
 
   const handlePause = () => {
@@ -731,9 +792,9 @@ function HeartbeatSection() {
       {/* Heartbeat Interval */}
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
         <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-          <label css={css`font-size: ${theme.typography.fontSize.sm}; font-weight: ${theme.typography.fontWeight.medium}; color: ${theme.colors.text.secondary};`}>
+          <Typography.SmallBodyAlt as="label" color="secondary">
             How often does your Animus think?
-          </label>
+          </Typography.SmallBodyAlt>
           <SaveIndicator show={intervalSave.show} />
         </div>
         <div css={css`display: flex; align-items: center; gap: ${theme.spacing[4]};`}>
@@ -749,46 +810,43 @@ function HeartbeatSection() {
               showNeutral={false}
             />
           </div>
-          <span css={css`
-            font-size: ${theme.typography.fontSize.sm};
-            color: ${theme.colors.text.primary};
-            font-weight: ${theme.typography.fontWeight.medium};
+          <Typography.SmallBodyAlt as="span" css={css`
             white-space: nowrap;
             min-width: 110px;
           `}>
             {formatInterval(intervalMs)}
-          </span>
+          </Typography.SmallBodyAlt>
         </div>
-        <p css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint}; line-height: ${theme.typography.lineHeight.relaxed};`}>
+        <Typography.Caption as="p" color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
           Shorter intervals mean more frequent thoughts and faster emotional shifts. Longer intervals are more contemplative (and cheaper).
-        </p>
+        </Typography.Caption>
       </div>
 
       {/* Heartbeat Status */}
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-        <h3 css={css`font-size: ${theme.typography.fontSize.lg}; font-weight: ${theme.typography.fontWeight.semibold};`}>
+        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
           Status
-        </h3>
+        </Typography.Subtitle>
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
           <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
             <div css={css`
               width: 8px; height: 8px; border-radius: 50%;
               background: ${isRunning ? theme.colors.success.main : theme.colors.warning.main};
             `} />
-            <span css={css`font-size: ${theme.typography.fontSize.sm}; font-weight: ${theme.typography.fontWeight.medium};`}>
+            <Typography.SmallBodyAlt as="span">
               {isRunning ? 'Running' : 'Paused'}
-            </span>
+            </Typography.SmallBodyAlt>
           </div>
-          <div css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary};`}>
+          <Typography.SmallBody as="div" color="secondary">
             Tick #{tickNumber.toLocaleString()}
-          </div>
-          <div css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary};`}>
+          </Typography.SmallBody>
+          <Typography.SmallBody as="div" color="secondary">
             Last tick: {formatAgo(lastTickAt)}
-          </div>
+          </Typography.SmallBody>
           {isRunning && currentStage !== 'idle' && (
-            <div css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary};`}>
+            <Typography.SmallBody as="div" color="secondary">
               Currently: {currentStage === 'gather' ? 'Gathering context' : currentStage === 'mind' ? 'Thinking' : currentStage === 'execute' ? 'Executing' : currentStage}
-            </div>
+            </Typography.SmallBody>
           )}
         </div>
 
@@ -796,11 +854,11 @@ function HeartbeatSection() {
           <div css={css`
             padding: ${theme.spacing[3]} ${theme.spacing[4]};
             background: ${theme.colors.warning.main}1a;
-            color: ${theme.colors.warning.dark};
             border-radius: ${theme.borderRadius.default};
-            font-size: ${theme.typography.fontSize.sm};
           `}>
-            Heartbeat is paused. Your Animus is not thinking.
+            <Typography.SmallBody color={theme.colors.warning.dark}>
+              Heartbeat is paused. Your Animus is not thinking.
+            </Typography.SmallBody>
           </div>
         )}
 
@@ -818,12 +876,12 @@ function HeartbeatSection() {
 
         <Modal open={showPauseConfirm} onClose={() => setShowPauseConfirm(false)}>
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-            <h3 css={css`font-size: ${theme.typography.fontSize.lg}; font-weight: ${theme.typography.fontWeight.semibold};`}>
+            <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
               Pause heartbeat?
-            </h3>
-            <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary}; line-height: ${theme.typography.lineHeight.relaxed};`}>
+            </Typography.Subtitle>
+            <Typography.SmallBody color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
               Pausing the heartbeat stops all internal processes. Your Animus will stop thinking, feeling, and acting until resumed.
-            </p>
+            </Typography.SmallBody>
             <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
               <Button variant="ghost" size="sm" onClick={() => setShowPauseConfirm(false)}>Cancel</Button>
               <Button variant="danger" size="sm" onClick={handlePause} loading={stopMutation.isPending}>
@@ -836,11 +894,11 @@ function HeartbeatSection() {
 
       {/* Session Info */}
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-        <h3 css={css`font-size: ${theme.typography.fontSize.lg}; font-weight: ${theme.typography.fontWeight.semibold};`}>
+        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
           Session
-        </h3>
+        </Typography.Subtitle>
         <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-          <span css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary};`}>State:</span>
+          <Typography.SmallBody as="span" color="secondary">State:</Typography.SmallBody>
           <Badge variant={sessionState === 'active' ? 'success' : sessionState === 'warm' ? 'warning' : 'default'}>
             {sessionState.charAt(0).toUpperCase() + sessionState.slice(1)}
           </Badge>
@@ -848,9 +906,9 @@ function HeartbeatSection() {
 
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
           <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-            <label css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary};`}>
+            <Typography.SmallBody as="label" color="secondary">
               Warmth window: {Math.round(warmthMs / 60000)} min
-            </label>
+            </Typography.SmallBody>
             <SaveIndicator show={warmthSave.show} />
           </div>
           <Slider
@@ -867,9 +925,9 @@ function HeartbeatSection() {
 
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
           <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-            <label css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary};`}>
+            <Typography.SmallBody as="label" color="secondary">
               Context budget: {Math.round(contextBudget * 100)}%
-            </label>
+            </Typography.SmallBody>
             <SaveIndicator show={budgetSave.show} />
           </div>
           <Slider
@@ -884,6 +942,207 @@ function HeartbeatSection() {
           />
         </div>
       </div>
+
+      {/* Sleep & Energy */}
+      <SleepEnergySettings />
+    </div>
+  );
+}
+
+// ============================================================================
+// Sleep & Energy Settings (rendered inside HeartbeatSection)
+// ============================================================================
+
+function SleepEnergySettings() {
+  const theme = useTheme();
+  const utils = trpc.useUtils();
+
+  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
+  const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation({
+    onSuccess: () => utils.settings.getSystemSettings.invalidate(),
+  });
+
+  const enabledSave = useSaveFlash();
+  const sleepStartSave = useSaveFlash();
+  const sleepEndSave = useSaveFlash();
+  const sleepIntervalSave = useSaveFlash();
+
+  const energyEnabled = systemSettings?.energySystemEnabled ?? true;
+  const sleepStartHour = systemSettings?.sleepStartHour ?? 22;
+  const sleepEndHour = systemSettings?.sleepEndHour ?? 7;
+  const sleepTickIntervalMs = systemSettings?.sleepTickIntervalMs ?? 1800000;
+
+  const [localSleepInterval, setLocalSleepInterval] = useState<number | null>(null);
+  const intervalTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const displayInterval = localSleepInterval ?? sleepTickIntervalMs;
+
+  const formatHour = (h: number): string => {
+    const suffix = h >= 12 ? 'PM' : 'AM';
+    const display = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${display}:00 ${suffix}`;
+  };
+
+  const formatSleepInterval = (ms: number): string => {
+    const mins = Math.round(ms / 60000);
+    if (mins >= 60) {
+      const hrs = mins / 60;
+      return `${hrs % 1 === 0 ? hrs : hrs.toFixed(1)} hour${hrs !== 1 ? 's' : ''}`;
+    }
+    return `${mins} min`;
+  };
+
+  const handleToggle = (checked: boolean) => {
+    updateSettingsMutation.mutate({ energySystemEnabled: checked }, { onSuccess: () => enabledSave.flash() });
+  };
+
+  const handleSleepStartChange = (hour: number) => {
+    updateSettingsMutation.mutate({ sleepStartHour: hour }, { onSuccess: () => sleepStartSave.flash() });
+  };
+
+  const handleSleepEndChange = (hour: number) => {
+    updateSettingsMutation.mutate({ sleepEndHour: hour }, { onSuccess: () => sleepEndSave.flash() });
+  };
+
+  const handleSleepIntervalChange = (mins: number) => {
+    const ms = mins * 60000;
+    setLocalSleepInterval(ms);
+    clearTimeout(intervalTimerRef.current);
+    intervalTimerRef.current = setTimeout(() => {
+      updateSettingsMutation.mutate({ sleepTickIntervalMs: ms }, { onSuccess: () => sleepIntervalSave.flash() });
+    }, 300);
+  };
+
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+
+  return (
+    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+      <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+        Sleep & Energy
+      </Typography.Subtitle>
+
+      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+        <Toggle
+          checked={energyEnabled}
+          onChange={handleToggle}
+          label="Enable sleep & energy system"
+        />
+        <SaveIndicator show={enabledSave.show} />
+      </div>
+
+      <Typography.Caption as="p" color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+        Adds a circadian rhythm to your Animus. Energy rises and falls throughout the day, and sleep emerges naturally when energy drops.
+      </Typography.Caption>
+
+      <AnimatePresence initial={false}>
+        {energyEnabled && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            css={css`overflow: hidden;`}
+          >
+            <div css={css`
+              display: flex;
+              flex-direction: column;
+              gap: ${theme.spacing[4]};
+              padding-top: ${theme.spacing[3]};
+            `}>
+              {/* Sleep Start Hour */}
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+                  <Typography.SmallBody as="label" color="secondary">
+                    Sleep starts at
+                  </Typography.SmallBody>
+                  <SaveIndicator show={sleepStartSave.show} />
+                </div>
+                <select
+                  value={sleepStartHour}
+                  onChange={(e) => handleSleepStartChange(parseInt(e.target.value, 10))}
+                  css={css`
+                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                    border-radius: ${theme.borderRadius.default};
+                    border: 1px solid ${theme.colors.border.default};
+                    background: ${theme.colors.background.paper};
+                    color: ${theme.colors.text.primary};
+                    font-size: ${theme.typography.fontSize.sm};
+                    font-family: ${theme.typography.fontFamily.sans};
+                    cursor: pointer;
+                    max-width: 160px;
+
+                    &:focus {
+                      outline: none;
+                      border-color: ${theme.colors.border.focus};
+                    }
+                  `}
+                >
+                  {hours.map((h) => (
+                    <option key={h} value={h}>{formatHour(h)}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Sleep End Hour */}
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+                  <Typography.SmallBody as="label" color="secondary">
+                    Wake up at
+                  </Typography.SmallBody>
+                  <SaveIndicator show={sleepEndSave.show} />
+                </div>
+                <select
+                  value={sleepEndHour}
+                  onChange={(e) => handleSleepEndChange(parseInt(e.target.value, 10))}
+                  css={css`
+                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                    border-radius: ${theme.borderRadius.default};
+                    border: 1px solid ${theme.colors.border.default};
+                    background: ${theme.colors.background.paper};
+                    color: ${theme.colors.text.primary};
+                    font-size: ${theme.typography.fontSize.sm};
+                    font-family: ${theme.typography.fontFamily.sans};
+                    cursor: pointer;
+                    max-width: 160px;
+
+                    &:focus {
+                      outline: none;
+                      border-color: ${theme.colors.border.focus};
+                    }
+                  `}
+                >
+                  {hours.map((h) => (
+                    <option key={h} value={h}>{formatHour(h)}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Sleep Tick Interval */}
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+                  <Typography.SmallBody as="label" color="secondary">
+                    Sleep tick interval: {formatSleepInterval(displayInterval)}
+                  </Typography.SmallBody>
+                  <SaveIndicator show={sleepIntervalSave.show} />
+                </div>
+                <Slider
+                  value={displayInterval / 60000}
+                  onChange={handleSleepIntervalChange}
+                  min={15}
+                  max={120}
+                  step={15}
+                  leftLabel="15 min"
+                  rightLabel="2 hours"
+                  showNeutral={false}
+                />
+                <Typography.Caption as="p" color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+                  How often your Animus thinks while sleeping. Longer intervals mean less processing during sleep.
+                </Typography.Caption>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -899,36 +1158,133 @@ function ProviderSection() {
   const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
   const { data: claudeKey } = trpc.provider.hasKey.useQuery({ provider: 'claude' });
   const { data: codexKey } = trpc.provider.hasKey.useQuery({ provider: 'codex' });
+  const { data: detectData } = trpc.provider.detect.useQuery();
 
   const saveKeyMutation = trpc.provider.saveKey.useMutation({
     onSuccess: () => {
       utils.provider.hasKey.invalidate();
+      utils.provider.detect.invalidate();
     },
   });
   const validateMutation = trpc.provider.validateKey.useMutation();
+  const removeKeyMutation = trpc.provider.removeKey.useMutation({
+    onSuccess: () => {
+      utils.provider.hasKey.invalidate();
+      utils.provider.detect.invalidate();
+    },
+  });
+  const useCliMutation = trpc.provider.useCli.useMutation({
+    onSuccess: () => {
+      utils.provider.hasKey.invalidate();
+      utils.provider.detect.invalidate();
+    },
+  });
   const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation({
     onSuccess: () => utils.settings.getSystemSettings.invalidate(),
   });
 
+  // Codex OAuth mutations
+  const codexInitiateMutation = trpc.codexAuth.initiate.useMutation();
+  const codexCancelMutation = trpc.codexAuth.cancel.useMutation();
+
   const activeProvider = systemSettings?.defaultAgentProvider ?? 'claude';
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
-  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [credentialInput, setCredentialInput] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [switchConfirm, setSwitchConfirm] = useState<string | null>(null);
   const [validateResult, setValidateResult] = useState<{ valid: boolean; message: string } | null>(null);
+
+  // Codex OAuth state
+  const [codexOAuthSession, setCodexOAuthSession] = useState<string | null>(null);
+  const [codexOAuthData, setCodexOAuthData] = useState<{
+    userCode: string;
+    verificationUrl: string;
+    expiresIn: number;
+  } | null>(null);
+  const [codexOAuthStatus, setCodexOAuthStatus] = useState<'idle' | 'pending' | 'success' | 'error' | 'expired'>('idle');
+  const [codexOAuthMessage, setCodexOAuthMessage] = useState('');
+  const [codexCountdown, setCodexCountdown] = useState(0);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  const stopCountdown = useCallback(() => {
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => stopCountdown();
+  }, [stopCountdown]);
+
+  // Codex OAuth status subscription
+  trpc.codexAuth.status.useSubscription(
+    { sessionId: codexOAuthSession! },
+    {
+      enabled: codexOAuthSession !== null && codexOAuthStatus === 'pending',
+      onData: (data) => {
+        if (data.status === 'success') {
+          setCodexOAuthStatus('success');
+          stopCountdown();
+          utils.provider.hasKey.invalidate();
+          utils.provider.detect.invalidate();
+        } else if (data.status === 'error') {
+          setCodexOAuthStatus('error');
+          setCodexOAuthMessage(data.message ?? 'Authorization failed');
+          stopCountdown();
+        } else if (data.status === 'expired') {
+          setCodexOAuthStatus('expired');
+          setCodexOAuthMessage('Authorization code expired');
+          stopCountdown();
+        } else if (data.status === 'cancelled') {
+          setCodexOAuthStatus('idle');
+          stopCountdown();
+        }
+      },
+    }
+  );
+
+  // Derive CLI detection
+  const claudeCliAvailable = detectData?.find((d) => d.provider === 'claude')?.methods.some((m) => m.method === 'cli' && m.available) ?? false;
+  const codexCliAvailable = detectData?.find((d) => d.provider === 'codex')?.methods.some((m) => m.method === 'cli' && m.available) ?? false;
+
+  // Infer credential type from input prefix
+  const inferredType = (() => {
+    if (!credentialInput || credentialInput.length < 5) return null;
+    if (credentialInput.startsWith('sk-ant-oat01-')) return 'OAuth Token';
+    if (credentialInput.startsWith('sk-ant-api03-')) return 'API Key';
+    if (credentialInput.startsWith('sk-ant-')) return 'API Key';
+    if (credentialInput.startsWith('sk-')) return 'API Key';
+    return null;
+  })();
+
+  // Format credential type for badge display
+  const getCredentialBadge = (keyData: typeof claudeKey) => {
+    if (!keyData?.hasKey) return { label: 'Not configured', variant: 'default' as const };
+    switch (keyData.credentialType) {
+      case 'api_key': return { label: 'API Key', variant: 'success' as const };
+      case 'oauth_token': return { label: 'OAuth Token', variant: 'success' as const };
+      case 'codex_oauth': return { label: 'ChatGPT OAuth', variant: 'success' as const };
+      case 'cli_detected': return { label: 'CLI', variant: 'success' as const };
+      default: return { label: 'Connected', variant: 'success' as const };
+    }
+  };
 
   const providers = [
     {
       id: 'claude' as const,
       name: 'Claude',
       description: 'By Anthropic. Full-featured agent with native tool use and streaming.',
-      hasKey: claudeKey?.hasKey ?? false,
+      keyData: claudeKey,
+      cliAvailable: claudeCliAvailable,
     },
     {
       id: 'codex' as const,
       name: 'Codex',
       description: 'By OpenAI. Code-focused agent with function calling.',
-      hasKey: codexKey?.hasKey ?? false,
+      keyData: codexKey,
+      cliAvailable: codexCliAvailable,
     },
   ];
 
@@ -944,18 +1300,18 @@ function ProviderSection() {
   };
 
   const handleValidateAndSave = (provider: 'claude' | 'codex') => {
-    if (!apiKeyInput.trim()) return;
+    if (!credentialInput.trim()) return;
     validateMutation.mutate(
-      { provider, apiKey: apiKeyInput },
+      { provider, key: credentialInput },
       {
         onSuccess: (result) => {
           setValidateResult(result);
           if (result.valid) {
             saveKeyMutation.mutate(
-              { provider, apiKey: apiKeyInput },
+              { provider, key: credentialInput, credentialType: result.credentialType as 'api_key' | 'oauth_token' | undefined },
               {
                 onSuccess: () => {
-                  setApiKeyInput('');
+                  setCredentialInput('');
                   setShowKey(false);
                 },
               },
@@ -966,111 +1322,374 @@ function ProviderSection() {
     );
   };
 
+  const handleRemove = (provider: 'claude' | 'codex') => {
+    removeKeyMutation.mutate({ provider });
+  };
+
+  const handleUseCli = (provider: 'claude' | 'codex') => {
+    useCliMutation.mutate({ provider });
+  };
+
+  const handleCodexOAuthStart = () => {
+    setCodexOAuthStatus('pending');
+    setCodexOAuthMessage('');
+    setCodexOAuthData(null);
+
+    codexInitiateMutation.mutate(undefined, {
+      onSuccess: (result) => {
+        setCodexOAuthData({
+          userCode: result.userCode,
+          verificationUrl: result.verificationUrl,
+          expiresIn: result.expiresIn,
+        });
+        setCodexOAuthSession(result.sessionId);
+        setCodexCountdown(result.expiresIn);
+
+        stopCountdown();
+        countdownRef.current = setInterval(() => {
+          setCodexCountdown((prev) => {
+            if (prev <= 1) {
+              stopCountdown();
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+      },
+      onError: (err) => {
+        setCodexOAuthStatus('error');
+        setCodexOAuthMessage(err.message ?? 'Failed to start authentication');
+      },
+    });
+  };
+
+  const handleCodexOAuthCancel = () => {
+    if (codexOAuthSession) {
+      codexCancelMutation.mutate({ sessionId: codexOAuthSession });
+    }
+    setCodexOAuthStatus('idle');
+    setCodexOAuthSession(null);
+    setCodexOAuthData(null);
+    stopCountdown();
+  };
+
+  const handleCopyCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 2000);
+    } catch {
+      // Fallback
+    }
+  };
+
+  const formatCountdown = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-      {providers.map((p) => (
-        <Card
-          key={p.id}
-          variant={activeProvider === p.id ? 'elevated' : 'outlined'}
-          padding="md"
-        >
-          <div
-            css={css`cursor: pointer;`}
-            onClick={() => setExpandedProvider(expandedProvider === p.id ? null : p.id)}
-          >
-            <div css={css`display: flex; align-items: center; justify-content: space-between; margin-bottom: ${theme.spacing[1]};`}>
-              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                <span css={css`font-size: ${theme.typography.fontSize.lg}; font-weight: ${theme.typography.fontWeight.medium};`}>
-                  {p.name}
-                </span>
-                {activeProvider === p.id && (
-                  <Badge variant="success">Currently active</Badge>
-                )}
-              </div>
-              <Badge variant={p.hasKey ? 'success' : 'default'}>
-                {p.hasKey ? 'Connected' : 'Not configured'}
-              </Badge>
-            </div>
-            <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary};`}>
-              {p.description}
-            </p>
-          </div>
+      {providers.map((p) => {
+        const badge = getCredentialBadge(p.keyData);
+        const hasKey = p.keyData?.hasKey ?? false;
 
-          <AnimatePresence>
-            {expandedProvider === p.id && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                css={css`overflow: hidden;`}
-              >
-                <div css={css`
-                  margin-top: ${theme.spacing[4]};
-                  padding-top: ${theme.spacing[4]};
-                  border-top: 1px solid ${theme.colors.border.light};
-                  display: flex;
-                  flex-direction: column;
-                  gap: ${theme.spacing[3]};
-                `}>
-                  <div css={css`display: flex; gap: ${theme.spacing[2]}; align-items: flex-end;`}>
-                    <div css={css`flex: 1;`}>
-                      <Input
-                        label="API Key"
-                        type={showKey ? 'text' : 'password'}
-                        value={apiKeyInput}
-                        onChange={(e) => { setApiKeyInput((e.target as HTMLInputElement).value); setValidateResult(null); }}
-                        placeholder={p.hasKey ? '********' : 'Enter API key'}
-                        rightElement={
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setShowKey(!showKey); }}
-                            css={css`
-                              cursor: pointer; padding: 0; color: ${theme.colors.text.hint};
-                              &:hover { color: ${theme.colors.text.primary}; }
-                            `}
-                          >
-                            {showKey ? <EyeSlash size={16} /> : <Eye size={16} />}
-                          </button>
-                        }
-                      />
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() => handleValidateAndSave(p.id)}
-                      loading={validateMutation.isPending || saveKeyMutation.isPending}
-                      disabled={!apiKeyInput.trim()}
-                    >
-                      Validate & Save
-                    </Button>
-                  </div>
-                  {validateResult && (
-                    <div css={css`
-                      font-size: ${theme.typography.fontSize.xs};
-                      color: ${validateResult.valid ? theme.colors.success.main : theme.colors.error.main};
-                    `}>
-                      {validateResult.message}
-                    </div>
-                  )}
-                  {activeProvider !== p.id && p.hasKey && (
-                    <Button variant="secondary" size="sm" onClick={() => handleSwitch(p.id)}>
-                      Switch to {p.name}
-                    </Button>
+        return (
+          <Card
+            key={p.id}
+            variant={activeProvider === p.id ? 'elevated' : 'outlined'}
+            padding="md"
+          >
+            <div
+              css={css`cursor: pointer;`}
+              onClick={() => {
+                setExpandedProvider(expandedProvider === p.id ? null : p.id);
+                setCredentialInput('');
+                setValidateResult(null);
+                setShowKey(false);
+              }}
+            >
+              <div css={css`display: flex; align-items: center; justify-content: space-between; margin-bottom: ${theme.spacing[1]};`}>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                  <Typography.Subtitle as="span">
+                    {p.name}
+                  </Typography.Subtitle>
+                  {activeProvider === p.id && (
+                    <Badge variant="success">Currently active</Badge>
                   )}
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </Card>
-      ))}
+                <Badge variant={badge.variant}>
+                  {badge.label}
+                </Badge>
+              </div>
+              <Typography.SmallBody color="secondary">
+                {p.description}
+              </Typography.SmallBody>
+            </div>
+
+            <AnimatePresence>
+              {expandedProvider === p.id && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  css={css`overflow: hidden;`}
+                >
+                  <div css={css`
+                    margin-top: ${theme.spacing[4]};
+                    padding-top: ${theme.spacing[4]};
+                    border-top: 1px solid ${theme.colors.border.light};
+                    display: flex;
+                    flex-direction: column;
+                    gap: ${theme.spacing[3]};
+                  `}>
+                    {/* CLI detection */}
+                    {p.cliAvailable && (
+                      <div css={css`
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        padding: ${theme.spacing[3]};
+                        background: ${theme.colors.background.elevated};
+                        border-radius: ${theme.borderRadius.sm};
+                        gap: ${theme.spacing[2]};
+                      `}>
+                        <Typography.SmallBody as="div" color="secondary">
+                          {p.name} CLI detected
+                        </Typography.SmallBody>
+                        {p.keyData?.credentialType === 'cli_detected' ? (
+                          <Typography.Caption as="span" color={theme.colors.success.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                            <CheckCircle size={14} weight="fill" /> Active
+                          </Typography.Caption>
+                        ) : (
+                          <Button variant="ghost" size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleUseCli(p.id); }} loading={useCliMutation.isPending}>
+                            Use CLI
+                          </Button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Codex OAuth section */}
+                    {p.id === 'codex' && (
+                      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                        {codexOAuthStatus === 'idle' && (
+                          <div css={css`
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                            padding: ${theme.spacing[3]};
+                            border: 1px solid ${theme.colors.border.light};
+                            border-radius: ${theme.borderRadius.sm};
+                            gap: ${theme.spacing[2]};
+                          `}>
+                            <div>
+                              <Typography.SmallBody as="div">
+                                ChatGPT Sign In
+                              </Typography.SmallBody>
+                              <Typography.Caption as="div" color="hint">
+                                Use your ChatGPT subscription
+                              </Typography.Caption>
+                            </div>
+                            <Button size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleCodexOAuthStart(); }} loading={codexInitiateMutation.isPending}>
+                              Sign in
+                            </Button>
+                          </div>
+                        )}
+
+                        {codexOAuthStatus === 'pending' && codexOAuthData && (
+                          <div css={css`
+                            padding: ${theme.spacing[3]};
+                            border: 1px solid ${theme.colors.border.default};
+                            border-radius: ${theme.borderRadius.sm};
+                            display: flex;
+                            flex-direction: column;
+                            gap: ${theme.spacing[3]};
+                          `}>
+                            <Typography.SmallBody as="div" color="secondary">
+                              Open{' '}
+                              <a
+                                href={codexOAuthData.verificationUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                css={css`color: ${theme.colors.text.primary}; font-weight: ${theme.typography.fontWeight.medium}; text-decoration: none; &:hover { text-decoration: underline; }`}
+                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                              >
+                                {codexOAuthData.verificationUrl} <ArrowSquareOut size={12} css={css`vertical-align: middle;`} />
+                              </a>{' '}
+                              and enter:
+                            </Typography.SmallBody>
+                            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                              <Typography.Subtitle as="code" css={css`
+                                font-weight: ${theme.typography.fontWeight.semibold};
+                                letter-spacing: 0.12em;
+                                background: ${theme.colors.background.elevated};
+                                padding: ${theme.spacing[1.5]} ${theme.spacing[3]};
+                                border-radius: ${theme.borderRadius.sm};
+                                border: 1px solid ${theme.colors.border.default};
+                              `}>
+                                {codexOAuthData.userCode}
+                              </Typography.Subtitle>
+                              <button
+                                onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleCopyCode(codexOAuthData.userCode); }}
+                                css={css`
+                                  display: flex; align-items: center; gap: ${theme.spacing[0.5]};
+                                  font-size: ${theme.typography.fontSize.xs};
+                                  color: ${codeCopied ? theme.colors.success.main : theme.colors.text.hint};
+                                  cursor: pointer; padding: ${theme.spacing[1]};
+                                  &:hover { color: ${codeCopied ? theme.colors.success.main : theme.colors.text.primary}; }
+                                `}
+                              >
+                                {codeCopied ? <CheckCircle size={12} /> : <Copy size={12} />}
+                                {codeCopied ? 'Copied' : 'Copy'}
+                              </button>
+                            </div>
+                            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                              <CircleNotch
+                                size={14}
+                                css={css`
+                                  color: ${theme.colors.text.hint};
+                                  animation: spin 1s linear infinite;
+                                  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                                `}
+                              />
+                              <Typography.Caption color="hint">
+                                Waiting...
+                              </Typography.Caption>
+                              {codexCountdown > 0 && (
+                                <Typography.Caption color="disabled" css={css`margin-left: auto;`}>
+                                  {formatCountdown(codexCountdown)}
+                                </Typography.Caption>
+                              )}
+                            </div>
+                            <Button variant="ghost" size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleCodexOAuthCancel(); }}>
+                              Cancel
+                            </Button>
+                          </div>
+                        )}
+
+                        {codexOAuthStatus === 'success' && (
+                          <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
+                            display: flex; align-items: center; gap: ${theme.spacing[2]};
+                            padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                            background: ${theme.colors.success.main}0d;
+                            border-radius: ${theme.borderRadius.sm};
+                          `}>
+                            <CheckCircle size={16} weight="fill" /> Signed in with ChatGPT
+                          </Typography.SmallBody>
+                        )}
+
+                        {(codexOAuthStatus === 'error' || codexOAuthStatus === 'expired') && (
+                          <div css={css`
+                            display: flex; align-items: center; justify-content: space-between;
+                            padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                            background: ${theme.colors.error.main}0d;
+                            border-radius: ${theme.borderRadius.sm};
+                          `}>
+                            <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                              <XCircle size={16} weight="fill" /> {codexOAuthMessage || 'Failed'}
+                            </Typography.SmallBody>
+                            <Button variant="ghost" size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setCodexOAuthStatus('idle'); setCodexOAuthSession(null); setCodexOAuthData(null); }}>
+                              Retry
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Credential input */}
+                    <div css={css`display: flex; gap: ${theme.spacing[2]}; align-items: flex-end;`}>
+                      <div css={css`flex: 1;`}>
+                        <Input
+                          label={p.id === 'claude' ? 'API Key or OAuth Token' : 'API Key'}
+                          type={showKey ? 'text' : 'password'}
+                          value={credentialInput}
+                          onChange={(e) => { setCredentialInput((e.target as HTMLInputElement).value); setValidateResult(null); }}
+                          placeholder={hasKey ? '********' : (p.id === 'claude' ? 'sk-ant-api03-... or sk-ant-oat01-...' : 'sk-proj-...')}
+                          rightElement={
+                            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[1.5]};`}>
+                              {inferredType && credentialInput.length > 8 && (
+                                <Typography.Caption color="hint" css={css`
+                                  background: ${theme.colors.background.elevated};
+                                  padding: 1px ${theme.spacing[1]};
+                                  border-radius: ${theme.borderRadius.sm};
+                                  white-space: nowrap;
+                                `}>
+                                  {inferredType}
+                                </Typography.Caption>
+                              )}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setShowKey(!showKey); }}
+                                css={css`
+                                  cursor: pointer; padding: 0; color: ${theme.colors.text.hint};
+                                  &:hover { color: ${theme.colors.text.primary}; }
+                                `}
+                              >
+                                {showKey ? <EyeSlash size={16} /> : <Eye size={16} />}
+                              </button>
+                            </div>
+                          }
+                        />
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleValidateAndSave(p.id); }}
+                        loading={validateMutation.isPending || saveKeyMutation.isPending}
+                        disabled={!credentialInput.trim()}
+                      >
+                        Validate & Save
+                      </Button>
+                    </div>
+                    {validateResult && (
+                      <Typography.Caption as="div" color={validateResult.valid ? theme.colors.success.main : theme.colors.error.main}>
+                        {validateResult.message}
+                      </Typography.Caption>
+                    )}
+
+                    {/* Action buttons */}
+                    <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
+                      {activeProvider !== p.id && hasKey && (
+                        <Button variant="secondary" size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleSwitch(p.id); }}>
+                          Switch to {p.name}
+                        </Button>
+                      )}
+                      {hasKey && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleRemove(p.id); }}
+                          loading={removeKeyMutation.isPending}
+                        >
+                          <Trash size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+                          Remove
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* Security footnote */}
+                    <Typography.Caption as="div" color="disabled" css={css`
+                      display: flex; align-items: center; gap: ${theme.spacing[1.5]};
+                    `}>
+                      <ShieldCheck size={12} css={css`flex-shrink: 0;`} />
+                      <span>Encrypted at rest. Never leaves your instance.</span>
+                    </Typography.Caption>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </Card>
+        );
+      })}
 
       <Modal open={switchConfirm !== null} onClose={() => setSwitchConfirm(null)}>
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-          <h3 css={css`font-size: ${theme.typography.fontSize.lg}; font-weight: ${theme.typography.fontWeight.semibold};`}>
+          <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
             Switch to {switchConfirm}?
-          </h3>
-          <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary}; line-height: ${theme.typography.lineHeight.relaxed};`}>
+          </Typography.Subtitle>
+          <Typography.SmallBody color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
             Your Animus will use {switchConfirm} for all future thinking. The current mind session will end and restart with the new provider.
-          </p>
+          </Typography.SmallBody>
           <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
             <Button variant="ghost" size="sm" onClick={() => setSwitchConfirm(null)}>Cancel</Button>
             <Button size="sm" onClick={confirmSwitch} loading={updateSettingsMutation.isPending}>
@@ -1162,7 +1781,7 @@ function ChannelsSection() {
           >
             <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
               <ch.icon size={20} />
-              <span css={css`font-weight: ${theme.typography.fontWeight.medium};`}>{ch.name}</span>
+              <Typography.BodyAlt as="span">{ch.name}</Typography.BodyAlt>
               <Badge variant={ch.alwaysOn ? 'success' : getChannelStatus(ch.type) as any}>
                 {ch.alwaysOn ? 'Always on' : (isEnabled(ch.type) ? 'Active' : 'Not configured')}
               </Badge>
@@ -1287,11 +1906,11 @@ function ChannelsSection() {
                   padding-top: ${theme.spacing[4]};
                   border-top: 1px solid ${theme.colors.border.light};
                 `}>
-                  <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary};`}>
+                  <Typography.SmallBody color="secondary">
                     {ch.type === 'web'
                       ? 'The web channel is always active. No additional configuration needed.'
                       : 'The API channel is always available. Use it to integrate Animus with external systems.'}
-                  </p>
+                  </Typography.SmallBody>
                 </div>
               </motion.div>
             )}
@@ -1343,9 +1962,9 @@ function GoalsSection() {
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
       <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-        <label css={css`font-size: ${theme.typography.fontSize.sm}; font-weight: ${theme.typography.fontWeight.medium}; color: ${theme.colors.text.secondary};`}>
+        <Typography.SmallBodyAlt as="label" color="secondary">
           How should your Animus handle new goals?
-        </label>
+        </Typography.SmallBodyAlt>
         <SaveIndicator show={goalSave.show} />
       </div>
 
@@ -1361,19 +1980,19 @@ function GoalsSection() {
             <div css={css`display: flex; align-items: flex-start; gap: ${theme.spacing[3]};`}>
               {currentMode === mode.id && <Check size={18} weight="bold" css={css`flex-shrink: 0; margin-top: 2px;`} />}
               <div>
-                <span css={css`font-weight: ${theme.typography.fontWeight.medium};`}>{mode.label}</span>
-                <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary}; margin-top: ${theme.spacing[1]};`}>
+                <Typography.BodyAlt as="span">{mode.label}</Typography.BodyAlt>
+                <Typography.SmallBody color="secondary" css={css`margin-top: ${theme.spacing[1]};`}>
                   {mode.description}
-                </p>
+                </Typography.SmallBody>
               </div>
             </div>
           </Card>
         ))}
       </div>
 
-      <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.hint}; line-height: ${theme.typography.lineHeight.relaxed};`}>
+      <Typography.SmallBody color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
         Goals with average salience below 0.05 over 30 days are automatically cleaned up.
-      </p>
+      </Typography.SmallBody>
     </div>
   );
 }
@@ -1397,25 +2016,14 @@ function SystemSection() {
   const clearConvMutation = trpc.data.clearConversations.useMutation();
   const exportQuery = trpc.data.export.useQuery(undefined, { enabled: false });
 
-  const [timezone, setTimezone] = useState('');
   const [confirmAction, setConfirmAction] = useState<'soft' | 'full' | 'clear' | null>(null);
   const [showPasswordForm, setShowPasswordForm] = useState(false);
-  const timezoneSave = useSaveFlash();
-
-  useEffect(() => {
-    if (settings?.timezone) setTimezone(settings.timezone);
-  }, [settings]);
-
-  const handleTimezoneChange = (tz: string) => {
-    setTimezone(tz);
-    updateSettingsMutation.mutate({ timezone: tz }, { onSuccess: () => timezoneSave.flash() });
-  };
 
   const handleConfirmAction = () => {
-    if (confirmAction === 'soft') softResetMutation.mutate();
-    if (confirmAction === 'full') fullResetMutation.mutate();
-    if (confirmAction === 'clear') clearConvMutation.mutate();
-    setConfirmAction(null);
+    const onSuccess = () => setConfirmAction(null);
+    if (confirmAction === 'soft') softResetMutation.mutate(undefined, { onSuccess });
+    if (confirmAction === 'full') fullResetMutation.mutate(undefined, { onSuccess });
+    if (confirmAction === 'clear') clearConvMutation.mutate(undefined, { onSuccess });
   };
 
   const handleExport = async () => {
@@ -1436,41 +2044,25 @@ function SystemSection() {
   const confirmMessages = {
     soft: {
       title: 'Soft reset',
-      description: 'This will clear all thoughts, emotions, goals, and decisions. Your Animus will lose its current inner state but retain memories and conversations. The heartbeat will be paused.',
+      description: 'This will clear all thoughts, emotions, goals, tasks, and decisions. Your Animus will lose its current inner state but retain memories and conversations. The heartbeat will be paused.',
     },
     full: {
       title: 'Full reset',
-      description: 'This will clear all AI state including memories. Your Animus will be effectively reborn with the same personality but no accumulated knowledge. Conversations are preserved.',
+      description: 'This will clear all AI state including memories, conversations, goals, and tasks. Your Animus will be effectively reborn with the same personality but no accumulated knowledge. This cannot be undone.',
     },
     clear: {
       title: 'Clear conversations',
-      description: 'This will delete all message history across all contacts and channels. This cannot be undone.',
+      description: 'This will delete all message history and media across all contacts and channels. This cannot be undone.',
     },
   };
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[8]};`}>
-      {/* Timezone */}
-      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-          <label css={css`font-size: ${theme.typography.fontSize.sm}; font-weight: ${theme.typography.fontWeight.medium}; color: ${theme.colors.text.secondary};`}>
-            Your timezone
-          </label>
-          <SaveIndicator show={timezoneSave.show} />
-        </div>
-        <Input
-          value={timezone}
-          onChange={(e) => handleTimezoneChange((e.target as HTMLInputElement).value)}
-          placeholder="America/New_York"
-          helperText="All scheduled tasks and time-based displays use this timezone."
-        />
-      </div>
-
       {/* Data Management */}
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-        <h3 css={css`font-size: ${theme.typography.fontSize.lg}; font-weight: ${theme.typography.fontWeight.semibold};`}>
+        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
           Data Management
-        </h3>
+        </Typography.Subtitle>
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
           <div>
             <button
@@ -1487,9 +2079,9 @@ function SystemSection() {
             >
               Soft reset
             </button>
-            <p css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint}; margin-top: ${theme.spacing[0.5]};`}>
-              Clear thoughts, emotions, and goals. Preserve memories and conversations.
-            </p>
+            <Typography.Caption as="p" color="hint" css={css`margin-top: ${theme.spacing[0.5]};`}>
+              Clear thoughts, emotions, goals, and tasks. Preserve memories and conversations.
+            </Typography.Caption>
           </div>
           <div>
             <button
@@ -1506,9 +2098,9 @@ function SystemSection() {
             >
               Full reset
             </button>
-            <p css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint}; margin-top: ${theme.spacing[0.5]};`}>
-              Clear all AI state including memories. Preserve conversations.
-            </p>
+            <Typography.Caption as="p" color="hint" css={css`margin-top: ${theme.spacing[0.5]};`}>
+              Clear all AI state including memories and conversations.
+            </Typography.Caption>
           </div>
           <div>
             <button
@@ -1525,9 +2117,9 @@ function SystemSection() {
             >
               Clear conversations
             </button>
-            <p css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint}; margin-top: ${theme.spacing[0.5]};`}>
-              Delete all message history across all contacts and channels.
-            </p>
+            <Typography.Caption as="p" color="hint" css={css`margin-top: ${theme.spacing[0.5]};`}>
+              Delete all message history and media across all contacts and channels.
+            </Typography.Caption>
           </div>
           <div>
             <button
@@ -1544,21 +2136,21 @@ function SystemSection() {
             >
               Export data
             </button>
-            <p css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint}; margin-top: ${theme.spacing[0.5]};`}>
+            <Typography.Caption as="p" color="hint" css={css`margin-top: ${theme.spacing[0.5]};`}>
               Download all databases as a backup file.
-            </p>
+            </Typography.Caption>
           </div>
         </div>
       </div>
 
       {/* Account */}
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-        <h3 css={css`font-size: ${theme.typography.fontSize.lg}; font-weight: ${theme.typography.fontWeight.semibold};`}>
+        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
           Account
-        </h3>
-        <div css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary};`}>
+        </Typography.Subtitle>
+        <Typography.SmallBody as="div" color="secondary">
           {me?.email ?? 'Loading...'}
-        </div>
+        </Typography.SmallBody>
         {!showPasswordForm ? (
           <button
             onClick={() => setShowPasswordForm(true)}
@@ -1586,13 +2178,13 @@ function SystemSection() {
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
             <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
               <Warning size={20} css={css`color: ${theme.colors.error.main};`} />
-              <h3 css={css`font-size: ${theme.typography.fontSize.lg}; font-weight: ${theme.typography.fontWeight.semibold};`}>
+              <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
                 {confirmMessages[confirmAction].title}
-              </h3>
+              </Typography.Subtitle>
             </div>
-            <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary}; line-height: ${theme.typography.lineHeight.relaxed};`}>
+            <Typography.SmallBody color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
               {confirmMessages[confirmAction].description}
-            </p>
+            </Typography.SmallBody>
             <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
               <Button variant="ghost" size="sm" onClick={() => setConfirmAction(null)}>Cancel</Button>
               <Button
@@ -1618,12 +2210,12 @@ function SystemSection() {
             css={css`
               padding: ${theme.spacing[3]} ${theme.spacing[4]};
               background: ${theme.colors.success.main}1a;
-              color: ${theme.colors.success.main};
               border-radius: ${theme.borderRadius.default};
-              font-size: ${theme.typography.fontSize.sm};
             `}
           >
-            Operation completed successfully.
+            <Typography.SmallBody color={theme.colors.success.main}>
+              Operation completed successfully.
+            </Typography.SmallBody>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1719,6 +2311,21 @@ export function SettingsPage() {
     navigate(`/settings/${section}`);
   };
 
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [mobileMenuOpen]);
+
   const renderSection = () => {
     switch (activeSection) {
       case 'persona': return <PersonaSection />;
@@ -1742,14 +2349,10 @@ export function SettingsPage() {
         padding-top: 0;
       }
     `}>
-      {/* Desktop Sidebar */}
+      {/* Desktop Sidebar — reserves flex space; inner content is fixed full-height */}
       <nav css={css`
         width: 220px;
         flex-shrink: 0;
-        padding: ${theme.spacing[4]} ${theme.spacing[6]};
-        position: sticky;
-        top: ${theme.spacing[6]};
-        align-self: flex-start;
 
         @media (max-width: ${theme.breakpoints.lg}) {
           width: 180px;
@@ -1760,12 +2363,20 @@ export function SettingsPage() {
         }
       `}>
         <div css={css`
+          position: fixed;
+          top: 0;
+          bottom: 0;
+          width: 220px;
           display: flex;
           flex-direction: column;
+          justify-content: center;
           gap: ${theme.spacing[2]};
           border-right: 1px solid ${theme.colors.border.light};
-          padding-right: ${theme.spacing[6]};
-          height: fit-content;
+          padding: ${theme.spacing[4]} ${theme.spacing[6]};
+
+          @media (max-width: ${theme.breakpoints.lg}) {
+            width: 180px;
+          }
         `}>
           {sections.map((section) => {
             const isActive = section.id === activeSection;
@@ -1821,50 +2432,112 @@ export function SettingsPage() {
         </div>
       </nav>
 
-      {/* Mobile horizontal nav */}
-      <nav css={css`
-        display: none;
+      {/* Mobile hamburger menu */}
+      <div
+        ref={menuRef}
+        css={css`
+          display: none;
 
-        @media (max-width: ${theme.breakpoints.md}) {
-          display: flex;
-          overflow-x: auto;
-          gap: ${theme.spacing[4]};
-          padding: ${theme.spacing[3]} ${theme.spacing[4]};
-          border-bottom: 1px solid ${theme.colors.border.light};
-          -webkit-overflow-scrolling: touch;
-          scrollbar-width: none;
-          &::-webkit-scrollbar { display: none; }
-        }
-      `}>
-        {sections.map((section) => {
-          const isActive = section.id === activeSection;
-          return (
-            <button
-              key={section.id}
-              onClick={() => handleSectionChange(section.id)}
+          @media (max-width: ${theme.breakpoints.md}) {
+            display: block;
+            position: fixed;
+            top: ${theme.spacing[3]};
+            left: ${theme.spacing[3]};
+            z-index: ${theme.zIndex.fixed};
+          }
+        `}
+      >
+        <button
+          onClick={() => setMobileMenuOpen((o) => !o)}
+          aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
+          css={css`
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            border-radius: ${theme.borderRadius.full};
+            background: ${theme.mode === 'light'
+              ? 'rgba(250, 249, 244, 0.85)'
+              : 'rgba(28, 26, 24, 0.85)'};
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid ${theme.colors.border.light};
+            color: ${theme.colors.text.primary};
+            cursor: pointer;
+          `}
+        >
+          {mobileMenuOpen ? <X size={18} /> : <List size={18} />}
+        </button>
+
+        <AnimatePresence>
+          {mobileMenuOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -8, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8, scale: 0.95 }}
+              transition={{ duration: 0.15, ease: 'easeOut' }}
               css={css`
-                flex-shrink: 0;
-                padding: ${theme.spacing[1]} 0;
-                font-size: ${theme.typography.fontSize.sm};
-                font-weight: ${isActive ? theme.typography.fontWeight.semibold : theme.typography.fontWeight.normal};
-                color: ${isActive ? theme.colors.text.primary : theme.colors.text.secondary};
-                cursor: pointer;
-                white-space: nowrap;
-                border-bottom: 2px solid ${isActive ? theme.colors.accent : 'transparent'};
-                transition: all ${theme.transitions.micro};
-                &:hover { color: ${theme.colors.text.primary}; }
+                position: absolute;
+                top: calc(100% + ${theme.spacing[2]});
+                left: 0;
+                display: flex;
+                flex-direction: column;
+                gap: ${theme.spacing[1]};
+                padding: ${theme.spacing[2]};
+                border-radius: ${theme.borderRadius.md};
+                background: ${theme.mode === 'light'
+                  ? 'rgba(250, 249, 244, 0.95)'
+                  : 'rgba(28, 26, 24, 0.95)'};
+                backdrop-filter: blur(16px);
+                -webkit-backdrop-filter: blur(16px);
+                border: 1px solid ${theme.colors.border.light};
+                min-width: 180px;
               `}
             >
-              {section.label}
-            </button>
-          );
-        })}
-      </nav>
+              {sections.map((section) => {
+                const isActive = section.id === activeSection;
+                const Icon = section.icon;
+                return (
+                  <button
+                    key={section.id}
+                    onClick={() => {
+                      handleSectionChange(section.id);
+                      setMobileMenuOpen(false);
+                    }}
+                    css={css`
+                      display: flex;
+                      align-items: center;
+                      gap: ${theme.spacing[2]};
+                      padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                      border-radius: ${theme.borderRadius.sm};
+                      font-size: ${theme.typography.fontSize.sm};
+                      font-weight: ${isActive ? theme.typography.fontWeight.semibold : theme.typography.fontWeight.normal};
+                      color: ${isActive ? theme.colors.text.primary : theme.colors.text.secondary};
+                      cursor: pointer;
+                      transition: all ${theme.transitions.micro};
+
+                      &:hover {
+                        color: ${theme.colors.text.primary};
+                        background: ${theme.colors.background.elevated};
+                      }
+                    `}
+                  >
+                    <Icon size={14} css={css`opacity: ${isActive ? 1 : 0.55}; flex-shrink: 0;`} />
+                    {section.label}
+                  </button>
+                );
+              })}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* Content */}
       <main css={css`
         flex: 1;
         max-width: 640px;
+        margin: 0 auto;
         padding: 0 ${theme.spacing[6]} ${theme.spacing[16]};
 
         @media (max-width: ${theme.breakpoints.md}) {
@@ -1884,6 +2557,20 @@ export function SettingsPage() {
           </motion.div>
         </AnimatePresence>
       </main>
+
+      {/* Right spacer to balance sidebar — keeps content truly centered */}
+      <div css={css`
+        width: 220px;
+        flex-shrink: 0;
+
+        @media (max-width: ${theme.breakpoints.lg}) {
+          width: 180px;
+        }
+
+        @media (max-width: ${theme.breakpoints.md}) {
+          display: none;
+        }
+      `} />
     </div>
   );
 }

@@ -10,6 +10,7 @@ import type { Goal, EmotionName, EmotionState, Plan } from '@animus/shared';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import { computeSalience, GOAL_VISIBILITY_THRESHOLD, MAX_GOALS_IN_CONTEXT } from './salience.js';
 import type { SalienceResult } from './salience.js';
+import { getEventBus } from '../lib/event-bus.js';
 
 // ============================================================================
 // Goal Manager
@@ -54,6 +55,11 @@ export class GoalManager {
       graduatedToGoalId: goal.id,
     });
 
+    const eventBus = getEventBus();
+    eventBus.emit('goal:created', goal);
+    const updatedSeed = heartbeatStore.getSeed(this.db, seedId);
+    if (updatedSeed) eventBus.emit('seed:updated', updatedSeed);
+
     return goal;
   }
 
@@ -72,7 +78,9 @@ export class GoalManager {
     completionCriteria?: string;
     deadline?: string;
   }): Goal {
-    return heartbeatStore.createGoal(this.db, data);
+    const goal = heartbeatStore.createGoal(this.db, data);
+    getEventBus().emit('goal:created', goal);
+    return goal;
   }
 
   /**
@@ -104,6 +112,8 @@ export class GoalManager {
       status: 'active',
       activatedAt: now(),
     });
+    const goal = heartbeatStore.getGoal(this.db, goalId);
+    if (goal) getEventBus().emit('goal:updated', goal);
   }
 
   /**
@@ -111,6 +121,8 @@ export class GoalManager {
    */
   pauseGoal(goalId: string): void {
     heartbeatStore.updateGoal(this.db, goalId, { status: 'paused' });
+    const goal = heartbeatStore.getGoal(this.db, goalId);
+    if (goal) getEventBus().emit('goal:updated', goal);
   }
 
   /**
@@ -121,6 +133,8 @@ export class GoalManager {
       status: 'active',
       activatedAt: now(),
     });
+    const goal = heartbeatStore.getGoal(this.db, goalId);
+    if (goal) getEventBus().emit('goal:updated', goal);
   }
 
   /**
@@ -131,6 +145,8 @@ export class GoalManager {
       status: 'completed',
       completedAt: now(),
     });
+    const goal = heartbeatStore.getGoal(this.db, goalId);
+    if (goal) getEventBus().emit('goal:updated', goal);
   }
 
   /**
@@ -142,6 +158,8 @@ export class GoalManager {
       abandonedAt: now(),
       abandonedReason: reason ?? null,
     });
+    const goal = heartbeatStore.getGoal(this.db, goalId);
+    if (goal) getEventBus().emit('goal:updated', goal);
   }
 
   /**
@@ -151,6 +169,8 @@ export class GoalManager {
     heartbeatStore.updateGoal(this.db, goalId, {
       lastProgressAt: now(),
     });
+    const goal = heartbeatStore.getGoal(this.db, goalId);
+    if (goal) getEventBus().emit('goal:updated', goal);
   }
 
   /**
@@ -196,12 +216,15 @@ export class GoalManager {
     milestones?: Array<{ title: string; description: string; status: 'pending' | 'in_progress' | 'completed' | 'skipped' }>;
     createdBy: 'mind' | 'planning_agent';
   }): Plan {
-    return heartbeatStore.createPlan(this.db, {
+    const plan = heartbeatStore.createPlan(this.db, {
       goalId,
       strategy: data.strategy,
       milestones: data.milestones ?? null,
       createdBy: data.createdBy,
     });
+    const goal = heartbeatStore.getGoal(this.db, goalId);
+    if (goal) getEventBus().emit('goal:updated', goal);
+    return plan;
   }
 
   /**

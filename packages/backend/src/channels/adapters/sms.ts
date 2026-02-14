@@ -10,6 +10,9 @@
 import type { FastifyInstance } from 'fastify';
 import type { IChannelAdapter } from '../types.js';
 import type { ChannelType } from '@animus/shared';
+import { createLogger } from '../../lib/logger.js';
+
+const log = createLogger('SmsAdapter', 'channels');
 
 export class SmsChannelAdapter implements IChannelAdapter {
   readonly channelType: ChannelType = 'sms';
@@ -18,15 +21,15 @@ export class SmsChannelAdapter implements IChannelAdapter {
   async start(): Promise<void> {
     // TODO: Initialize Twilio client with credentials from channel_configs
     // const config = getChannelConfig('sms');
-    // if (!config) { console.warn('[SmsAdapter] No SMS config found'); return; }
+    // if (!config) { log.warn('No SMS config found'); return; }
     // const client = twilio(config.accountSid, config.authToken);
     this.enabled = true;
-    console.log('[SmsAdapter] Started (stub mode — no actual Twilio connection)');
+    log.info('Started (stub mode — no actual Twilio connection)');
   }
 
   async stop(): Promise<void> {
     this.enabled = false;
-    console.log('[SmsAdapter] Stopped');
+    log.info('Stopped');
   }
 
   isEnabled(): boolean {
@@ -49,7 +52,7 @@ export class SmsChannelAdapter implements IChannelAdapter {
     //     from: animusPhoneNumber,
     //     to: contactPhoneNumber,
     //   });
-    console.log(`[SmsAdapter] Would send SMS to contact ${contactId}: "${content.substring(0, 50)}..."`);
+    log.info(`Would send SMS to contact ${contactId}: "${content.substring(0, 50)}..."`);
   }
 
   /**
@@ -64,13 +67,13 @@ export class SmsChannelAdapter implements IChannelAdapter {
       // TODO: Check for MMS media (NumMedia > 0)
       // TODO: Resolve identity and hand to channel router
 
-      console.log('[SmsAdapter] Received webhook (stub — not processing)');
+      log.info('Received webhook (stub — not processing)');
 
       // Respond with empty TwiML
       reply.type('text/xml');
       return '<Response/>';
     });
 
-    console.log('[SmsAdapter] Webhook route registered: POST /webhooks/twilio/sms');
+    log.info('Webhook route registered: POST /webhooks/twilio/sms');
   }
 }

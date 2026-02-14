@@ -44,6 +44,7 @@ interface QueryOptions {
   systemPrompt?: string;
   cwd?: string;
   permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
+  allowDangerouslySkipPermissions?: boolean;
   allowedTools?: string[];
   disallowedTools?: string[];
   maxTurns?: number;
@@ -55,6 +56,12 @@ interface QueryOptions {
   forkSession?: boolean;
   mcpServers?: Record<string, unknown>;
   hooks?: Record<string, HookMatcher[]>;
+  env?: Record<string, string>;
+  outputFormat?: {
+    type: 'json_schema';
+    schema: Record<string, unknown>;
+  };
+  stderr?: (message: string) => void;
 }
 
 interface HookMatcher {
@@ -139,12 +146,13 @@ interface ContentBlock {
 
 interface ResultMessage {
   type: 'result';
-  subtype: 'success' | 'error_max_turns' | 'error_during_execution' | 'error_max_budget_usd';
+  subtype: 'success' | 'error_max_turns' | 'error_during_execution' | 'error_max_budget_usd' | 'error_max_structured_output_retries';
   session_id: string;
   duration_ms: number;
   num_turns: number;
   result: string;
   total_cost_usd: number;
+  structured_output?: unknown;
   usage: {
     input_tokens: number;
     output_tokens: number;
@@ -201,7 +209,8 @@ export class ClaudeAdapter extends BaseAdapter {
    * Checks for:
    * 1. ANTHROPIC_API_KEY environment variable
    * 2. CLAUDE_CODE_OAUTH_TOKEN environment variable
-   * 3. Pre-authenticated Claude Code at ~/.claude/.credentials
+   * 3. CLAUDE_CLI_CONFIGURED sentinel (set by credential service when CLI detected)
+   * 4. Pre-authenticated Claude Code at ~/.claude/.credentials or ~/.claude/.credentials.json
    */
   isConfigured(): boolean {
     // Check API key
@@ -214,10 +223,25 @@ export class ClaudeAdapter extends BaseAdapter {
       return true;
     }
 
-    // Check for pre-authenticated Claude Code
+    // Check CLI sentinel (set by credential-service when user selected "Use CLI")
+    if (process.env['CLAUDE_CLI_CONFIGURED']) {
+      return true;
+    }
+
+    // Check for pre-authenticated Claude Code credentials files
     try {
-      const credentialsPath = join(homedir(), '.claude', '.credentials');
-      return existsSync(credentialsPath);
+      const claudeDir = join(homedir(), '.claude');
+      const hasCreds = existsSync(join(claudeDir, '.credentials'));
+      const hasCredsJson = existsSync(join(claudeDir, '.credentials.json'));
+      if (hasCreds || hasCredsJson) return true;
+      this.logger.debug('Claude not configured', {
+        ANTHROPIC_API_KEY: !!process.env['ANTHROPIC_API_KEY'],
+        CLAUDE_CODE_OAUTH_TOKEN: !!process.env['CLAUDE_CODE_OAUTH_TOKEN'],
+        CLAUDE_CLI_CONFIGURED: !!process.env['CLAUDE_CLI_CONFIGURED'],
+        credsFile: hasCreds,
+        credsJsonFile: hasCredsJson,
+      });
+      return false;
     } catch {
       return false;
     }
@@ -301,6 +325,7 @@ class ClaudeSession extends BaseSession {
   private abortController: AbortController | null = null;
   private nativeSessionId: string | null = null;
   private pendingId: string;
+  private stderrBuffer: string = '';
 
   constructor(sdk: ClaudeSDK, config: AgentSessionConfig, logger: Logger) {
     super(config, logger);
@@ -330,6 +355,7 @@ class ClaudeSession extends BaseSession {
 
     const startTime = Date.now();
     let response = '';
+    let structuredOutput: unknown;
     let finishReason: AgentResponse['finishReason'] = 'complete';
 
     try {
@@ -366,6 +392,9 @@ class ClaudeSession extends BaseSession {
           this.updateUsageFromResult(message);
           finishReason = this.mapFinishReason(message.subtype);
           response = message.result || response;
+          if (message.structured_output !== undefined) {
+            structuredOutput = message.structured_output;
+          }
         }
       }
 
@@ -376,6 +405,7 @@ class ClaudeSession extends BaseSession {
         cost: this.getCost() ?? undefined,
         durationMs: Date.now() - startTime,
         model: this.config.model ?? 'unknown',
+        structuredOutput,
       };
     } catch (error) {
       // Check if it was an abort
@@ -390,7 +420,17 @@ class ClaudeSession extends BaseSession {
         });
       }
 
-      throw wrapError(error, 'claude', this.id);
+      // Enrich error with stderr output from the CLI subprocess
+      const stderrInfo = this.stderrBuffer.trim();
+      if (stderrInfo) {
+        this.logger.error('Claude CLI stderr output:', { stderr: stderrInfo });
+      }
+      const enrichedError = error instanceof Error && stderrInfo
+        ? new Error(`${error.message}\nCLI stderr: ${stderrInfo}`)
+        : error;
+      this.stderrBuffer = '';
+
+      throw wrapError(enrichedError, 'claude', this.id);
     } finally {
       clearTimeout(timer);
       this.abortController = null;
@@ -418,6 +458,7 @@ class ClaudeSession extends BaseSession {
     const startTime = Date.now();
     let response = '';
     let accumulated = '';
+    let structuredOutput: unknown;
     let finishReason: AgentResponse['finishReason'] = 'complete';
 
     try {
@@ -478,6 +519,9 @@ class ClaudeSession extends BaseSession {
           this.updateUsageFromResult(message);
           finishReason = this.mapFinishReason(message.subtype);
           response = message.result || response;
+          if (message.structured_output !== undefined) {
+            structuredOutput = message.structured_output;
+          }
         }
       }
 
@@ -496,6 +540,7 @@ class ClaudeSession extends BaseSession {
         cost: this.getCost() ?? undefined,
         durationMs: Date.now() - startTime,
         model: this.config.model ?? 'unknown',
+        structuredOutput,
       };
     } catch (error) {
       if (this.abortController?.signal.aborted) {
@@ -509,7 +554,17 @@ class ClaudeSession extends BaseSession {
         });
       }
 
-      throw wrapError(error, 'claude', this.id);
+      // Enrich error with stderr output from the CLI subprocess
+      const stderrInfo = this.stderrBuffer.trim();
+      if (stderrInfo) {
+        this.logger.error('Claude CLI stderr output:', { stderr: stderrInfo });
+      }
+      const enrichedError = error instanceof Error && stderrInfo
+        ? new Error(`${error.message}\nCLI stderr: ${stderrInfo}`)
+        : error;
+      this.stderrBuffer = '';
+
+      throw wrapError(enrichedError, 'claude', this.id);
     } finally {
       clearTimeout(timer);
       this.abortController = null;
@@ -568,11 +623,13 @@ class ClaudeSession extends BaseSession {
    * Build SDK options from session config.
    */
   private buildSdkOptions(): QueryOptions {
+    const permMode = this.mapPermissionMode();
     const options: QueryOptions = {
       model: this.config.model,
       systemPrompt: this.config.systemPrompt,
       cwd: this.config.cwd,
-      permissionMode: this.mapPermissionMode(),
+      permissionMode: permMode,
+      allowDangerouslySkipPermissions: permMode === 'bypassPermissions' ? true : undefined,
       allowedTools: this.config.allowedTools,
       disallowedTools: this.getDisallowedTools(),
       maxTurns: this.config.maxTurns,
@@ -584,6 +641,18 @@ class ClaudeSession extends BaseSession {
       forkSession: this.config.forkSession,
       mcpServers: this.config.mcpServers,
       hooks: this.buildSdkHooks(),
+      env: this.config.env,
+      outputFormat: this.config.outputFormat,
+      // Capture stderr from the Claude CLI subprocess for diagnostics
+      stderr: (message: string) => {
+        this.logger.debug('Claude CLI stderr:', { stderr: message.trim() });
+        // Accumulate stderr for error reporting
+        this.stderrBuffer += message;
+        // Keep buffer bounded (last 4KB)
+        if (this.stderrBuffer.length > 4096) {
+          this.stderrBuffer = this.stderrBuffer.slice(-4096);
+        }
+      },
     };
 
     return options;
@@ -727,17 +796,39 @@ class ClaudeSession extends BaseSession {
   }
 
   /**
+   * Return a JSON-safe copy of the session config for logging.
+   * Strips non-serializable fields like MCP server instances.
+   */
+  private getSafeConfig(): Record<string, unknown> {
+    const { mcpServers, ...rest } = this.config;
+    if (!mcpServers) return { ...rest };
+
+    // Replace each server entry with just its serializable fields
+    const safeMcp: Record<string, Record<string, unknown>> = {};
+    for (const [name, server] of Object.entries(mcpServers)) {
+      const { instance, ...safeFields } = server as Record<string, unknown>;
+      safeMcp[name] = {
+        ...safeFields,
+        ...(instance ? { instance: '[McpServer]' } : {}),
+      };
+    }
+    return { ...rest, mcpServers: safeMcp };
+  }
+
+  /**
    * Process an SDK message and emit appropriate events.
    */
   private async processMessage(message: SDKMessage): Promise<void> {
     switch (message.type) {
       case 'system':
         if (message.subtype === 'init') {
+          // Strip non-serializable fields (e.g. MCP server instances) for logging
+          const safeConfig = this.getSafeConfig();
           await this.emit(
             this.createEvent('session_start', {
               provider: 'claude',
               model: this.config.model ?? 'unknown',
-              config: this.config,
+              config: safeConfig,
             }),
           );
 
@@ -747,7 +838,7 @@ class ClaudeSession extends BaseSession {
               sessionId: this.id,
               provider: 'claude',
               model: this.config.model ?? 'unknown',
-              config: this.config,
+              config: safeConfig,
             });
           }
         }

@@ -48,6 +48,10 @@ interface HeartbeatStoreState {
   // -- Emotions --
   emotions: Map<string, EmotionState>;
 
+  // -- Energy --
+  energyLevel: number | null;
+  energyBand: string | null;
+
   // -- Thoughts & Experiences --
   recentThoughts: Thought[];
   recentExperiences: Experience[];
@@ -63,6 +67,7 @@ interface HeartbeatStoreState {
   setHeartbeatActive: (active: boolean) => void;
   updateEmotion: (emotion: EmotionState) => void;
   setEmotions: (emotions: EmotionState[]) => void;
+  updateEnergy: (level: number, band: string) => void;
   addThought: (thought: Thought) => void;
   addExperience: (experience: Experience) => void;
   addAgentEvent: (event: Omit<AgentStatusEvent, 'receivedAt'>) => void;
@@ -80,6 +85,8 @@ export const useHeartbeatStore = create<HeartbeatStoreState>()((set) => ({
   heartbeatState: null,
   isHeartbeatActive: false,
   emotions: new Map(),
+  energyLevel: null,
+  energyBand: null,
   recentThoughts: [],
   recentExperiences: [],
   agentEvents: [],
@@ -108,6 +115,10 @@ export const useHeartbeatStore = create<HeartbeatStoreState>()((set) => ({
       for (const e of emotions) map.set(e.emotion, e);
       return { emotions: map };
     }),
+
+  // -- Energy --
+  updateEnergy: (level, band) =>
+    set({ energyLevel: level, energyBand: band }),
 
   // -- Thoughts --
   addThought: (thought) =>

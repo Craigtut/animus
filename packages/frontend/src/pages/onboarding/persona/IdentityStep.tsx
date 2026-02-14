@@ -2,8 +2,9 @@
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Input } from '../../../components/ui';
+import { Input, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
+import { OnboardingNav } from '../OnboardingNav';
 
 export function PersonaIdentityStep() {
   const theme = useTheme();
@@ -28,9 +29,9 @@ export function PersonaIdentityStep() {
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
       <div>
-        <h2 css={css`font-size: ${theme.typography.fontSize['2xl']}; font-weight: ${theme.typography.fontWeight.light}; margin-bottom: ${theme.spacing[2]};`}>
+        <Typography.Title3 as="h2" serif>
           Who are they?
-        </h2>
+        </Typography.Title3>
       </div>
 
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
@@ -43,15 +44,17 @@ export function PersonaIdentityStep() {
         />
 
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
-          <label css={css`font-size: ${theme.typography.fontSize.sm}; font-weight: ${theme.typography.fontWeight.medium}; color: ${theme.colors.text.secondary};`}>
+          <Typography.SmallBodyAlt as="label" color="secondary">
             Gender
-          </label>
+          </Typography.SmallBodyAlt>
           <select
             value={gender}
             onChange={(e) => setGender(e.target.value)}
             css={css`
               padding: ${theme.spacing[3]};
               background: ${theme.colors.background.paper};
+              backdrop-filter: blur(12px);
+              -webkit-backdrop-filter: blur(12px);
               border: 1px solid ${theme.colors.border.default};
               border-radius: ${theme.borderRadius.default};
               color: ${theme.colors.text.primary};
@@ -93,10 +96,11 @@ export function PersonaIdentityStep() {
         />
       </div>
 
-      <div css={css`display: flex; justify-content: space-between; margin-top: ${theme.spacing[4]};`}>
-        <Button variant="ghost" onClick={handleBack}>Back</Button>
-        <Button onClick={handleContinue} disabled={!name.trim()}>Continue</Button>
-      </div>
+      <OnboardingNav
+        onBack={handleBack}
+        onContinue={handleContinue}
+        continueDisabled={!name.trim()}
+      />
     </div>
   );
 }

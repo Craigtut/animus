@@ -44,6 +44,8 @@ export const agentEventTypeSchema = z.enum([
   'response_chunk',
   'response_end',
   'error',
+  'tick_input',
+  'tick_output',
 ]);
 
 export const agentEventSchema = z.object({

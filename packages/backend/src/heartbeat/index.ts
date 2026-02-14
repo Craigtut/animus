@@ -9,16 +9,19 @@
 
 import { getHeartbeatDb, getSystemDb, getMessagesDb, getAgentLogsDb, getMemoryDb } from '../db/index.js';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
+import * as agentLogStore from '../db/stores/agent-log-store.js';
 import * as systemStore from '../db/stores/system-store.js';
 import * as messageStore from '../db/stores/message-store.js';
 import { getEventBus } from '../lib/event-bus.js';
-import { expiresIn, now } from '@animus/shared';
+import { createLogger } from '../lib/logger.js';
+import { DecayEngine, expiresIn, now, clamp } from '@animus/shared';
 import { mindOutputSchema } from '@animus/shared';
 import type {
   HeartbeatState,
   MindOutput,
   Contact,
   EmotionState,
+  EnergyBand,
 } from '@animus/shared';
 
 import { MemoryManager, buildMemoryContext, LocalEmbeddingProvider, VectorStore } from '../memory/index.js';
@@ -35,9 +38,10 @@ import {
 } from '@animus/agents';
 
 import { JsonStream } from 'llm-json-stream';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import { TickQueue, type QueuedTick } from './tick-queue.js';
-import { type TriggerContext, buildMindContext, buildSystemPrompt } from './context-builder.js';
+import { type TriggerContext, type CompiledContext, buildMindContext, buildSystemPrompt } from './context-builder.js';
 import {
   applyDecay,
   applyDelta,
@@ -47,6 +51,70 @@ import {
 import { compilePersona, type PersonaConfig, type CompiledPersona } from './persona-compiler.js';
 import { createAgentLogStoreAdapter } from './agent-log-adapter.js';
 import { AgentOrchestrator, type AgentTaskStore } from './agent-orchestrator.js';
+import { buildMindMcpServer, type MutableToolContext } from '../tools/index.js';
+import type { ToolHandlerContext } from '../tools/index.js';
+import { getChannelRouter } from '../channels/index.js';
+import {
+  getEnergyBand,
+  computeCircadianBaseline,
+  applyEnergyDecay,
+  isInSleepHours,
+  SLEEP_EMOTION_DECAY_MULTIPLIER,
+  type WakeUpContext,
+} from './energy-engine.js';
+
+const log = createLogger('Heartbeat', 'heartbeat');
+
+// ============================================================================
+// Async Chunk Channel — bridges push-based adapter to pull-based AsyncIterable
+// ============================================================================
+
+function createChunkChannel(): {
+  push: (chunk: string) => void;
+  end: () => void;
+  iterable: AsyncIterable<string>;
+} {
+  let resolve: ((value: IteratorResult<string>) => void) | null = null;
+  const buffer: string[] = [];
+  let done = false;
+
+  const iterable: AsyncIterable<string> = {
+    [Symbol.asyncIterator]() {
+      return {
+        next(): Promise<IteratorResult<string>> {
+          if (buffer.length > 0) {
+            return Promise.resolve({ value: buffer.shift()!, done: false });
+          }
+          if (done) {
+            return Promise.resolve({ value: undefined as any, done: true });
+          }
+          return new Promise((r) => { resolve = r; });
+        },
+      };
+    },
+  };
+
+  return {
+    push(chunk: string) {
+      if (resolve) {
+        const r = resolve;
+        resolve = null;
+        r({ value: chunk, done: false });
+      } else {
+        buffer.push(chunk);
+      }
+    },
+    end() {
+      done = true;
+      if (resolve) {
+        const r = resolve;
+        resolve = null;
+        r({ value: undefined as any, done: true });
+      }
+    },
+    iterable,
+  };
+}
 
 // ============================================================================
 // Module State
@@ -60,13 +128,25 @@ let agentManager: AgentManager | null = null;
 let agentLogStoreAdapter: AgentLogStore | null = null;
 let agentOrchestrator: AgentOrchestrator | null = null;
 
+// Cached JSON schema for structured output (computed once)
+// Note: don't pass `name` — it wraps schema in $ref/definitions which the SDK can't handle
+const mindOutputJsonSchema = zodToJsonSchema(mindOutputSchema, {
+  $refStrategy: 'none',
+}) as Record<string, unknown>;
+
 // Mind session state
 let mindSession: IAgentSession | null = null;
 let mindSessionId: string | null = null;
+let mindLogSessionId: (() => string | null) | null = null;
 let sessionWarmSince: number | null = null;
+
+// Mind MCP tool state
+const mindToolContext: MutableToolContext = { current: null };
+let mindMcpServer: { serverConfig: Record<string, unknown>; allowedTools: string[] } | null = null;
 
 // Memory & goal system state
 let memoryManager: MemoryManager | null = null;
+let vectorStore: VectorStore | null = null;
 let seedManager: SeedManager | null = null;
 let goalManager: GoalManager | null = null;
 let embeddingProvider: LocalEmbeddingProvider | null = null;
@@ -88,6 +168,12 @@ interface GatherResult {
   memoryContext: MemoryContext | null;
   goalContext: GoalContext | null;
   spawnBudgetNote: string | null;
+  contacts: Array<{ contact: Contact; channels: import('@animus/shared').ContactChannel[] }>;
+  energyLevel: number | null;
+  energyBand: EnergyBand | null;
+  circadianBaseline: number | null;
+  wakeUpContext: WakeUpContext | null;
+  energySystemEnabled: boolean;
 }
 
 async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
@@ -101,9 +187,63 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
   // Determine session state
   const sessionState = determineSessionState(state, settings.sessionWarmthMs);
 
-  // Load and decay emotions
+  // Compute energy state (before emotion decay — sleep affects decay rate)
+  let energyLevel: number | null = null;
+  let energyBand: EnergyBand | null = null;
+  let circadianBaseline: number | null = null;
+  let wakeUpContext: WakeUpContext | null = null;
+  let emotionDecayMultiplier = 1.0;
+
+  if (settings.energySystemEnabled) {
+    const { energyLevel: rawEnergy, lastEnergyUpdate } = heartbeatStore.getEnergyLevel(hbDb);
+    const currentTime = new Date();
+    const tz = settings.timezone || 'UTC';
+
+    circadianBaseline = computeCircadianBaseline(
+      currentTime, settings.sleepStartHour, settings.sleepEndHour, tz
+    );
+
+    // Apply decay toward circadian baseline
+    const elapsed = lastEnergyUpdate ? DecayEngine.hoursSince(lastEnergyUpdate) : 0;
+    let decayed = applyEnergyDecay(rawEnergy, circadianBaseline, elapsed);
+
+    // Check for wake-up bumps
+    const previousBand = getEnergyBand(decayed);
+    const inSleep = isInSleepHours(currentTime, settings.sleepStartHour, settings.sleepEndHour, tz);
+
+    if (previousBand === 'sleeping') {
+      if (!inSleep) {
+        // Natural wake-up: sleep hours ended, bump to 0.15
+        decayed = Math.max(decayed, 0.15);
+        const ctx: WakeUpContext = { type: 'natural' };
+        if (lastEnergyUpdate) ctx.sleepDurationHours = DecayEngine.hoursSince(lastEnergyUpdate);
+        wakeUpContext = ctx;
+        log.info('Natural wake-up: bumped energy to', decayed.toFixed(2));
+      } else if (trigger.type !== 'interval') {
+        // Triggered wake-up: non-interval trigger during sleep
+        decayed = Math.max(decayed, 0.10);
+        const ctx: WakeUpContext = { type: 'triggered', triggerType: trigger.type };
+        if (lastEnergyUpdate) ctx.sleepDurationHours = DecayEngine.hoursSince(lastEnergyUpdate);
+        wakeUpContext = ctx;
+        log.info(`Triggered wake-up (${trigger.type}): bumped energy to`, decayed.toFixed(2));
+      }
+    }
+
+    energyLevel = decayed;
+    energyBand = getEnergyBand(decayed);
+
+    // Accelerated emotion decay during sleep
+    if (energyBand === 'sleeping') {
+      emotionDecayMultiplier = SLEEP_EMOTION_DECAY_MULTIPLIER;
+    }
+
+    // Persist decayed energy so downstream reads reflect it
+    heartbeatStore.updateEnergyLevel(hbDb, decayed);
+  }
+
+  // Load and decay emotions (with sleep multiplier if applicable)
   const rawEmotions = heartbeatStore.getEmotionStates(hbDb);
-  const emotions = applyDecay(rawEmotions, Date.now());
+  const emotions = applyDecay(rawEmotions, Date.now(), emotionDecayMultiplier);
 
   // Load recent thoughts & experiences (last 10)
   const recentThoughts = heartbeatStore.getRecentThoughts(hbDb, 10);
@@ -144,7 +284,7 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
         query,
       );
     } catch (err) {
-      console.warn('[Heartbeat] Memory context failed:', err);
+      log.warn('Memory context failed:', err);
     }
   }
 
@@ -154,9 +294,15 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
     try {
       goalCtx = buildGoalContext(goalManager, seedManager, emotions);
     } catch (err) {
-      console.warn('[Heartbeat] Goal context failed:', err);
+      log.warn('Goal context failed:', err);
     }
   }
+
+  // Load all contacts with their channels
+  const allContacts = systemStore.listContacts(sysDb).map((c) => ({
+    contact: c,
+    channels: systemStore.getContactChannelsByContactId(sysDb, c.id),
+  }));
 
   // Check spawn budget for context injection
   let spawnBudgetNote: string | null = null;
@@ -182,6 +328,12 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
     memoryContext: memCtx,
     goalContext: goalCtx,
     spawnBudgetNote,
+    contacts: allContacts,
+    energyLevel,
+    energyBand,
+    circadianBaseline,
+    wakeUpContext,
+    energySystemEnabled: settings.energySystemEnabled,
   };
 }
 
@@ -195,9 +347,9 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
 function safeMindOutput(gathered: GatherResult): MindOutput {
   const isIdle = gathered.trigger.type === 'interval';
   return {
-    thoughts: isIdle
-      ? [{ content: 'A quiet moment passes.', importance: 0.1 }]
-      : [{ content: `Processing a ${gathered.trigger.type} trigger.`, importance: 0.3 }],
+    thought: isIdle
+      ? { content: 'A quiet moment passes.', importance: 0.1 }
+      : { content: `Processing a ${gathered.trigger.type} trigger.`, importance: 0.3 },
     reply: gathered.trigger.type === 'message'
       ? {
           content: 'I\'m having a moment of difficulty. Let me gather my thoughts.',
@@ -206,12 +358,65 @@ function safeMindOutput(gathered: GatherResult): MindOutput {
           replyToMessageId: gathered.trigger.messageId || '',
         }
       : null,
-    experiences: [{ content: 'Had difficulty processing this tick.', importance: 0.3 }],
+    experience: { content: 'Had difficulty processing this tick.', importance: 0.3 },
     emotionDeltas: [],
     decisions: [],
     workingMemoryUpdate: null,
     coreSelfUpdate: null,
     memoryCandidate: [],
+  };
+}
+
+/**
+ * Build a ToolHandlerContext for the mind session's current tick.
+ * Uses 'mind' as the sentinel agentTaskId to distinguish from sub-agents.
+ */
+function buildMindToolContext(gathered: GatherResult): ToolHandlerContext {
+  const msgDb = getMessagesDb();
+  const memDb = getMemoryDb();
+
+  // Resolve conversation for the triggering contact
+  let conversationId = '';
+  if (gathered.contact && gathered.trigger.channel) {
+    const channel = (gathered.trigger.channel || 'web') as import('@animus/shared').ChannelType;
+    const conv = messageStore.getConversationByContactAndChannel(
+      msgDb, gathered.contact.id, channel
+    );
+    if (conv) conversationId = conv.id;
+  }
+
+  const sysDb = getSystemDb();
+
+  return {
+    agentTaskId: 'mind',
+    contactId: gathered.contact?.id ?? '',
+    sourceChannel: gathered.trigger.channel ?? 'web',
+    conversationId,
+    stores: {
+      messages: {
+        createMessage: (data) => messageStore.createMessage(msgDb, data),
+      },
+      heartbeat: {},
+      memory: {
+        retrieveRelevant: async (query: string, limit?: number) => {
+          if (!memoryManager) return [];
+          return memoryManager.retrieveRelevant(query, limit ?? 5);
+        },
+      },
+      contacts: {
+        getContact: (id) => systemStore.getContact(sysDb, id),
+        listContacts: () => systemStore.listContacts(sysDb),
+        getContactChannels: (contactId) => systemStore.getContactChannelsByContactId(sysDb, contactId),
+      },
+      channels: {
+        sendOutbound: async (params) => {
+          const router = getChannelRouter();
+          const msg = await router.sendOutbound(params);
+          return msg ? { id: msg.id } : null;
+        },
+      },
+    },
+    eventBus: getEventBus(),
   };
 }
 
@@ -236,36 +441,70 @@ async function getOrCreateMindSession(
     try {
       await mindSession.end();
     } catch (err) {
-      console.warn('[Heartbeat] Failed to end previous mind session:', err);
+      log.warn('Failed to end previous mind session:', err);
     }
   }
 
-  // Check if the provider is configured
+  // Determine provider: respect user's defaultAgentProvider setting
   const configuredProviders = agentManager.getConfiguredProviders();
   if (configuredProviders.length === 0) {
     throw new Error('No agent providers configured. Set ANTHROPIC_API_KEY or other credentials.');
   }
 
-  const provider = configuredProviders[0]!;
+  let provider = configuredProviders[0]!;
+  try {
+    const settings = systemStore.getSystemSettings(getSystemDb());
+    const preferred = settings.defaultAgentProvider;
+    if (preferred && agentManager.isConfigured(preferred)) {
+      provider = preferred;
+    }
+  } catch {
+    // Settings table may not exist yet on fresh install
+  }
+
+  // Build MCP server on first cold session (lazy, once per process lifetime)
+  if (!mindMcpServer && provider === 'claude') {
+    try {
+      mindMcpServer = await buildMindMcpServer(mindToolContext);
+      log.info(`Mind MCP server built with tools: ${mindMcpServer.allowedTools.join(', ')}`);
+    } catch (err) {
+      log.warn('Failed to build mind MCP server, proceeding without tools:', err);
+    }
+  }
 
   const session = await agentManager.createSession({
     provider,
     ...(systemPrompt != null ? { systemPrompt } : {}),
     permissions: {
-      executionMode: 'plan',
+      executionMode: 'build',
       approvalLevel: 'none',
     },
+    outputFormat: {
+      type: 'json_schema',
+      schema: mindOutputJsonSchema,
+    },
+    // Attach in-process MCP server for mind tools (Claude only)
+    ...(mindMcpServer ? {
+      mcpServers: { animus: mindMcpServer.serverConfig },
+      allowedTools: mindMcpServer.allowedTools,
+    } : {}),
   });
 
   // Attach logging
   if (agentLogStoreAdapter) {
-    attachSessionLogging(session, { store: agentLogStoreAdapter });
+    const logging = attachSessionLogging(session, { store: agentLogStoreAdapter });
+    mindLogSessionId = logging.getLogSessionId;
   }
 
   mindSession = session;
   mindSessionId = session.id;
 
   return session;
+}
+
+interface MindQueryResult {
+  output: MindOutput;
+  compiledContext: CompiledContext;
 }
 
 /**
@@ -278,13 +517,16 @@ async function getOrCreateMindSession(
 async function mindQuery(
   gathered: GatherResult,
   tickNumber: number
-): Promise<MindOutput> {
-  // Ensure persona is compiled
+): Promise<MindQueryResult> {
+  // Ensure persona is compiled and load full persona for existence info
+  const sysDb = getSystemDb();
+  const fullPersona = systemStore.getPersona(sysDb);
   if (!compiledPersona) {
-    const sysDb = getSystemDb();
-    const persona = systemStore.getPersonalitySettings(sysDb);
-    compiledPersona = compilePersona(buildPersonaConfig(persona));
+    compiledPersona = compilePersona(buildPersonaConfig(fullPersona));
   }
+
+  // Load timezone for timestamp formatting
+  const settings = systemStore.getSystemSettings(sysDb);
 
   // Determine if session is approaching context limit (~85% of token budget)
   const SESSION_TOKEN_BUDGET = 100_000; // approx budget for a mind session
@@ -312,12 +554,25 @@ async function mindQuery(
     proposedGoalsContext: gathered.goalContext?.proposedGoalsSection ?? null,
     memoryFlushPending,
     spawnBudgetNote: gathered.spawnBudgetNote,
+    contacts: gathered.contacts,
+    tickNumber,
+    existenceParadigm: fullPersona.existenceParadigm ?? 'digital_consciousness',
+    existenceLocation: fullPersona.existenceParadigm === 'simulated_life'
+      ? fullPersona.location
+      : fullPersona.worldDescription,
+    timezone: settings.timezone || undefined,
+    energyLevel: gathered.energyLevel,
+    energyBand: gathered.energyBand,
+    circadianBaseline: gathered.circadianBaseline,
+    wakeUpContext: gathered.wakeUpContext,
+    energySystemEnabled: gathered.energySystemEnabled,
+    mindToolsEnabled: !!mindMcpServer,
   });
 
   // If no agent manager configured, fall back to safe output
   if (!agentManager || agentManager.getConfiguredProviders().length === 0) {
-    console.warn('[Heartbeat] No agent provider configured, using safe output');
-    return safeMindOutput(gathered);
+    log.warn('No agent provider configured, using safe output');
+    return { output: safeMindOutput(gathered), compiledContext: context };
   }
 
   try {
@@ -327,62 +582,115 @@ async function mindQuery(
       context.systemPrompt,
     );
 
+    // Update the mutable tool context for this tick so tool handlers
+    // can access the current contact/channel/conversation
+    mindToolContext.current = buildMindToolContext(gathered);
+
     const eventBus = getEventBus();
 
-    // Use promptStreaming to get real-time chunks for reply streaming
+    // Set up streaming: bridge push-based adapter to pull-based AsyncIterable
+    const channel = createChunkChannel();
     let fullJson = '';
 
+    // Create streaming JSON parser to extract reply.content incrementally
+    const parser = JsonStream.parse(channel.iterable);
+    const replyContentStream = parser.get<string>('reply.content');
+
+    // Catch the internal promise rejection that fires when reply is null
+    // (property path not found). Without this, Node emits an unhandled rejection.
+    (replyContentStream as Promise<string>).catch(() => {});
+
+    // Consume reply chunks in parallel — emits to frontend in real-time
+    let replyAccumulated = '';
+    let streamingFailed = false;
+    const replyPromise = (async () => {
+      try {
+        for await (const chunk of replyContentStream) {
+          replyAccumulated += chunk;
+          eventBus.emit('reply:chunk', { content: chunk, accumulated: replyAccumulated });
+        }
+      } catch (err) {
+        // Parser failure (e.g. reply is null / malformed JSON mid-stream)
+        // Fall back to post-hoc behavior after full parse completes
+        streamingFailed = true;
+        log.debug('Reply stream interrupted (reply may be null):', err);
+      }
+    })();
+
+    // Feed chunks from the agent adapter into both fullJson and the parser channel
     const response = await session.promptStreaming(
       context.userMessage,
       (chunk: string) => {
         fullJson += chunk;
+        channel.push(chunk);
       },
     );
+    channel.end();
 
-    // The full response content is the complete JSON
-    fullJson = response.content || fullJson;
+    // Wait for reply streaming to finish, then clean up parser
+    await replyPromise;
+    await parser.dispose();
 
-    // Parse and validate the structured output
+    // Prefer structured_output from the SDK (guaranteed valid JSON when outputFormat is set)
+    // Fall back to parsing the raw response content
     let parsed: unknown;
-    try {
-      parsed = JSON.parse(fullJson);
-    } catch (parseErr) {
-      console.error('[Heartbeat] Failed to parse MindOutput JSON:', parseErr);
-      console.error('[Heartbeat] Raw output:', fullJson.slice(0, 500));
-      return safeMindOutput(gathered);
+    if (response.structuredOutput !== undefined) {
+      log.info('Using SDK structured_output (constrained decoding)');
+      parsed = response.structuredOutput;
+    } else {
+      log.info('structuredOutput not available, falling back to JSON.parse');
+      fullJson = response.content || fullJson;
+      try {
+        parsed = JSON.parse(fullJson);
+      } catch (parseErr) {
+        log.error('Failed to parse MindOutput JSON:', parseErr);
+        log.error('Raw output:', fullJson.slice(0, 500));
+        return { output: safeMindOutput(gathered), compiledContext: context };
+      }
     }
 
     // Validate with Zod schema
     const result = mindOutputSchema.safeParse(parsed);
     if (!result.success) {
-      console.error('[Heartbeat] MindOutput validation failed:', result.error.issues);
+      log.error('MindOutput validation failed:', result.error.issues);
       // Try to extract what we can from partial output
       try {
         // Lenient parse: accept partial data with defaults
+        // Also handle legacy array field names (thoughts/experiences → thought/experience)
+        const p = parsed as any;
+        const legacyThought = Array.isArray(p?.thoughts) && p.thoughts.length > 0
+          ? p.thoughts[0]
+          : undefined;
+        const legacyExperience = Array.isArray(p?.experiences) && p.experiences.length > 0
+          ? p.experiences[0]
+          : undefined;
         const lenient = {
-          thoughts: Array.isArray((parsed as any)?.thoughts) ? (parsed as any).thoughts : [],
-          reply: (parsed as any)?.reply ?? null,
-          experiences: Array.isArray((parsed as any)?.experiences) ? (parsed as any).experiences : [],
+          thought: p?.thought ?? legacyThought ?? { content: '', importance: 0 },
+          reply: p?.reply ?? null,
+          experience: p?.experience ?? legacyExperience ?? { content: '', importance: 0 },
           emotionDeltas: Array.isArray((parsed as any)?.emotionDeltas) ? (parsed as any).emotionDeltas : [],
           decisions: Array.isArray((parsed as any)?.decisions) ? (parsed as any).decisions : [],
           workingMemoryUpdate: (parsed as any)?.workingMemoryUpdate ?? null,
           coreSelfUpdate: (parsed as any)?.coreSelfUpdate ?? null,
           memoryCandidate: Array.isArray((parsed as any)?.memoryCandidate) ? (parsed as any).memoryCandidate : [],
         };
-        return lenient as MindOutput;
+        return { output: lenient as MindOutput, compiledContext: context };
       } catch {
-        return safeMindOutput(gathered);
+        return { output: safeMindOutput(gathered), compiledContext: context };
       }
     }
 
     const validated = result.data;
 
-    // Emit reply streaming events (post-hoc since we got the full reply)
+    // Emit reply events: if streaming worked, emit complete; if it failed, emit post-hoc
     if (validated.reply?.content) {
-      eventBus.emit('reply:chunk', {
-        content: validated.reply.content,
-        accumulated: validated.reply.content,
-      });
+      if (streamingFailed || !replyAccumulated) {
+        // Streaming didn't work — emit the full reply post-hoc
+        eventBus.emit('reply:chunk', {
+          content: validated.reply.content,
+          accumulated: validated.reply.content,
+        });
+      }
       eventBus.emit('reply:complete', {
         content: validated.reply.content,
         tickNumber,
@@ -399,15 +707,27 @@ async function mindQuery(
       });
     }
 
-    return validated;
+    return { output: validated, compiledContext: context };
   } catch (err) {
-    console.error('[Heartbeat] Mind query failed:', err);
+    log.error('Mind query failed:', err);
+    mindToolContext.current = null;
 
-    // On critical failure, transition session to cold
+    // End the leaked session before nulling references
+    if (mindSession) {
+      const sessionId = mindSession.id;
+      try {
+        await mindSession.end();
+      } catch (endErr) {
+        log.warn('Failed to end mind session after error, force-removing from tracking:', endErr);
+        agentManager?.removeTrackedSession(sessionId);
+      }
+    }
+
     mindSession = null;
     mindSessionId = null;
+    mindLogSessionId = null;
 
-    return safeMindOutput(gathered);
+    return { output: safeMindOutput(gathered), compiledContext: context };
   }
 }
 
@@ -427,23 +747,23 @@ async function executeOutput(
 
   // Wrap all DB writes in a transaction for atomicity
   const runTransaction = hbDb.transaction(() => {
-    // 1. Persist thoughts
-    for (const thought of output.thoughts) {
+    // 1. Persist thought
+    if (output.thought?.content) {
       const t = heartbeatStore.insertThought(hbDb, {
         tickNumber,
-        content: thought.content,
-        importance: thought.importance,
+        content: output.thought.content,
+        importance: output.thought.importance,
         expiresAt: expiresIn(settings.thoughtRetentionDays),
       });
       eventBus.emit('thought:created', t);
     }
 
-    // 2. Persist experiences
-    for (const exp of output.experiences) {
+    // 2. Persist experience
+    if (output.experience?.content) {
       const e = heartbeatStore.insertExperience(hbDb, {
         tickNumber,
-        content: exp.content,
-        importance: exp.importance,
+        content: output.experience.content,
+        importance: output.experience.importance,
         expiresAt: expiresIn(settings.experienceRetentionDays),
       });
       eventBus.emit('experience:created', e);
@@ -474,6 +794,36 @@ async function executeOutput(
         intensity: after,
         lastUpdatedAt: now(),
       });
+    }
+
+    // 3b. Apply energy delta
+    if (settings.energySystemEnabled && output.energyDelta) {
+      const before = gathered.energyLevel ?? 0.85;
+      const after = clamp(before + output.energyDelta.delta, 0, 1);
+      heartbeatStore.updateEnergyLevel(hbDb, after);
+      heartbeatStore.insertEnergyHistory(hbDb, {
+        tickNumber,
+        energyBefore: before,
+        energyAfter: after,
+        delta: output.energyDelta.delta,
+        reasoning: output.energyDelta.reasoning,
+        circadianBaseline: gathered.circadianBaseline ?? 0.85,
+        energyBand: getEnergyBand(after),
+      });
+      eventBus.emit('energy:updated', { energyLevel: after, band: getEnergyBand(after) });
+
+      // Interval switching based on energy band transitions
+      const prevBand = getEnergyBand(before);
+      const newBand = getEnergyBand(after);
+      const inSleep = isInSleepHours(
+        new Date(), settings.sleepStartHour, settings.sleepEndHour,
+        settings.timezone || 'UTC'
+      );
+      if (newBand === 'sleeping' && prevBand !== 'sleeping') {
+        tickQueue.updateInterval(settings.sleepTickIntervalMs);
+      } else if (prevBand === 'sleeping' && newBand !== 'sleeping' && !inSleep) {
+        tickQueue.updateInterval(settings.heartbeatIntervalMs);
+      }
     }
 
     // 4. Log decisions (DB writes only; agent operations happen outside transaction)
@@ -539,7 +889,7 @@ async function executeOutput(
           });
         }
       } catch (err) {
-        console.error(`[Heartbeat] Failed to execute ${decision.type} decision:`, err);
+        log.error(`Failed to execute ${decision.type} decision:`, err);
       }
     }
   }
@@ -572,7 +922,7 @@ async function executeOutput(
 
       eventBus.emit('message:sent', msg);
     } catch (err) {
-      console.error(`[Heartbeat] Failed to send reply for tick #${tickNumber}:`, err);
+      log.error(`Failed to send reply for tick #${tickNumber}:`, err);
       // Log failure as a tick decision so it's visible in the UI
       heartbeatStore.insertTickDecision(getHeartbeatDb(), {
         tickNumber,
@@ -610,24 +960,22 @@ async function executeOutput(
         }
       }
     } catch (err) {
-      console.error(`[Heartbeat] Memory processing failed for tick #${tickNumber}:`, err);
+      log.error(`Memory processing failed for tick #${tickNumber}:`, err);
     }
   }
 
-  // 7. Process seed resonance (thoughts may reinforce seeds)
-  if (seedManager && output.thoughts.length > 0) {
+  // 7. Process seed resonance (thought may reinforce seeds)
+  if (seedManager && output.thought?.content && output.thought.importance >= 0.3) {
     try {
-      const significantThoughts = output.thoughts.filter((t) => t.importance >= 0.3);
-      if (significantThoughts.length > 0) {
-        await seedManager.checkSeedResonance(significantThoughts);
-      }
+      await seedManager.checkSeedResonance([output.thought]);
     } catch (err) {
-      console.warn('[Heartbeat] Seed resonance check failed:', err);
+      log.warn('Seed resonance check failed:', err);
     }
   }
 
   // 8. Cleanup expired entries
   heartbeatStore.cleanupExpiredEntries(hbDb);
+  heartbeatStore.cleanupEnergyHistory(hbDb, settings.emotionHistoryRetentionDays);
 }
 
 // ============================================================================
@@ -640,7 +988,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
   const state = heartbeatStore.getHeartbeatState(hbDb);
   const tickNumber = state.tickNumber + 1;
 
-  console.log(`[Heartbeat] Starting tick #${tickNumber} (${queuedTick.trigger.type})`);
+  log.info(`Starting tick #${tickNumber} (${queuedTick.trigger.type})`);
 
   // Emit tick start event
   eventBus.emit('heartbeat:tick_start', {
@@ -662,13 +1010,38 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
 
     // Stage 1: GATHER CONTEXT
     const gathered = await gatherContext(queuedTick.trigger);
+    const tickStart = Date.now();
 
     // Update state: entering mind stage
     heartbeatStore.updateHeartbeatState(hbDb, { currentStage: 'mind' });
     eventBus.emit('heartbeat:stage_change', { stage: 'mind' });
 
     // Stage 2: MIND QUERY
-    const output = await mindQuery(gathered, tickNumber);
+    const { output, compiledContext } = await mindQuery(gathered, tickNumber);
+
+    // Log tick input to agent_logs.db
+    // Use the logging hook's session ID (DB UUID), not the SDK session ID
+    const logSessionId = mindLogSessionId?.() ?? null;
+    if (logSessionId) {
+      try {
+        const agentLogsDb = getAgentLogsDb();
+        agentLogStore.insertEvent(agentLogsDb, {
+          sessionId: logSessionId,
+          eventType: 'tick_input',
+          data: {
+            tickNumber,
+            triggerType: queuedTick.trigger.type,
+            triggerContext: queuedTick.trigger,
+            sessionState: gathered.sessionState,
+            systemPrompt: compiledContext.systemPrompt,
+            userMessage: compiledContext.userMessage,
+            tokenBreakdown: compiledContext.tokenBreakdown,
+          },
+        });
+      } catch (err) {
+        log.warn('Failed to log tick_input event:', err);
+      }
+    }
 
     // Update state: entering execute stage
     heartbeatStore.updateHeartbeatState(hbDb, { currentStage: 'execute' });
@@ -676,6 +1049,34 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
 
     // Stage 3: EXECUTE
     await executeOutput(output, tickNumber, gathered);
+
+    // Log tick output to agent_logs.db
+    const durationMs = Date.now() - tickStart;
+    if (logSessionId) {
+      try {
+        const agentLogsDb = getAgentLogsDb();
+        agentLogStore.insertEvent(agentLogsDb, {
+          sessionId: logSessionId,
+          eventType: 'tick_output',
+          data: {
+            tickNumber,
+            rawOutput: output,
+            durationMs,
+          },
+        });
+      } catch (err) {
+        log.warn('Failed to log tick_output event:', err);
+      }
+    }
+
+    // Emit for real-time subscription
+    eventBus.emit('tick:context_stored', {
+      tickNumber,
+      triggerType: queuedTick.trigger.type,
+      sessionState: gathered.sessionState,
+      durationMs,
+      createdAt: now(),
+    });
 
     // Return to idle, set session warm
     // Only reset warmth timer for interactive triggers (message, agent_complete, scheduled_task)
@@ -693,9 +1094,9 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
       sessionWarmSince = Date.now();
     }
 
-    console.log(`[Heartbeat] Completed tick #${tickNumber}`);
+    log.info(`Completed tick #${tickNumber}`);
   } catch (err) {
-    console.error(`[Heartbeat] Tick #${tickNumber} failed:`, err);
+    log.error(`Tick #${tickNumber} failed:`, err);
 
     // Return to idle on failure
     heartbeatStore.updateHeartbeatState(hbDb, {
@@ -738,33 +1139,35 @@ function determineSessionState(
 // ============================================================================
 
 /**
- * Convert the stored personality settings to a PersonaConfig.
- * Note: the current personalitySettings schema is minimal (from Sprint 0).
- * This adapter provides defaults for the full PersonaConfig until the
- * frontend sends complete persona data.
+ * Convert the full Persona from the DB into a PersonaConfig for the compiler.
  */
 function buildPersonaConfig(
-  settings: ReturnType<typeof systemStore.getPersonalitySettings>
+  persona: import('@animus/shared').Persona
 ): PersonaConfig {
   return {
-    name: settings.name || 'Animus',
-    existenceParadigm: 'digital_consciousness',
-    worldDescription: 'A thoughtful digital space where ideas and memories flow like light.',
+    name: persona.name || 'Animus',
+    gender: persona.gender ?? undefined,
+    age: persona.age ?? undefined,
+    physicalDescription: persona.physicalDescription ?? undefined,
+    existenceParadigm: persona.existenceParadigm || 'digital_consciousness',
+    location: persona.location ?? undefined,
+    worldDescription: persona.worldDescription ?? undefined,
     dimensions: {
-      extroversion: 0.5,
-      trust: 0.5,
-      leadership: 0.5,
-      optimism: 0.5,
-      confidence: 0.5,
-      empathy: 0.5,
-      cautious: 0.5,
-      patience: 0.5,
-      orderly: 0.5,
-      altruism: 0.5,
+      extroversion: persona.personalityDimensions.extroversion ?? 0.5,
+      trust: persona.personalityDimensions.trust ?? 0.5,
+      leadership: persona.personalityDimensions.leadership ?? 0.5,
+      optimism: persona.personalityDimensions.optimism ?? 0.5,
+      confidence: persona.personalityDimensions.confidence ?? 0.5,
+      empathy: persona.personalityDimensions.empathy ?? 0.5,
+      cautious: persona.personalityDimensions.cautious ?? 0.5,
+      patience: persona.personalityDimensions.patience ?? 0.5,
+      orderly: persona.personalityDimensions.orderly ?? 0.5,
+      altruism: persona.personalityDimensions.altruism ?? 0.5,
     },
-    traits: settings.traits || [],
-    values: settings.values || [],
-    ...(settings.communicationStyle ? { personalityNotes: settings.communicationStyle } : {}),
+    traits: persona.traits || [],
+    values: persona.values || [],
+    background: persona.background ?? undefined,
+    personalityNotes: persona.personalityNotes ?? persona.communicationStyle ?? undefined,
   };
 }
 
@@ -788,22 +1191,22 @@ export async function initializeHeartbeat(): Promise<void> {
       triggerType: null,
       triggerContext: null,
     });
-    console.log('[Heartbeat] Recovered from interrupted tick');
+    log.info('Recovered from interrupted tick');
   }
 
   // Mark orphaned agent tasks from previous crash
   const orphaned = heartbeatStore.markOrphanedAgentTasks(hbDb);
   if (orphaned > 0) {
-    console.log(`[Heartbeat] Marked ${orphaned} orphaned agent tasks as failed`);
+    log.info(`Marked ${orphaned} orphaned agent tasks as failed`);
   }
 
   // Initialize the AgentManager (3 sub-agents + 1 mind session = 4 max)
   agentManager = createAgentManager({ maxConcurrentSessions: 4 });
   const configuredProviders = agentManager.getConfiguredProviders();
   if (configuredProviders.length > 0) {
-    console.log(`[Heartbeat] Agent providers configured: ${configuredProviders.join(', ')}`);
+    log.info(`Agent providers configured: ${configuredProviders.join(', ')}`);
   } else {
-    console.warn('[Heartbeat] No agent providers configured. Mind query will use safe defaults.');
+    log.warn('No agent providers configured. Mind query will use safe defaults.');
   }
 
   // Initialize the agent log store adapter
@@ -811,19 +1214,19 @@ export async function initializeHeartbeat(): Promise<void> {
     const agentLogsDb = getAgentLogsDb();
     agentLogStoreAdapter = createAgentLogStoreAdapter(agentLogsDb);
   } catch (err) {
-    console.warn('[Heartbeat] Agent log store not available:', err);
+    log.warn('Agent log store not available:', err);
   }
 
   // Initialize memory system
   try {
     const memDb = getMemoryDb();
     embeddingProvider = new LocalEmbeddingProvider();
-    const vectorStore = new VectorStore('./data/lancedb', embeddingProvider.dimensions);
+    vectorStore = new VectorStore('./data/lancedb', embeddingProvider.dimensions);
     await vectorStore.initialize();
     memoryManager = new MemoryManager(memDb, vectorStore, embeddingProvider);
-    console.log('[Heartbeat] Memory system initialized');
+    log.info('Memory system initialized');
   } catch (err) {
-    console.warn('[Heartbeat] Memory system not available:', err);
+    log.warn('Memory system not available:', err);
   }
 
   // Initialize goal system
@@ -832,9 +1235,9 @@ export async function initializeHeartbeat(): Promise<void> {
     if (embeddingProvider) {
       seedManager = new SeedManager(hbDb, embeddingProvider);
     }
-    console.log('[Heartbeat] Goal system initialized');
+    log.info('Goal system initialized');
   } catch (err) {
-    console.warn('[Heartbeat] Goal system not available:', err);
+    log.warn('Goal system not available:', err);
   }
 
   // Initialize the agent orchestrator with DB-backed task store
@@ -850,6 +1253,14 @@ export async function initializeHeartbeat(): Promise<void> {
       taskStore,
       logStore: agentLogStoreAdapter,
       eventBus: getEventBus(),
+      getPreferredProvider: () => {
+        try {
+          const settings = systemStore.getSystemSettings(getSystemDb());
+          return settings.defaultAgentProvider ?? null;
+        } catch {
+          return null;
+        }
+      },
       onAgentComplete: handleAgentComplete,
     });
   }
@@ -857,8 +1268,15 @@ export async function initializeHeartbeat(): Promise<void> {
   // Set up the tick queue processor
   tickQueue.setProcessor(executeTick);
 
-  // Don't auto-start — wait for startHeartbeat() call
-  // The heartbeat stays paused until persona exists (onboarding complete)
+  // Resume heartbeat if it was running before a crash / ungraceful restart.
+  // Graceful shutdown sets isRunning=false, so this only fires after crashes
+  // or dev-server restarts (tsx watch) where stopHeartbeat() didn't run.
+  if (state.isRunning) {
+    const sysDb = getSystemDb();
+    const settings = systemStore.getSystemSettings(sysDb);
+    tickQueue.startInterval(settings.heartbeatIntervalMs);
+    log.info(`Resumed after restart (next tick in ${settings.heartbeatIntervalMs}ms)`);
+  }
 }
 
 /**
@@ -870,7 +1288,7 @@ export function startHeartbeat(): void {
   const state = heartbeatStore.getHeartbeatState(hbDb);
 
   if (state.isRunning) {
-    console.log('[Heartbeat] Already running');
+    log.info('Already running');
     return;
   }
 
@@ -885,7 +1303,7 @@ export function startHeartbeat(): void {
   // Fire the first tick immediately
   tickQueue.enqueueInterval();
 
-  console.log(`[Heartbeat] Started with interval of ${settings.heartbeatIntervalMs}ms`);
+  log.info(`Started with interval of ${settings.heartbeatIntervalMs}ms`);
 }
 
 /**
@@ -900,10 +1318,11 @@ export async function stopHeartbeat(): Promise<void> {
     try {
       await mindSession.end();
     } catch (err) {
-      console.warn('[Heartbeat] Failed to end mind session on stop:', err);
+      log.warn('Failed to end mind session on stop:', err);
     }
     mindSession = null;
     mindSessionId = null;
+    mindLogSessionId = null;
   }
 
   // Clean up orchestrator
@@ -918,7 +1337,7 @@ export async function stopHeartbeat(): Promise<void> {
 
   const hbDb = getHeartbeatDb();
   heartbeatStore.updateHeartbeatState(hbDb, { isRunning: false });
-  console.log('[Heartbeat] Stopped');
+  log.info('Stopped');
 }
 
 /**
@@ -998,6 +1417,14 @@ export function getHeartbeatStatus(): HeartbeatState {
 }
 
 /**
+ * Get the VectorStore instance (if initialized).
+ * Used by data router for full reset cleanup.
+ */
+export function getVectorStore(): VectorStore | null {
+  return vectorStore;
+}
+
+/**
  * Update heartbeat interval (from settings change).
  */
 export function updateHeartbeatInterval(intervalMs: number): void {
@@ -1009,9 +1436,9 @@ export function updateHeartbeatInterval(intervalMs: number): void {
  */
 export function recompilePersona(): void {
   const sysDb = getSystemDb();
-  const persona = systemStore.getPersonalitySettings(sysDb);
+  const persona = systemStore.getPersona(sysDb);
   compiledPersona = compilePersona(buildPersonaConfig(persona));
-  console.log('[Heartbeat] Persona recompiled');
+  log.info('Persona recompiled');
 }
 
 /**
@@ -1028,5 +1455,5 @@ export function recomputeEmotionBaselines(dimensions: PersonaDimensions): void {
     ).run(baseline, emotion);
   }
 
-  console.log('[Heartbeat] Emotion baselines recomputed');
+  log.info('Emotion baselines recomputed');
 }

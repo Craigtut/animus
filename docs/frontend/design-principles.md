@@ -91,7 +91,7 @@ A separate palette exists for representing Animus's inner life. These colors are
 
 ### Typography
 
-**Plus Jakarta Sans** — The sole typeface family.
+**Outfit** (sans-serif, UI chrome and body text) and **Crimson Pro** (serif, inner-life content and brand moments) — the two typeface families.
 
 **Hierarchy Through Weight:**
 - Display/Hero: Light or Regular, large size

@@ -3,6 +3,7 @@ import { css, useTheme, keyframes } from '@emotion/react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
+import { Typography } from '../../components/ui';
 import { useOnboardingStore } from '../../store';
 import { trpc } from '../../utils/trpc';
 
@@ -126,7 +127,8 @@ export function BirthPage() {
               margin-top: 280px;
             `}
           >
-            <h1
+            <Typography.Title
+              serif
               css={css`
                 font-size: ${theme.typography.fontSize['3xl']};
                 font-weight: ${theme.typography.fontWeight.semibold};
@@ -135,14 +137,17 @@ export function BirthPage() {
               `}
             >
               {personaDraft.name || 'Animus'}
-            </h1>
-            <motion.p
+            </Typography.Title>
+            <Typography.Body
+              as={motion.p}
+              serif
+              italic
+              color="secondary"
               initial={{ opacity: 0 }}
               animate={{ opacity: 0.6 }}
               transition={{ duration: 1, delay: 1 }}
               css={css`
-                font-size: ${theme.typography.fontSize.base};
-                color: ${theme.colors.text.secondary};
+                font-size: ${theme.typography.fontSize.lg};
                 font-weight: ${theme.typography.fontWeight.light};
                 max-width: 400px;
                 line-height: ${theme.typography.lineHeight.relaxed};
@@ -150,7 +155,7 @@ export function BirthPage() {
             >
               {/* TODO: Use actual first thought from heartbeat tick */}
               Awareness begins. The world is quiet, and full of possibility.
-            </motion.p>
+            </Typography.Body>
           </motion.div>
         )}
       </AnimatePresence>

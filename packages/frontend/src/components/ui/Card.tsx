@@ -31,12 +31,11 @@ export function Card({
   const variantStyles = {
     elevated: css`
       background: ${theme.colors.background.paper};
-      border: 1px solid ${theme.colors.border.light};
-      /* Rim lighting via border-image */
-      border-image: ${theme.colors.rimGradient} 1;
-      border-image-slice: 1;
-      /* Fallback for rounded corners (border-image breaks border-radius) */
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid transparent;
       position: relative;
+      /* Rim lighting — gradient border via pseudo-element to preserve border-radius */
       &::before {
         content: '';
         position: absolute;
@@ -51,7 +50,9 @@ export function Card({
       }
     `,
     outlined: css`
-      background: transparent;
+      background: ${theme.colors.background.elevated};
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
       border: 1px solid ${theme.colors.border.default};
     `,
     transparent: css`

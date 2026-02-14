@@ -2,8 +2,9 @@
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Card } from '../../../components/ui';
+import { Card, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
+import { OnboardingNav } from '../OnboardingNav';
 import { trpc } from '../../../utils/trpc';
 
 export function ReviewStep() {
@@ -13,6 +14,7 @@ export function ReviewStep() {
   const [isSaving, setIsSaving] = useState(false);
 
   const saveDraft = trpc.persona.saveDraft.useMutation();
+  const updateSettings = trpc.settings.updateSystemSettings.useMutation();
 
   const handleBringToLife = async () => {
     setIsSaving(true);
@@ -52,6 +54,11 @@ export function ReviewStep() {
         background: personaDraft.background || null,
       });
 
+      // Save timezone to system settings
+      if (personaDraft.timezone) {
+        await updateSettings.mutateAsync({ timezone: personaDraft.timezone });
+      }
+
       markStepComplete('persona_review');
       setCurrentStep('birth');
       navigate('/onboarding/birth');
@@ -65,13 +72,13 @@ export function ReviewStep() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div css={css`text-align: center;`}>
-        <h2 css={css`font-size: ${theme.typography.fontSize['2xl']}; font-weight: ${theme.typography.fontWeight.light}; margin-bottom: ${theme.spacing[2]};`}>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]}; text-align: center;`}>
+        <Typography.Title3 as="h2" serif>
           Is this who they are?
-        </h2>
-        <p css={css`color: ${theme.colors.text.secondary};`}>
+        </Typography.Title3>
+        <Typography.Body color="secondary">
           Review everything before bringing them to life. You can edit any section.
-        </p>
+        </Typography.Body>
       </div>
 
       {/* Summary sections */}
@@ -80,74 +87,75 @@ export function ReviewStep() {
           title="Existence"
           onEdit={() => navigate('/onboarding/persona/existence')}
         >
-          <p css={css`color: ${theme.colors.text.secondary}; font-size: ${theme.typography.fontSize.sm};`}>
+          <Typography.SmallBody color="secondary">
             {personaDraft.existenceParadigm === 'simulated_life'
               ? `Simulated Life${personaDraft.location ? ` — ${personaDraft.location}` : ''}`
               : personaDraft.existenceParadigm === 'digital_consciousness'
                 ? 'Digital Consciousness'
                 : 'Not configured'}
-          </p>
+          </Typography.SmallBody>
         </ReviewSection>
 
         <ReviewSection
           title="Identity"
           onEdit={() => navigate('/onboarding/persona/identity')}
         >
-          <p css={css`color: ${theme.colors.text.secondary}; font-size: ${theme.typography.fontSize.sm};`}>
+          <Typography.SmallBody color="secondary">
             {personaDraft.name || 'No name set'}
             {personaDraft.age ? `, ${personaDraft.age} years old` : ''}
-          </p>
+          </Typography.SmallBody>
         </ReviewSection>
 
         <ReviewSection
           title="Personality"
           onEdit={() => navigate('/onboarding/persona/dimensions')}
         >
-          <p css={css`color: ${theme.colors.text.secondary}; font-size: ${theme.typography.fontSize.sm};`}>
+          <Typography.SmallBody color="secondary">
             10 personality dimensions configured
-          </p>
+          </Typography.SmallBody>
         </ReviewSection>
 
         <ReviewSection
           title="Traits"
           onEdit={() => navigate('/onboarding/persona/traits')}
         >
-          <p css={css`color: ${theme.colors.text.secondary}; font-size: ${theme.typography.fontSize.sm};`}>
+          <Typography.SmallBody color="secondary">
             {personaDraft.traits.length > 0
               ? personaDraft.traits.join(', ')
               : 'No traits selected'}
-          </p>
+          </Typography.SmallBody>
         </ReviewSection>
 
         <ReviewSection
           title="Values"
           onEdit={() => navigate('/onboarding/persona/values')}
         >
-          <p css={css`color: ${theme.colors.text.secondary}; font-size: ${theme.typography.fontSize.sm};`}>
+          <Typography.SmallBody color="secondary">
             {personaDraft.values.length > 0
               ? personaDraft.values.join(', ')
               : 'No values selected'}
-          </p>
+          </Typography.SmallBody>
         </ReviewSection>
 
         <ReviewSection
           title="Background & Notes"
           onEdit={() => navigate('/onboarding/persona/background')}
         >
-          <p css={css`color: ${theme.colors.text.secondary}; font-size: ${theme.typography.fontSize.sm};`}>
+          <Typography.SmallBody color="secondary">
             {personaDraft.personalityNotes || personaDraft.background
               ? 'Background configured'
               : 'No background set'}
-          </p>
+          </Typography.SmallBody>
         </ReviewSection>
       </div>
 
-      <div css={css`display: flex; justify-content: space-between; margin-top: ${theme.spacing[6]};`}>
-        <Button variant="ghost" onClick={handleBack}>Back</Button>
-        <Button size="lg" onClick={handleBringToLife} disabled={isSaving}>
-          {isSaving ? 'Saving...' : 'Bring to Life'}
-        </Button>
-      </div>
+      <OnboardingNav
+        onBack={handleBack}
+        onContinue={handleBringToLife}
+        continueLabel="Bring to Life"
+        continueLoading={isSaving}
+        continueDisabled={isSaving}
+      />
     </div>
   );
 }
@@ -167,27 +175,23 @@ function ReviewSection({
     <Card variant="outlined" padding="md">
       <div css={css`display: flex; justify-content: space-between; align-items: flex-start;`}>
         <div>
-          <h3 css={css`
-            font-size: ${theme.typography.fontSize.base};
-            font-weight: ${theme.typography.fontWeight.semibold};
-            margin-bottom: ${theme.spacing[1]};
-          `}>
+          <Typography.BodyAlt as="h3" css={css`margin-bottom: ${theme.spacing[1]};`}>
             {title}
-          </h3>
+          </Typography.BodyAlt>
           {children}
         </div>
-        <button
+        <Typography.SmallBody
+          as="button"
+          color="hint"
           onClick={onEdit}
           css={css`
-            font-size: ${theme.typography.fontSize.sm};
-            color: ${theme.colors.text.hint};
             cursor: pointer;
             flex-shrink: 0;
             &:hover { color: ${theme.colors.text.primary}; }
           `}
         >
           Edit
-        </button>
+        </Typography.SmallBody>
       </div>
     </Card>
   );

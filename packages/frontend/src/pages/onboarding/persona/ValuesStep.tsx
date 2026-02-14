@@ -2,8 +2,9 @@
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Card } from '../../../components/ui';
+import { Card, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
+import { OnboardingNav } from '../OnboardingNav';
 
 const allValues = [
   { id: 'knowledge', name: 'Knowledge & Truth', description: 'Pursuing understanding above all else' },
@@ -52,13 +53,13 @@ export function ValuesStep() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div>
-        <h2 css={css`font-size: ${theme.typography.fontSize['2xl']}; font-weight: ${theme.typography.fontWeight.light}; margin-bottom: ${theme.spacing[2]};`}>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+        <Typography.Title3 as="h2" serif>
           What matters most?
-        </h2>
-        <p css={css`color: ${theme.colors.text.secondary};`}>
+        </Typography.Title3>
+        <Typography.Body color="secondary">
           Pick your top 3 to 5 values and rank them. When values conflict, higher-ranked values win.
-        </p>
+        </Typography.Body>
       </div>
 
       {/* Ranked summary */}
@@ -89,9 +90,9 @@ export function ValuesStep() {
         </div>
       )}
 
-      <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.hint};`}>
+      <Typography.SmallBody color="hint">
         {selected.length} of {MAX_VALUES} selected
-      </p>
+      </Typography.SmallBody>
 
       <div css={css`
         display: grid;
@@ -132,12 +133,12 @@ export function ValuesStep() {
                   </span>
                 )}
                 <div>
-                  <span css={css`font-weight: ${theme.typography.fontWeight.medium}; font-size: ${theme.typography.fontSize.sm};`}>
+                  <Typography.SmallBodyAlt as="span">
                     {val.name}
-                  </span>
-                  <p css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint}; margin-top: 2px;`}>
+                  </Typography.SmallBodyAlt>
+                  <Typography.Caption as="p" color="hint" css={css`margin-top: 2px;`}>
                     {val.description}
-                  </p>
+                  </Typography.Caption>
                 </div>
               </div>
             </Card>
@@ -145,10 +146,11 @@ export function ValuesStep() {
         })}
       </div>
 
-      <div css={css`display: flex; justify-content: space-between; margin-top: ${theme.spacing[4]};`}>
-        <Button variant="ghost" onClick={handleBack}>Back</Button>
-        <Button onClick={handleContinue} disabled={selected.length < 3}>Continue</Button>
-      </div>
+      <OnboardingNav
+        onBack={handleBack}
+        onContinue={handleContinue}
+        continueDisabled={selected.length < 3}
+      />
     </div>
   );
 }

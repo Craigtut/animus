@@ -445,7 +445,7 @@ interface PersonaDraft {
 - `docs/frontend/onboarding.md` -- Persona creation steps (Settings mirrors these for editing)
 - `docs/architecture/persona.md` -- Persona data model, prompt compilation, archetype presets, slider zones
 - `docs/architecture/heartbeat.md` -- Heartbeat configuration, session lifecycle, emotion baselines
-- `docs/architecture/channels.md` -- Channel types, configuration fields, validation
+- `docs/architecture/channel-packages.md` -- Channel types, configuration fields, validation, channel adapters
 - `docs/architecture/goals.md` -- Goal approval modes
 - `docs/architecture/memory.md` -- Embedding model configuration, memory reset behavior
 - `docs/architecture/contacts.md` -- Contact notes, primary contact

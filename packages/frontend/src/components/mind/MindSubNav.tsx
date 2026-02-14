@@ -3,14 +3,15 @@ import { css, useTheme } from '@emotion/react';
 import { motion } from 'motion/react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
-export type MindSection = 'emotions' | 'thoughts' | 'memories' | 'goals' | 'agents';
+export type MindSection = 'emotions' | 'journal' | 'memories' | 'goals' | 'agents' | 'heartbeats';
 
 const sections: { key: MindSection; label: string }[] = [
   { key: 'emotions', label: 'Emotions' },
-  { key: 'thoughts', label: 'Thoughts' },
+  { key: 'journal', label: 'Journal' },
   { key: 'memories', label: 'Memories' },
   { key: 'goals', label: 'Goals' },
   { key: 'agents', label: 'Agents' },
+  { key: 'heartbeats', label: 'Heartbeats' },
 ];
 
 export function MindSubNav() {
@@ -88,9 +89,11 @@ export function MindSubNav() {
 }
 
 export function getActiveSection(pathname: string): MindSection {
-  if (pathname.includes('/mind/thoughts')) return 'thoughts';
+  if (pathname.includes('/mind/emotions')) return 'emotions';
+  if (pathname.includes('/mind/journal')) return 'journal';
   if (pathname.includes('/mind/memories')) return 'memories';
   if (pathname.includes('/mind/goals')) return 'goals';
   if (pathname.includes('/mind/agents')) return 'agents';
-  return 'emotions';
+  if (pathname.includes('/mind/heartbeats')) return 'heartbeats';
+  return 'journal';
 }

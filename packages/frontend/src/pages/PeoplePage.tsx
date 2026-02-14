@@ -16,7 +16,7 @@ import {
   Brain,
   Trash,
 } from '@phosphor-icons/react';
-import { Card, Button, Input, Modal, Badge } from '../components/ui';
+import { Card, Button, Input, Modal, Badge, Typography } from '../components/ui';
 import { trpc } from '../utils/trpc';
 
 // ============================================================================
@@ -108,54 +108,44 @@ function ContactListItem({
             flex-shrink: 0;
           `}
         >
-          <span css={css`
-            font-size: ${theme.typography.fontSize.sm};
-            font-weight: ${theme.typography.fontWeight.semibold};
-            color: hsl(${hue}, 40%, ${theme.mode === 'light' ? '40%' : '75%'});
-          `}>
+          <Typography.SmallBodyAlt
+            as="span"
+            color={`hsl(${hue}, 40%, ${theme.mode === 'light' ? '40%' : '75%'})`}
+          >
             {getInitials(contact.fullName)}
-          </span>
+          </Typography.SmallBodyAlt>
         </div>
 
         {/* Name + Last message */}
         <div css={css`flex: 1; min-width: 0;`}>
           <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-            <span css={css`
-              font-size: ${theme.typography.fontSize.base};
-              font-weight: ${theme.typography.fontWeight.semibold};
-            `}>
+            <Typography.BodyAlt as="span">
               {contact.fullName}
-            </span>
+            </Typography.BodyAlt>
             {contact.isPrimary && (
-              <span css={css`
-                font-size: 11px;
-                color: ${theme.colors.accent};
-                font-weight: ${theme.typography.fontWeight.medium};
-              `}>
+              <Typography.Caption color={theme.colors.accent}>
                 Primary
-              </span>
+              </Typography.Caption>
             )}
             {!contact.isPrimary && (
-              <span css={css`
-                font-size: 11px;
-                color: ${theme.colors.text.secondary};
-              `}>
+              <Typography.Caption color="secondary">
                 Standard
-              </span>
+              </Typography.Caption>
             )}
           </div>
           {contact.lastMessage && (
-            <p css={css`
-              font-size: 13px;
-              color: ${theme.colors.text.hint};
-              white-space: nowrap;
-              overflow: hidden;
-              text-overflow: ellipsis;
-              margin-top: 2px;
-            `}>
+            <Typography.SmallBody
+              color="hint"
+              css={css`
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                margin-top: 2px;
+              `}
+            >
               {contact.lastMessage.direction === 'outbound' ? 'You: ' : ''}
               {contact.lastMessage.content}
-            </p>
+            </Typography.SmallBody>
           )}
         </div>
 
@@ -177,9 +167,9 @@ function ContactListItem({
             })}
           </div>
           {contact.lastMessage && (
-            <span css={css`font-size: 11px; color: ${theme.colors.text.hint};`}>
+            <Typography.Caption color="hint">
               {formatRelativeTime(contact.lastMessage.createdAt)}
-            </span>
+            </Typography.Caption>
           )}
         </div>
       </div>
@@ -218,9 +208,9 @@ function AddContactModal({
   return (
     <Modal open={open} onClose={onClose}>
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-        <h3 css={css`font-size: ${theme.typography.fontSize.lg}; font-weight: ${theme.typography.fontWeight.semibold};`}>
+        <Typography.Subtitle as="h3">
           Add contact
-        </h3>
+        </Typography.Subtitle>
         <Input
           label="Full name"
           value={fullName}
@@ -332,9 +322,12 @@ function ContactDetail({
 
   if (!contact) {
     return (
-      <div css={css`padding: ${theme.spacing[8]}; color: ${theme.colors.text.hint}; text-align: center;`}>
+      <Typography.Body
+        color="hint"
+        css={css`padding: ${theme.spacing[8]}; text-align: center;`}
+      >
         Loading...
-      </div>
+      </Typography.Body>
     );
   }
 
@@ -378,12 +371,9 @@ function ContactDetail({
         ) : (
           <>
             <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-              <h1 css={css`
-                font-size: ${theme.typography.fontSize['2xl']};
-                font-weight: ${theme.typography.fontWeight.semibold};
-              `}>
+              <Typography.Title3 as="h1">
                 {contact.fullName}
-              </h1>
+              </Typography.Title3>
               <button
                 onClick={() => setEditing(true)}
                 css={css`
@@ -394,28 +384,27 @@ function ContactDetail({
                 <PencilSimple size={16} />
               </button>
             </div>
-            <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary};`}>
+            <Typography.SmallBody color="secondary">
               {contact.isPrimary ? 'Primary contact' : 'Standard contact'}
-            </p>
+            </Typography.SmallBody>
             {channels && channels.length > 0 && (
               <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[2]}; margin-top: ${theme.spacing[2]};`}>
                 {channels.map((ch: any) => {
                   const Icon = channelIcons[ch.channel] ?? Globe;
                   return (
-                    <span
+                    <Typography.Caption
                       key={ch.id}
+                      color="secondary"
                       css={css`
                         display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
                         padding: ${theme.spacing[0.5]} ${theme.spacing[2]};
                         background: ${theme.colors.background.elevated};
                         border-radius: ${theme.borderRadius.full};
-                        font-size: ${theme.typography.fontSize.xs};
-                        color: ${theme.colors.text.secondary};
                       `}
                     >
                       <Icon size={12} />
                       {ch.identifier}
-                    </span>
+                    </Typography.Caption>
                   );
                 })}
               </div>
@@ -460,19 +449,20 @@ function ContactDetail({
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
             <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
               <NotePencil size={16} css={css`color: ${theme.colors.text.secondary};`} />
-              <h3 css={css`font-size: ${theme.typography.fontSize.base}; font-weight: ${theme.typography.fontWeight.semibold};`}>
+              <Typography.BodyAlt as="h3">
                 {contact.isPrimary ? 'About you' : 'Your notes'}
-              </h3>
+              </Typography.BodyAlt>
               <AnimatePresence>
                 {notesSaved && (
-                  <motion.span
+                  <Typography.Caption
+                    as={motion.span}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.success.main};`}
+                    color={theme.colors.success.main}
                   >
                     Saved
-                  </motion.span>
+                  </Typography.Caption>
                 )}
               </AnimatePresence>
             </div>
@@ -489,26 +479,21 @@ function ContactDetail({
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
             <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
               <Brain size={16} css={css`color: ${theme.colors.text.secondary};`} />
-              <h3 css={css`font-size: ${theme.typography.fontSize.base}; font-weight: ${theme.typography.fontWeight.semibold};`}>
+              <Typography.BodyAlt as="h3">
                 What {contact.fullName.split(' ')[0]} knows
-              </h3>
+              </Typography.BodyAlt>
             </div>
-            <p css={css`
-              font-size: ${theme.typography.fontSize.sm};
-              color: ${theme.colors.text.hint};
-              line-height: ${theme.typography.lineHeight.relaxed};
-              font-style: italic;
-            `}>
+            <Typography.SmallBody color="hint" italic>
               Your Animus hasn't formed notes about this contact yet.
-            </p>
+            </Typography.SmallBody>
           </div>
 
           {/* Channel Management */}
           {channels && (
             <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-              <h3 css={css`font-size: ${theme.typography.fontSize.base}; font-weight: ${theme.typography.fontWeight.semibold};`}>
+              <Typography.BodyAlt as="h3">
                 Channels
-              </h3>
+              </Typography.BodyAlt>
               {channels.map((ch: any) => {
                 const Icon = channelIcons[ch.channel] ?? Globe;
                 return (
@@ -520,7 +505,7 @@ function ContactDetail({
                   `}>
                     <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
                       <Icon size={16} css={css`color: ${theme.colors.text.secondary};`} />
-                      <span css={css`font-size: ${theme.typography.fontSize.sm};`}>{ch.identifier}</span>
+                      <Typography.SmallBody as="span">{ch.identifier}</Typography.SmallBody>
                       {ch.isVerified && <Badge variant="success">Verified</Badge>}
                     </div>
                   </div>
@@ -551,12 +536,12 @@ function ContactDetail({
 
           <Modal open={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)}>
             <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-              <h3 css={css`font-size: ${theme.typography.fontSize.lg}; font-weight: ${theme.typography.fontWeight.semibold};`}>
+              <Typography.Subtitle as="h3">
                 Delete {contact.fullName}?
-              </h3>
-              <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary}; line-height: ${theme.typography.lineHeight.relaxed};`}>
+              </Typography.Subtitle>
+              <Typography.SmallBody color="secondary">
                 This will remove the contact and all their channel associations. Message history will be preserved.
-              </p>
+              </Typography.SmallBody>
               <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
                 <Button variant="ghost" size="sm" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
                 <Button variant="danger" size="sm" onClick={() => deleteMutation.mutate({ id: contactId })} loading={deleteMutation.isPending}>
@@ -611,14 +596,15 @@ function ConversationTab({
 
   if (messages.length === 0) {
     return (
-      <div css={css`
-        text-align: center;
-        padding: ${theme.spacing[16]} 0;
-        color: ${theme.colors.text.hint};
-        font-size: ${theme.typography.fontSize.base};
-      `}>
+      <Typography.Body
+        color="hint"
+        css={css`
+          text-align: center;
+          padding: ${theme.spacing[16]} 0;
+        `}
+      >
         No messages yet.
-      </div>
+      </Typography.Body>
     );
   }
 
@@ -638,7 +624,9 @@ function ConversationTab({
                 justify-content: ${isUser ? 'flex-end' : 'flex-start'};
               `}
             >
-              <div
+              <Typography.Body
+                as="div"
+                color="primary"
                 css={css`
                   max-width: ${isUser ? '80%' : '85%'};
                   ${isUser
@@ -648,28 +636,27 @@ function ConversationTab({
                     padding: ${theme.spacing[3]} ${theme.spacing[4]};
                   `
                     : ''}
-                  font-size: ${theme.typography.fontSize.base};
-                  line-height: ${theme.typography.lineHeight.normal};
-                  color: ${theme.colors.text.primary};
                   white-space: pre-wrap;
                 `}
               >
                 {msg.content}
-                <div css={css`
-                  font-size: 10px;
-                  color: ${theme.colors.text.hint};
-                  margin-top: ${theme.spacing[0.5]};
-                  display: flex;
-                  align-items: center;
-                  gap: ${theme.spacing[1]};
-                `}>
+                <Typography.Caption
+                  as="div"
+                  color="hint"
+                  css={css`
+                    margin-top: ${theme.spacing[0.5]};
+                    display: flex;
+                    align-items: center;
+                    gap: ${theme.spacing[1]};
+                  `}
+                >
                   {msg.channel && (() => {
                     const Icon = channelIcons[msg.channel] ?? Globe;
                     return <Icon size={10} />;
                   })()}
                   {formatRelativeTime(msg.createdAt)}
-                </div>
-              </div>
+                </Typography.Caption>
+              </Typography.Body>
             </div>
           );
         })}
@@ -800,22 +787,28 @@ export function PeoplePage() {
 
       {/* Contact List */}
       {isLoading ? (
-        <div css={css`text-align: center; padding: ${theme.spacing[8]}; color: ${theme.colors.text.hint};`}>
+        <Typography.Body
+          color="hint"
+          css={css`text-align: center; padding: ${theme.spacing[8]};`}
+        >
           Loading contacts...
-        </div>
+        </Typography.Body>
       ) : contacts.length === 0 && !searchQuery ? (
-        <div css={css`text-align: center; padding: ${theme.spacing[8]};`}>
-          <p css={css`color: ${theme.colors.text.hint}; margin-bottom: ${theme.spacing[4]};`}>
+        <div css={css`text-align: center; padding: ${theme.spacing[8]}; display: flex; flex-direction: column; align-items: center; gap: ${theme.spacing[4]};`}>
+          <Typography.Body color="hint">
             Other contacts will appear here as people message your Animus through SMS, Discord, or API. You can also add contacts manually.
-          </p>
+          </Typography.Body>
           <Button variant="secondary" size="sm" onClick={() => setShowAddModal(true)}>
             <Plus size={14} /> Add contact
           </Button>
         </div>
       ) : contacts.length === 0 && searchQuery ? (
-        <div css={css`text-align: center; padding: ${theme.spacing[8]}; color: ${theme.colors.text.hint};`}>
+        <Typography.Body
+          color="hint"
+          css={css`text-align: center; padding: ${theme.spacing[8]};`}
+        >
           No contacts match "{searchQuery}"
-        </div>
+        </Typography.Body>
       ) : (
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
           {contacts.map((contact: any) => (

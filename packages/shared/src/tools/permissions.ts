@@ -9,6 +9,7 @@
 
 import type { PermissionTier } from '../types/index.js';
 import type { AnimusToolName } from './definitions.js';
+import { ANIMUS_TOOL_DEFS, MIND_TOOL_NAMES } from './definitions.js';
 
 /**
  * Maps contact permission tiers to allowed tool sets.
@@ -33,4 +34,23 @@ export function isToolAllowed(tool: AnimusToolName, tier: PermissionTier): boole
  */
 export function getAllowedTools(tier: PermissionTier): readonly AnimusToolName[] {
   return TOOL_PERMISSIONS[tier];
+}
+
+/**
+ * Get mind tool definitions (name, description, inputSchema) for
+ * the tools the mind session should have access to.
+ */
+export function getMindTools(): Array<{
+  name: AnimusToolName;
+  description: string;
+  inputSchema: import('zod').ZodTypeAny;
+}> {
+  return MIND_TOOL_NAMES.map((name) => {
+    const def = ANIMUS_TOOL_DEFS[name];
+    return {
+      name,
+      description: def.description,
+      inputSchema: def.inputSchema,
+    };
+  });
 }

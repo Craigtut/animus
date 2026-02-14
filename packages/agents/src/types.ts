@@ -88,7 +88,7 @@ export interface SessionStartEvent {
   sessionId: string;
   provider: AgentProvider;
   model: string;
-  config: AgentSessionConfig;
+  config: Record<string, unknown>;
 }
 
 /**
@@ -235,8 +235,14 @@ export interface AgentSessionConfig {
   /** Unified permission configuration */
   permissions?: PermissionConfig;
 
-  /** MCP server configurations */
-  mcpServers?: Record<string, McpServerConfig>;
+  /**
+   * MCP server configurations.
+   *
+   * Values can be our McpServerConfig (stdio/HTTP) or opaque SDK-specific
+   * objects (e.g., Claude SDK's in-process McpSdkServerConfigWithInstance
+   * returned by createSdkMcpServer()).
+   */
+  mcpServers?: Record<string, McpServerConfig | Record<string, unknown>>;
 
   /** Lifecycle hooks */
   hooks?: UnifiedHooks;
@@ -252,6 +258,10 @@ export interface AgentSessionConfig {
   allowedTools?: string[];
   disallowedTools?: string[];
   includePartialMessages?: boolean;
+  outputFormat?: {
+    type: 'json_schema';
+    schema: Record<string, unknown>;
+  };
 
   // Codex-specific
   workingDirectory?: string;
@@ -435,6 +445,9 @@ export interface AgentResponse {
 
   /** Model used for this response */
   model: string;
+
+  /** Structured output (when outputFormat is specified) */
+  structuredOutput?: unknown;
 }
 
 // ============================================================================

@@ -4,6 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Pulse, Brain, User, GearSix } from '@phosphor-icons/react';
 import { useShellStore } from '../../store';
+import { Typography } from '../ui';
 
 const spaces = [
   { name: 'presence' as const, label: 'Presence', icon: Pulse, path: '/' },
@@ -64,7 +65,6 @@ export function NavigationPill() {
       >
         {spaces.map((space) => {
           const isActive = currentActive === space.name;
-          const Icon = space.icon;
 
           return (
             <button
@@ -74,7 +74,6 @@ export function NavigationPill() {
                 position: relative;
                 display: flex;
                 align-items: center;
-                gap: ${theme.spacing[1.5]};
                 padding: ${theme.spacing[1.5]} ${theme.spacing[3]};
                 border-radius: ${theme.borderRadius.full};
                 font-size: ${theme.typography.fontSize.sm};
@@ -93,7 +92,6 @@ export function NavigationPill() {
                 }
               `}
             >
-              <Icon size={16} weight={isActive ? 'fill' : 'regular'} />
               {space.label}
               {isActive && (
                 <motion.div
@@ -142,14 +140,9 @@ export function NavigationPill() {
               `}
             />
             {connectionStatus === 'disconnected' && (
-              <span
-                css={css`
-                  font-size: ${theme.typography.fontSize.xs};
-                  color: ${theme.colors.text.hint};
-                `}
-              >
+              <Typography.Caption color="hint">
                 Offline
-              </span>
+              </Typography.Caption>
             )}
           </div>
         )}

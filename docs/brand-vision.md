@@ -86,15 +86,19 @@ Colors should be defined to represent the inner emotional life of Animus. These 
 
 ### Typography
 
-**Primary Typeface: Plus Jakarta Sans**
+**Primary Typefaces: Outfit & Crimson Pro**
 
-A geometric sans-serif with subtle warmth in its curves. It feels modern and clean while avoiding coldness. The slightly rounded terminals give it an approachable quality without being childish.
+**Outfit** — A geometric sans-serif with subtle warmth in its curves, used for all UI chrome and body text. It feels modern and clean while avoiding coldness. The slightly rounded terminals give it an approachable quality without being childish.
 
-Use the full range of weights to create hierarchy:
+**Crimson Pro** — A refined serif used for inner-life content and brand moments. It adds a literary, contemplative quality to thoughts, emotions, and personality-forward text.
+
+Use the full range of Outfit weights to create hierarchy:
 - Light weights for large display text
 - Regular for body copy
 - Medium and Semibold for emphasis and headings
 - Bold used sparingly for maximum impact
+
+Crimson Pro appears in serif contexts: thought content, emotional descriptions, and brand moments where the AI's personality surfaces.
 
 ### Iconography
 

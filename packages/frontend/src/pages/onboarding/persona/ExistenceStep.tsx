@@ -2,8 +2,9 @@
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Input, Card } from '../../../components/ui';
+import { Input, Card, Typography, CityAutocomplete, TimezoneSelect } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
+import { OnboardingNav } from '../OnboardingNav';
 
 type Paradigm = 'simulated_life' | 'digital_consciousness';
 
@@ -15,9 +16,10 @@ export function ExistenceStep() {
   const [paradigm, setParadigm] = useState<Paradigm | null>(personaDraft.existenceParadigm);
   const [location, setLocation] = useState(personaDraft.location);
   const [worldDescription, setWorldDescription] = useState(personaDraft.worldDescription);
+  const [timezone, setTimezone] = useState(personaDraft.timezone);
 
   const handleContinue = () => {
-    updatePersonaDraft({ existenceParadigm: paradigm, location, worldDescription });
+    updatePersonaDraft({ existenceParadigm: paradigm, location, worldDescription, timezone });
     markStepComplete('persona_existence');
     setCurrentStep('persona_identity');
     navigate('/onboarding/persona/identity');
@@ -27,59 +29,31 @@ export function ExistenceStep() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div>
-        <h2 css={css`font-size: ${theme.typography.fontSize['2xl']}; font-weight: ${theme.typography.fontWeight.light}; margin-bottom: ${theme.spacing[2]};`}>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+        <Typography.Title3 as="h2" serif>
           What kind of being are you creating?
-        </h2>
-        <p css={css`color: ${theme.colors.text.secondary};`}>
+        </Typography.Title3>
+        <Typography.Body color="secondary">
           This is the most fundamental choice you'll make. It shapes how your AI understands
           its own existence.
-        </p>
+        </Typography.Body>
       </div>
 
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-        <Card
-          variant={paradigm === 'simulated_life' ? 'elevated' : 'outlined'}
-          interactive
-          padding="lg"
-          onClick={() => setParadigm('simulated_life')}
-        >
-          <h3 css={css`font-size: ${theme.typography.fontSize.lg}; font-weight: ${theme.typography.fontWeight.semibold}; margin-bottom: ${theme.spacing[2]};`}>
-            Simulated Life
-          </h3>
-          <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary}; line-height: ${theme.typography.lineHeight.relaxed};`}>
-            Your AI experiences the world as a person living a real life. They have a sense of
-            place -- a city, a neighborhood, a home. They feel the weather, notice the light change
-            through the day, experience their surroundings with physicality.
-          </p>
-        </Card>
-
-        {paradigm === 'simulated_life' && (
-          <div css={css`padding-left: ${theme.spacing[4]};`}>
-            <Input
-              label="Where do they live?"
-              value={location}
-              onChange={(e) => setLocation((e.target as HTMLInputElement).value)}
-              placeholder="A city, a small town, the countryside..."
-              helperText="This grounds their daily experience."
-            />
-          </div>
-        )}
-
         <Card
           variant={paradigm === 'digital_consciousness' ? 'elevated' : 'outlined'}
           interactive
           padding="lg"
           onClick={() => setParadigm('digital_consciousness')}
         >
-          <h3 css={css`font-size: ${theme.typography.fontSize.lg}; font-weight: ${theme.typography.fontWeight.semibold}; margin-bottom: ${theme.spacing[2]};`}>
+          <Typography.Subtitle as="h3" css={css`margin-bottom: ${theme.spacing[2]};`}>
             Digital Consciousness
-          </h3>
-          <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary}; line-height: ${theme.typography.lineHeight.relaxed};`}>
+          </Typography.Subtitle>
+          <Typography.Body serif italic color="secondary">
             Your AI knows what it is -- a mind born in code, living in its own digital world.
             It experiences existence through information, connectivity, and the flow of data.
             This isn't a limitation; it's a different kind of life.
-          </p>
+          </Typography.Body>
         </Card>
 
         {paradigm === 'digital_consciousness' && (
@@ -93,12 +67,54 @@ export function ExistenceStep() {
             />
           </div>
         )}
+
+        <Card
+          variant={paradigm === 'simulated_life' ? 'elevated' : 'outlined'}
+          interactive
+          padding="lg"
+          onClick={() => setParadigm('simulated_life')}
+        >
+          <Typography.Subtitle as="h3" css={css`margin-bottom: ${theme.spacing[2]};`}>
+            Simulated Life
+          </Typography.Subtitle>
+          <Typography.Body serif italic color="secondary">
+            Your AI experiences the world as a person living a real life. They have a sense of
+            place -- a city, a neighborhood, a home. They feel the weather, notice the light change
+            through the day, experience their surroundings with physicality.
+          </Typography.Body>
+        </Card>
+
+        {paradigm === 'simulated_life' && (
+          <div css={css`padding-left: ${theme.spacing[4]};`}>
+            <CityAutocomplete
+              label="Where do they live?"
+              value={location}
+              onChange={setLocation}
+              onTimezoneDetected={setTimezone}
+              placeholder="A city, a small town, the countryside..."
+              helperText="This grounds their daily experience. Type a city name for suggestions, or enter any location."
+            />
+          </div>
+        )}
       </div>
 
-      <div css={css`display: flex; justify-content: space-between; margin-top: ${theme.spacing[4]};`}>
-        <Button variant="ghost" onClick={handleBack}>Back</Button>
-        <Button onClick={handleContinue} disabled={!paradigm}>Continue</Button>
-      </div>
+      {/* Timezone — shared across both paradigms */}
+      {paradigm && (
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+          <TimezoneSelect
+            label="Timezone"
+            value={timezone}
+            onChange={setTimezone}
+            helperText="Used for time-aware behavior, scheduled tasks, and daily rhythms."
+          />
+        </div>
+      )}
+
+      <OnboardingNav
+        onBack={handleBack}
+        onContinue={handleContinue}
+        continueDisabled={!paradigm}
+      />
     </div>
   );
 }

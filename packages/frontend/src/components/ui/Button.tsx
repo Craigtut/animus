@@ -48,6 +48,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         background: transparent;
         color: ${theme.colors.text.primary};
         border: 1px solid ${theme.colors.border.default};
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
         &:hover:not(:disabled) {
           background: ${theme.colors.background.elevated};
         }
@@ -58,6 +60,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         &:hover:not(:disabled) {
           color: ${theme.colors.text.primary};
           background: ${theme.colors.background.elevated};
+          backdrop-filter: blur(8px);
+          -webkit-backdrop-filter: blur(8px);
         }
       `,
       danger: css`

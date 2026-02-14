@@ -9,6 +9,9 @@
 
 import type { IChannelAdapter } from '../types.js';
 import type { ChannelType } from '@animus/shared';
+import { createLogger } from '../../lib/logger.js';
+
+const log = createLogger('DiscordAdapter', 'channels');
 
 export class DiscordChannelAdapter implements IChannelAdapter {
   readonly channelType: ChannelType = 'discord';
@@ -29,7 +32,7 @@ export class DiscordChannelAdapter implements IChannelAdapter {
     // TODO: Login with bot token from channel_configs
 
     this.enabled = true;
-    console.log('[DiscordAdapter] Started (stub mode — no actual Discord connection)');
+    log.info('Started (stub mode — no actual Discord connection)');
   }
 
   /**
@@ -39,7 +42,7 @@ export class DiscordChannelAdapter implements IChannelAdapter {
   async stop(): Promise<void> {
     // TODO: client.destroy()
     this.enabled = false;
-    console.log('[DiscordAdapter] Stopped');
+    log.info('Stopped');
   }
 
   isEnabled(): boolean {
@@ -59,8 +62,8 @@ export class DiscordChannelAdapter implements IChannelAdapter {
     // TODO: Look up Discord channel from contact_channels
     // TODO: Send via Discord.js:
     //   await channel.send(content);
-    console.log(
-      `[DiscordAdapter] Would send to contact ${contactId}${channelId ? ` (channel: ${channelId})` : ''}: "${content.substring(0, 50)}..."`
+    log.info(
+      `Would send to contact ${contactId}${channelId ? ` (channel: ${channelId})` : ''}: "${content.substring(0, 50)}..."`
     );
   }
 }

@@ -1,21 +1,27 @@
 /**
  * Animus Theme
  *
- * Design-spec aligned theme with warm neutrals, Plus Jakarta Sans,
+ * Design-spec aligned theme with warm neutrals, Outfit + Crimson Pro,
  * gradient rim lighting, and dual-mode support (light default).
  *
- * See docs/frontend/design-principles.md and docs/brand-vision.md.
+ * Typography: Outfit (sans-serif) for UI chrome. Crimson Pro (serif)
+ * for inner-life content, brand moments, and attention-drawing text.
+ *
+ * See docs/frontend/design-principles.md, docs/brand-vision.md,
+ * and docs/branding/02-typography.md.
  */
 
 // --------------------------------------------------------------------------
 // Light Mode (default)
 // --------------------------------------------------------------------------
 const lightColors = {
-  // Canvas & surfaces
+  // Canvas & surfaces — translucent layers per "Layered Transparency" principle.
+  // On solid backgrounds the composited result is nearly identical to the old hex values.
+  // On gradient / WebGL backgrounds the translucency lets warmth bleed through.
   background: {
-    default: '#FAF9F4',       // warm white canvas
-    paper: '#F5F4EE',         // slightly darker warm surface (cards)
-    elevated: '#EFEDE6',      // elevated surfaces
+    default: '#FAF9F4',                   // warm white canvas (opaque — the base layer)
+    paper: 'rgba(255, 255, 255, 0.55)',   // translucent white surface (cards, inputs)
+    elevated: 'rgba(255, 255, 255, 0.35)',// translucent white (hover, elevated surfaces)
   },
 
   // Text
@@ -52,9 +58,9 @@ const lightColors = {
 // --------------------------------------------------------------------------
 const darkColors = {
   background: {
-    default: '#1C1A18',       // warm dark canvas
-    paper: '#242220',         // warm dark surface
-    elevated: '#2E2C29',      // elevated
+    default: '#1C1A18',                   // warm dark canvas (opaque — the base layer)
+    paper: 'rgba(255, 255, 255, 0.05)',   // translucent white lift (cards, inputs)
+    elevated: 'rgba(255, 255, 255, 0.08)',// translucent white lift (hover, elevated)
   },
 
   text: {
@@ -121,10 +127,12 @@ export const emotionColors = {
 const shared = {
   typography: {
     fontFamily: {
-      sans: '"Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      sans: '"Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      serif: '"Crimson Pro", Georgia, "Times New Roman", serif',
       mono: '"JetBrains Mono", "Fira Code", Consolas, monospace',
     },
     fontSize: {
+      tiny: '0.625rem',  // 10px
       xs: '0.75rem',     // 12px
       sm: '0.875rem',    // 14px
       base: '1rem',      // 16px
@@ -136,6 +144,7 @@ const shared = {
       '5xl': '3rem',     // 48px
     },
     fontWeight: {
+      extraLight: 200,
       light: 300,
       normal: 400,
       medium: 500,

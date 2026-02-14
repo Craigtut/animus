@@ -37,38 +37,35 @@ export function Modal({ open, onClose, children, maxWidth = '480px' }: ModalProp
   return (
     <AnimatePresence>
       {open && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            onClick={onClose}
-            css={css`
-              position: fixed;
-              inset: 0;
-              background: rgba(0, 0, 0, 0.4);
-              z-index: ${theme.zIndex.modalBackdrop};
-            `}
-          />
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          onClick={onClose}
+          css={css`
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: ${theme.zIndex.modal};
+          `}
+        >
           {/* Content */}
           <motion.div
             initial={{ opacity: 0, scale: 0.97 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.97 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
+            onClick={(e) => e.stopPropagation()}
             css={css`
-              position: fixed;
-              top: 50%;
-              left: 50%;
-              transform: translate(-50%, -50%);
-              z-index: ${theme.zIndex.modal};
               width: calc(100% - ${theme.spacing[8]});
               max-width: ${maxWidth};
               max-height: calc(100vh - ${theme.spacing[8]});
               overflow-y: auto;
-              background: ${theme.colors.background.paper};
+              background: ${theme.colors.background.default};
               border-radius: ${theme.borderRadius.xl};
               padding: ${theme.spacing[6]};
               border: 1px solid ${theme.colors.border.light};
@@ -76,7 +73,7 @@ export function Modal({ open, onClose, children, maxWidth = '480px' }: ModalProp
           >
             {children}
           </motion.div>
-        </>
+        </motion.div>
       )}
     </AnimatePresence>
   );

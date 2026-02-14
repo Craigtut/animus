@@ -98,6 +98,45 @@ export const readMemoryDef: AnimusToolDef = {
 };
 
 /**
+ * lookup_contacts - Discover contacts and their available communication channels.
+ * Mind-only tool (not available to sub-agents).
+ */
+export const lookupContactsDef: AnimusToolDef = {
+  name: 'lookup_contacts',
+  description:
+    'Look up contacts and their available communication channels. Use this to discover who you can reach and how before sending proactive messages. Returns contact names, permission tiers, and available channels.',
+  inputSchema: z.object({
+    nameFilter: z
+      .string()
+      .optional()
+      .describe('Filter contacts by name (case-insensitive partial match)'),
+    channel: z
+      .enum(['web', 'sms', 'discord', 'api'])
+      .optional()
+      .describe('Only return contacts reachable on this channel'),
+  }),
+  category: 'system',
+};
+
+/**
+ * send_proactive_message - Send a message to any contact on any channel.
+ * Mind-only tool. Goes through ChannelRouter.sendOutbound() for full delivery.
+ */
+export const sendProactiveMessageDef: AnimusToolDef = {
+  name: 'send_proactive_message',
+  description:
+    'Send a message to any contact on any of their available channels. Use lookup_contacts first to discover available contacts and channels. This goes through the full delivery pipeline (channel adapter, message storage, event emission). For responding to the contact who triggered this tick on the same channel, prefer the "reply" field in your JSON output instead — it is faster.',
+  inputSchema: z.object({
+    contactId: z.string().uuid().describe('The contact ID to message'),
+    channel: z
+      .enum(['web', 'sms', 'discord', 'api'])
+      .describe('Channel to send through'),
+    content: z.string().describe('Message content'),
+  }),
+  category: 'messaging',
+};
+
+/**
  * Central registry of all Animus tool definitions.
  * This is the single source of truth for what tools exist.
  * Handlers are attached separately in the backend.
@@ -106,6 +145,25 @@ export const ANIMUS_TOOL_DEFS = {
   send_message: sendMessageDef,
   update_progress: updateProgressDef,
   read_memory: readMemoryDef,
+  lookup_contacts: lookupContactsDef,
+  send_proactive_message: sendProactiveMessageDef,
 } as const;
 
 export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
+
+/**
+ * Tools available to the mind session (main orchestrator).
+ * These are the core tools the mind can invoke dynamically during a tick,
+ * beyond what GATHER CONTEXT pre-loads.
+ *
+ * The mind uses `reply` for the common case (responding to triggering contact).
+ * These tools handle cases beyond that:
+ * - read_memory: dynamic memory search beyond pre-loaded context
+ * - lookup_contacts: discover contacts and channels at call time
+ * - send_proactive_message: send to any contact on any channel
+ *
+ * Excludes send_message (sub-agent only) and update_progress (sub-agent only).
+ */
+export const MIND_TOOL_NAMES: readonly AnimusToolName[] = [
+  'read_memory', 'lookup_contacts', 'send_proactive_message'
+] as const;

@@ -121,6 +121,11 @@ export const systemSettingsSchema = z.object({
     .enum(['always_approve', 'auto_approve', 'full_autonomy'])
     .default('always_approve'),
   timezone: z.string().default('UTC'),
+  // Sleep & energy system
+  energySystemEnabled: z.boolean().default(true),
+  sleepStartHour: z.number().int().min(0).max(23).default(22),
+  sleepEndHour: z.number().int().min(0).max(23).default(7),
+  sleepTickIntervalMs: z.number().int().positive().default(1800000),
 });
 
 export const updateSystemSettingsInputSchema = systemSettingsSchema.partial();

@@ -8,10 +8,14 @@
 import type {
   HeartbeatState,
   EmotionState,
+  EnergyBand,
   Thought,
   Experience,
   Message,
   TickDecision,
+  Goal,
+  GoalSeed,
+  LongTermMemory,
 } from './types/index.js';
 
 /**
@@ -26,6 +30,9 @@ export interface AnimusEventMap {
 
   // Emotions
   'emotion:updated': EmotionState;
+
+  // Energy
+  'energy:updated': { energyLevel: number; band: EnergyBand };
 
   // Thoughts & Experiences
   'thought:created': Thought;
@@ -42,12 +49,33 @@ export interface AnimusEventMap {
   'reply:chunk': { content: string; accumulated: string };
   'reply:complete': { content: string; tickNumber: number };
 
+  // Goals & Seeds
+  'goal:created': Goal;
+  'goal:updated': Goal;
+  'seed:created': GoalSeed;
+  'seed:updated': GoalSeed;
+
+  // Memory
+  'memory:working_updated': { contactId: string };
+  'memory:core_updated': Record<string, never>;
+  'memory:stored': LongTermMemory;
+  'memory:pruned': { count: number };
+
   // Agent tasks
   'agent:spawned': { taskId: string; provider: string };
   'agent:completed': { taskId: string; result: string | null };
   'agent:failed': { taskId: string; error: string };
   'agent:cancelled': { taskId: string; reason: string };
   'agent:rate_limited': { taskId: string; count: number; limit: number };
+
+  // Tick inspector
+  'tick:context_stored': {
+    tickNumber: number;
+    triggerType: string;
+    sessionState: string;
+    durationMs: number | null;
+    createdAt: string;
+  };
 
   // System
   'system:settings_updated': Record<string, unknown>;

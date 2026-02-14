@@ -70,19 +70,14 @@ function makeContact(): Contact {
  */
 function makeMindOutput(overrides: Partial<MindOutput> = {}): MindOutput {
   return {
-    thoughts: [
-      { content: 'Alice seems to be in a good mood today.', importance: 0.5 },
-      { content: 'I should remember she mentioned hiking.', importance: 0.3 },
-    ],
+    thought: { content: 'Alice seems to be in a good mood today — I should remember she mentioned hiking.', importance: 0.5 },
     reply: {
       content: 'Hi Alice! How was the hike this weekend?',
       contactId: 'contact-1',
       channel: 'web',
       replyToMessageId: 'msg-1',
     },
-    experiences: [
-      { content: 'Received a friendly greeting from Alice.', importance: 0.4 },
-    ],
+    experience: { content: 'Received a friendly greeting from Alice.', importance: 0.4 },
     emotionDeltas: [
       { emotion: 'joy', delta: 0.05, reasoning: 'Hearing from Alice brings a quiet contentment.' },
       { emotion: 'curiosity', delta: 0.03, reasoning: 'Wondering about her hiking trip.' },
@@ -195,23 +190,19 @@ describe('Full Tick Cycle', () => {
     // ---- STAGE 4: EXECUTE ----
     // Simulate what executeOutput does: persist thoughts, experiences, emotions, decisions
 
-    // 4a. Persist thoughts
-    for (const thought of mindOutput.thoughts) {
-      heartbeatStore.insertThought(hbDb, {
-        tickNumber,
-        content: thought.content,
-        importance: thought.importance,
-      });
-    }
+    // 4a. Persist thought
+    heartbeatStore.insertThought(hbDb, {
+      tickNumber,
+      content: mindOutput.thought.content,
+      importance: mindOutput.thought.importance,
+    });
 
-    // 4b. Persist experiences
-    for (const exp of mindOutput.experiences) {
-      heartbeatStore.insertExperience(hbDb, {
-        tickNumber,
-        content: exp.content,
-        importance: exp.importance,
-      });
-    }
+    // 4b. Persist experience
+    heartbeatStore.insertExperience(hbDb, {
+      tickNumber,
+      content: mindOutput.experience.content,
+      importance: mindOutput.experience.importance,
+    });
 
     // 4c. Apply emotion deltas
     for (const delta of mindOutput.emotionDeltas) {
@@ -266,12 +257,12 @@ describe('Full Tick Cycle', () => {
 
     // ---- VERIFY: All side effects ----
 
-    // Thoughts persisted
+    // Thought persisted
     const thoughts = heartbeatStore.getRecentThoughts(hbDb, 10);
-    expect(thoughts).toHaveLength(2);
-    expect(thoughts.map((t) => t.content)).toContain('Alice seems to be in a good mood today.');
+    expect(thoughts).toHaveLength(1);
+    expect(thoughts[0]!.content).toContain('Alice seems to be in a good mood today');
 
-    // Experiences persisted
+    // Experience persisted
     const experiences = heartbeatStore.getRecentExperiences(hbDb, 10);
     expect(experiences).toHaveLength(1);
     expect(experiences[0]!.content).toBe('Received a friendly greeting from Alice.');

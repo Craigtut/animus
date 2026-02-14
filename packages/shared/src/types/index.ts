@@ -41,6 +41,8 @@ import type {
   emotionStateSchema,
   emotionDeltaSchema,
   emotionHistoryEntrySchema,
+  energyBandSchema,
+  energyHistoryEntrySchema,
   thoughtSchema,
   experienceSchema,
   decisionTypeSchema,
@@ -145,6 +147,9 @@ export type EmotionCategory = z.infer<typeof emotionCategorySchema>;
 export type EmotionState = z.infer<typeof emotionStateSchema>;
 export type EmotionDelta = z.infer<typeof emotionDeltaSchema>;
 export type EmotionHistoryEntry = z.infer<typeof emotionHistoryEntrySchema>;
+
+export type EnergyBand = z.infer<typeof energyBandSchema>;
+export type EnergyHistoryEntry = z.infer<typeof energyHistoryEntrySchema>;
 
 export type Thought = z.infer<typeof thoughtSchema>;
 export type Experience = z.infer<typeof experienceSchema>;

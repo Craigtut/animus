@@ -28,7 +28,7 @@ These three documents are your north star. Internalize them deeply:
 
 2. **`docs/brand-vision.md`** — The aesthetic identity. Warm, not cold. Alive, not animated. Sophisticated but approachable. Monochromatic restraint with purposeful color. Breathing over blinking. No sci-fi tropes.
 
-3. **`docs/frontend/design-principles.md`** — The implementation principles. Intent-driven design, clarity over cleverness, quiet confidence, rim lighting for depth, Plus Jakarta Sans, Phosphor Icons, generous spacing, organic animation.
+3. **`docs/frontend/design-principles.md`** — The implementation principles. Intent-driven design, clarity over cleverness, quiet confidence, rim lighting for depth, Outfit and Crimson Pro, Phosphor Icons, generous spacing, organic animation.
 
 Additionally reference:
 - **`docs/frontend/onboarding.md`** — The onboarding flow is the gold standard for how design specs should look in this project. Study its level of detail.

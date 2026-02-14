@@ -17,7 +17,8 @@ build/
 *.db-wal
 *.db-shm
 
-# LanceDB data
+# Runtime data (SQLite DBs, LanceDB vectors)
+packages/backend/data/
 .lancedb/
 
 # IDE
@@ -46,3 +47,7 @@ temp/
 
 # Claude local settings (keep .claude/settings.json for shared settings)
 .claude/settings.local.json
+
+.playwright-mcp
+/data
+/design-mockups

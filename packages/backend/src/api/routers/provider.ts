@@ -1,67 +1,128 @@
 /**
- * Provider Router — tRPC procedures for agent provider API key management.
+ * Provider Router — tRPC procedures for agent provider credential management.
  *
- * Validates and saves encrypted API keys for agent providers.
+ * Handles multi-method authentication: API keys, OAuth tokens, CLI detection.
+ * Uses the EncryptionService for encrypted storage in the credentials table.
  */
 
 import { z } from 'zod';
 import { router, protectedProcedure } from '../trpc.js';
 import { getSystemDb } from '../../db/index.js';
 import * as systemStore from '../../db/stores/system-store.js';
-import { agentProviderSchema } from '@animus/shared';
+import {
+  detectProviderAuth,
+  validateCredential,
+  saveCredential,
+  saveCliDetected,
+  removeCredential,
+  inferCredentialType,
+} from '../../services/credential-service.js';
+
+const providerSchema = z.enum(['claude', 'codex']);
 
 export const providerRouter = router({
   /**
-   * Validate an API key for a provider.
-   * Currently a stub — returns success if key is non-empty.
-   * Future: actually test the key against the provider API.
+   * Detect available authentication methods for all providers.
+   * Returns CLI detection, env vars, DB credentials, filesystem checks.
+   */
+  detect: protectedProcedure.query(async () => {
+    return detectProviderAuth(getSystemDb());
+  }),
+
+  /**
+   * Validate a credential against the provider's API.
+   * Auto-detects credential type from prefix. Makes a real API call.
    */
   validateKey: protectedProcedure
     .input(
       z.object({
-        provider: agentProviderSchema,
-        apiKey: z.string().min(1),
+        provider: providerSchema,
+        key: z.string().min(1),
       })
     )
-    .mutation(({ input }) => {
-      // TODO: Actually validate the key against the provider's API
-      // For Claude: test with a minimal API call
-      // For Codex: test with auth endpoint
-      // For OpenCode: test with a health check
-
-      // Basic format validation
-      if (input.provider === 'claude' && !input.apiKey.startsWith('sk-ant-')) {
-        return { valid: false, message: 'Claude API keys should start with sk-ant-' };
-      }
-
-      return { valid: true, message: 'Key format accepted' };
+    .mutation(async ({ input }) => {
+      const credentialType = inferCredentialType(input.provider, input.key);
+      const result = await validateCredential(input.provider, input.key, credentialType);
+      return { ...result, credentialType };
     }),
 
   /**
-   * Save an encrypted API key for a provider.
-   * Uses the existing systemStore.setApiKey which stores encrypted keys.
+   * Save an encrypted credential for a provider.
+   * Encrypts via EncryptionService, stores in credentials table, updates process.env.
    */
   saveKey: protectedProcedure
     .input(
       z.object({
-        provider: agentProviderSchema,
-        apiKey: z.string().min(1),
+        provider: providerSchema,
+        key: z.string().min(1),
+        credentialType: z.enum(['api_key', 'oauth_token']).optional(),
       })
     )
     .mutation(({ input }) => {
-      // TODO: Encrypt with EncryptionService before storing
-      // For now, store as-is (EncryptionService not yet available)
-      systemStore.setApiKey(getSystemDb(), input.provider, input.apiKey);
-      return { success: true, provider: input.provider };
+      const result = saveCredential(
+        getSystemDb(),
+        input.provider,
+        input.key,
+        input.credentialType
+      );
+      return { success: true, provider: input.provider, credentialType: result.credentialType };
     }),
 
   /**
-   * Check if a provider has a configured API key.
+   * Mark a provider as using CLI authentication.
+   * Saves a cli_detected sentinel in the credentials table.
+   */
+  useCli: protectedProcedure
+    .input(z.object({ provider: providerSchema }))
+    .mutation(({ input }) => {
+      saveCliDetected(getSystemDb(), input.provider);
+      return { success: true };
+    }),
+
+  /**
+   * Check if a provider has configured credentials.
+   * Checks the credentials table and returns type info.
    */
   hasKey: protectedProcedure
-    .input(z.object({ provider: agentProviderSchema }))
+    .input(z.object({ provider: providerSchema }))
     .query(({ input }) => {
-      const key = systemStore.getApiKey(getSystemDb(), input.provider);
-      return { hasKey: key !== null, provider: input.provider };
+      const db = getSystemDb();
+      const metas = systemStore.getCredentialMetadata(db, input.provider);
+      const activeCred = metas.find((m) => m.credentialType !== 'cli_detected');
+      const cliDetected = metas.some((m) => m.credentialType === 'cli_detected');
+
+      if (activeCred) {
+        return {
+          hasKey: true,
+          credentialType: activeCred.credentialType,
+          provider: input.provider,
+        };
+      }
+
+      if (cliDetected) {
+        return {
+          hasKey: true,
+          credentialType: 'cli_detected',
+          provider: input.provider,
+        };
+      }
+
+      // Fallback: check legacy api_keys table
+      const legacyKey = systemStore.getApiKey(db, input.provider);
+      return {
+        hasKey: legacyKey !== null,
+        credentialType: legacyKey ? 'api_key' : null,
+        provider: input.provider,
+      };
+    }),
+
+  /**
+   * Remove credentials for a provider and clear env vars.
+   */
+  removeKey: protectedProcedure
+    .input(z.object({ provider: providerSchema }))
+    .mutation(({ input }) => {
+      removeCredential(getSystemDb(), input.provider);
+      return { success: true };
     }),
 });

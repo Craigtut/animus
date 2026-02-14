@@ -147,10 +147,13 @@ export function computeBaselines(
 /**
  * Apply time-based decay to all emotions.
  * Returns new intensities after decay toward their baselines.
+ *
+ * @param decayMultiplier - Optional multiplier for decay rates (e.g., 3.0 during sleep)
  */
 export function applyDecay(
   emotions: EmotionState[],
-  nowMs: number
+  nowMs: number,
+  decayMultiplier: number = 1.0
 ): EmotionState[] {
   return emotions.map((e) => {
     const elapsedMs = nowMs - new Date(e.lastUpdatedAt).getTime();
@@ -158,7 +161,7 @@ export function applyDecay(
 
     if (elapsedHours <= 0) return e;
 
-    const rate = DECAY_RATES[e.emotion];
+    const rate = DECAY_RATES[e.emotion] * decayMultiplier;
     const decayed = DecayEngine.compute(e.intensity, e.baseline, rate, elapsedHours);
 
     return {

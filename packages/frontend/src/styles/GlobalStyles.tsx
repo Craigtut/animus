@@ -7,7 +7,7 @@ export function GlobalStyles() {
   return (
     <Global
       styles={css`
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400&family=JetBrains+Mono:wght@400;700&display=swap');
 
         *,
         *::before,
@@ -47,18 +47,6 @@ export function GlobalStyles() {
             opacity: 0.8;
           }
         }
-
-        h1, h2, h3, h4, h5, h6 {
-          font-weight: ${theme.typography.fontWeight.semibold};
-          line-height: ${theme.typography.lineHeight.tight};
-        }
-
-        h1 { font-size: ${theme.typography.fontSize['4xl']}; }
-        h2 { font-size: ${theme.typography.fontSize['3xl']}; }
-        h3 { font-size: ${theme.typography.fontSize['2xl']}; }
-        h4 { font-size: ${theme.typography.fontSize.xl}; }
-        h5 { font-size: ${theme.typography.fontSize.lg}; }
-        h6 { font-size: ${theme.typography.fontSize.base}; }
 
         code, pre {
           font-family: ${theme.typography.fontFamily.mono};

@@ -5,7 +5,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { trpc } from '../../utils/trpc';
 import { emotionColors } from '../../styles/theme';
 import { Card } from '../ui/Card';
+import { Typography } from '../ui';
 import { EmotionSparkline } from './EmotionSparkline';
+import { useHeartbeatStore } from '../../store/heartbeat-store';
 import type { EmotionState, EmotionName, EmotionHistoryEntry } from '@animus/shared';
 
 // ============================================================================
@@ -87,14 +89,16 @@ function AnnotatedEmotionalField({ emotions }: { emotions: EmotionState[] }) {
         ];
         const pos = positions[i] ?? positions[0]!;
         return (
-          <span
+          <Typography.Caption
             key={e.emotion}
+            as="span"
+            serif
+            italic
             css={css`
               position: absolute;
               left: ${pos!.left};
               top: ${pos!.top};
-              font-size: 11px;
-              font-weight: ${theme.typography.fontWeight.semibold};
+              font-weight: ${theme.typography.fontWeight.medium};
               color: ${theme.colors.text.primary};
               opacity: ${0.3 + e.intensity * 0.4};
               pointer-events: none;
@@ -102,7 +106,7 @@ function AnnotatedEmotionalField({ emotions }: { emotions: EmotionState[] }) {
             `}
           >
             {e.emotion}
-          </span>
+          </Typography.Caption>
         );
       })}
     </div>
@@ -198,45 +202,37 @@ function EmotionCard({ emotion, color, historyEntries, isExpanded, onToggle }: E
       {/* Header row */}
       <div css={css`display: flex; align-items: center; justify-content: space-between; margin-bottom: ${theme.spacing[2]};`}>
         <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-          <span css={css`
-            font-size: ${theme.typography.fontSize.base};
+          <Typography.Body as="span" serif css={css`
+            font-size: ${theme.typography.fontSize.lg};
             font-weight: ${theme.typography.fontWeight.semibold};
-            color: ${theme.colors.text.primary};
             text-transform: capitalize;
           `}>
             {emotion.emotion}
-          </span>
-          <span css={css`
-            font-size: 11px;
-            color: ${theme.colors.text.hint};
-          `}>
+          </Typography.Body>
+          <Typography.Caption color="hint">
             {categoryLabel}
-          </span>
+          </Typography.Caption>
         </div>
         <EmotionSparkline data={sparklineData} color={color} />
       </div>
 
       {/* Intensity bar */}
       <IntensityBar intensity={emotion.intensity} baseline={emotion.baseline} color={color} />
-      <span css={css`
-        font-size: ${theme.typography.fontSize.xs};
-        color: ${theme.colors.text.hint};
+      <Typography.Caption color="hint" css={css`
         margin-top: ${theme.spacing[1]};
         display: block;
       `}>
         {emotion.intensity.toFixed(2)}
-      </span>
+      </Typography.Caption>
 
       {/* Last delta */}
       {lastDelta && (
-        <p css={css`
-          font-size: ${theme.typography.fontSize.xs};
-          color: ${theme.colors.text.secondary};
+        <Typography.SmallBody serif italic color="secondary" css={css`
           margin-top: ${theme.spacing[2]};
           line-height: ${theme.typography.lineHeight.normal};
         `}>
           {lastDelta.delta >= 0 ? '+' : ''}{lastDelta.delta.toFixed(2)} &mdash; {`"${lastDelta.reasoning}"`}
-        </p>
+        </Typography.SmallBody>
       )}
 
       {/* Expanded detail */}
@@ -256,14 +252,12 @@ function EmotionCard({ emotion, color, historyEntries, isExpanded, onToggle }: E
             `}>
               {/* 7-day chart placeholder -- using larger sparkline */}
               <div css={css`margin-bottom: ${theme.spacing[4]};`}>
-                <span css={css`
-                  font-size: ${theme.typography.fontSize.xs};
-                  color: ${theme.colors.text.hint};
+                <Typography.Caption color="hint" css={css`
                   margin-bottom: ${theme.spacing[2]};
                   display: block;
                 `}>
                   History
-                </span>
+                </Typography.Caption>
                 <EmotionSparkline
                   data={historyEntries.map((h) => ({
                     value: h.intensityAfter,
@@ -276,18 +270,16 @@ function EmotionCard({ emotion, color, historyEntries, isExpanded, onToggle }: E
               </div>
 
               {/* Recent deltas */}
-              <span css={css`
-                font-size: ${theme.typography.fontSize.xs};
-                color: ${theme.colors.text.hint};
+              <Typography.Caption color="hint" css={css`
                 margin-bottom: ${theme.spacing[2]};
                 display: block;
               `}>
                 Recent changes
-              </span>
+              </Typography.Caption>
               {recentDeltas.length === 0 ? (
-                <span css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint};`}>
+                <Typography.Caption color="hint">
                   No changes recorded yet.
-                </span>
+                </Typography.Caption>
               ) : (
                 <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
                   {recentDeltas.map((d) => (
@@ -298,30 +290,28 @@ function EmotionCard({ emotion, color, historyEntries, isExpanded, onToggle }: E
                       font-size: ${theme.typography.fontSize.xs};
                       color: ${theme.colors.text.secondary};
                     `}>
-                      <span css={css`
+                      <Typography.Caption as="span" css={css`
                         font-weight: ${theme.typography.fontWeight.medium};
                         color: ${d.delta >= 0 ? theme.colors.success.main : theme.colors.error.main};
                         min-width: 40px;
                       `}>
                         {d.delta >= 0 ? '+' : ''}{d.delta.toFixed(2)}
-                      </span>
-                      <span css={css`flex: 1;`}>{d.reasoning}</span>
-                      <span css={css`color: ${theme.colors.text.hint}; white-space: nowrap;`}>
+                      </Typography.Caption>
+                      <Typography.Caption as="span" color="secondary" css={css`flex: 1;`}>{d.reasoning}</Typography.Caption>
+                      <Typography.Caption as="span" color="hint" css={css`white-space: nowrap;`}>
                         Tick #{d.tickNumber}
-                      </span>
+                      </Typography.Caption>
                     </div>
                   ))}
                 </div>
               )}
 
               {/* Baseline info */}
-              <div css={css`
+              <Typography.Caption as="div" color="hint" css={css`
                 margin-top: ${theme.spacing[3]};
-                font-size: ${theme.typography.fontSize.xs};
-                color: ${theme.colors.text.hint};
               `}>
                 Personality baseline: {emotion.baseline.toFixed(2)}
-              </div>
+              </Typography.Caption>
             </div>
           </motion.div>
         )}
@@ -358,29 +348,16 @@ export function EmotionsSection() {
     { retry: false },
   );
 
-  // Subscribe to real-time emotion updates
-  const [liveEmotions, setLiveEmotions] = useState<EmotionState[]>([]);
-  trpc.heartbeat.onEmotionChange.useSubscription(undefined, {
-    onData: (emotion: EmotionState) => {
-      setLiveEmotions((prev) => {
-        const idx = prev.findIndex((e) => e.emotion === emotion.emotion);
-        if (idx >= 0) {
-          const next = [...prev];
-          next[idx] = emotion;
-          return next;
-        }
-        return [...prev, emotion];
-      });
-    },
-  });
-
+  // Real-time emotion data from centralized subscription manager
+  const storeEmotions = useHeartbeatStore(s => s.emotions);
   const currentEmotions = useMemo(() => {
     const base = emotionStates ?? [];
     const map = new Map<string, EmotionState>();
     for (const e of base) map.set(e.emotion, e);
-    for (const e of liveEmotions) map.set(e.emotion, e);
+    // Merge in store (real-time) data
+    for (const [key, value] of storeEmotions) map.set(key, value);
     return map;
-  }, [emotionStates, liveEmotions]);
+  }, [emotionStates, storeEmotions]);
 
   // Group history by emotion
   const historyByEmotion = useMemo(() => {

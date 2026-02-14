@@ -408,7 +408,7 @@ class OpenCodeSession extends BaseSession {
       this.createEvent('session_start', {
         provider: 'opencode',
         model: this.config.model ?? 'anthropic/claude-sonnet-4-5',
-        config: this.config,
+        config: { ...this.config },
       }),
     );
 
@@ -417,7 +417,7 @@ class OpenCodeSession extends BaseSession {
         sessionId: this.id,
         provider: 'opencode',
         model: this.config.model ?? 'anthropic/claude-sonnet-4-5',
-        config: this.config,
+        config: { ...this.config },
       });
     }
   }

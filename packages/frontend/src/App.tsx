@@ -84,7 +84,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
           alignItems: 'center',
           justifyContent: 'center',
           padding: '2rem',
-          fontFamily: 'Plus Jakarta Sans, system-ui, sans-serif',
+          fontFamily: 'Outfit, system-ui, sans-serif',
           background: '#FAF9F4',
           color: '#2C2925',
         }}>

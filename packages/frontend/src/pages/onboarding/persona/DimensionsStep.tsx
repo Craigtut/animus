@@ -2,9 +2,9 @@
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from '../../../components/ui';
-import { Slider } from '../../../components/ui/Slider';
+import { Slider, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
+import { OnboardingNav } from '../OnboardingNav';
 
 interface Dimension {
   id: string;
@@ -77,26 +77,23 @@ export function DimensionsStep() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div>
-        <h2 css={css`font-size: ${theme.typography.fontSize['2xl']}; font-weight: ${theme.typography.fontWeight.light}; margin-bottom: ${theme.spacing[2]};`}>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+        <Typography.Title3 as="h2" serif>
           Shape their personality
-        </h2>
-        <p css={css`color: ${theme.colors.text.secondary};`}>
+        </Typography.Title3>
+        <Typography.Body color="secondary">
           Slide each dimension to define who they are. Leave anything in the middle if it's not distinctive.
-        </p>
+        </Typography.Body>
       </div>
 
       {dimensionGroups.map((group) => (
         <div key={group.title} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-          <h3 css={css`
-            font-size: ${theme.typography.fontSize.sm};
-            font-weight: ${theme.typography.fontWeight.medium};
-            color: ${theme.colors.text.hint};
+          <Typography.SmallBodyAlt as="h3" color="hint" css={css`
             text-transform: uppercase;
             letter-spacing: 0.06em;
           `}>
             {group.title}
-          </h3>
+          </Typography.SmallBodyAlt>
           {group.dimensions.map((dim) => (
             <Slider
               key={dim.id}
@@ -110,10 +107,10 @@ export function DimensionsStep() {
         </div>
       ))}
 
-      <div css={css`display: flex; justify-content: space-between; margin-top: ${theme.spacing[4]};`}>
-        <Button variant="ghost" onClick={handleBack}>Back</Button>
-        <Button onClick={handleContinue}>Continue</Button>
-      </div>
+      <OnboardingNav
+        onBack={handleBack}
+        onContinue={handleContinue}
+      />
     </div>
   );
 }

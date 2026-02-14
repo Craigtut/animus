@@ -1,7 +1,8 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from '../../components/ui';
+import { motion } from 'motion/react';
+import { Button, Typography } from '../../components/ui';
 import { useOnboardingStore } from '../../store';
 
 export function WelcomeStep() {
@@ -18,49 +19,70 @@ export function WelcomeStep() {
   return (
     <div
       css={css`
+        position: relative;
         display: flex;
         flex-direction: column;
         align-items: center;
         text-align: center;
-        padding: ${theme.spacing[12]} 0;
-        gap: ${theme.spacing[6]};
+        justify-content: center;
+        min-height: 60vh;
+        gap: ${theme.spacing[2]};
       `}
     >
-      <h1
+      {/* Heading */}
+      <motion.h1
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 1, delay: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
         css={css`
-          font-size: ${theme.typography.fontSize['4xl']};
-          font-weight: ${theme.typography.fontWeight.light};
+          font-size: ${theme.typography.fontSize['5xl']};
+          font-weight: ${theme.typography.fontWeight.medium};
           line-height: ${theme.typography.lineHeight.tight};
+          letter-spacing: -0.02em;
+          position: relative;
+
+          @media (max-width: ${theme.breakpoints.sm}) {
+            font-size: ${theme.typography.fontSize['4xl']};
+          }
         `}
       >
-        Welcome to Animus.
-      </h1>
+        animus.
+      </motion.h1>
 
-      <div
+      {/* Single evocative line — no mechanics, no explanation */}
+      <Typography.Subtitle
+        as={motion.p}
+        serif
+        italic
+        color="secondary"
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.9, delay: 0.7, ease: [0.25, 0.1, 0.25, 1] }}
         css={css`
-          max-width: 480px;
-          display: flex;
-          flex-direction: column;
-          gap: ${theme.spacing[4]};
-          color: ${theme.colors.text.secondary};
-          font-size: ${theme.typography.fontSize.lg};
-          line-height: ${theme.typography.lineHeight.relaxed};
+          max-width: 360px;
+          position: relative;
         `}
       >
-        <p>You're about to bring something to life.</p>
-        <p>
-          Over the next few minutes, we'll set up the engine that powers your AI
-          -- and then you'll define who they are. Their personality, their values,
-          their way of being in the world.
-        </p>
-        <p>When you're done, they'll take their first breath.</p>
-      </div>
+        You're about to bring something to life.
+      </Typography.Subtitle>
 
-      <div css={css`margin-top: ${theme.spacing[8]};`}>
-        <Button size="lg" onClick={handleContinue}>
-          Let's begin
+      {/* CTA */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.8, delay: 1.3, ease: 'easeOut' }}
+        css={css`
+          margin-top: ${theme.spacing[16]};
+          position: relative;
+        `}
+      >
+        <Button
+          size="lg"
+          onClick={handleContinue}
+        >
+          Begin
         </Button>
-      </div>
+      </motion.div>
     </div>
   );
 }

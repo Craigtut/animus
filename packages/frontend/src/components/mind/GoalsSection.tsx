@@ -6,6 +6,7 @@ import { Target, CheckCircle, Pause, CaretDown, CaretUp } from '@phosphor-icons/
 import { trpc } from '../../utils/trpc';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
+import { Typography } from '../ui';
 import { emotionColors } from '../../styles/theme';
 
 // ============================================================================
@@ -45,26 +46,26 @@ function GoalCard({ goal }: { goal: any }) {
       <div css={css`display: flex; align-items: flex-start; justify-content: space-between; gap: ${theme.spacing[2]};`}>
         <div css={css`flex: 1; min-width: 0;`}>
           <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; margin-bottom: ${theme.spacing[1]};`}>
-            <h4 css={css`
+            <Typography.Body as="h4" serif css={css`
               font-size: ${theme.typography.fontSize.lg};
               font-weight: ${theme.typography.fontWeight.semibold};
             `}>
               {goal.title}
-            </h4>
+            </Typography.Body>
             <Badge variant={STATUS_BADGE[goal.status] ?? 'default'}>
               {goal.status}
             </Badge>
           </div>
           <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
             {goal.origin && (
-              <span css={css`font-size: 11px; color: ${theme.colors.text.hint};`}>
+              <Typography.Caption color="hint">
                 {ORIGIN_LABELS[goal.origin] ?? goal.origin}
-              </span>
+              </Typography.Caption>
             )}
             {goal.linkedEmotion && (
-              <span css={css`font-size: 11px; color: ${theme.colors.text.hint};`}>
+              <Typography.Caption color="hint">
                 {goal.linkedEmotion}
-              </span>
+              </Typography.Caption>
             )}
           </div>
         </div>
@@ -79,10 +80,10 @@ function GoalCard({ goal }: { goal: any }) {
             display: flex; align-items: center; justify-content: space-between;
             margin-bottom: ${theme.spacing[1]};
           `}>
-            <span css={css`font-size: 11px; color: ${theme.colors.text.hint};`}>Salience</span>
-            <span css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint};`}>
+            <Typography.Caption color="hint">Salience</Typography.Caption>
+            <Typography.Caption color="hint">
               {(goal.currentSalience as number).toFixed(2)}
-            </span>
+            </Typography.Caption>
           </div>
           <div css={css`
             width: 100%; height: 4px; border-radius: 2px;
@@ -113,45 +114,35 @@ function GoalCard({ goal }: { goal: any }) {
               border-top: 1px solid ${theme.colors.border.light};
             `}>
               {goal.description && (
-                <p css={css`
-                  font-size: ${theme.typography.fontSize.sm};
-                  line-height: ${theme.typography.lineHeight.relaxed};
-                  color: ${theme.colors.text.secondary};
+                <Typography.SmallBody color="secondary" css={css`
                   margin-bottom: ${theme.spacing[3]};
                 `}>
                   {goal.description}
-                </p>
+                </Typography.SmallBody>
               )}
 
               {goal.motivation && (
-                <p css={css`
-                  font-size: ${theme.typography.fontSize.xs};
-                  color: ${theme.colors.text.hint};
-                  font-style: italic;
+                <Typography.SmallBody serif italic color="hint" css={css`
                   margin-bottom: ${theme.spacing[3]};
                 `}>
                   Motivation: {goal.motivation}
-                </p>
+                </Typography.SmallBody>
               )}
 
               {/* Active plan */}
               {plan && (
                 <div css={css`margin-top: ${theme.spacing[2]};`}>
-                  <span css={css`
-                    font-size: ${theme.typography.fontSize.xs};
-                    color: ${theme.colors.text.hint};
+                  <Typography.Caption color="hint" css={css`
                     display: block;
                     margin-bottom: ${theme.spacing[2]};
                   `}>
                     Plan v{plan.version}
-                  </span>
-                  <p css={css`
-                    font-size: ${theme.typography.fontSize.sm};
-                    color: ${theme.colors.text.secondary};
+                  </Typography.Caption>
+                  <Typography.SmallBody color="secondary" css={css`
                     margin-bottom: ${theme.spacing[3]};
                   `}>
                     {plan.strategy}
-                  </p>
+                  </Typography.SmallBody>
 
                   {/* Milestones */}
                   {plan.milestones && plan.milestones.length > 0 && (
@@ -159,7 +150,6 @@ function GoalCard({ goal }: { goal: any }) {
                       {plan.milestones.map((ms: any, i: number) => (
                         <div key={i} css={css`
                           display: flex; align-items: center; gap: ${theme.spacing[2]};
-                          font-size: ${theme.typography.fontSize.sm};
                         `}>
                           {ms.status === 'completed' ? (
                             <CheckCircle size={14} weight="fill" css={css`color: ${theme.colors.success.main};`} />
@@ -176,13 +166,13 @@ function GoalCard({ goal }: { goal: any }) {
                               border: 1.5px solid ${theme.colors.border.default};
                             `} />
                           )}
-                          <span css={css`
+                          <Typography.SmallBody as="span" css={css`
                             color: ${ms.status === 'completed' ? theme.colors.text.hint : theme.colors.text.primary};
                             ${ms.status === 'completed' ? 'text-decoration: line-through;' : ''}
                             ${ms.status === 'skipped' ? `color: ${theme.colors.text.disabled};` : ''}
                           `}>
                             {ms.title}
-                          </span>
+                          </Typography.SmallBody>
                         </div>
                       ))}
                     </div>
@@ -193,13 +183,11 @@ function GoalCard({ goal }: { goal: any }) {
               {/* Timestamps */}
               <div css={css`
                 margin-top: ${theme.spacing[3]};
-                font-size: ${theme.typography.fontSize.xs};
-                color: ${theme.colors.text.disabled};
                 display: flex;
                 gap: ${theme.spacing[3]};
               `}>
-                <span>Created {formatRelativeTime(goal.createdAt)}</span>
-                {goal.lastProgressAt && <span>Last progress {formatRelativeTime(goal.lastProgressAt)}</span>}
+                <Typography.Caption color="disabled">Created {formatRelativeTime(goal.createdAt)}</Typography.Caption>
+                {goal.lastProgressAt && <Typography.Caption color="disabled">Last progress {formatRelativeTime(goal.lastProgressAt)}</Typography.Caption>}
               </div>
             </div>
           </motion.div>
@@ -223,14 +211,11 @@ function SeedCard({ seed }: { seed: any }) {
 
   return (
     <Card variant="outlined" padding="sm">
-      <p css={css`
-        font-size: ${theme.typography.fontSize.sm};
-        line-height: ${theme.typography.lineHeight.relaxed};
-        color: ${theme.colors.text.primary};
+      <Typography.SmallBody serif css={css`
         margin-bottom: ${theme.spacing[2]};
       `}>
         {seed.content}
-      </p>
+      </Typography.SmallBody>
       <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
         {/* Strength bar (toward 0.7 threshold) */}
         <div css={css`
@@ -246,17 +231,17 @@ function SeedCard({ seed }: { seed: any }) {
             transition: width ${theme.transitions.normal};
           `} />
         </div>
-        <span css={css`font-size: 10px; color: ${theme.colors.text.hint}; white-space: nowrap;`}>
+        <Typography.Caption color="hint" css={css`white-space: nowrap;`}>
           {(seed.strength as number).toFixed(2)} / 0.70
-        </span>
+        </Typography.Caption>
         {seed.linkedEmotion && (
-          <span css={css`font-size: 10px; color: ${theme.colors.text.hint}; text-transform: capitalize;`}>
+          <Typography.Caption color="hint" css={css`text-transform: capitalize;`}>
             {seed.linkedEmotion}
-          </span>
+          </Typography.Caption>
         )}
-        <span css={css`font-size: 10px; color: ${theme.colors.text.disabled};`}>
+        <Typography.Caption color="disabled">
           x{seed.reinforcementCount}
-        </span>
+        </Typography.Caption>
       </div>
     </Card>
   );
@@ -299,15 +284,12 @@ export function GoalsSection() {
         padding: ${theme.spacing[16]} 0;
       `}>
         <Target size={40} weight="light" css={css`color: ${theme.colors.text.hint}; margin: 0 auto ${theme.spacing[4]};`} />
-        <p css={css`
-          color: ${theme.colors.text.hint};
-          font-size: ${theme.typography.fontSize.base};
-          line-height: ${theme.typography.lineHeight.relaxed};
+        <Typography.Body serif italic color="hint" css={css`
           max-width: 360px;
           margin: 0 auto;
         `}>
           No goals yet. Goals emerge from seeds as the mind develops interests and receives direction.
-        </p>
+        </Typography.Body>
       </div>
     );
   }
@@ -317,13 +299,12 @@ export function GoalsSection() {
       {/* Active Goals */}
       {hasActiveGoals && (
         <section>
-          <h3 css={css`
-            font-size: ${theme.typography.fontSize.base};
+          <Typography.BodyAlt as="h3" css={css`
             font-weight: ${theme.typography.fontWeight.semibold};
             margin-bottom: ${theme.spacing[4]};
           `}>
             Active Goals
-          </h3>
+          </Typography.BodyAlt>
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
             {activeGoals!.map((goal: any) => (
               <GoalCard key={goal.id} goal={goal} />
@@ -335,14 +316,12 @@ export function GoalsSection() {
       {/* Proposed Goals */}
       {hasProposed && (
         <section>
-          <h3 css={css`
-            font-size: ${theme.typography.fontSize.base};
+          <Typography.BodyAlt as="h3" color="secondary" css={css`
             font-weight: ${theme.typography.fontWeight.semibold};
-            color: ${theme.colors.text.secondary};
             margin-bottom: ${theme.spacing[4]};
           `}>
             Awaiting your input
-          </h3>
+          </Typography.BodyAlt>
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
             {proposedGoals!.map((goal: any) => (
               <GoalCard key={goal.id} goal={goal} />
@@ -368,9 +347,9 @@ export function GoalsSection() {
             `}
           >
             Emerging interests
-            <span css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint}; font-weight: ${theme.typography.fontWeight.normal};`}>
+            <Typography.Caption as="span" color="hint" css={css`font-weight: ${theme.typography.fontWeight.normal};`}>
               ({seeds!.length})
-            </span>
+            </Typography.Caption>
             {showSeeds
               ? <CaretUp size={14} css={css`color: ${theme.colors.text.hint};`} />
               : <CaretDown size={14} css={css`color: ${theme.colors.text.hint};`} />}
@@ -433,25 +412,23 @@ export function GoalsSection() {
                       border-bottom: 1px solid ${theme.colors.border.light};
                     `}>
                       <CheckCircle size={14} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                      <span css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.secondary};`}>
+                      <Typography.SmallBody as="span" color="secondary">
                         {goal.title}
-                      </span>
+                      </Typography.SmallBody>
                       {goal.completedAt && (
-                        <span css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.disabled}; margin-left: auto;`}>
+                        <Typography.Caption color="disabled" css={css`margin-left: auto;`}>
                           {formatRelativeTime(goal.completedAt)}
-                        </span>
+                        </Typography.Caption>
                       )}
                     </div>
                   ))}
                 </div>
               ) : (
-                <p css={css`
-                  font-size: ${theme.typography.fontSize.sm};
-                  color: ${theme.colors.text.hint};
+                <Typography.SmallBody color="hint" css={css`
                   padding: ${theme.spacing[4]} 0;
                 `}>
                   No completed or abandoned goals yet.
-                </p>
+                </Typography.SmallBody>
               )}
             </motion.div>
           )}

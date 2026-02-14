@@ -2,8 +2,9 @@
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Input } from '../../../components/ui';
+import { Input, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
+import { OnboardingNav } from '../OnboardingNav';
 
 export function BackgroundStep() {
   const theme = useTheme();
@@ -24,13 +25,13 @@ export function BackgroundStep() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div>
-        <h2 css={css`font-size: ${theme.typography.fontSize['2xl']}; font-weight: ${theme.typography.fontWeight.light}; margin-bottom: ${theme.spacing[2]};`}>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+        <Typography.Title3 as="h2" serif>
           Give them depth
-        </h2>
-        <p css={css`color: ${theme.colors.text.secondary};`}>
+        </Typography.Title3>
+        <Typography.Body color="secondary">
           Structure gets you far, but the details make it real.
-        </p>
+        </Typography.Body>
       </div>
 
       <Input
@@ -51,10 +52,10 @@ export function BackgroundStep() {
         helperText="What was their early life like? What do they carry with them?"
       />
 
-      <div css={css`display: flex; justify-content: space-between; margin-top: ${theme.spacing[4]};`}>
-        <Button variant="ghost" onClick={handleBack}>Back</Button>
-        <Button onClick={handleContinue}>Continue</Button>
-      </div>
+      <OnboardingNav
+        onBack={handleBack}
+        onContinue={handleContinue}
+      />
     </div>
   );
 }

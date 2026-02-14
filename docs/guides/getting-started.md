@@ -4,7 +4,7 @@ This guide will help you set up Animus for local development.
 
 ## Prerequisites
 
-- **Node.js** 20.0 or higher
+- **Node.js** 24.0 or higher
 - **npm** 10.0 or higher
 - Git
 
@@ -56,6 +56,8 @@ OPENAI_API_KEY=your-openai-key
 ```
 
 ### 4. Start Development Servers
+
+> **Note:** Before starting the servers, check if they are already running. During active development the backend and frontend are often already running in watch mode and will automatically pick up your latest changes. You can check with `lsof -i:3000` (backend) and `lsof -i:5173` (frontend). Only start them if nothing is listening on those ports.
 
 Run both backend and frontend in development mode:
 

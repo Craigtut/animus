@@ -17,6 +17,14 @@ import type {
 } from '@animus/agents';
 import { attachSessionLogging, type AgentLogStore } from '@animus/agents';
 import type { IEventBus } from '@animus/shared';
+import { prepareCodexSessionAuth } from '../services/codex-oauth.js';
+import { getSystemDb } from '../db/index.js';
+import { createLogger } from '../lib/logger.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const log = createLogger('AgentOrchestrator', 'agents');
 
 // ============================================================================
 // Types
@@ -122,6 +130,7 @@ export class AgentOrchestrator {
   private settledTasks = new Set<string>();
   private spawnTimestamps: number[] = [];
   private spawnBudgetPerHour: number;
+  private getPreferredProvider: (() => AgentProvider | null) | null;
   private onAgentComplete: (params: {
     agentId: string;
     taskDescription: string;
@@ -135,6 +144,7 @@ export class AgentOrchestrator {
     logStore: AgentLogStore;
     eventBus: IEventBus;
     spawnBudgetPerHour?: number;
+    getPreferredProvider?: () => AgentProvider | null;
     onAgentComplete: (params: {
       agentId: string;
       taskDescription: string;
@@ -147,6 +157,7 @@ export class AgentOrchestrator {
     this.logStore = params.logStore;
     this.eventBus = params.eventBus;
     this.spawnBudgetPerHour = params.spawnBudgetPerHour ?? 20;
+    this.getPreferredProvider = params.getPreferredProvider ?? null;
     this.onAgentComplete = params.onAgentComplete;
   }
 
@@ -182,7 +193,11 @@ export class AgentOrchestrator {
   async spawnAgent(params: SpawnAgentParams): Promise<string> {
     const taskId = generateUUID();
     const timestamp = now();
-    const provider = this.manager.getConfiguredProviders()[0] ?? 'claude';
+    // Determine provider: prefer user's setting, fall back to first configured
+    const preferred = this.getPreferredProvider?.();
+    const provider = (preferred && this.manager.isConfigured(preferred))
+      ? preferred
+      : (this.manager.getConfiguredProviders()[0] ?? 'claude');
 
     // Check spawn budget before proceeding
     const budget = this.checkSpawnBudget();
@@ -223,7 +238,24 @@ export class AgentOrchestrator {
       createdAt: timestamp,
     });
 
+    let codexTempDir: string | null = null;
+
     try {
+      // Prepare Codex OAuth session auth if needed
+      let sessionEnv: Record<string, string> | undefined;
+      if (provider === 'codex' && process.env['CODEX_OAUTH_CONFIGURED']) {
+        try {
+          codexTempDir = await mkdtemp(join(tmpdir(), 'animus-codex-'));
+          sessionEnv = await prepareCodexSessionAuth(getSystemDb(), codexTempDir);
+        } catch (err) {
+          log.warn('Codex OAuth session prep failed, falling back:', err);
+          if (codexTempDir) {
+            rm(codexTempDir, { recursive: true, force: true }).catch(() => {});
+            codexTempDir = null;
+          }
+        }
+      }
+
       // Create the agent session
       const session = await this.manager.createSession({
         provider,
@@ -232,6 +264,7 @@ export class AgentOrchestrator {
           executionMode: 'build',
           approvalLevel: 'none',
         },
+        ...(sessionEnv ? { env: sessionEnv } : {}),
       });
 
       // Attach logging
@@ -258,9 +291,16 @@ export class AgentOrchestrator {
       this.timeoutTimers.set(taskId, timer);
 
       // Run asynchronously (non-blocking)
-      this.runAgent(taskId, session, params.instructions, logging).catch((err) => {
-        console.error(`[AgentOrchestrator] Agent ${taskId} run error:`, err);
-      });
+      this.runAgent(taskId, session, params.instructions, logging)
+        .catch((err) => {
+          log.error(`Agent ${taskId} run error:`, err);
+        })
+        .finally(() => {
+          // Clean up Codex OAuth temp directory
+          if (codexTempDir) {
+            rm(codexTempDir, { recursive: true, force: true }).catch(() => {});
+          }
+        });
 
       return taskId;
     } catch (err) {
@@ -276,6 +316,11 @@ export class AgentOrchestrator {
         error: err instanceof Error ? err.message : String(err),
       });
 
+      // Clean up Codex temp dir on session creation failure
+      if (codexTempDir) {
+        rm(codexTempDir, { recursive: true, force: true }).catch(() => {});
+      }
+
       throw err;
     }
   }
@@ -286,9 +331,7 @@ export class AgentOrchestrator {
   async updateAgent(params: UpdateAgentParams): Promise<void> {
     const session = this.activeSessions.get(params.agentId);
     if (!session) {
-      console.warn(
-        `[AgentOrchestrator] Cannot update agent ${params.agentId}: no active session`
-      );
+      log.warn(`Cannot update agent ${params.agentId}: no active session`);
       return;
     }
 
@@ -298,10 +341,7 @@ export class AgentOrchestrator {
         currentActivity: 'Processing update',
       });
     } catch (err) {
-      console.error(
-        `[AgentOrchestrator] Failed to update agent ${params.agentId}:`,
-        err
-      );
+      log.error(`Failed to update agent ${params.agentId}:`, err);
     }
   }
 
@@ -323,10 +363,7 @@ export class AgentOrchestrator {
         await session.cancel();
         await session.end();
       } catch (err) {
-        console.warn(
-          `[AgentOrchestrator] Failed to cancel session for ${params.agentId}:`,
-          err
-        );
+        log.warn(`Failed to cancel session for ${params.agentId}:`, err);
       }
       this.activeSessions.delete(params.agentId);
     }
@@ -373,10 +410,7 @@ export class AgentOrchestrator {
         try {
           await session.end();
         } catch (err) {
-          console.warn(
-            `[AgentOrchestrator] Failed to end session for ${taskId}:`,
-            err
-          );
+          log.warn(`Failed to end session for ${taskId}:`, err);
         }
       }
     );
@@ -508,10 +542,7 @@ export class AgentOrchestrator {
         await session.cancel();
         await session.end();
       } catch (err) {
-        console.warn(
-          `[AgentOrchestrator] Failed to cancel timed out session ${taskId}:`,
-          err
-        );
+        log.warn(`Failed to cancel timed out session ${taskId}:`, err);
       }
       this.activeSessions.delete(taskId);
     }

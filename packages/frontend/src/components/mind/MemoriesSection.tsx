@@ -5,6 +5,7 @@ import { UserCircle, Notebook, Database, MagnifyingGlass } from '@phosphor-icons
 import { trpc } from '../../utils/trpc';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
+import { Typography } from '../ui';
 
 // ============================================================================
 // Core Self Section
@@ -26,42 +27,32 @@ function CoreSelfSection() {
         margin-bottom: ${theme.spacing[4]};
       `}>
         <UserCircle size={20} css={css`color: ${theme.colors.text.secondary};`} />
-        <h3 css={css`
-          font-size: ${theme.typography.fontSize.base};
+        <Typography.BodyAlt as="h3" css={css`
           font-weight: ${theme.typography.fontWeight.semibold};
         `}>
           Self-Knowledge
-        </h3>
+        </Typography.BodyAlt>
       </div>
       <Card variant="elevated" padding="lg">
         {coreSelf?.content ? (
           <>
-            <p css={css`
-              font-size: 15px;
-              line-height: ${theme.typography.lineHeight.relaxed};
-              color: ${theme.colors.text.primary};
+            <Typography.Body serif italic css={css`
               white-space: pre-wrap;
             `}>
               {coreSelf.content}
-            </p>
+            </Typography.Body>
             {coreSelf.updatedAt && (
-              <p css={css`
-                font-size: ${theme.typography.fontSize.xs};
-                color: ${theme.colors.text.hint};
+              <Typography.Caption color="hint" css={css`
                 margin-top: ${theme.spacing[3]};
               `}>
                 Last updated {formatRelativeTime(coreSelf.updatedAt)}
-              </p>
+              </Typography.Caption>
             )}
           </>
         ) : (
-          <p css={css`
-            color: ${theme.colors.text.hint};
-            font-size: ${theme.typography.fontSize.base};
-            line-height: ${theme.typography.lineHeight.relaxed};
-          `}>
+          <Typography.Body serif italic color="hint">
             The mind hasn't reflected on itself yet. Self-knowledge builds over time.
-          </p>
+          </Typography.Body>
         )}
       </Card>
     </section>
@@ -88,19 +79,18 @@ function WorkingMemorySection() {
         margin-bottom: ${theme.spacing[4]};
       `}>
         <Notebook size={20} css={css`color: ${theme.colors.text.secondary};`} />
-        <h3 css={css`
-          font-size: ${theme.typography.fontSize.base};
+        <Typography.BodyAlt as="h3" css={css`
           font-weight: ${theme.typography.fontWeight.semibold};
         `}>
           Contact Notes
-        </h3>
+        </Typography.BodyAlt>
       </div>
 
       {!workingMemories || workingMemories.length === 0 ? (
         <Card variant="outlined" padding="md">
-          <p css={css`color: ${theme.colors.text.hint}; font-size: ${theme.typography.fontSize.sm};`}>
+          <Typography.SmallBody serif italic color="hint">
             No working memories yet. Notes about contacts will appear here as the mind interacts.
-          </p>
+          </Typography.SmallBody>
         </Card>
       ) : (
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
@@ -123,21 +113,17 @@ function WorkingMemoryCard({ memory }: { memory: any }) {
   return (
     <Card variant="elevated" padding="md" interactive onClick={() => setExpanded(!expanded)}>
       <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; margin-bottom: ${theme.spacing[2]};`}>
-        <span css={css`
-          font-size: ${theme.typography.fontSize.base};
+        <Typography.BodyAlt as="span" css={css`
           font-weight: ${theme.typography.fontWeight.semibold};
         `}>
           {memory.contactName || memory.contactId}
-        </span>
+        </Typography.BodyAlt>
         {memory.tier && (
           <Badge>{memory.tier}</Badge>
         )}
       </div>
       {content ? (
-        <p css={css`
-          font-size: ${theme.typography.fontSize.sm};
-          line-height: ${theme.typography.lineHeight.relaxed};
-          color: ${theme.colors.text.secondary};
+        <Typography.SmallBody color="secondary" css={css`
           ${!expanded && isLong ? `
             display: -webkit-box;
             -webkit-line-clamp: 3;
@@ -147,20 +133,18 @@ function WorkingMemoryCard({ memory }: { memory: any }) {
           white-space: pre-wrap;
         `}>
           {content}
-        </p>
+        </Typography.SmallBody>
       ) : (
-        <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.hint};`}>
+        <Typography.SmallBody color="hint">
           No notes yet
-        </p>
+        </Typography.SmallBody>
       )}
       {memory.updatedAt && (
-        <p css={css`
-          font-size: ${theme.typography.fontSize.xs};
-          color: ${theme.colors.text.hint};
+        <Typography.Caption color="hint" css={css`
           margin-top: ${theme.spacing[2]};
         `}>
           Updated {formatRelativeTime(memory.updatedAt)}
-        </p>
+        </Typography.Caption>
       )}
     </Card>
   );
@@ -197,12 +181,11 @@ function LongTermMemorySection() {
         margin-bottom: ${theme.spacing[4]};
       `}>
         <Database size={20} css={css`color: ${theme.colors.text.secondary};`} />
-        <h3 css={css`
-          font-size: ${theme.typography.fontSize.base};
+        <Typography.BodyAlt as="h3" css={css`
           font-weight: ${theme.typography.fontWeight.semibold};
         `}>
           Long-Term Memory
-        </h3>
+        </Typography.BodyAlt>
       </div>
 
       {/* Search input */}
@@ -240,26 +223,21 @@ function LongTermMemorySection() {
       </div>
 
       {displayMemories.length === 0 ? (
-        <p css={css`
+        <Typography.SmallBody serif italic color="hint" css={css`
           text-align: center;
           padding: ${theme.spacing[8]} 0;
-          color: ${theme.colors.text.hint};
-          font-size: ${theme.typography.fontSize.sm};
         `}>
           No long-term memories yet. Knowledge accumulates as the mind processes experiences.
-        </p>
+        </Typography.SmallBody>
       ) : (
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
           {displayMemories.map((mem: any) => (
             <Card key={mem.id} variant="outlined" padding="md">
-              <p css={css`
-                font-size: 15px;
-                line-height: ${theme.typography.lineHeight.relaxed};
-                color: ${theme.colors.text.primary};
+              <Typography.Body serif css={css`
                 margin-bottom: ${theme.spacing[2]};
               `}>
                 {mem.content}
-              </p>
+              </Typography.Body>
               <div css={css`
                 display: flex;
                 align-items: center;
@@ -283,24 +261,22 @@ function LongTermMemorySection() {
                         opacity: 0.5; border-radius: 2px;
                       `} />
                     </div>
-                    <span css={css`font-size: 10px; color: ${theme.colors.text.hint};`}>
+                    <Typography.Caption color="hint">
                       {(mem.importance as number).toFixed(1)}
-                    </span>
+                    </Typography.Caption>
                   </div>
                 )}
                 {mem.accessCount != null && (mem.accessCount as number) > 0 && (
-                  <span css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint};`}>
+                  <Typography.Caption color="hint">
                     Accessed {mem.accessCount} time{(mem.accessCount as number) !== 1 ? 's' : ''}
-                  </span>
+                  </Typography.Caption>
                 )}
                 {mem.createdAt && (
-                  <span css={css`
-                    font-size: ${theme.typography.fontSize.xs};
-                    color: ${theme.colors.text.disabled};
+                  <Typography.Caption color="disabled" css={css`
                     margin-left: auto;
                   `}>
                     {formatRelativeTime(mem.createdAt)}
-                  </span>
+                  </Typography.Caption>
                 )}
               </div>
             </Card>

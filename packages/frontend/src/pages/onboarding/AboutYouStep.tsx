@@ -2,8 +2,9 @@
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Input } from '../../components/ui';
+import { Input, Typography } from '../../components/ui';
 import { useOnboardingStore } from '../../store';
+import { OnboardingNav } from './OnboardingNav';
 
 export function AboutYouStep() {
   const theme = useTheme();
@@ -24,19 +25,20 @@ export function AboutYouStep() {
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
       <div>
-        <h2
+        <Typography.Title3
+          as="h2"
+          serif
           css={css`
-            font-size: ${theme.typography.fontSize['2xl']};
             font-weight: ${theme.typography.fontWeight.light};
             margin-bottom: ${theme.spacing[2]};
           `}
         >
-          What should your Animus know about you?
-        </h2>
-        <p css={css`color: ${theme.colors.text.secondary};`}>
-          This is context your Animus will always carry -- not something it has to learn over time.
+          What should your AI know about you?
+        </Typography.Title3>
+        <Typography.Body color="secondary">
+          This is context your AI will always carry -- not something it has to learn over time.
           Think of it as the things you'd tell someone on day one.
-        </p>
+        </Typography.Body>
       </div>
 
       <Input
@@ -47,19 +49,17 @@ export function AboutYouStep() {
       />
 
       {charCount > 1800 && (
-        <p css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint};`}>
-          Your Animus always carries this context, so keeping it concise helps it stay focused.
+        <Typography.Caption as="p" color="hint">
+          Your AI always carries this context, so keeping it concise helps it stay focused.
           You can always add more detail later.
-        </p>
+        </Typography.Caption>
       )}
 
-      <div css={css`display: flex; justify-content: space-between; margin-top: ${theme.spacing[4]};`}>
-        <Button variant="ghost" onClick={handleBack}>Back</Button>
-        <div css={css`display: flex; gap: ${theme.spacing[3]};`}>
-          <Button variant="ghost" onClick={handleContinue}>Skip</Button>
-          <Button onClick={handleContinue}>Continue</Button>
-        </div>
-      </div>
+      <OnboardingNav
+        onBack={handleBack}
+        onContinue={handleContinue}
+        onSkip={handleContinue}
+      />
     </div>
   );
 }

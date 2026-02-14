@@ -46,6 +46,9 @@ export const heartbeatStateSchema = z.object({
   lastTickAt: timestampSchema.nullable(),
   sessionWarmSince: timestampSchema.nullable(),
   isRunning: z.boolean(),
+  // Energy system
+  energyLevel: z.number().min(0).max(1).default(0.85),
+  lastEnergyUpdate: timestampSchema.nullable().default(null),
 });
 
 // ============================================================================
@@ -91,6 +94,31 @@ export const emotionHistoryEntrySchema = z.object({
   reasoning: z.string(),
   intensityBefore: z.number().min(0).max(1),
   intensityAfter: z.number().min(0).max(1),
+  createdAt: timestampSchema,
+});
+
+// ============================================================================
+// Energy
+// ============================================================================
+
+export const energyBandSchema = z.enum([
+  'peak',
+  'alert',
+  'tired',
+  'drowsy',
+  'very_drowsy',
+  'sleeping',
+]);
+
+export const energyHistoryEntrySchema = z.object({
+  id: z.number().int(),
+  tickNumber: z.number().int().nonnegative(),
+  energyBefore: z.number().min(0).max(1),
+  energyAfter: z.number().min(0).max(1),
+  delta: z.number(),
+  reasoning: z.string(),
+  circadianBaseline: z.number().min(0).max(1),
+  energyBand: energyBandSchema,
   createdAt: timestampSchema,
 });
 

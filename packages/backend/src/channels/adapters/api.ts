@@ -10,6 +10,9 @@
 import type { FastifyInstance } from 'fastify';
 import type { IChannelAdapter } from '../types.js';
 import type { ChannelType } from '@animus/shared';
+import { createLogger } from '../../lib/logger.js';
+
+const log = createLogger('ApiAdapter', 'channels');
 
 export class ApiChannelAdapter implements IChannelAdapter {
   readonly channelType: ChannelType = 'api';
@@ -17,12 +20,12 @@ export class ApiChannelAdapter implements IChannelAdapter {
 
   async start(): Promise<void> {
     this.enabled = true;
-    console.log('[ApiAdapter] Started (stub mode)');
+    log.info('Started (stub mode)');
   }
 
   async stop(): Promise<void> {
     this.enabled = false;
-    console.log('[ApiAdapter] Stopped');
+    log.info('Stopped');
   }
 
   isEnabled(): boolean {
@@ -39,8 +42,8 @@ export class ApiChannelAdapter implements IChannelAdapter {
     _metadata?: Record<string, unknown>
   ): Promise<void> {
     // API responses are synchronous — the reply is part of the HTTP response
-    console.log(
-      `[ApiAdapter] Would send API response to contact ${contactId}: "${content.substring(0, 50)}..."`
+    log.info(
+      `Would send API response to contact ${contactId}: "${content.substring(0, 50)}..."`
     );
   }
 
@@ -192,6 +195,6 @@ export class ApiChannelAdapter implements IChannelAdapter {
       };
     });
 
-    console.log('[ApiAdapter] API routes registered (OpenAI + Ollama stubs)');
+    log.info('API routes registered (OpenAI + Ollama stubs)');
   }
 }

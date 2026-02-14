@@ -16,10 +16,17 @@ export function AuthGuard({ children }: AuthGuardProps) {
   const { isAuthenticated, setUser, logout } = useAuthStore();
 
   // Check auth on mount — the cookie-based session is the source of truth
-  const { data: meData, isLoading, error } = trpc.auth.me.useQuery(undefined, {
+  const { data: meData, isLoading: authLoading, error } = trpc.auth.me.useQuery(undefined, {
     retry: false,
     refetchOnWindowFocus: false,
   });
+
+  // Check onboarding status for non-onboarding routes
+  const isOnboardingRoute = location.pathname.startsWith('/onboarding');
+  const { data: onboardingState, isLoading: onboardingLoading } = trpc.onboarding.getState.useQuery(
+    undefined,
+    { enabled: !!meData && !isOnboardingRoute, retry: false, refetchOnWindowFocus: false }
+  );
 
   useEffect(() => {
     if (meData) {
@@ -30,7 +37,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
     }
   }, [meData, error, setUser, logout]);
 
-  if (isLoading) {
+  if (authLoading || (meData && !isOnboardingRoute && onboardingLoading)) {
     return (
       <div css={css`
         min-height: 100vh;
@@ -46,6 +53,11 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
   if (!meData) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // If onboarding isn't complete, redirect non-onboarding routes to onboarding
+  if (!isOnboardingRoute && onboardingState && !onboardingState.isComplete) {
+    return <Navigate to="/onboarding" replace />;
   }
 
   return <>{children}</>;

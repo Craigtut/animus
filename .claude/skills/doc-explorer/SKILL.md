@@ -41,7 +41,7 @@ Use this index to find the right files to read. Each entry includes the file pat
 | File | Size | Covers |
 |------|------|--------|
 | `docs/project-vision.md` | 7 KB | Core concept, what makes Animus different, the heartbeat concept, persistent mind, autonomous action, self-building capability, multi-channel presence, guardrails, security |
-| `docs/brand-vision.md` | 8 KB | Brand essence, personality (warm, calm, sophisticated), visual identity, color palette (monochromatic + warm), typography (Plus Jakarta Sans), animation philosophy, visualization approaches for inner life |
+| `docs/brand-vision.md` | 8 KB | Brand essence, personality (warm, calm, sophisticated), visual identity, color palette (monochromatic + warm), typography (Outfit and Crimson Pro), animation philosophy, visualization approaches for inner life |
 
 ### Architecture
 
@@ -53,13 +53,14 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/architecture/agent-orchestration.md` | 14 KB | Sub-agent delegation, custom orchestration layer, prompt template, channel-aware formatting, agent lifecycle, MCP tools, result delivery through heartbeat, failure handling, configuration |
 | `docs/architecture/mcp-tools.md` | 28 KB | Cross-provider MCP tool architecture - tool definitions (shared), handlers (backend), registry, permission filtering by contact tier, hybrid in-process/stdio strategy, Claude createSdkMcpServer optimization, extensibility, user-defined tools |
 | `docs/architecture/contacts.md` | 14 KB | Contact system, user-contact linking, primary/standard/unknown tiers, identity resolution, contact channels, permission enforcement, message isolation, message storage (messages.db), contact notes |
-| `docs/architecture/channels.md` | 18 KB | Channel adapter layer - IncomingMessage interface, identity resolution, Web/tRPC, SMS/Twilio (webhooks, MMS, signature validation), Discord/discord.js (bot, intents, conversation scoping), OpenAI-compatible API (SSE streaming), Ollama-compatible API (NDJSON streaming), streaming pipeline, media handling, credential management, outbound routing, channel lifecycle |
+| `docs/architecture/channel-packages.md` | 30 KB | Channel system architecture (single source of truth) - channel protocol (IncomingMessage, identity resolution, conversation scoping, outbound routing), web channel (built-in), channel package format (manifest, config schema), AdapterContext API, child process isolation, IPC protocol (including streaming), streaming pipeline, media handling, Channel Manager, installation UX, hot-swap lifecycle, dynamic channel types, frontend integration, plugin hooks integration, security model, Channel SDK, channel reference specs (SMS/Twilio, Discord, OpenAI API, Ollama API) |
 | `docs/architecture/context-builder.md` | 16 KB | Context Builder system - centralized context assembly for all LLM prompts (mind ticks, sub-agents, task ticks), prompt compilation, token budget management, persona compilation, four compilation targets |
 | `docs/architecture/memory.md` | 22 KB | Memory system - four layers (short-term, working memory, core self, long-term), memory.db schema, write pipeline (embed → dedup → store), retrieval scoring, consolidation, forgetting, Transformers.js embeddings, structured output additions, pre-session-end flush, MCP tools for sub-agents |
 | `docs/architecture/goals.md` | 20 KB | Goal system - seeds (emergent desires), goals, plans, tasks hierarchy, salience scoring, emotional links, approval modes, cleanup, heartbeat integration |
 | `docs/architecture/tasks-system.md` | 16 KB | Task system - scheduled vs deferred tasks, task ticks, cron support, planning agent, retry logic, heartbeat integration |
 | `docs/architecture/open-questions.md` | 5 KB | Resolved design questions (all 7) - concurrent tick handling, crash recovery, MCP tool design, structured output, Claude OAuth, Codex OAuth, contact notes |
 | `docs/architecture/voice-channel.md` | 20 KB | Voice channel architecture - Parakeet TDT v3 STT + Kokoro TTS (both via sherpa-onnx, native Node.js), frontend voice mode UX, audio pipeline (capture → transcribe → mind → synthesize → playback), sentence-buffered TTS streaming, voice channel adapter, configuration, ffmpeg conversion |
+| `docs/architecture/sleep-energy.md` | 16 KB | Sleep & energy system - circadian rhythm, energy level (0-1), 6 energy bands (peak/alert/tired/drowsy/very drowsy/sleeping), experience-driven energy deltas, exponential decay toward circadian baseline, wake-up mechanics (natural + triggered), accelerated emotional decay during sleep, tick interval switching, settings configuration |
 
 ### Frontend
 
@@ -106,14 +107,15 @@ When you need context for a task, follow this approach:
 5b. **For frontend onboarding/auth**: Read `docs/frontend/onboarding.md`
 6. **For persona/personality**: Read `docs/architecture/persona.md` and `docs/brand-vision.md`
 7. **For heartbeat/inner life**: Read `docs/architecture/heartbeat.md` and `docs/project-vision.md`
+7a. **For sleep/energy/circadian rhythm**: Read `docs/architecture/sleep-energy.md` and `docs/architecture/heartbeat.md`
 7b. **For memory/knowledge/embeddings**: Read `docs/architecture/memory.md` and `docs/architecture/heartbeat.md`
 7c. **For context assembly/prompt building**: Read `docs/architecture/context-builder.md`
 7d. **For shared abstractions (embedding, decay, encryption, event bus)**: Read `docs/architecture/tech-stack.md` (Shared Abstractions section)
 7e. **For MCP tools/custom tools**: Read `docs/architecture/mcp-tools.md` and `docs/architecture/agent-orchestration.md`
 8. **For new contributors**: Read `docs/guides/getting-started.md`
-9. **For channels/messaging/SMS/Discord/API**: Read `docs/architecture/channels.md` and `docs/architecture/contacts.md`
+9. **For channels/messaging/SMS/Discord/API**: Read `docs/architecture/channel-packages.md` and `docs/architecture/contacts.md`
 10. **For Codex OAuth/authentication**: Read `docs/agents/codex/oauth.md`
-11. **For voice/speech/STT/TTS/audio**: Read `docs/architecture/voice-channel.md`, `docs/frontend/voice-mode.md`, and `docs/architecture/channels.md`
+11. **For voice/speech/STT/TTS/audio**: Read `docs/architecture/voice-channel.md`, `docs/frontend/voice-mode.md`, and `docs/architecture/channel-packages.md`
 
 ## Topic Keyword Guide
 
@@ -136,7 +138,7 @@ Use this to quickly map user questions to the right docs:
 - **sub-agent, delegation, orchestration, spawn agent, agent lifecycle** -> `docs/architecture/agent-orchestration.md`
 - **MCP, tools, custom tools, tool definitions, tool registry, send_message, read_memory, update_progress** -> `docs/architecture/mcp-tools.md`
 - **contacts, identity, permission, primary, standard, unknown caller, contact notes** -> `docs/architecture/contacts.md`
-- **channels, adapter, SMS, twilio, discord, API, ollama, openai, streaming, webhook, inbound, outbound, media** -> `docs/architecture/channels.md`
+- **channels, adapter, SMS, twilio, discord, API, ollama, openai, streaming, webhook, inbound, outbound, media, channel packages, channel plugin, channel install, channel manifest, channel SDK, channel isolation, hot-swap, AdapterContext, channel manager, IPC, child process** -> `docs/architecture/channel-packages.md`
 - **context builder, context assembly, prompt compilation, token budget, mind prompt, system prompt, mind instructions** -> `docs/architecture/context-builder.md`
 - **shared abstractions, embedding provider, decay engine, encryption service, event bus, database stores** -> `docs/architecture/tech-stack.md`
 - **memory, embedding, retrieval, long-term, lancedb memories, working memory, core self, consolidation, forgetting, transformers.js** -> `docs/architecture/memory.md`
@@ -144,6 +146,7 @@ Use this to quickly map user questions to the right docs:
 - **tasks, scheduling, cron, scheduled jobs** -> `docs/architecture/tasks-system.md`
 - **open questions, resolved questions** -> `docs/architecture/open-questions.md`
 - **voice, speech, STT, TTS, speech-to-text, text-to-speech, audio, microphone, parakeet, kokoro, sherpa-onnx, voice channel** -> `docs/architecture/voice-channel.md`
+- **sleep, energy, circadian, tired, drowsy, wake up, nap, rest, energy level, sleep hours, quiet hours** -> `docs/architecture/sleep-energy.md`
 - **app shell, navigation, nav pill, command palette, connection status, route structure, space transition, click deeper** -> `docs/frontend/app-shell.md`
 - **presence, emotional field, thought stream, conversation, ambient animation, heartbeat pulse** -> `docs/frontend/presence.md`
 - **mind space, emotion detail, thought log, memory browser, goal detail, agent view, inner life observation** -> `docs/frontend/mind.md`

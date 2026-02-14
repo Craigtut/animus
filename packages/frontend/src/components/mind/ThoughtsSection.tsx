@@ -1,11 +1,12 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Star } from '@phosphor-icons/react';
 import { trpc } from '../../utils/trpc';
 import { Tooltip } from '../ui/Tooltip';
-import type { Thought, Experience, TriggerType } from '@animus/shared';
+import { Spinner, Typography } from '../ui';
+import { useHeartbeatStore } from '../../store/heartbeat-store';
 
 // ============================================================================
 // Types
@@ -23,6 +24,8 @@ interface UnifiedEntry {
   createdAt: string;
 }
 
+const PAGE_SIZE = 20;
+
 // ============================================================================
 // Tick Dot
 // ============================================================================
@@ -30,7 +33,6 @@ interface UnifiedEntry {
 function TickDot({ tickNumber }: { tickNumber: number }) {
   const theme = useTheme();
 
-  // Without trigger info, use warm gray. Could be extended when trigger data is available.
   return (
     <Tooltip content={`Tick #${tickNumber}`}>
       <div css={css`
@@ -86,42 +88,55 @@ function EntryRow({ entry }: { entry: UnifiedEntry }) {
           padding-left: ${theme.spacing[3]};
         ` : ''}
       `}>
-        {/* Content */}
-        <p css={css`
-          font-size: 15px;
-          line-height: ${theme.typography.lineHeight.relaxed};
-          color: ${theme.colors.text.primary};
-          ${isExperience ? `font-style: italic;` : ''}
-        `}>
+        <Typography.Body
+          serif
+          italic={isExperience}
+          color="primary"
+          css={css`
+            line-height: ${theme.typography.lineHeight.relaxed};
+          `}
+        >
           {entry.content}
-        </p>
+        </Typography.Body>
 
-        {/* Metadata row */}
         <div css={css`
           display: flex;
           align-items: center;
           gap: ${theme.spacing[2]};
           margin-top: ${theme.spacing[1]};
         `}>
-          <span css={css`
-            font-size: 11px;
-            color: ${theme.colors.text.hint};
-          `}>
+          <Typography.Caption color="hint">
             {entry.type === 'thought' ? 'Thought' : 'Experience'}
-          </span>
+          </Typography.Caption>
           {isImportant && (
             <Star size={12} weight="fill" css={css`color: ${theme.colors.warning.main}; opacity: 0.7;`} />
           )}
-          <span css={css`
-            font-size: ${theme.typography.fontSize.xs};
-            color: ${theme.colors.text.disabled};
-            margin-left: auto;
-          `}>
+          <Typography.Caption color="disabled" css={css`margin-left: auto;`}>
             {formatRelativeTime(entry.createdAt)}
-          </span>
+          </Typography.Caption>
         </div>
       </div>
     </motion.div>
+  );
+}
+
+// ============================================================================
+// Loading Indicator
+// ============================================================================
+
+function LoadingMore() {
+  const theme = useTheme();
+  return (
+    <div css={css`
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: ${theme.spacing[2]};
+      padding: ${theme.spacing[6]} 0;
+    `}>
+      <Spinner size={16} />
+      <Typography.Caption color="hint">Loading more...</Typography.Caption>
+    </div>
   );
 }
 
@@ -133,39 +148,44 @@ export function ThoughtsSection() {
   const theme = useTheme();
   const [filter, setFilter] = useState<FilterType>('all');
   const [importantOnly, setImportantOnly] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
-  // Fetch thoughts and experiences
-  const { data: thoughts } = trpc.heartbeat.getRecentThoughts.useQuery(
-    { limit: 50 },
-    { retry: false },
-  );
-  const { data: experiences } = trpc.heartbeat.getRecentExperiences.useQuery(
-    { limit: 50 },
-    { retry: false },
-  );
-
-  // Real-time subscriptions
-  const [liveThoughts, setLiveThoughts] = useState<Thought[]>([]);
-  const [liveExperiences, setLiveExperiences] = useState<Experience[]>([]);
-
-  trpc.heartbeat.onThoughts.useSubscription(undefined, {
-    onData: (thought) => {
-      setLiveThoughts((prev) => [thought, ...prev].slice(0, 50));
+  // Paginated queries
+  const thoughtsQuery = trpc.heartbeat.getThoughtsPaginated.useInfiniteQuery(
+    { limit: PAGE_SIZE, importantOnly: importantOnly || undefined },
+    {
+      getNextPageParam: (lastPage) => lastPage.nextCursor,
+      retry: false,
     },
-  });
+  );
 
-  trpc.heartbeat.onExperience.useSubscription(undefined, {
-    onData: (exp) => {
-      setLiveExperiences((prev) => [exp, ...prev].slice(0, 50));
+  const experiencesQuery = trpc.heartbeat.getExperiencesPaginated.useInfiniteQuery(
+    { limit: PAGE_SIZE, importantOnly: importantOnly || undefined },
+    {
+      getNextPageParam: (lastPage) => lastPage.nextCursor,
+      retry: false,
     },
-  });
+  );
 
-  // Merge and sort entries
+  // Real-time data from centralized subscription manager
+  const liveThoughts = useHeartbeatStore(s => s.recentThoughts);
+  const liveExperiences = useHeartbeatStore(s => s.recentExperiences);
+
+  // Flatten paginated results
+  const pagedThoughts = useMemo(
+    () => thoughtsQuery.data?.pages.flatMap((p) => p.items) ?? [],
+    [thoughtsQuery.data],
+  );
+  const pagedExperiences = useMemo(
+    () => experiencesQuery.data?.pages.flatMap((p) => p.items) ?? [],
+    [experiencesQuery.data],
+  );
+
+  // Merge live + paginated, deduplicate, sort
   const entries = useMemo(() => {
-    const allThoughts = [...liveThoughts, ...(thoughts ?? [])];
-    const allExperiences = [...liveExperiences, ...(experiences ?? [])];
+    const allThoughts = [...liveThoughts, ...pagedThoughts];
+    const allExperiences = [...liveExperiences, ...pagedExperiences];
 
-    // Deduplicate by id
     const seenIds = new Set<string>();
     const unified: UnifiedEntry[] = [];
 
@@ -195,20 +215,71 @@ export function ThoughtsSection() {
       });
     }
 
-    // Sort by createdAt descending
     unified.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
     return unified;
-  }, [thoughts, experiences, liveThoughts, liveExperiences]);
+  }, [pagedThoughts, pagedExperiences, liveThoughts, liveExperiences]);
 
-  // Apply filters
+  // Apply type filter
   const filteredEntries = useMemo(() => {
-    let result = entries;
-    if (filter === 'thoughts') result = result.filter((e) => e.type === 'thought');
-    if (filter === 'experiences') result = result.filter((e) => e.type === 'experience');
-    if (importantOnly) result = result.filter((e) => e.importance > 0.7);
-    return result;
-  }, [entries, filter, importantOnly]);
+    if (filter === 'thoughts') return entries.filter((e) => e.type === 'thought');
+    if (filter === 'experiences') return entries.filter((e) => e.type === 'experience');
+    return entries;
+  }, [entries, filter]);
+
+  // Determine loading / hasMore state based on active filter
+  const isFetchingMore = (filter === 'thoughts'
+    ? thoughtsQuery.isFetchingNextPage
+    : filter === 'experiences'
+      ? experiencesQuery.isFetchingNextPage
+      : thoughtsQuery.isFetchingNextPage || experiencesQuery.isFetchingNextPage
+  );
+
+  const hasMore = (filter === 'thoughts'
+    ? thoughtsQuery.hasNextPage
+    : filter === 'experiences'
+      ? experiencesQuery.hasNextPage
+      : (thoughtsQuery.hasNextPage || experiencesQuery.hasNextPage)
+  );
+
+  const fetchMore = useCallback(() => {
+    if (filter === 'thoughts') {
+      if (thoughtsQuery.hasNextPage && !thoughtsQuery.isFetchingNextPage) {
+        thoughtsQuery.fetchNextPage();
+      }
+    } else if (filter === 'experiences') {
+      if (experiencesQuery.hasNextPage && !experiencesQuery.isFetchingNextPage) {
+        experiencesQuery.fetchNextPage();
+      }
+    } else {
+      // "all" — fetch next page from whichever still has data
+      if (thoughtsQuery.hasNextPage && !thoughtsQuery.isFetchingNextPage) {
+        thoughtsQuery.fetchNextPage();
+      }
+      if (experiencesQuery.hasNextPage && !experiencesQuery.isFetchingNextPage) {
+        experiencesQuery.fetchNextPage();
+      }
+    }
+  }, [filter, thoughtsQuery, experiencesQuery]);
+
+  // IntersectionObserver on sentinel element
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && hasMore && !isFetchingMore) {
+          fetchMore();
+        }
+      },
+      { rootMargin: '200px' },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, isFetchingMore, fetchMore]);
+
+  const isInitialLoading = thoughtsQuery.isLoading || experiencesQuery.isLoading;
 
   return (
     <div>
@@ -216,6 +287,7 @@ export function ThoughtsSection() {
       <div css={css`
         display: flex;
         align-items: center;
+        justify-content: center;
         gap: ${theme.spacing[3]};
         margin-bottom: ${theme.spacing[6]};
         flex-wrap: wrap;
@@ -275,16 +347,29 @@ export function ThoughtsSection() {
       </div>
 
       {/* Entry list */}
-      {filteredEntries.length === 0 ? (
+      {isInitialLoading ? (
         <div css={css`
-          text-align: center;
+          display: flex;
+          justify-content: center;
           padding: ${theme.spacing[16]} 0;
-          color: ${theme.colors.text.hint};
         `}>
+          <Spinner size={24} />
+        </div>
+      ) : filteredEntries.length === 0 ? (
+        <Typography.Body
+          as="div"
+          serif
+          italic
+          color="hint"
+          css={css`
+            text-align: center;
+            padding: ${theme.spacing[16]} 0;
+          `}
+        >
           {entries.length === 0
             ? "No thoughts yet. The mind hasn't started thinking."
             : 'No entries match the current filter.'}
-        </div>
+        </Typography.Body>
       ) : (
         <div css={css`
           display: flex;
@@ -296,6 +381,25 @@ export function ThoughtsSection() {
               <EntryRow key={entry.id} entry={entry} />
             ))}
           </AnimatePresence>
+
+          {/* Sentinel + loading indicator */}
+          <div ref={sentinelRef}>
+            {isFetchingMore && <LoadingMore />}
+          </div>
+
+          {/* End of list indicator */}
+          {!hasMore && filteredEntries.length > 0 && (
+            <Typography.Caption
+              as="div"
+              color="disabled"
+              css={css`
+                text-align: center;
+                padding: ${theme.spacing[4]} 0 ${theme.spacing[2]};
+              `}
+            >
+              That's everything.
+            </Typography.Caption>
+          )}
         </div>
       )}
     </div>

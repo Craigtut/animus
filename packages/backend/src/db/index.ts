@@ -17,7 +17,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { env } from '../utils/env.js';
+import { createLogger } from '../lib/logger.js';
 import { runMigrations } from './migrate.js';
+
+const log = createLogger('Database', 'database');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.join(__dirname, 'migrations');
@@ -94,7 +97,7 @@ export async function initializeDatabases(): Promise<void> {
   runMigrations(messagesDb, path.join(MIGRATIONS_DIR, 'messages'), 'messages.db');
   runMigrations(agentLogsDb, path.join(MIGRATIONS_DIR, 'agent-logs'), 'agent_logs.db');
 
-  console.log('All databases initialized');
+  log.info('All databases initialized');
 }
 
 /**

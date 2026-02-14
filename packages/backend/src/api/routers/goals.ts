@@ -3,9 +3,12 @@
  */
 
 import { z } from 'zod';
+import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';
 import { getHeartbeatDb } from '../../db/index.js';
 import * as heartbeatStore from '../../db/stores/heartbeat-store.js';
+import { getEventBus } from '../../lib/event-bus.js';
+import type { Goal, GoalSeed } from '@animus/shared';
 
 export const goalsRouter = router({
   /**
@@ -72,4 +75,36 @@ export const goalsRouter = router({
       const db = getHeartbeatDb();
       return heartbeatStore.getActivePlan(db, input.goalId);
     }),
+
+  /**
+   * Subscribe to goal changes (created or updated).
+   */
+  onGoalChange: protectedProcedure.subscription(() => {
+    return observable<Goal>((emit) => {
+      const eventBus = getEventBus();
+      const handler = (goal: Goal) => emit.next(goal);
+      eventBus.on('goal:created', handler);
+      eventBus.on('goal:updated', handler);
+      return () => {
+        eventBus.off('goal:created', handler);
+        eventBus.off('goal:updated', handler);
+      };
+    });
+  }),
+
+  /**
+   * Subscribe to seed changes (created or updated).
+   */
+  onSeedChange: protectedProcedure.subscription(() => {
+    return observable<GoalSeed>((emit) => {
+      const eventBus = getEventBus();
+      const handler = (seed: GoalSeed) => emit.next(seed);
+      eventBus.on('seed:created', handler);
+      eventBus.on('seed:updated', handler);
+      return () => {
+        eventBus.off('seed:created', handler);
+        eventBus.off('seed:updated', handler);
+      };
+    });
+  }),
 });

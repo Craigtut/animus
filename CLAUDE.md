@@ -121,7 +121,7 @@ A separate package providing a unified abstraction over multiple agent SDKs:
 ### Running Locally
 
 ```bash
-# Prerequisites: Node.js 20+
+# Prerequisites: Node.js 24+
 
 # Install dependencies
 npm install
@@ -129,12 +129,23 @@ npm install
 # Copy environment template
 cp .env.example .env
 
+# IMPORTANT: Check if servers are already running before starting them.
+# During development, the backend and frontend are often already running
+# in watch mode and will automatically pick up your changes.
+# Check with: lsof -i:3000 (backend) and lsof -i:5173 (frontend)
+
 # Start development (backend + frontend)
-npm run dev            # Runs all packages in parallel
+npm run dev            # Runs backend + frontend in parallel
 
 # Or run separately:
 npm run dev:backend   # http://localhost:3000
 npm run dev:frontend  # http://localhost:5173
+
+# NOTE: In dev mode, the backend imports @animus/shared and @animus/agents
+# source (.ts) directly via the "source" export condition (--conditions source).
+# This means changes to shared/agents source are picked up immediately —
+# no need to rebuild their dist. The dist is only used for production builds.
+# If you need dist for any reason: npm run build -w @animus/shared
 ```
 
 ### Testing Requirements
@@ -165,6 +176,26 @@ npm run clean         # Remove dist folders and caches
 - Prefer composition over inheritance
 - Use meaningful variable names
 - Add comments only for non-obvious logic
+
+### Backend Logging
+
+**All backend logging MUST use the logger from `packages/backend/src/lib/logger.ts`.** Never use raw `console.log/warn/error` in backend code (the only exception is `utils/env.ts` which runs before the logger is available).
+
+```typescript
+import { createLogger } from '../lib/logger.js';
+const log = createLogger('MyService', 'mycategory');
+
+log.info('Something happened');
+log.warn('Something concerning', details);
+log.error('Something failed:', err);
+log.debug('Verbose details');
+```
+
+- First argument to `createLogger` is the **context name** shown in yellow brackets: `[MyService]`
+- Second argument is the **category** for DB-based filtering (defaults to lowercase context name)
+- Existing categories: `server`, `heartbeat`, `agents`, `channels`, `auth`, `database`
+- Categories are toggled via `settings.updateLogCategories` tRPC endpoint, stored in `system_settings.log_categories`
+- Level filtering respects `LOG_LEVEL` env var (`debug < info < warn < error`)
 
 ### API Design
 
@@ -248,12 +279,14 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 
 **Available documentation areas:**
 - **Vision & Identity**: `docs/project-vision.md`, `docs/brand-vision.md`
-- **Architecture**: `docs/architecture/heartbeat.md`, `docs/architecture/agent-orchestration.md`, `docs/architecture/contacts.md`, `docs/architecture/channels.md`, `docs/architecture/persona.md`, `docs/architecture/tech-stack.md`
+- **Architecture**: `docs/architecture/heartbeat.md`, `docs/architecture/agent-orchestration.md`, `docs/architecture/contacts.md`, `docs/architecture/persona.md`, `docs/architecture/tech-stack.md`
 - **Architecture**: `docs/architecture/goals.md` (goal system, seeds, plans, salience), `docs/architecture/tasks-system.md` (scheduled & deferred tasks, task ticks)
 - **Architecture**: `docs/architecture/memory.md` (four memory layers, memory.db, embeddings, write pipeline, consolidation)
 - **Architecture**: `docs/architecture/context-builder.md` (context assembly, prompt compilation, token budgets, persona compilation)
+- **Architecture**: `docs/architecture/channel-packages.md` (channel system — protocol, packaging, child process isolation, IPC streaming, AdapterContext, manifests, Channel Manager, hot-swap, dynamic types, security, channel reference specs)
 - **Architecture**: `docs/architecture/mcp-tools.md` (cross-provider MCP tool architecture, tool definitions, handlers, registry, permission filtering)
 - **Architecture**: `docs/architecture/voice-channel.md` (voice channel — Parakeet TDT v3 STT + Kokoro TTS, both via sherpa-onnx, frontend voice mode, audio pipeline)
+- **Architecture**: `docs/architecture/sleep-energy.md` (sleep & energy system, circadian rhythm, energy bands, wake-up mechanics, accelerated emotional decay)
 - **Open Questions**: `docs/architecture/open-questions.md` (all 7 resolved)
 - **Open Concerns**: `docs/architecture/open-concerns.md` (known acceptable concerns)
 - **Frontend Design**: `docs/frontend/design-principles.md`, `docs/frontend/onboarding.md`
@@ -266,6 +299,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on frontend/UI → `/doc-explorer design` and `/doc-explorer brand`
 - Working on contacts/identity/permissions → `/doc-explorer contacts`
 - Working on channels/SMS/Discord/API → `/doc-explorer channels`
+- Working on channel packages/installation/isolation → `/doc-explorer channel-packages`
 - Working on persona/personality system → `/doc-explorer persona`
 - Working on the heartbeat system → `/doc-explorer heartbeat`
 - Working on memory/knowledge/embeddings → `/doc-explorer memory`
@@ -273,6 +307,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on shared abstractions (embedding, decay, encryption, auth, migrations) → `/doc-explorer tech-stack`
 - Working on MCP tools/custom tools → `/doc-explorer mcp-tools`
 - Working on voice/speech/STT/TTS/audio → `/doc-explorer voice`
+- Working on sleep/energy/circadian rhythm → `/doc-explorer sleep-energy`
 - Working on agent SDKs → `/doc-explorer agents`
 - Working on backend/API → `/doc-explorer architecture`
 - Unsure about project conventions → `/doc-explorer` (no args, see everything)

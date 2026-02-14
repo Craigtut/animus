@@ -350,19 +350,32 @@ export class AgentManager {
       config,
     };
 
-    this.trackedSessions.set(session.id, tracked);
-    this.logger.debug('Session tracked', { sessionId: session.id });
+    // Capture the initial (possibly pending) ID used as the map key
+    const initialId = session.id;
+    this.trackedSessions.set(initialId, tracked);
+    this.logger.debug('Session tracked', { sessionId: initialId });
 
-    // Update activity on events
+    // Update activity on events and handle ID changes
     session.onEvent(async (event) => {
-      const t = this.trackedSessions.get(session.id);
+      const currentId = session.id;
+
+      // Re-key if the session ID stabilized (pending → native)
+      if (currentId !== initialId && this.trackedSessions.has(initialId)) {
+        this.trackedSessions.delete(initialId);
+        this.trackedSessions.set(currentId, tracked);
+        this.logger.debug('Session re-keyed', { from: initialId, to: currentId });
+      }
+
+      const t = this.trackedSessions.get(currentId);
       if (t) {
         t.lastActivityAt = Date.now();
       }
 
       if (event.type === 'session_end') {
-        this.trackedSessions.delete(session.id);
-        this.logger.debug('Session untracked', { sessionId: session.id });
+        // Delete by both IDs to be safe
+        this.trackedSessions.delete(currentId);
+        this.trackedSessions.delete(initialId);
+        this.logger.debug('Session untracked', { sessionId: currentId });
       }
     });
   }
@@ -491,6 +504,14 @@ export class AgentManager {
       return true;
     }
     return this.trackedSessions.size < this.maxConcurrentSessions;
+  }
+
+  /**
+   * Force-remove a session from tracking without ending it.
+   * Use as a last resort when session.end() fails.
+   */
+  removeTrackedSession(sessionId: string): boolean {
+    return this.trackedSessions.delete(sessionId);
   }
 
   // ============================================================================

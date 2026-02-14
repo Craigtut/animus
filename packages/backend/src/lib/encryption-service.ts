@@ -7,6 +7,9 @@
 
 import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync } from 'crypto';
 import { env } from '../utils/env.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('Encryption', 'server');
 
 const ALGORITHM = 'aes-256-gcm';
 const KEY_LENGTH = 32;
@@ -39,7 +42,7 @@ export function isConfigured(): boolean {
 export function encrypt(plaintext: string): string {
   const key = getKey();
   if (!key) {
-    console.warn('[Encryption] No encryption key set — storing value as plaintext');
+    log.warn('No encryption key set — storing value as plaintext');
     return `plain:${Buffer.from(plaintext).toString('base64')}`;
   }
 

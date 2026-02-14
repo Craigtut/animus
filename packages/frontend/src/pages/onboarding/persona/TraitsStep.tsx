@@ -3,8 +3,9 @@ import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Button } from '../../../components/ui';
+import { Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
+import { OnboardingNav } from '../OnboardingNav';
 
 const traitCategories: { title: string; traits: string[] }[] = [
   { title: 'Communication', traits: ['Witty', 'Sarcastic', 'Dry humor', 'Gentle', 'Blunt', 'Poetic', 'Formal', 'Casual', 'Verbose', 'Terse'] },
@@ -41,13 +42,13 @@ export function TraitsStep() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div>
-        <h2 css={css`font-size: ${theme.typography.fontSize['2xl']}; font-weight: ${theme.typography.fontWeight.light}; margin-bottom: ${theme.spacing[2]};`}>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+        <Typography.Title3 as="h2" serif>
           Add some texture
-        </h2>
-        <p css={css`color: ${theme.colors.text.secondary};`}>
+        </Typography.Title3>
+        <Typography.Body color="secondary">
           These are the adjectives -- the quirks, style, and flavor that make a personality distinctive.
-        </p>
+        </Typography.Body>
       </div>
 
       {/* Selected strip */}
@@ -77,21 +78,18 @@ export function TraitsStep() {
         </div>
       )}
 
-      <p css={css`font-size: ${theme.typography.fontSize.sm}; color: ${theme.colors.text.hint};`}>
+      <Typography.SmallBody color="hint">
         {selected.length} of {MAX_TRAITS} selected
-      </p>
+      </Typography.SmallBody>
 
       {traitCategories.map((cat) => (
         <div key={cat.title} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-          <h3 css={css`
-            font-size: ${theme.typography.fontSize.sm};
-            font-weight: ${theme.typography.fontWeight.medium};
-            color: ${theme.colors.text.hint};
+          <Typography.SmallBodyAlt as="h3" color="hint" css={css`
             text-transform: uppercase;
             letter-spacing: 0.06em;
           `}>
             {cat.title}
-          </h3>
+          </Typography.SmallBodyAlt>
           <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[2]};`}>
             {cat.traits.map((trait) => {
               const isSelected = selected.includes(trait);
@@ -126,12 +124,11 @@ export function TraitsStep() {
         </div>
       ))}
 
-      <div css={css`display: flex; justify-content: space-between; margin-top: ${theme.spacing[4]};`}>
-        <Button variant="ghost" onClick={handleBack}>Back</Button>
-        <Button onClick={handleContinue} disabled={selected.length < 5}>
-          Continue
-        </Button>
-      </div>
+      <OnboardingNav
+        onBack={handleBack}
+        onContinue={handleContinue}
+        continueDisabled={selected.length < 5}
+      />
     </div>
   );
 }

@@ -38,7 +38,7 @@ Before implementing any feature, check for a design spec at `docs/frontend/specs
 ## Visual System Rules
 
 - **Background**: Warm white `#FAF9F4` (light mode), warm dark (dark mode) — NEVER pure white or pure black
-- **Typography**: Plus Jakarta Sans exclusively. Light weight for display, Semibold for headings, Regular for body.
+- **Typography**: Outfit exclusively. Light weight for display, Semibold for headings, Regular for body.
 - **Cards**: Gradient border rim lighting (light from top/top-left). No drop shadows.
 - **Color**: Monochromatic restraint. Color only for semantic meaning (success/warning/error) and emotional state visualizations.
 - **Icons**: Phosphor Icons, line style, consistent stroke weight.

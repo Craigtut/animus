@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Animus — Symbol Exploration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=Crimson+Pro:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --warm-white: #FAF9F4;
+    --warm-dark: #1C1A18;
+    --text-light: #1A1816;
+    --text-dark: #FAF9F4;
+    --sec-light: rgba(26, 24, 22, 0.45);
+    --sec-dark: rgba(250, 249, 244, 0.45);
+    --border-light: rgba(26, 24, 22, 0.08);
+    --border-dark: rgba(250, 249, 244, 0.08);
+    --surface-light: #F5F4EE;
+    --surface-dark: #242220;
+  }
+  body {
+    background: var(--warm-white);
+    color: var(--text-light);
+    font-family: 'Outfit', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Page header */
+  .page-header {
+    padding: 72px 64px 48px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .page-header .label {
+    font-size: 12px; font-weight: 600; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--sec-light); margin-bottom: 16px;
+  }
+  .page-header h1 { font-size: 28px; font-weight: 400; line-height: 1.4; max-width: 700px; }
+  .page-header p { font-size: 15px; color: var(--sec-light); margin-top: 12px; max-width: 600px; line-height: 1.65; }
+
+  /* Territory header */
+  .territory-header {
+    padding: 56px 64px 20px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .territory-header .tag {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--sec-light); margin-bottom: 8px;
+  }
+  .territory-header h2 { font-size: 20px; font-weight: 500; }
+  .territory-header p {
+    font-size: 14px; color: var(--sec-light); margin-top: 8px; max-width: 640px; line-height: 1.65;
+  }
+
+  /* Concept grid */
+  .concept-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .concept-pane {
+    padding: 56px 64px;
+  }
+  .concept-pane.dark {
+    background: var(--warm-dark);
+    color: var(--text-dark);
+  }
+  .concept-pane .mode-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; opacity: 0.3; margin-bottom: 40px;
+  }
+
+  /* Symbol display area */
+  .symbol-display {
+    display: flex;
+    align-items: center;
+    gap: 48px;
+    margin-bottom: 36px;
+  }
+  .symbol-large svg { width: 96px; height: 96px; }
+  .symbol-medium svg { width: 48px; height: 48px; }
+  .symbol-small svg { width: 24px; height: 24px; }
+  .symbol-tiny svg { width: 16px; height: 16px; }
+
+  .symbol-sizes {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  /* Lockup */
+  .lockup {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .lockup svg { width: 40px; height: 40px; }
+  .lockup .wordmark {
+    font-family: 'Outfit', sans-serif;
+    font-size: 28px;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+  }
+
+  .lockup-small {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 32px;
+  }
+  .lockup-small svg { width: 22px; height: 22px; }
+  .lockup-small .wordmark {
+    font-family: 'Outfit', sans-serif;
+    font-size: 16px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+
+  /* Concept notes */
+  .concept-name {
+    font-size: 16px; font-weight: 600; margin-bottom: 8px;
+  }
+  .concept-desc {
+    font-size: 14px; line-height: 1.65; max-width: 480px;
+  }
+  .concept-pane.dark .concept-desc { opacity: 0.6; }
+  .concept-pane:not(.dark) .concept-desc { color: var(--sec-light); }
+
+  /* Animation preview section */
+  .anim-note {
+    margin-top: 20px;
+    font-size: 12px;
+    font-style: italic;
+    opacity: 0.4;
+  }
+
+  /* Breathing animation for demo */
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); opacity: 0.9; }
+    50% { transform: scale(1.04); opacity: 1; }
+  }
+  .breathing svg {
+    animation: breathe 4s ease-in-out infinite;
+  }
+
+  /* Divider */
+  .divider {
+    height: 1px;
+    background: var(--border-light);
+  }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <div class="label">Animus — Symbol Exploration</div>
+  <h1>Six symbol concepts across two territories</h1>
+  <p>Each mark shown at four sizes (96px, 48px, 24px, 16px) in both palettes, with wordmark lockups. Concepts explore breath, emergence, and the space between.</p>
+</div>
+
+
+<!-- ====================================================================== -->
+<!-- TERRITORY 1: THE BREATH                                                 -->
+<!-- ====================================================================== -->
+<div class="territory-header">
+  <div class="tag">Territory 1 — The Breath</div>
+  <h2>Forms that feel like they're mid-inhale</h2>
+  <p>Marks that suggest continuous rhythm, expansion and contraction, the organic quality of respiration. These animate the most naturally — they're built to breathe.</p>
+</div>
+
+<!-- Concept A: The Sigh — Two flowing curves suggesting inhale/exhale -->
+<div class="concept-row">
+  <div class="concept-pane">
+    <div class="mode-label">Light</div>
+    <div class="symbol-display">
+      <div class="symbol-large breathing">
+        <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M48 16C32 16 24 32 24 48C24 64 32 80 48 80" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round" fill="none">
+          </path>
+          <path d="M48 16C64 16 72 32 72 48C72 64 64 80 48 80" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.35">
+          </path>
+          <circle cx="48" cy="48" r="4" fill="#1A1816" opacity="0.15"/>
+        </svg>
+      </div>
+      <div class="symbol-sizes">
+        <div class="symbol-medium">
+          <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M48 16C32 16 24 32 24 48C24 64 32 80 48 80" stroke="#1A1816" stroke-width="3" stroke-linecap="round"/>
+            <path d="M48 16C64 16 72 32 72 48C72 64 64 80 48 80" stroke="#1A1816" stroke-width="3" stroke-linecap="round" opacity="0.35"/>
+            <circle cx="48" cy="48" r="4.5" fill="#1A1816" opacity="0.15"/>
+          </svg>
+        </div>
+        <div class="symbol-small">
+          <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M48 16C32 16 24 32 24 48C24 64 32 80 48 80" stroke="#1A1816" stroke-width="5" stroke-linecap="round"/>
+            <path d="M48 16C64 16 72 32 72 48C72 64 64 80 48 80" stroke="#1A1816" stroke-width="5" stroke-linecap="round" opacity="0.35"/>
+            <circle cx="48" cy="48" r="6" fill="#1A1816" opacity="0.15"/>
+          </svg>
+        </div>
+        <div class="symbol-tiny">
+          <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M48 16C32 16 24 32 24 48C24 64 32 80 48 80" stroke="#1A1816" stroke-width="7" stroke-linecap="round"/>
+            <path d="M48 16C64 16 72 32 72 48C72 64 64 80 48 80" stroke="#1A1816" stroke-width="7" stroke-linecap="round" opacity="0.4"/>
+            <circle cx="48" cy="48" r="7" fill="#1A1816" opacity="0.2"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+    <div class="lockup">
+      <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M48 16C32 16 24 32 24 48C24 64 32 80 48 80" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M48 16C64 16 72 32 72 48C72 64 64 80 48 80" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round" opacity="0.35"/>
+        <circle cx="48" cy="48" r="4" fill="#1A1816" opacity="0.15"/>
+      </svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="lockup-small">
+      <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M48 16C32 16 24 32 24 48C24 64 32 80 48 80" stroke="#1A1816" stroke-width="4" stroke-linecap="round"/>
+        <path d="M48 16C64 16 72 32 72 48C72 64 64 80 48 80" stroke="#1A1816" stroke-width="4" stroke-linecap="round" opacity="0.35"/>
+        <circle cx="48" cy="48" r="5" fill="#1A1816" opacity="0.15"/>
+      </svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="concept-name">A — The Sigh</div>
+    <div class="concept-desc">Two mirrored arcs — one solid, one fading — suggesting a breath cycle. The solid arc is the inhale, the transparent arc is the exhale dissolving. A subtle center point anchors the form. Animates by shifting which arc is solid and which fades.</div>
+  </div>
+  <div class="concept-pane dark">
+    <div class="mode-label">Dark</div>
+    <div class="symbol-display">
+      <div class="symbol-large breathing">
+        <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M48 16C32 16 24 32 24 48C24 64 32 80 48 80" stroke="#FAF9F4" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M48 16C64 16 72 32 72 48C72 64 64 80 48 80" stroke="#FAF9F4" stroke-width="2.5" stroke-linecap="round" opacity="0.3"/>
+          <circle cx="48" cy="48" r="4" fill="#FAF9F4" opacity="0.12"/>
+        </svg>
+      </div>
+      <div class="symbol-sizes">
+        <div class="symbol-medium">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C32 16 24 32 24 48C24 64 32 80 48 80" stroke="#FAF9F4" stroke-width="3" stroke-linecap="round"/><path d="M48 16C64 16 72 32 72 48C72 64 64 80 48 80" stroke="#FAF9F4" stroke-width="3" stroke-linecap="round" opacity="0.3"/><circle cx="48" cy="48" r="4.5" fill="#FAF9F4" opacity="0.12"/></svg>
+        </div>
+        <div class="symbol-small">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C32 16 24 32 24 48C24 64 32 80 48 80" stroke="#FAF9F4" stroke-width="5" stroke-linecap="round"/><path d="M48 16C64 16 72 32 72 48C72 64 64 80 48 80" stroke="#FAF9F4" stroke-width="5" stroke-linecap="round" opacity="0.3"/><circle cx="48" cy="48" r="6" fill="#FAF9F4" opacity="0.12"/></svg>
+        </div>
+        <div class="symbol-tiny">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C32 16 24 32 24 48C24 64 32 80 48 80" stroke="#FAF9F4" stroke-width="7" stroke-linecap="round"/><path d="M48 16C64 16 72 32 72 48C72 64 64 80 48 80" stroke="#FAF9F4" stroke-width="7" stroke-linecap="round" opacity="0.35"/><circle cx="48" cy="48" r="7" fill="#FAF9F4" opacity="0.15"/></svg>
+        </div>
+      </div>
+    </div>
+    <div class="lockup">
+      <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C32 16 24 32 24 48C24 64 32 80 48 80" stroke="#FAF9F4" stroke-width="2.5" stroke-linecap="round"/><path d="M48 16C64 16 72 32 72 48C72 64 64 80 48 80" stroke="#FAF9F4" stroke-width="2.5" stroke-linecap="round" opacity="0.3"/><circle cx="48" cy="48" r="4" fill="#FAF9F4" opacity="0.12"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="lockup-small">
+      <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C32 16 24 32 24 48C24 64 32 80 48 80" stroke="#FAF9F4" stroke-width="4" stroke-linecap="round"/><path d="M48 16C64 16 72 32 72 48C72 64 64 80 48 80" stroke="#FAF9F4" stroke-width="4" stroke-linecap="round" opacity="0.3"/><circle cx="48" cy="48" r="5" fill="#FAF9F4" opacity="0.12"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="concept-name">A — The Sigh</div>
+    <div class="concept-desc">The fading arc becomes even more atmospheric in dark mode — like breath visible in cold air. The center point acts as a subtle anchor of warmth.</div>
+  </div>
+</div>
+
+
+<!-- Concept B: The Pulse — An organic ring that varies in thickness -->
+<div class="concept-row">
+  <div class="concept-pane">
+    <div class="mode-label">Light</div>
+    <div class="symbol-display">
+      <div class="symbol-large breathing">
+        <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <ellipse cx="48" cy="48" rx="30" ry="32" stroke="#1A1816" stroke-width="2" opacity="0.12"/>
+          <path d="M48 14C30 14 18 28 18 48C18 68 30 82 48 82C66 82 78 68 78 48C78 28 66 14 48 14Z" stroke="#1A1816" stroke-width="0" fill="none"/>
+          <!-- Organic ring with varying thickness -->
+          <path d="M48 16C29 16 16 30 16 48C16 66 29 80 48 80" stroke="#1A1816" stroke-width="4" stroke-linecap="round" opacity="0.9"/>
+          <path d="M48 80C67 80 80 66 80 48C80 30 67 16 48 16" stroke="#1A1816" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+        </svg>
+      </div>
+      <div class="symbol-sizes">
+        <div class="symbol-medium">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C29 16 16 30 16 48C16 66 29 80 48 80" stroke="#1A1816" stroke-width="5" stroke-linecap="round" opacity="0.9"/><path d="M48 80C67 80 80 66 80 48C80 30 67 16 48 16" stroke="#1A1816" stroke-width="2" stroke-linecap="round" opacity="0.4"/></svg>
+        </div>
+        <div class="symbol-small">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C29 16 16 30 16 48C16 66 29 80 48 80" stroke="#1A1816" stroke-width="7" stroke-linecap="round" opacity="0.9"/><path d="M48 80C67 80 80 66 80 48C80 30 67 16 48 16" stroke="#1A1816" stroke-width="3" stroke-linecap="round" opacity="0.4"/></svg>
+        </div>
+        <div class="symbol-tiny">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C29 16 16 30 16 48C16 66 29 80 48 80" stroke="#1A1816" stroke-width="9" stroke-linecap="round" opacity="0.9"/><path d="M48 80C67 80 80 66 80 48C80 30 67 16 48 16" stroke="#1A1816" stroke-width="4" stroke-linecap="round" opacity="0.45"/></svg>
+        </div>
+      </div>
+    </div>
+    <div class="lockup">
+      <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C29 16 16 30 16 48C16 66 29 80 48 80" stroke="#1A1816" stroke-width="4" stroke-linecap="round" opacity="0.9"/><path d="M48 80C67 80 80 66 80 48C80 30 67 16 48 16" stroke="#1A1816" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="lockup-small">
+      <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C29 16 16 30 16 48C16 66 29 80 48 80" stroke="#1A1816" stroke-width="5.5" stroke-linecap="round" opacity="0.9"/><path d="M48 80C67 80 80 66 80 48C80 30 67 16 48 16" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round" opacity="0.4"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="concept-name">B — The Pulse</div>
+    <div class="concept-desc">A broken ring with varying stroke weight — thick where it's "present," thin where it's fading. Suggests a pulse traveling around a circuit. Not a loading spinner — more like a heartbeat captured in form. Animates by rotating which section is thick vs thin.</div>
+  </div>
+  <div class="concept-pane dark">
+    <div class="mode-label">Dark</div>
+    <div class="symbol-display">
+      <div class="symbol-large breathing">
+        <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C29 16 16 30 16 48C16 66 29 80 48 80" stroke="#FAF9F4" stroke-width="4" stroke-linecap="round" opacity="0.9"/><path d="M48 80C67 80 80 66 80 48C80 30 67 16 48 16" stroke="#FAF9F4" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/></svg>
+      </div>
+      <div class="symbol-sizes">
+        <div class="symbol-medium">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C29 16 16 30 16 48C16 66 29 80 48 80" stroke="#FAF9F4" stroke-width="5" stroke-linecap="round" opacity="0.9"/><path d="M48 80C67 80 80 66 80 48C80 30 67 16 48 16" stroke="#FAF9F4" stroke-width="2" stroke-linecap="round" opacity="0.3"/></svg>
+        </div>
+        <div class="symbol-small">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C29 16 16 30 16 48C16 66 29 80 48 80" stroke="#FAF9F4" stroke-width="7" stroke-linecap="round" opacity="0.9"/><path d="M48 80C67 80 80 66 80 48C80 30 67 16 48 16" stroke="#FAF9F4" stroke-width="3" stroke-linecap="round" opacity="0.3"/></svg>
+        </div>
+        <div class="symbol-tiny">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C29 16 16 30 16 48C16 66 29 80 48 80" stroke="#FAF9F4" stroke-width="9" stroke-linecap="round" opacity="0.9"/><path d="M48 80C67 80 80 66 80 48C80 30 67 16 48 16" stroke="#FAF9F4" stroke-width="4" stroke-linecap="round" opacity="0.35"/></svg>
+        </div>
+      </div>
+    </div>
+    <div class="lockup">
+      <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C29 16 16 30 16 48C16 66 29 80 48 80" stroke="#FAF9F4" stroke-width="4" stroke-linecap="round" opacity="0.9"/><path d="M48 80C67 80 80 66 80 48C80 30 67 16 48 16" stroke="#FAF9F4" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="lockup-small">
+      <svg viewBox="0 0 96 96" fill="none"><path d="M48 16C29 16 16 30 16 48C16 66 29 80 48 80" stroke="#FAF9F4" stroke-width="5.5" stroke-linecap="round" opacity="0.9"/><path d="M48 80C67 80 80 66 80 48C80 30 67 16 48 16" stroke="#FAF9F4" stroke-width="2.5" stroke-linecap="round" opacity="0.3"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="concept-name">B — The Pulse</div>
+    <div class="concept-desc">In dark mode the thin arc nearly dissolves into the background, making the thick arc feel more like a presence — something emerging from darkness rather than drawn on a surface.</div>
+  </div>
+</div>
+
+
+<!-- Concept C: The Tide — A flowing S-curve suggesting continuous movement -->
+<div class="concept-row">
+  <div class="concept-pane">
+    <div class="mode-label">Light</div>
+    <div class="symbol-display">
+      <div class="symbol-large breathing">
+        <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M20 48C20 32 34 20 48 20C62 20 68 34 68 48C68 62 62 76 48 76C34 76 20 62 20 48Z" stroke="#1A1816" stroke-width="0" fill="none"/>
+          <!-- Flowing organic S-curve -->
+          <path d="M24 56C28 36 38 20 48 20C58 20 62 36 62 48C62 60 58 76 48 76C38 76 28 68 24 56Z" fill="#1A1816" opacity="0.08"/>
+          <path d="M28 58C32 40 40 24 48 24C56 24 58 38 58 48C58 58 56 72 48 72C40 72 32 64 28 58Z" fill="#1A1816" opacity="0.12"/>
+          <path d="M34 56C36 44 42 30 48 30C54 30 54 42 54 48C54 54 54 66 48 66C42 66 36 60 34 56Z" fill="#1A1816" opacity="0.25"/>
+        </svg>
+      </div>
+      <div class="symbol-sizes">
+        <div class="symbol-medium">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M24 56C28 36 38 20 48 20C58 20 62 36 62 48C62 60 58 76 48 76C38 76 28 68 24 56Z" fill="#1A1816" opacity="0.08"/><path d="M28 58C32 40 40 24 48 24C56 24 58 38 58 48C58 58 56 72 48 72C40 72 32 64 28 58Z" fill="#1A1816" opacity="0.12"/><path d="M34 56C36 44 42 30 48 30C54 30 54 42 54 48C54 54 54 66 48 66C42 66 36 60 34 56Z" fill="#1A1816" opacity="0.25"/></svg>
+        </div>
+        <div class="symbol-small">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M24 56C28 36 38 20 48 20C58 20 62 36 62 48C62 60 58 76 48 76C38 76 28 68 24 56Z" fill="#1A1816" opacity="0.1"/><path d="M28 58C32 40 40 24 48 24C56 24 58 38 58 48C58 58 56 72 48 72C40 72 32 64 28 58Z" fill="#1A1816" opacity="0.15"/><path d="M34 56C36 44 42 30 48 30C54 30 54 42 54 48C54 54 54 66 48 66C42 66 36 60 34 56Z" fill="#1A1816" opacity="0.35"/></svg>
+        </div>
+        <div class="symbol-tiny">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M24 56C28 36 38 20 48 20C58 20 62 36 62 48C62 60 58 76 48 76C38 76 28 68 24 56Z" fill="#1A1816" opacity="0.12"/><path d="M28 58C32 40 40 24 48 24C56 24 58 38 58 48C58 58 56 72 48 72C40 72 32 64 28 58Z" fill="#1A1816" opacity="0.18"/><path d="M34 56C36 44 42 30 48 30C54 30 54 42 54 48C54 54 54 66 48 66C42 66 36 60 34 56Z" fill="#1A1816" opacity="0.4"/></svg>
+        </div>
+      </div>
+    </div>
+    <div class="lockup">
+      <svg viewBox="0 0 96 96" fill="none"><path d="M24 56C28 36 38 20 48 20C58 20 62 36 62 48C62 60 58 76 48 76C38 76 28 68 24 56Z" fill="#1A1816" opacity="0.08"/><path d="M28 58C32 40 40 24 48 24C56 24 58 38 58 48C58 58 56 72 48 72C40 72 32 64 28 58Z" fill="#1A1816" opacity="0.12"/><path d="M34 56C36 44 42 30 48 30C54 30 54 42 54 48C54 54 54 66 48 66C42 66 36 60 34 56Z" fill="#1A1816" opacity="0.25"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="concept-name">C — The Tide</div>
+    <div class="concept-desc">Layered organic shapes that overlap and undulate — like looking at something through water. Three translucent layers create depth. The form is never the same twice when animated — layers drift independently. Feels alive through layered transparency rather than line.</div>
+  </div>
+  <div class="concept-pane dark">
+    <div class="mode-label">Dark</div>
+    <div class="symbol-display">
+      <div class="symbol-large breathing">
+        <svg viewBox="0 0 96 96" fill="none"><path d="M24 56C28 36 38 20 48 20C58 20 62 36 62 48C62 60 58 76 48 76C38 76 28 68 24 56Z" fill="#FAF9F4" opacity="0.06"/><path d="M28 58C32 40 40 24 48 24C56 24 58 38 58 48C58 58 56 72 48 72C40 72 32 64 28 58Z" fill="#FAF9F4" opacity="0.1"/><path d="M34 56C36 44 42 30 48 30C54 30 54 42 54 48C54 54 54 66 48 66C42 66 36 60 34 56Z" fill="#FAF9F4" opacity="0.2"/></svg>
+      </div>
+      <div class="symbol-sizes">
+        <div class="symbol-medium"><svg viewBox="0 0 96 96" fill="none"><path d="M24 56C28 36 38 20 48 20C58 20 62 36 62 48C62 60 58 76 48 76C38 76 28 68 24 56Z" fill="#FAF9F4" opacity="0.06"/><path d="M28 58C32 40 40 24 48 24C56 24 58 38 58 48C58 58 56 72 48 72C40 72 32 64 28 58Z" fill="#FAF9F4" opacity="0.1"/><path d="M34 56C36 44 42 30 48 30C54 30 54 42 54 48C54 54 54 66 48 66C42 66 36 60 34 56Z" fill="#FAF9F4" opacity="0.2"/></svg></div>
+        <div class="symbol-small"><svg viewBox="0 0 96 96" fill="none"><path d="M24 56C28 36 38 20 48 20C58 20 62 36 62 48C62 60 58 76 48 76C38 76 28 68 24 56Z" fill="#FAF9F4" opacity="0.08"/><path d="M28 58C32 40 40 24 48 24C56 24 58 38 58 48C58 58 56 72 48 72C40 72 32 64 28 58Z" fill="#FAF9F4" opacity="0.12"/><path d="M34 56C36 44 42 30 48 30C54 30 54 42 54 48C54 54 54 66 48 66C42 66 36 60 34 56Z" fill="#FAF9F4" opacity="0.3"/></svg></div>
+        <div class="symbol-tiny"><svg viewBox="0 0 96 96" fill="none"><path d="M24 56C28 36 38 20 48 20C58 20 62 36 62 48C62 60 58 76 48 76C38 76 28 68 24 56Z" fill="#FAF9F4" opacity="0.1"/><path d="M28 58C32 40 40 24 48 24C56 24 58 38 58 48C58 58 56 72 48 72C40 72 32 64 28 58Z" fill="#FAF9F4" opacity="0.15"/><path d="M34 56C36 44 42 30 48 30C54 30 54 42 54 48C54 54 54 66 48 66C42 66 36 60 34 56Z" fill="#FAF9F4" opacity="0.35"/></svg></div>
+      </div>
+    </div>
+    <div class="lockup">
+      <svg viewBox="0 0 96 96" fill="none"><path d="M24 56C28 36 38 20 48 20C58 20 62 36 62 48C62 60 58 76 48 76C38 76 28 68 24 56Z" fill="#FAF9F4" opacity="0.06"/><path d="M28 58C32 40 40 24 48 24C56 24 58 38 58 48C58 58 56 72 48 72C40 72 32 64 28 58Z" fill="#FAF9F4" opacity="0.1"/><path d="M34 56C36 44 42 30 48 30C54 30 54 42 54 48C54 54 54 66 48 66C42 66 36 60 34 56Z" fill="#FAF9F4" opacity="0.2"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="concept-name">C — The Tide</div>
+    <div class="concept-desc">In dark mode the layers glow softly — warmth emanating outward. The deepest layer is barely there, the inner layer is most present. Creates a sense of interiority — looking into something, not at it.</div>
+  </div>
+</div>
+
+
+<!-- ====================================================================== -->
+<!-- TERRITORY 2: THE EMERGENCE                                              -->
+<!-- ====================================================================== -->
+<div class="territory-header">
+  <div class="tag">Territory 2 — The Emergence</div>
+  <h2>Forms in the process of becoming</h2>
+  <p>Marks that feel incomplete in a deliberate way — something taking shape, coalescing, arriving. These connect to the idea that Animus is always in a state of becoming, never static.</p>
+</div>
+
+<!-- Concept D: The Coalescence — Dots/particles gathering into form -->
+<div class="concept-row">
+  <div class="concept-pane">
+    <div class="mode-label">Light</div>
+    <div class="symbol-display">
+      <div class="symbol-large breathing">
+        <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Particles coalescing into a sphere-like form -->
+          <!-- Dense center -->
+          <circle cx="48" cy="48" r="6" fill="#1A1816" opacity="0.5"/>
+          <circle cx="44" cy="42" r="3.5" fill="#1A1816" opacity="0.4"/>
+          <circle cx="53" cy="44" r="3" fill="#1A1816" opacity="0.35"/>
+          <circle cx="46" cy="54" r="3.5" fill="#1A1816" opacity="0.38"/>
+          <circle cx="54" cy="52" r="2.5" fill="#1A1816" opacity="0.3"/>
+          <!-- Mid ring -->
+          <circle cx="38" cy="36" r="2.5" fill="#1A1816" opacity="0.22"/>
+          <circle cx="58" cy="38" r="2" fill="#1A1816" opacity="0.2"/>
+          <circle cx="60" cy="54" r="2.5" fill="#1A1816" opacity="0.18"/>
+          <circle cx="36" cy="56" r="2" fill="#1A1816" opacity="0.2"/>
+          <circle cx="42" cy="34" r="1.5" fill="#1A1816" opacity="0.18"/>
+          <circle cx="56" cy="60" r="1.5" fill="#1A1816" opacity="0.15"/>
+          <!-- Outer scatter -->
+          <circle cx="30" cy="30" r="1.5" fill="#1A1816" opacity="0.1"/>
+          <circle cx="66" cy="32" r="1.5" fill="#1A1816" opacity="0.08"/>
+          <circle cx="68" cy="62" r="1" fill="#1A1816" opacity="0.08"/>
+          <circle cx="28" cy="60" r="1" fill="#1A1816" opacity="0.06"/>
+          <circle cx="34" cy="24" r="1" fill="#1A1816" opacity="0.06"/>
+          <circle cx="62" cy="68" r="1" fill="#1A1816" opacity="0.05"/>
+          <circle cx="26" cy="44" r="0.8" fill="#1A1816" opacity="0.05"/>
+          <circle cx="70" cy="46" r="0.8" fill="#1A1816" opacity="0.04"/>
+        </svg>
+      </div>
+      <div class="symbol-sizes">
+        <div class="symbol-medium">
+          <svg viewBox="0 0 96 96" fill="none"><circle cx="48" cy="48" r="7" fill="#1A1816" opacity="0.5"/><circle cx="44" cy="42" r="4" fill="#1A1816" opacity="0.35"/><circle cx="53" cy="44" r="3.5" fill="#1A1816" opacity="0.3"/><circle cx="46" cy="54" r="4" fill="#1A1816" opacity="0.33"/><circle cx="54" cy="52" r="3" fill="#1A1816" opacity="0.25"/><circle cx="38" cy="36" r="2.5" fill="#1A1816" opacity="0.18"/><circle cx="58" cy="38" r="2.5" fill="#1A1816" opacity="0.15"/><circle cx="60" cy="56" r="2.5" fill="#1A1816" opacity="0.14"/><circle cx="36" cy="58" r="2" fill="#1A1816" opacity="0.15"/><circle cx="30" cy="30" r="1.5" fill="#1A1816" opacity="0.08"/><circle cx="66" cy="64" r="1.5" fill="#1A1816" opacity="0.06"/></svg>
+        </div>
+        <div class="symbol-small">
+          <svg viewBox="0 0 96 96" fill="none"><circle cx="48" cy="48" r="10" fill="#1A1816" opacity="0.45"/><circle cx="40" cy="40" r="5" fill="#1A1816" opacity="0.25"/><circle cx="56" cy="42" r="4.5" fill="#1A1816" opacity="0.22"/><circle cx="44" cy="56" r="5" fill="#1A1816" opacity="0.25"/><circle cx="56" cy="56" r="4" fill="#1A1816" opacity="0.18"/><circle cx="32" cy="34" r="3" fill="#1A1816" opacity="0.1"/><circle cx="64" cy="58" r="2.5" fill="#1A1816" opacity="0.08"/></svg>
+        </div>
+        <div class="symbol-tiny">
+          <svg viewBox="0 0 96 96" fill="none"><circle cx="48" cy="48" r="14" fill="#1A1816" opacity="0.4"/><circle cx="38" cy="38" r="6" fill="#1A1816" opacity="0.2"/><circle cx="58" cy="42" r="5" fill="#1A1816" opacity="0.18"/><circle cx="42" cy="58" r="6" fill="#1A1816" opacity="0.2"/><circle cx="58" cy="56" r="4" fill="#1A1816" opacity="0.12"/></svg>
+        </div>
+      </div>
+    </div>
+    <div class="lockup">
+      <svg viewBox="0 0 96 96" fill="none"><circle cx="48" cy="48" r="6" fill="#1A1816" opacity="0.5"/><circle cx="44" cy="42" r="3.5" fill="#1A1816" opacity="0.4"/><circle cx="53" cy="44" r="3" fill="#1A1816" opacity="0.35"/><circle cx="46" cy="54" r="3.5" fill="#1A1816" opacity="0.38"/><circle cx="54" cy="52" r="2.5" fill="#1A1816" opacity="0.3"/><circle cx="38" cy="36" r="2.5" fill="#1A1816" opacity="0.22"/><circle cx="58" cy="38" r="2" fill="#1A1816" opacity="0.2"/><circle cx="60" cy="54" r="2.5" fill="#1A1816" opacity="0.18"/><circle cx="36" cy="56" r="2" fill="#1A1816" opacity="0.2"/><circle cx="30" cy="30" r="1.5" fill="#1A1816" opacity="0.1"/><circle cx="66" cy="32" r="1.5" fill="#1A1816" opacity="0.08"/><circle cx="68" cy="62" r="1" fill="#1A1816" opacity="0.08"/><circle cx="28" cy="60" r="1" fill="#1A1816" opacity="0.06"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="lockup-small">
+      <svg viewBox="0 0 96 96" fill="none"><circle cx="48" cy="48" r="8" fill="#1A1816" opacity="0.45"/><circle cx="42" cy="40" r="4.5" fill="#1A1816" opacity="0.3"/><circle cx="54" cy="42" r="4" fill="#1A1816" opacity="0.28"/><circle cx="44" cy="56" r="4.5" fill="#1A1816" opacity="0.3"/><circle cx="56" cy="54" r="3" fill="#1A1816" opacity="0.2"/><circle cx="36" cy="34" r="2.5" fill="#1A1816" opacity="0.12"/><circle cx="62" cy="56" r="2" fill="#1A1816" opacity="0.1"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="concept-name">D — The Coalescence</div>
+    <div class="concept-desc">Particles gathering into form — dense at center, scattered at edges. Always in the process of coming together, never fully resolved. Animates beautifully — particles drift, orbit, breathe inward and outward. The most "alive" feeling of all concepts. At small sizes, simplifies to a soft cluster.</div>
+  </div>
+  <div class="concept-pane dark">
+    <div class="mode-label">Dark</div>
+    <div class="symbol-display">
+      <div class="symbol-large breathing">
+        <svg viewBox="0 0 96 96" fill="none"><circle cx="48" cy="48" r="6" fill="#FAF9F4" opacity="0.45"/><circle cx="44" cy="42" r="3.5" fill="#FAF9F4" opacity="0.35"/><circle cx="53" cy="44" r="3" fill="#FAF9F4" opacity="0.3"/><circle cx="46" cy="54" r="3.5" fill="#FAF9F4" opacity="0.33"/><circle cx="54" cy="52" r="2.5" fill="#FAF9F4" opacity="0.25"/><circle cx="38" cy="36" r="2.5" fill="#FAF9F4" opacity="0.18"/><circle cx="58" cy="38" r="2" fill="#FAF9F4" opacity="0.15"/><circle cx="60" cy="54" r="2.5" fill="#FAF9F4" opacity="0.14"/><circle cx="36" cy="56" r="2" fill="#FAF9F4" opacity="0.15"/><circle cx="30" cy="30" r="1.5" fill="#FAF9F4" opacity="0.08"/><circle cx="66" cy="32" r="1.5" fill="#FAF9F4" opacity="0.06"/><circle cx="68" cy="62" r="1" fill="#FAF9F4" opacity="0.06"/><circle cx="28" cy="60" r="1" fill="#FAF9F4" opacity="0.05"/><circle cx="34" cy="24" r="1" fill="#FAF9F4" opacity="0.04"/><circle cx="62" cy="68" r="1" fill="#FAF9F4" opacity="0.04"/><circle cx="26" cy="44" r="0.8" fill="#FAF9F4" opacity="0.04"/><circle cx="70" cy="46" r="0.8" fill="#FAF9F4" opacity="0.03"/></svg>
+      </div>
+      <div class="symbol-sizes">
+        <div class="symbol-medium"><svg viewBox="0 0 96 96" fill="none"><circle cx="48" cy="48" r="7" fill="#FAF9F4" opacity="0.45"/><circle cx="44" cy="42" r="4" fill="#FAF9F4" opacity="0.3"/><circle cx="53" cy="44" r="3.5" fill="#FAF9F4" opacity="0.25"/><circle cx="46" cy="54" r="4" fill="#FAF9F4" opacity="0.28"/><circle cx="54" cy="52" r="3" fill="#FAF9F4" opacity="0.2"/><circle cx="38" cy="36" r="2.5" fill="#FAF9F4" opacity="0.14"/><circle cx="58" cy="38" r="2.5" fill="#FAF9F4" opacity="0.12"/><circle cx="60" cy="56" r="2.5" fill="#FAF9F4" opacity="0.1"/><circle cx="36" cy="58" r="2" fill="#FAF9F4" opacity="0.1"/><circle cx="30" cy="30" r="1.5" fill="#FAF9F4" opacity="0.06"/></svg></div>
+        <div class="symbol-small"><svg viewBox="0 0 96 96" fill="none"><circle cx="48" cy="48" r="10" fill="#FAF9F4" opacity="0.4"/><circle cx="40" cy="40" r="5" fill="#FAF9F4" opacity="0.2"/><circle cx="56" cy="42" r="4.5" fill="#FAF9F4" opacity="0.18"/><circle cx="44" cy="56" r="5" fill="#FAF9F4" opacity="0.2"/><circle cx="56" cy="56" r="4" fill="#FAF9F4" opacity="0.14"/><circle cx="32" cy="34" r="3" fill="#FAF9F4" opacity="0.08"/></svg></div>
+        <div class="symbol-tiny"><svg viewBox="0 0 96 96" fill="none"><circle cx="48" cy="48" r="14" fill="#FAF9F4" opacity="0.35"/><circle cx="38" cy="38" r="6" fill="#FAF9F4" opacity="0.15"/><circle cx="58" cy="42" r="5" fill="#FAF9F4" opacity="0.14"/><circle cx="42" cy="58" r="6" fill="#FAF9F4" opacity="0.15"/></svg></div>
+      </div>
+    </div>
+    <div class="lockup">
+      <svg viewBox="0 0 96 96" fill="none"><circle cx="48" cy="48" r="6" fill="#FAF9F4" opacity="0.45"/><circle cx="44" cy="42" r="3.5" fill="#FAF9F4" opacity="0.35"/><circle cx="53" cy="44" r="3" fill="#FAF9F4" opacity="0.3"/><circle cx="46" cy="54" r="3.5" fill="#FAF9F4" opacity="0.33"/><circle cx="54" cy="52" r="2.5" fill="#FAF9F4" opacity="0.25"/><circle cx="38" cy="36" r="2.5" fill="#FAF9F4" opacity="0.18"/><circle cx="58" cy="38" r="2" fill="#FAF9F4" opacity="0.15"/><circle cx="60" cy="54" r="2.5" fill="#FAF9F4" opacity="0.14"/><circle cx="36" cy="56" r="2" fill="#FAF9F4" opacity="0.15"/><circle cx="30" cy="30" r="1.5" fill="#FAF9F4" opacity="0.08"/><circle cx="66" cy="32" r="1.5" fill="#FAF9F4" opacity="0.06"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="concept-name">D — The Coalescence</div>
+    <div class="concept-desc">In dark mode the particles become points of light — like stars gathering, or fireflies. The scatter feels cosmic. This is the concept most connected to the "particle fields" visualization described in the brand vision doc.</div>
+  </div>
+</div>
+
+
+<!-- Concept E: The Becoming — A form partially dissolved/forming -->
+<div class="concept-row">
+  <div class="concept-pane">
+    <div class="mode-label">Light</div>
+    <div class="symbol-display">
+      <div class="symbol-large breathing">
+        <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- A circle that's dissolving on one side -->
+          <path d="M48 18C64.6 18 78 31.4 78 48C78 64.6 64.6 78 48 78C31.4 78 18 64.6 18 48" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round" opacity="0.7"/>
+          <!-- Dissolving fragments -->
+          <path d="M18 48C18 42 19.5 36.5 22 31.5" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round" opacity="0.45"/>
+          <path d="M25 27C27.5 23.5 30.5 20.5 34 18.5" stroke="#1A1816" stroke-width="2" stroke-linecap="round" opacity="0.25"/>
+          <path d="M38 17C40.5 16.3 43 16 45.5 16" stroke="#1A1816" stroke-width="1.5" stroke-linecap="round" opacity="0.12"/>
+        </svg>
+      </div>
+      <div class="symbol-sizes">
+        <div class="symbol-medium">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M48 18C64.6 18 78 31.4 78 48C78 64.6 64.6 78 48 78C31.4 78 18 64.6 18 48" stroke="#1A1816" stroke-width="3" stroke-linecap="round" opacity="0.7"/><path d="M18 48C18 42 19.5 36.5 22 31.5" stroke="#1A1816" stroke-width="3" stroke-linecap="round" opacity="0.45"/><path d="M25 27C27.5 23.5 30.5 20.5 34 18.5" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round" opacity="0.25"/><path d="M38 17C40.5 16.3 43 16 45.5 16" stroke="#1A1816" stroke-width="2" stroke-linecap="round" opacity="0.12"/></svg>
+        </div>
+        <div class="symbol-small">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M48 18C64.6 18 78 31.4 78 48C78 64.6 64.6 78 48 78C31.4 78 18 64.6 18 48" stroke="#1A1816" stroke-width="5" stroke-linecap="round" opacity="0.7"/><path d="M18 48C18 42 19.5 36.5 22 31.5" stroke="#1A1816" stroke-width="4.5" stroke-linecap="round" opacity="0.45"/><path d="M25 27C27.5 23.5 30.5 20.5 34 18.5" stroke="#1A1816" stroke-width="3.5" stroke-linecap="round" opacity="0.25"/></svg>
+        </div>
+        <div class="symbol-tiny">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M48 18C64.6 18 78 31.4 78 48C78 64.6 64.6 78 48 78C31.4 78 18 64.6 18 48" stroke="#1A1816" stroke-width="7" stroke-linecap="round" opacity="0.7"/><path d="M18 48C18 42 19.5 36.5 22 31.5" stroke="#1A1816" stroke-width="6" stroke-linecap="round" opacity="0.4"/><path d="M25 27C28 24 31 21 35 19" stroke="#1A1816" stroke-width="4" stroke-linecap="round" opacity="0.2"/></svg>
+        </div>
+      </div>
+    </div>
+    <div class="lockup">
+      <svg viewBox="0 0 96 96" fill="none"><path d="M48 18C64.6 18 78 31.4 78 48C78 64.6 64.6 78 48 78C31.4 78 18 64.6 18 48" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round" opacity="0.7"/><path d="M18 48C18 42 19.5 36.5 22 31.5" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round" opacity="0.45"/><path d="M25 27C27.5 23.5 30.5 20.5 34 18.5" stroke="#1A1816" stroke-width="2" stroke-linecap="round" opacity="0.25"/><path d="M38 17C40.5 16.3 43 16 45.5 16" stroke="#1A1816" stroke-width="1.5" stroke-linecap="round" opacity="0.12"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="lockup-small">
+      <svg viewBox="0 0 96 96" fill="none"><path d="M48 18C64.6 18 78 31.4 78 48C78 64.6 64.6 78 48 78C31.4 78 18 64.6 18 48" stroke="#1A1816" stroke-width="3.5" stroke-linecap="round" opacity="0.7"/><path d="M18 48C18 42 19.5 36.5 22 31.5" stroke="#1A1816" stroke-width="3" stroke-linecap="round" opacity="0.45"/><path d="M25 27C27.5 23.5 30.5 20.5 34 18.5" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round" opacity="0.25"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="concept-name">E — The Becoming</div>
+    <div class="concept-desc">A circle that's almost complete but dissolves into fragments on one side. The form is in the process of arriving — or perhaps departing. The gap isn't broken; it's transforming. Animates by slowly rotating which section is dissolving, so the mark is always in flux, always becoming.</div>
+  </div>
+  <div class="concept-pane dark">
+    <div class="mode-label">Dark</div>
+    <div class="symbol-display">
+      <div class="symbol-large breathing">
+        <svg viewBox="0 0 96 96" fill="none"><path d="M48 18C64.6 18 78 31.4 78 48C78 64.6 64.6 78 48 78C31.4 78 18 64.6 18 48" stroke="#FAF9F4" stroke-width="2.5" stroke-linecap="round" opacity="0.65"/><path d="M18 48C18 42 19.5 36.5 22 31.5" stroke="#FAF9F4" stroke-width="2.5" stroke-linecap="round" opacity="0.35"/><path d="M25 27C27.5 23.5 30.5 20.5 34 18.5" stroke="#FAF9F4" stroke-width="2" stroke-linecap="round" opacity="0.18"/><path d="M38 17C40.5 16.3 43 16 45.5 16" stroke="#FAF9F4" stroke-width="1.5" stroke-linecap="round" opacity="0.08"/></svg>
+      </div>
+      <div class="symbol-sizes">
+        <div class="symbol-medium"><svg viewBox="0 0 96 96" fill="none"><path d="M48 18C64.6 18 78 31.4 78 48C78 64.6 64.6 78 48 78C31.4 78 18 64.6 18 48" stroke="#FAF9F4" stroke-width="3" stroke-linecap="round" opacity="0.65"/><path d="M18 48C18 42 19.5 36.5 22 31.5" stroke="#FAF9F4" stroke-width="3" stroke-linecap="round" opacity="0.35"/><path d="M25 27C27.5 23.5 30.5 20.5 34 18.5" stroke="#FAF9F4" stroke-width="2.5" stroke-linecap="round" opacity="0.18"/></svg></div>
+        <div class="symbol-small"><svg viewBox="0 0 96 96" fill="none"><path d="M48 18C64.6 18 78 31.4 78 48C78 64.6 64.6 78 48 78C31.4 78 18 64.6 18 48" stroke="#FAF9F4" stroke-width="5" stroke-linecap="round" opacity="0.65"/><path d="M18 48C18 42 19.5 36.5 22 31.5" stroke="#FAF9F4" stroke-width="4.5" stroke-linecap="round" opacity="0.35"/><path d="M25 27C28 24 31 21 35 19" stroke="#FAF9F4" stroke-width="3.5" stroke-linecap="round" opacity="0.18"/></svg></div>
+        <div class="symbol-tiny"><svg viewBox="0 0 96 96" fill="none"><path d="M48 18C64.6 18 78 31.4 78 48C78 64.6 64.6 78 48 78C31.4 78 18 64.6 18 48" stroke="#FAF9F4" stroke-width="7" stroke-linecap="round" opacity="0.65"/><path d="M18 48C18 42 19.5 36.5 22 31.5" stroke="#FAF9F4" stroke-width="6" stroke-linecap="round" opacity="0.3"/><path d="M25 27C28 24 31 21 35 19" stroke="#FAF9F4" stroke-width="4" stroke-linecap="round" opacity="0.15"/></svg></div>
+      </div>
+    </div>
+    <div class="lockup">
+      <svg viewBox="0 0 96 96" fill="none"><path d="M48 18C64.6 18 78 31.4 78 48C78 64.6 64.6 78 48 78C31.4 78 18 64.6 18 48" stroke="#FAF9F4" stroke-width="2.5" stroke-linecap="round" opacity="0.65"/><path d="M18 48C18 42 19.5 36.5 22 31.5" stroke="#FAF9F4" stroke-width="2.5" stroke-linecap="round" opacity="0.35"/><path d="M25 27C27.5 23.5 30.5 20.5 34 18.5" stroke="#FAF9F4" stroke-width="2" stroke-linecap="round" opacity="0.18"/><path d="M38 17C40.5 16.3 43 16 45.5 16" stroke="#FAF9F4" stroke-width="1.5" stroke-linecap="round" opacity="0.08"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="concept-name">E — The Becoming</div>
+    <div class="concept-desc">In dark mode, the dissolving fragments fade into the void naturally — it feels like the form is materializing from darkness. There's something meditative about a shape that's always arriving, never quite complete.</div>
+  </div>
+</div>
+
+
+<!-- Concept F: The Aperture — An organic opening, like an eye or portal -->
+<div class="concept-row">
+  <div class="concept-pane">
+    <div class="mode-label">Light</div>
+    <div class="symbol-display">
+      <div class="symbol-large breathing">
+        <svg viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Organic eye/aperture form — two curves creating a lens shape -->
+          <path d="M16 48C28 28 40 22 48 22C56 22 68 28 80 48" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round" opacity="0.7" fill="none"/>
+          <path d="M16 48C28 68 40 74 48 74C56 74 68 68 80 48" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round" opacity="0.7" fill="none"/>
+          <!-- Inner warmth — subtle filled center -->
+          <ellipse cx="48" cy="48" rx="12" ry="14" fill="#1A1816" opacity="0.06"/>
+          <circle cx="48" cy="48" r="5" fill="#1A1816" opacity="0.15"/>
+        </svg>
+      </div>
+      <div class="symbol-sizes">
+        <div class="symbol-medium">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M16 48C28 28 40 22 48 22C56 22 68 28 80 48" stroke="#1A1816" stroke-width="3" stroke-linecap="round" opacity="0.7"/><path d="M16 48C28 68 40 74 48 74C56 74 68 68 80 48" stroke="#1A1816" stroke-width="3" stroke-linecap="round" opacity="0.7"/><ellipse cx="48" cy="48" rx="12" ry="14" fill="#1A1816" opacity="0.06"/><circle cx="48" cy="48" r="5.5" fill="#1A1816" opacity="0.15"/></svg>
+        </div>
+        <div class="symbol-small">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M16 48C28 28 40 22 48 22C56 22 68 28 80 48" stroke="#1A1816" stroke-width="5" stroke-linecap="round" opacity="0.7"/><path d="M16 48C28 68 40 74 48 74C56 74 68 68 80 48" stroke="#1A1816" stroke-width="5" stroke-linecap="round" opacity="0.7"/><circle cx="48" cy="48" r="7" fill="#1A1816" opacity="0.2"/></svg>
+        </div>
+        <div class="symbol-tiny">
+          <svg viewBox="0 0 96 96" fill="none"><path d="M16 48C28 28 40 22 48 22C56 22 68 28 80 48" stroke="#1A1816" stroke-width="7" stroke-linecap="round" opacity="0.7"/><path d="M16 48C28 68 40 74 48 74C56 74 68 68 80 48" stroke="#1A1816" stroke-width="7" stroke-linecap="round" opacity="0.7"/><circle cx="48" cy="48" r="8" fill="#1A1816" opacity="0.25"/></svg>
+        </div>
+      </div>
+    </div>
+    <div class="lockup">
+      <svg viewBox="0 0 96 96" fill="none"><path d="M16 48C28 28 40 22 48 22C56 22 68 28 80 48" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round" opacity="0.7"/><path d="M16 48C28 68 40 74 48 74C56 74 68 68 80 48" stroke="#1A1816" stroke-width="2.5" stroke-linecap="round" opacity="0.7"/><ellipse cx="48" cy="48" rx="12" ry="14" fill="#1A1816" opacity="0.06"/><circle cx="48" cy="48" r="5" fill="#1A1816" opacity="0.15"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="lockup-small">
+      <svg viewBox="0 0 96 96" fill="none"><path d="M16 48C28 28 40 22 48 22C56 22 68 28 80 48" stroke="#1A1816" stroke-width="3.5" stroke-linecap="round" opacity="0.7"/><path d="M16 48C28 68 40 74 48 74C56 74 68 68 80 48" stroke="#1A1816" stroke-width="3.5" stroke-linecap="round" opacity="0.7"/><circle cx="48" cy="48" r="6" fill="#1A1816" opacity="0.18"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="concept-name">F — The Aperture</div>
+    <div class="concept-desc">Two organic curves creating a lens or vesica piscis shape — an opening through which something looks out, or through which you look in. The center holds a warm core. Not an eye, but carries the quality of awareness, of seeing. Animates by the curves breathing apart and together — opening and closing like a gentle blink.</div>
+  </div>
+  <div class="concept-pane dark">
+    <div class="mode-label">Dark</div>
+    <div class="symbol-display">
+      <div class="symbol-large breathing">
+        <svg viewBox="0 0 96 96" fill="none"><path d="M16 48C28 28 40 22 48 22C56 22 68 28 80 48" stroke="#FAF9F4" stroke-width="2.5" stroke-linecap="round" opacity="0.6"/><path d="M16 48C28 68 40 74 48 74C56 74 68 68 80 48" stroke="#FAF9F4" stroke-width="2.5" stroke-linecap="round" opacity="0.6"/><ellipse cx="48" cy="48" rx="12" ry="14" fill="#FAF9F4" opacity="0.04"/><circle cx="48" cy="48" r="5" fill="#FAF9F4" opacity="0.12"/></svg>
+      </div>
+      <div class="symbol-sizes">
+        <div class="symbol-medium"><svg viewBox="0 0 96 96" fill="none"><path d="M16 48C28 28 40 22 48 22C56 22 68 28 80 48" stroke="#FAF9F4" stroke-width="3" stroke-linecap="round" opacity="0.6"/><path d="M16 48C28 68 40 74 48 74C56 74 68 68 80 48" stroke="#FAF9F4" stroke-width="3" stroke-linecap="round" opacity="0.6"/><circle cx="48" cy="48" r="5.5" fill="#FAF9F4" opacity="0.12"/></svg></div>
+        <div class="symbol-small"><svg viewBox="0 0 96 96" fill="none"><path d="M16 48C28 28 40 22 48 22C56 22 68 28 80 48" stroke="#FAF9F4" stroke-width="5" stroke-linecap="round" opacity="0.6"/><path d="M16 48C28 68 40 74 48 74C56 74 68 68 80 48" stroke="#FAF9F4" stroke-width="5" stroke-linecap="round" opacity="0.6"/><circle cx="48" cy="48" r="7" fill="#FAF9F4" opacity="0.15"/></svg></div>
+        <div class="symbol-tiny"><svg viewBox="0 0 96 96" fill="none"><path d="M16 48C28 28 40 22 48 22C56 22 68 28 80 48" stroke="#FAF9F4" stroke-width="7" stroke-linecap="round" opacity="0.6"/><path d="M16 48C28 68 40 74 48 74C56 74 68 68 80 48" stroke="#FAF9F4" stroke-width="7" stroke-linecap="round" opacity="0.6"/><circle cx="48" cy="48" r="8" fill="#FAF9F4" opacity="0.2"/></svg></div>
+      </div>
+    </div>
+    <div class="lockup">
+      <svg viewBox="0 0 96 96" fill="none"><path d="M16 48C28 28 40 22 48 22C56 22 68 28 80 48" stroke="#FAF9F4" stroke-width="2.5" stroke-linecap="round" opacity="0.6"/><path d="M16 48C28 68 40 74 48 74C56 74 68 68 80 48" stroke="#FAF9F4" stroke-width="2.5" stroke-linecap="round" opacity="0.6"/><ellipse cx="48" cy="48" rx="12" ry="14" fill="#FAF9F4" opacity="0.04"/><circle cx="48" cy="48" r="5" fill="#FAF9F4" opacity="0.12"/></svg>
+      <span class="wordmark">animus</span>
+    </div>
+    <div class="concept-name">F — The Aperture</div>
+    <div class="concept-desc">In dark mode the warm center becomes a subtle point of light — awareness glowing from within. The overall form suggests something sentient, present, watching gently. Connects strongly to the concept of an entity that is always aware, always perceiving.</div>
+  </div>
+</div>
+
+
+</body>
+</html>

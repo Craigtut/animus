@@ -47,6 +47,7 @@ export function useSubscriptionManager() {
   trpc.heartbeat.onEmotionChange.useSubscription(undefined, {
     onData: (emotion) => {
       useHeartbeatStore.getState().updateEmotion(emotion);
+      queryClient.invalidateQueries({ queryKey: [['heartbeat', 'getEmotionHistory']] });
     },
   });
 
@@ -103,6 +104,70 @@ export function useSubscriptionManager() {
       useMessagesStore.getState().addMessage(msg);
       // Invalidate the query cache so the conversation view refreshes
       queryClient.invalidateQueries({ queryKey: [['messages', 'getRecent']] });
+    },
+  });
+
+  // ========================================================================
+  // 8. Energy updates
+  // ========================================================================
+  trpc.heartbeat.onEnergyChange.useSubscription(undefined, {
+    onData: (data) => {
+      useHeartbeatStore.getState().updateEnergy(data.energyLevel, data.band);
+      queryClient.invalidateQueries({ queryKey: [['heartbeat', 'getEnergyState']] });
+      queryClient.invalidateQueries({ queryKey: [['heartbeat', 'getEnergyHistory']] });
+    },
+  });
+
+  // ========================================================================
+  // 9. Goal changes
+  // ========================================================================
+  trpc.goals.onGoalChange.useSubscription(undefined, {
+    onData: () => {
+      queryClient.invalidateQueries({ queryKey: [['goals']] });
+    },
+  });
+
+  // ========================================================================
+  // 10. Seed changes
+  // ========================================================================
+  trpc.goals.onSeedChange.useSubscription(undefined, {
+    onData: () => {
+      queryClient.invalidateQueries({ queryKey: [['goals', 'getSeeds']] });
+    },
+  });
+
+  // ========================================================================
+  // 11. Memory changes
+  // ========================================================================
+  trpc.memory.onMemoryChange.useSubscription(undefined, {
+    onData: (event: { type: string; detail?: any }) => {
+      if (event.type === 'working') {
+        queryClient.invalidateQueries({ queryKey: [['memory', 'getWorkingMemory']] });
+        queryClient.invalidateQueries({ queryKey: [['memory', 'listWorkingMemories']] });
+      } else if (event.type === 'core') {
+        queryClient.invalidateQueries({ queryKey: [['memory', 'getCoreSelf']] });
+      } else if (event.type === 'stored' || event.type === 'pruned') {
+        queryClient.invalidateQueries({ queryKey: [['memory', 'searchLongTermMemories']] });
+      }
+    },
+  });
+
+  // ========================================================================
+  // 12. Tick decisions
+  // ========================================================================
+  trpc.heartbeat.onDecision.useSubscription(undefined, {
+    onData: () => {
+      queryClient.invalidateQueries({ queryKey: [['heartbeat', 'getRecentDecisions']] });
+      queryClient.invalidateQueries({ queryKey: [['heartbeat', 'getTickDecisions']] });
+    },
+  });
+
+  // ========================================================================
+  // 13. Tick context stored (heartbeat inspector)
+  // ========================================================================
+  trpc.heartbeat.onTickStored.useSubscription(undefined, {
+    onData: () => {
+      queryClient.invalidateQueries({ queryKey: [['heartbeat', 'listTicks']] });
     },
   });
 }

@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { MagnifyingGlass, Pulse, Brain, User, GearSix } from '@phosphor-icons/react';
 import { useShellStore } from '../../store';
+import { Typography } from '../ui';
 
 interface CommandItem {
   id: string;
@@ -201,27 +202,26 @@ export function CommandPalette() {
                     `}
                   >
                     <Icon size={18} css={css`color: ${theme.colors.text.hint}; flex-shrink: 0;`} />
-                    <span css={css`flex: 1; font-size: ${theme.typography.fontSize.base};`}>
+                    <Typography.Body as="span" css={css`flex: 1;`}>
                       {item.label}
-                    </span>
-                    <span css={css`
-                      font-size: ${theme.typography.fontSize.xs};
-                      color: ${theme.colors.text.hint};
-                    `}>
+                    </Typography.Body>
+                    <Typography.Caption color="hint">
                       {item.secondaryLabel}
-                    </span>
+                    </Typography.Caption>
                   </button>
                 );
               })}
               {filtered.length === 0 && (
-                <div css={css`
-                  padding: ${theme.spacing[8]};
-                  text-align: center;
-                  color: ${theme.colors.text.hint};
-                  font-size: ${theme.typography.fontSize.sm};
-                `}>
+                <Typography.SmallBody
+                  as="div"
+                  color="hint"
+                  css={css`
+                    padding: ${theme.spacing[8]};
+                    text-align: center;
+                  `}
+                >
                   No results
-                </div>
+                </Typography.SmallBody>
               )}
             </div>
           </motion.div>

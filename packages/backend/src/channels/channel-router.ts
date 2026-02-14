@@ -14,8 +14,11 @@ import { resolveContact } from '../contacts/identity-resolver.js';
 import { canPerformByTier } from '../contacts/permission-enforcer.js';
 import { handleIncomingMessage } from '../heartbeat/index.js';
 import { getEventBus } from '../lib/event-bus.js';
+import { createLogger } from '../lib/logger.js';
 import type { ChannelType, Contact, Message, PermissionTier } from '@animus/shared';
 import type { IChannelAdapter } from './types.js';
+
+const log = createLogger('ChannelRouter', 'channels');
 
 // ============================================================================
 // Channel Router
@@ -70,8 +73,8 @@ export class ChannelRouter {
 
     // Step 2: Check permissions
     if (!canPerformByTier(tier, 'trigger_tick')) {
-      console.warn(
-        `[ChannelRouter] Contact ${contact.id} (${tier}) cannot trigger ticks`
+      log.warn(
+        `Contact ${contact.id} (${tier}) cannot trigger ticks`
       );
       return null;
     }
@@ -123,13 +126,13 @@ export class ChannelRouter {
 
     const adapter = this.adapters.get(channel);
     if (!adapter) {
-      console.error(`[ChannelRouter] No adapter for channel: ${channel}`);
+      log.error(`No adapter for channel: ${channel}`);
       return null;
     }
 
     if (!adapter.isEnabled()) {
-      console.error(
-        `[ChannelRouter] Channel ${channel} is disabled, cannot send`
+      log.error(
+        `Channel ${channel} is disabled, cannot send`
       );
       return null;
     }
@@ -138,8 +141,8 @@ export class ChannelRouter {
     try {
       await adapter.send(contactId, content, metadata);
     } catch (err) {
-      console.error(
-        `[ChannelRouter] Failed to send via ${channel}:`,
+      log.error(
+        `Failed to send via ${channel}:`,
         err
       );
       // Log failure but don't crash — per docs, don't auto-retry
@@ -176,10 +179,10 @@ export class ChannelRouter {
     for (const [channelType, adapter] of this.adapters) {
       try {
         await adapter.start();
-        console.log(`[ChannelRouter] Started adapter: ${channelType}`);
+        log.info(`Started adapter: ${channelType}`);
       } catch (err) {
-        console.error(
-          `[ChannelRouter] Failed to start adapter ${channelType}:`,
+        log.error(
+          `Failed to start adapter ${channelType}:`,
           err
         );
         // Continue — don't let one adapter failure block others
@@ -194,10 +197,10 @@ export class ChannelRouter {
     for (const [channelType, adapter] of this.adapters) {
       try {
         await adapter.stop();
-        console.log(`[ChannelRouter] Stopped adapter: ${channelType}`);
+        log.info(`Stopped adapter: ${channelType}`);
       } catch (err) {
-        console.error(
-          `[ChannelRouter] Failed to stop adapter ${channelType}:`,
+        log.error(
+          `Failed to stop adapter ${channelType}:`,
           err
         );
       }
@@ -213,8 +216,8 @@ export class ChannelRouter {
     identifier: string,
     content: string
   ): void {
-    console.log(
-      `[ChannelRouter] Unknown caller on ${channel}: ${identifier}`
+    log.info(
+      `Unknown caller on ${channel}: ${identifier}`
     );
 
     // Notify primary contact
@@ -223,8 +226,8 @@ export class ChannelRouter {
     if (primary) {
       const preview =
         content.length > 100 ? content.substring(0, 100) + '...' : content;
-      console.log(
-        `[ChannelRouter] Would notify primary: Unknown message from ${identifier} on ${channel}: "${preview}"`
+      log.info(
+        `Would notify primary: Unknown message from ${identifier} on ${channel}: "${preview}"`
       );
       // TODO: Send notification to primary contact when notification system is built
     }

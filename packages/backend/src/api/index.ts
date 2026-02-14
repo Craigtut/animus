@@ -22,6 +22,7 @@ import { providerRouter } from './routers/provider.js';
 import { memoryRouter } from './routers/memory.js';
 import { goalsRouter } from './routers/goals.js';
 import { agentLogsRouter } from './routers/agent-logs.js';
+import { codexAuthRouter } from './routers/codex-auth.js';
 
 // ============================================================================
 // App Router
@@ -42,6 +43,7 @@ export const appRouter = router({
   channels: channelsRouter,
   data: dataRouter,
   provider: providerRouter,
+  codexAuth: codexAuthRouter,
   memory: memoryRouter,
   goals: goalsRouter,
   agentLogs: agentLogsRouter,

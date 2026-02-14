@@ -1,6 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
 import { useMemo } from 'react';
+import { Typography } from '../ui';
 
 interface SparklinePoint {
   value: number;
@@ -76,14 +77,9 @@ export function EmotionSparkline({
           justify-content: center;
         `}
       >
-        <span
-          css={css`
-            font-size: 10px;
-            color: ${theme.colors.text.hint};
-          `}
-        >
+        <Typography.Caption color="hint">
           --
-        </span>
+        </Typography.Caption>
       </div>
     );
   }

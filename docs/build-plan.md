@@ -87,7 +87,7 @@ All agents are defined in `.claude/agents/` and use Opus 4.6 with the `doc-explo
 
 The existing `packages/shared/src/types/index.ts` and `packages/shared/src/schemas/index.ts` have the basics but need to be audited against the architecture docs and expanded. Go system by system:
 
-**system.db entities** (check against `docs/architecture/contacts.md`, `docs/architecture/persona.md`, `docs/architecture/channels.md`, `docs/architecture/tech-stack.md`):
+**system.db entities** (check against `docs/architecture/contacts.md`, `docs/architecture/persona.md`, `docs/architecture/channel-packages.md`, `docs/architecture/tech-stack.md`):
 - User (id, email, password_hash, created_at)
 - Settings (key-value with typed values)
 - Contact (id, name, is_primary, tier: primary/standard/unknown, notes, created_at, updated_at)
@@ -113,7 +113,7 @@ The existing `packages/shared/src/types/index.ts` and `packages/shared/src/schem
 - LongTermMemory (id, content, importance 0-1, strength 0-1, source, tags[], created_at, last_accessed_at)
 - NOTE: Vector embeddings are stored in LanceDB (separate from SQLite). LongTermMemory in SQLite stores metadata; LanceDB stores vectors with a foreign key back to the SQLite row.
 
-**messages.db entities** (check against `docs/architecture/channels.md`):
+**messages.db entities** (check against `docs/architecture/channel-packages.md`):
 - Conversation (id, contact_id, channel, started_at, last_message_at, metadata)
 - Message (id, conversation_id, role: user/assistant/system, content, channel, contact_id, created_at)
 
@@ -753,9 +753,10 @@ Sprint 1's design spec review revealed comprehensive specs for all pages. Sprint
 
 1. Read this build plan
 2. Use `/doc-explorer` to load architecture docs for the relevant systems
-3. Ensure `npm run typecheck` passes
-4. Ensure `npm run test:run` passes (if tests exist)
-5. Commit the current state before starting new work
+3. **Check if the dev servers are already running** before running `npm run dev`. During development, the backend and frontend are often already running in watch mode and will pick up your changes automatically. Check with `lsof -i:3000` (backend) and `lsof -i:5173` (frontend) — only start them if nothing is listening.
+4. Ensure `npm run typecheck` passes
+5. Ensure `npm run test:run` passes (if tests exist)
+6. Commit the current state before starting new work
 
 ### Team Ground Rules
 
@@ -781,7 +782,7 @@ Sprint 1's design spec review revealed comprehensive specs for all pages. Sprint
 
 All architecture docs live in `docs/`. Use `/doc-explorer <topic>` to load them. The most critical for each sprint:
 
-- **Sprint 0**: `tech-stack.md`, `contacts.md`, `persona.md`, `heartbeat.md`, `memory.md`, `channels.md`
+- **Sprint 0**: `tech-stack.md`, `contacts.md`, `persona.md`, `heartbeat.md`, `memory.md`, `channel-packages.md`
 - **Sprint 1**: `heartbeat.md`, `agent-orchestration.md`, `context-builder.md`, `persona.md`
-- **Sprint 2**: `memory.md`, `goals.md`, `tasks-system.md`, `contacts.md`, `channels.md`, `mcp-tools.md`, `onboarding.md`, `design-principles.md`
+- **Sprint 2**: `memory.md`, `goals.md`, `tasks-system.md`, `contacts.md`, `channel-packages.md`, `mcp-tools.md`, `onboarding.md`, `design-principles.md`
 - **Sprint 3**: `context-builder.md`, `agent-orchestration.md`, `design-principles.md`, `brand-vision.md`

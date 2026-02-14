@@ -475,4 +475,4 @@ These settings affect voice mode behavior immediately (no restart required). Cha
 - `docs/brand-vision.md` -- The alive quality, organic waveforms, warmth, breathing over blinking
 - `docs/frontend/design-principles.md` -- Animation timing, micro-interactions, visual system
 - `docs/architecture/heartbeat.md` -- Tick pipeline, emotion engine, streaming reply output
-- `docs/architecture/channels.md` -- Channel adapter layer, IncomingMessage interface
+- `docs/architecture/channel-packages.md` -- Channel system architecture, IncomingMessage interface, channel adapters

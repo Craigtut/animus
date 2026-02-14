@@ -11,6 +11,7 @@ import type Database from 'better-sqlite3';
 import { DecayEngine, now } from '@animus/shared';
 import type { IEmbeddingProvider, GoalSeed, EmotionName } from '@animus/shared';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
+import { getEventBus } from '../lib/event-bus.js';
 
 // ============================================================================
 // Constants
@@ -65,6 +66,7 @@ export class SeedManager {
     const embedding = await this.embeddingProvider.embedSingle(data.content);
     this.seedEmbeddings.set(seed.id, embedding);
 
+    getEventBus().emit('seed:created', seed);
     return seed;
   }
 
@@ -114,6 +116,8 @@ export class SeedManager {
           const boost = (similarity - SEED_RESONANCE_THRESHOLD) *
             thought.importance * SEED_BOOST_MULTIPLIER;
           heartbeatStore.reinforceSeed(this.db, seed.id, boost);
+          const updated = heartbeatStore.getSeed(this.db, seed.id);
+          if (updated) getEventBus().emit('seed:updated', updated);
         }
       }
     }
@@ -136,10 +140,14 @@ export class SeedManager {
           decayedAt: now(),
         });
         this.seedEmbeddings.delete(seed.id);
+        const decayed = heartbeatStore.getSeed(this.db, seed.id);
+        if (decayed) getEventBus().emit('seed:updated', decayed);
       } else if (Math.abs(decayedStrength - seed.strength) > 0.001) {
         heartbeatStore.updateSeed(this.db, seed.id, {
           strength: decayedStrength,
         });
+        const updated = heartbeatStore.getSeed(this.db, seed.id);
+        if (updated) getEventBus().emit('seed:updated', updated);
       }
     }
   }
@@ -155,7 +163,9 @@ export class SeedManager {
     for (const seed of activeSeeds) {
       if (seed.strength >= SEED_GRADUATION_THRESHOLD) {
         heartbeatStore.updateSeed(this.db, seed.id, { status: 'graduating' });
-        graduating.push({ ...seed, status: 'graduating' });
+        const graduatingSeed = { ...seed, status: 'graduating' as const };
+        getEventBus().emit('seed:updated', graduatingSeed);
+        graduating.push(graduatingSeed);
       }
     }
 

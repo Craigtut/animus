@@ -153,11 +153,17 @@ export class CodexAdapter extends BaseAdapter {
    *
    * Checks for:
    * 1. OPENAI_API_KEY environment variable
-   * 2. Pre-authenticated Codex CLI at ~/.codex/auth.json
+   * 2. CODEX_OAUTH_CONFIGURED sentinel (set by Animus OAuth flow)
+   * 3. Pre-authenticated Codex CLI at ~/.codex/auth.json
    */
   isConfigured(): boolean {
     // Check API key
     if (process.env['OPENAI_API_KEY']) {
+      return true;
+    }
+
+    // Check for Codex OAuth configured via Animus
+    if (process.env['CODEX_OAUTH_CONFIGURED']) {
       return true;
     }
 
@@ -357,7 +363,7 @@ class CodexSession extends BaseSession {
           this.createEvent('session_start', {
             provider: 'codex',
             model: this.config.model ?? 'codex-mini-latest',
-            config: this.config,
+            config: { ...this.config },
           }),
         );
 
@@ -366,7 +372,7 @@ class CodexSession extends BaseSession {
             sessionId: this.id,
             provider: 'codex',
             model: this.config.model ?? 'codex-mini-latest',
-            config: this.config,
+            config: { ...this.config },
           });
         }
       }
@@ -539,7 +545,7 @@ class CodexSession extends BaseSession {
           this.createEvent('session_start', {
             provider: 'codex',
             model: this.config.model ?? 'codex-mini-latest',
-            config: this.config,
+            config: { ...this.config },
           }),
         );
 
@@ -548,7 +554,7 @@ class CodexSession extends BaseSession {
             sessionId: this.id,
             provider: 'codex',
             model: this.config.model ?? 'codex-mini-latest',
-            config: this.config,
+            config: { ...this.config },
           });
         }
         break;

@@ -13,8 +13,11 @@ import { getHeartbeatDb, getSystemDb } from '../db/index.js';
 import * as taskStore from '../db/stores/task-store.js';
 import * as systemStore from '../db/stores/system-store.js';
 import { getEventBus } from '../lib/event-bus.js';
+import { createLogger } from '../lib/logger.js';
 import { now } from '@animus/shared';
 import type { Task } from '@animus/shared';
+
+const log = createLogger('TaskScheduler', 'heartbeat');
 
 // ============================================================================
 // Constants
@@ -57,7 +60,7 @@ export class TaskScheduler {
       this.checkDueTasks();
     }, CHECK_INTERVAL_MS);
 
-    console.log('[TaskScheduler] Started');
+    log.info('Started');
   }
 
   /**
@@ -78,7 +81,7 @@ export class TaskScheduler {
     }
     this.timers.clear();
 
-    console.log('[TaskScheduler] Stopped');
+    log.info('Stopped');
   }
 
   /**
@@ -152,11 +155,9 @@ export class TaskScheduler {
         }
       }
 
-      console.log(
-        `[TaskScheduler] Loaded ${tasks.length} active tasks`
-      );
+      log.info(`Loaded ${tasks.length} active tasks`);
     } catch (err) {
-      console.error('[TaskScheduler] Failed to load tasks:', err);
+      log.error('Failed to load tasks:', err);
     }
   }
 
@@ -174,7 +175,7 @@ export class TaskScheduler {
         }
       }
     } catch (err) {
-      console.error('[TaskScheduler] Error checking due tasks:', err);
+      log.error('Error checking due tasks:', err);
     }
   }
 

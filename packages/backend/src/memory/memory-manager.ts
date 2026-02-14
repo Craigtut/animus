@@ -14,6 +14,7 @@ import { DecayEngine } from '@animus/shared';
 import type { IEmbeddingProvider, LongTermMemory, MemoryType, MemorySourceType } from '@animus/shared';
 import * as memoryStore from '../db/stores/memory-store.js';
 import type { VectorStore, SearchResult } from './vector-store.js';
+import { getEventBus } from '../lib/event-bus.js';
 
 // ============================================================================
 // Constants (from docs/architecture/memory.md)
@@ -77,6 +78,7 @@ export class MemoryManager {
       : content;
     const cappedTokens = Math.min(tokenCount, WORKING_MEMORY_TOKEN_CAP);
     memoryStore.upsertWorkingMemory(this.memoryDb, contactId, cappedContent, cappedTokens);
+    getEventBus().emit('memory:working_updated', { contactId });
   }
 
   // --------------------------------------------------------------------------
@@ -94,6 +96,7 @@ export class MemoryManager {
       : content;
     const cappedTokens = Math.min(tokenCount, CORE_SELF_TOKEN_CAP);
     memoryStore.upsertCoreSelf(this.memoryDb, cappedContent, cappedTokens);
+    getEventBus().emit('memory:core_updated', {} as Record<string, never>);
   }
 
   // --------------------------------------------------------------------------
@@ -134,6 +137,7 @@ export class MemoryManager {
     });
 
     await this.vectorStore.addMemory(memory.id, embedding);
+    getEventBus().emit('memory:stored', memory);
     return memory;
   }
 
@@ -208,6 +212,7 @@ export class MemoryManager {
       }
     }
 
+    if (pruned > 0) getEventBus().emit('memory:pruned', { count: pruned });
     return pruned;
   }
 

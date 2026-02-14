@@ -216,6 +216,98 @@ export function getSessionUsage(db: Database.Database, sessionId: string): Agent
 }
 
 // ============================================================================
+// Tick Events (for Heartbeat Inspector)
+// ============================================================================
+
+export function getTickEvents(
+  db: Database.Database,
+  tickNumber: number
+): { input: AgentEvent | null; output: AgentEvent | null } {
+  const inputRow = db
+    .prepare(
+      `SELECT * FROM agent_events
+       WHERE event_type = 'tick_input'
+         AND JSON_EXTRACT(data, '$.tickNumber') = ?
+       ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(tickNumber) as Record<string, unknown> | undefined;
+
+  const outputRow = db
+    .prepare(
+      `SELECT * FROM agent_events
+       WHERE event_type = 'tick_output'
+         AND JSON_EXTRACT(data, '$.tickNumber') = ?
+       ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(tickNumber) as Record<string, unknown> | undefined;
+
+  const parse = (row: Record<string, unknown> | undefined): AgentEvent | null => {
+    if (!row) return null;
+    const e = snakeToCamel<AgentEvent>(row);
+    return {
+      ...e,
+      data: typeof e.data === 'string' ? JSON.parse(e.data) : e.data,
+    };
+  };
+
+  return { input: parse(inputRow), output: parse(outputRow) };
+}
+
+export function listTickEvents(
+  db: Database.Database,
+  options: { limit?: number; offset?: number } = {}
+): { events: AgentEvent[]; total: number } {
+  const limit = options.limit ?? 20;
+  const offset = options.offset ?? 0;
+
+  const totalRow = db
+    .prepare(`SELECT COUNT(*) as count FROM agent_events WHERE event_type = 'tick_input'`)
+    .get() as { count: number };
+
+  const rows = db
+    .prepare(
+      `SELECT * FROM agent_events
+       WHERE event_type = 'tick_input'
+       ORDER BY created_at DESC
+       LIMIT ? OFFSET ?`
+    )
+    .all(limit, offset) as Array<Record<string, unknown>>;
+
+  return {
+    events: rows.map((row) => {
+      const e = snakeToCamel<AgentEvent>(row);
+      return {
+        ...e,
+        data: typeof e.data === 'string' ? JSON.parse(e.data) : e.data,
+      };
+    }),
+    total: totalRow.count,
+  };
+}
+
+/**
+ * Find the most recent tick_input event with a non-null systemPrompt.
+ * Used to resolve the system prompt for warm sessions.
+ */
+export function getLastColdSystemPrompt(
+  db: Database.Database,
+): string | null {
+  const row = db
+    .prepare(
+      `SELECT * FROM agent_events
+       WHERE event_type = 'tick_input'
+         AND JSON_EXTRACT(data, '$.systemPrompt') IS NOT NULL
+       ORDER BY created_at DESC LIMIT 1`
+    )
+    .get() as Record<string, unknown> | undefined;
+
+  if (!row) return null;
+  const e = snakeToCamel<AgentEvent>(row);
+  const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+  return (data as Record<string, unknown>).systemPrompt as string | null;
+}
+
+// ============================================================================
 // Cleanup
 // ============================================================================
 

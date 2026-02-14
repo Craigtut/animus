@@ -12,17 +12,17 @@ import {
   getSystemDb,
   getAgentLogsDb,
 } from '../../db/index.js';
-import { stopHeartbeat } from '../../heartbeat/index.js';
+import { stopHeartbeat, getVectorStore } from '../../heartbeat/index.js';
 import * as systemStore from '../../db/stores/system-store.js';
 import * as heartbeatStore from '../../db/stores/heartbeat-store.js';
 
 export const dataRouter = router({
   /**
-   * Soft reset — clear heartbeat.db (thoughts, experiences, emotions, decisions).
-   * Preserves messages, memory, and system config.
+   * Soft reset — clear heartbeat.db (thoughts, experiences, emotions, decisions,
+   * goals, plans, seeds, tasks). Preserves messages, memory, and system config.
    */
-  softReset: protectedProcedure.mutation(() => {
-    stopHeartbeat();
+  softReset: protectedProcedure.mutation(async () => {
+    await stopHeartbeat();
     const hbDb = getHeartbeatDb();
 
     hbDb.transaction(() => {
@@ -30,6 +30,13 @@ export const dataRouter = router({
       hbDb.exec('DELETE FROM experiences');
       hbDb.exec('DELETE FROM emotion_history');
       hbDb.exec('DELETE FROM tick_decisions');
+      hbDb.exec('DELETE FROM goal_seeds');
+      hbDb.exec('DELETE FROM goal_salience_log');
+      hbDb.exec('DELETE FROM plans');
+      hbDb.exec('DELETE FROM goals');
+      hbDb.exec('DELETE FROM task_runs');
+      hbDb.exec('DELETE FROM agent_tasks');
+      hbDb.exec('DELETE FROM tasks');
 
       // Reset heartbeat state to initial values
       heartbeatStore.updateHeartbeatState(hbDb, {
@@ -52,20 +59,28 @@ export const dataRouter = router({
   }),
 
   /**
-   * Full reset — clear heartbeat.db + memory.db.
-   * Preserves messages and system config.
+   * Full reset — clear heartbeat.db + memory.db + messages.db + LanceDB vectors.
+   * Preserves system config (persona, contacts, API keys, channels).
    */
-  fullReset: protectedProcedure.mutation(() => {
-    stopHeartbeat();
+  fullReset: protectedProcedure.mutation(async () => {
+    await stopHeartbeat();
     const hbDb = getHeartbeatDb();
     const memDb = getMemoryDb();
+    const msgDb = getMessagesDb();
 
-    // Clear heartbeat
+    // Clear heartbeat (same as soft reset)
     hbDb.transaction(() => {
       hbDb.exec('DELETE FROM thoughts');
       hbDb.exec('DELETE FROM experiences');
       hbDb.exec('DELETE FROM emotion_history');
       hbDb.exec('DELETE FROM tick_decisions');
+      hbDb.exec('DELETE FROM goal_seeds');
+      hbDb.exec('DELETE FROM goal_salience_log');
+      hbDb.exec('DELETE FROM plans');
+      hbDb.exec('DELETE FROM goals');
+      hbDb.exec('DELETE FROM task_runs');
+      hbDb.exec('DELETE FROM agent_tasks');
+      hbDb.exec('DELETE FROM tasks');
 
       heartbeatStore.updateHeartbeatState(hbDb, {
         tickNumber: 0,
@@ -90,15 +105,29 @@ export const dataRouter = router({
       memDb.exec("UPDATE core_self SET content = '' WHERE id = 1");
     })();
 
-    return { success: true, cleared: 'heartbeat+memory' };
+    // Clear LanceDB vector embeddings
+    const vectorStore = getVectorStore();
+    if (vectorStore?.isReady()) {
+      await vectorStore.deleteAll();
+    }
+
+    // Clear messages and conversations
+    msgDb.transaction(() => {
+      msgDb.exec('DELETE FROM media_attachments');
+      msgDb.exec('DELETE FROM messages');
+      msgDb.exec('DELETE FROM conversations');
+    })();
+
+    return { success: true, cleared: 'heartbeat+memory+messages' };
   }),
 
   /**
-   * Clear all conversations and messages.
+   * Clear all conversations, messages, and media attachments.
    */
   clearConversations: protectedProcedure.mutation(() => {
     const msgDb = getMessagesDb();
     msgDb.transaction(() => {
+      msgDb.exec('DELETE FROM media_attachments');
       msgDb.exec('DELETE FROM messages');
       msgDb.exec('DELETE FROM conversations');
     })();

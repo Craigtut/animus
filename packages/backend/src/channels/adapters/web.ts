@@ -9,6 +9,9 @@
 
 import type { IChannelAdapter } from '../types.js';
 import type { ChannelType } from '@animus/shared';
+import { createLogger } from '../../lib/logger.js';
+
+const log = createLogger('WebAdapter', 'channels');
 
 export class WebChannelAdapter implements IChannelAdapter {
   readonly channelType: ChannelType = 'web';
@@ -42,8 +45,8 @@ export class WebChannelAdapter implements IChannelAdapter {
     // - EventBus emits 'message:sent'
     // - tRPC subscription delivers to the frontend
     // This method is a no-op because the pipeline handles it directly.
-    console.log(
-      `[WebAdapter] Outbound to ${contactId}: ${content.substring(0, 50)}...`
+    log.info(
+      `Outbound to ${contactId}: ${content.substring(0, 50)}...`
     );
   }
 }

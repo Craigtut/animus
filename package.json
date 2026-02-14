@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspaces --if-present",
+    "dev": "concurrently -n backend,frontend -c green,magenta \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "npm run dev -w @animus/backend",
     "dev:frontend": "npm run dev -w @animus/frontend",
     "build": "npm run build --workspaces --if-present",
@@ -25,6 +25,7 @@
     "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
+    "concurrently": "^9.2.1",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^9.0.0",
     "eslint-plugin-react": "^7.35.0",
@@ -34,7 +35,7 @@
     "vitest": "^2.1.0"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=24.0.0"
   },
   "packageManager": "npm@10.0.0"
 }

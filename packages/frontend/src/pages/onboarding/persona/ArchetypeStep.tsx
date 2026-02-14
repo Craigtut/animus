@@ -2,9 +2,16 @@
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CaretLeft, CaretRight } from '@phosphor-icons/react';
-import { Button, Card } from '../../../components/ui';
+import { CheckCircle } from '@phosphor-icons/react';
+import { Swiper, SwiperSlide } from 'swiper/react';
+import { Grid, Pagination } from 'swiper/modules';
+import { Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
+import { OnboardingNav } from '../OnboardingNav';
+
+import 'swiper/css';
+import 'swiper/css/grid';
+import 'swiper/css/pagination';
 
 const archetypes = [
   { id: 'scholar', name: 'The Scholar', feel: 'Curious, analytical, measured. Finds beauty in understanding.' },
@@ -23,17 +30,9 @@ export function ArchetypeStep() {
   const { markStepComplete, setCurrentStep, personaDraft, updatePersonaDraft } = useOnboardingStore();
 
   const [selected, setSelected] = useState<string | null>(personaDraft.archetype);
-  const [currentIndex, setCurrentIndex] = useState(0);
-
-  const handlePrev = () => setCurrentIndex((i) => (i - 1 + archetypes.length) % archetypes.length);
-  const handleNext = () => setCurrentIndex((i) => (i + 1) % archetypes.length);
 
   const handleSelect = (id: string) => {
     setSelected(selected === id ? null : id);
-  };
-
-  const handleFromScratch = () => {
-    setSelected('scratch');
   };
 
   const handleContinue = () => {
@@ -45,94 +44,111 @@ export function ArchetypeStep() {
 
   const handleBack = () => navigate('/onboarding/persona/identity');
 
-  const canContinue = selected !== null;
-
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div>
-        <h2 css={css`font-size: ${theme.typography.fontSize['2xl']}; font-weight: ${theme.typography.fontWeight.light}; margin-bottom: ${theme.spacing[2]};`}>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+        <Typography.Title3 as="h2" serif>
           Start with an archetype
-        </h2>
-        <p css={css`color: ${theme.colors.text.secondary};`}>
+        </Typography.Title3>
+        <Typography.Body color="secondary">
           A starting point, not a cage. Pick one that resonates -- you'll customize everything from here.
-        </p>
+        </Typography.Body>
       </div>
 
-      {/* Carousel */}
-      <div css={css`position: relative;`}>
-        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-          <button
-            onClick={handlePrev}
-            aria-label="Previous archetype"
-            css={css`
-              display: flex; align-items: center; justify-content: center;
-              width: 36px; height: 36px; border-radius: 50%;
-              color: ${theme.colors.text.secondary};
-              border: 1px solid ${theme.colors.border.default};
-              flex-shrink: 0;
-              &:hover { color: ${theme.colors.text.primary}; background: ${theme.colors.background.elevated}; }
-            `}
-          >
-            <CaretLeft size={18} />
-          </button>
+      {/* Swiper carousel — breaks out of the content column for more room */}
+      <div
+        css={css`
+          /* Break out of the max-width content column */
+          width: 100vw;
+          margin-left: calc(-50vw + 50%);
+          padding: 0 ${theme.spacing[6]};
 
-          <Card
-            variant={selected === archetypes[currentIndex]!.id ? 'elevated' : 'outlined'}
-            interactive
-            padding="lg"
-            onClick={() => handleSelect(archetypes[currentIndex]!.id)}
-            css={css`flex: 1; text-align: center; min-height: 140px; display: flex; flex-direction: column; justify-content: center;`}
-          >
-            <h3 css={css`font-size: ${theme.typography.fontSize.xl}; font-weight: ${theme.typography.fontWeight.semibold}; margin-bottom: ${theme.spacing[2]};`}>
-              {archetypes[currentIndex]!.name}
-            </h3>
-            <p css={css`font-size: ${theme.typography.fontSize.base}; color: ${theme.colors.text.secondary}; line-height: ${theme.typography.lineHeight.relaxed};`}>
-              {archetypes[currentIndex]!.feel}
-            </p>
-          </Card>
+          @media (max-width: ${theme.breakpoints.md}) {
+            padding: 0 ${theme.spacing[4]};
+          }
 
-          <button
-            onClick={handleNext}
-            aria-label="Next archetype"
-            css={css`
-              display: flex; align-items: center; justify-content: center;
-              width: 36px; height: 36px; border-radius: 50%;
-              color: ${theme.colors.text.secondary};
-              border: 1px solid ${theme.colors.border.default};
-              flex-shrink: 0;
-              &:hover { color: ${theme.colors.text.primary}; background: ${theme.colors.background.elevated}; }
-            `}
-          >
-            <CaretRight size={18} />
-          </button>
-        </div>
-
-        {/* Dots */}
-        <div css={css`display: flex; justify-content: center; gap: ${theme.spacing[1]}; margin-top: ${theme.spacing[3]};`}>
-          {archetypes.map((a, i) => (
-            <button
-              key={a.id}
-              onClick={() => setCurrentIndex(i)}
-              aria-label={a.name}
-              css={css`
-                width: 6px; height: 6px; border-radius: 50%; padding: 0;
-                background: ${i === currentIndex ? theme.colors.accent : theme.colors.background.elevated};
-                opacity: ${i === currentIndex ? 1 : 0.4};
-                transition: all ${theme.transitions.fast};
-              `}
-            />
-          ))}
-        </div>
+          /* Swiper overrides */
+          .swiper {
+            overflow: visible;
+            padding-bottom: ${theme.spacing[8]};
+          }
+          .swiper-pagination {
+            bottom: 0 !important;
+          }
+          .swiper-pagination-bullet {
+            width: 6px;
+            height: 6px;
+            background: ${theme.colors.text.primary};
+            opacity: 0.2;
+            transition: all ${theme.transitions.fast};
+          }
+          .swiper-pagination-bullet-active {
+            opacity: 0.8;
+            width: 8px;
+            height: 8px;
+          }
+        `}
+      >
+        <Swiper
+          modules={[Grid, Pagination]}
+          pagination={{ clickable: true }}
+          spaceBetween={12}
+          slidesPerView={1.4}
+          centeredSlides={false}
+          breakpoints={{
+            // sm
+            500: {
+              slidesPerView: 2,
+              spaceBetween: 12,
+            },
+            // md
+            768: {
+              slidesPerView: 3,
+              spaceBetween: 14,
+              grid: { rows: 2, fill: 'row' },
+            },
+            // lg
+            1024: {
+              slidesPerView: 3,
+              spaceBetween: 16,
+              grid: { rows: 2, fill: 'row' },
+            },
+            // xl — all 8 visible
+            1280: {
+              slidesPerView: 4,
+              spaceBetween: 16,
+              grid: { rows: 2, fill: 'row' },
+            },
+          }}
+        >
+          {archetypes.map((archetype) => {
+            const isSelected = selected === archetype.id;
+            return (
+              <SwiperSlide key={archetype.id}>
+                <ArchetypeCard
+                  name={archetype.name}
+                  feel={archetype.feel}
+                  isSelected={isSelected}
+                  onClick={() => handleSelect(archetype.id)}
+                />
+              </SwiperSlide>
+            );
+          })}
+        </Swiper>
       </div>
 
       <div css={css`text-align: center;`}>
         <button
-          onClick={handleFromScratch}
+          onClick={() => setSelected(selected === 'scratch' ? null : 'scratch')}
           css={css`
             font-size: ${theme.typography.fontSize.sm};
-            color: ${theme.colors.text.hint};
+            color: ${selected === 'scratch' ? theme.colors.text.primary : theme.colors.text.hint};
             cursor: pointer;
-            text-decoration: ${selected === 'scratch' ? 'underline' : 'none'};
+            border: none;
+            background: none;
+            font-family: inherit;
+            font-weight: ${selected === 'scratch' ? theme.typography.fontWeight.medium : theme.typography.fontWeight.normal};
+            transition: color ${theme.transitions.fast};
             &:hover { color: ${theme.colors.text.secondary}; }
           `}
         >
@@ -140,10 +156,124 @@ export function ArchetypeStep() {
         </button>
       </div>
 
-      <div css={css`display: flex; justify-content: space-between; margin-top: ${theme.spacing[4]};`}>
-        <Button variant="ghost" onClick={handleBack}>Back</Button>
-        <Button onClick={handleContinue} disabled={!canContinue}>Continue</Button>
-      </div>
+      <OnboardingNav
+        onBack={handleBack}
+        onContinue={handleContinue}
+        continueDisabled={selected === null}
+      />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ArchetypeCard
+// ---------------------------------------------------------------------------
+
+function ArchetypeCard({
+  name,
+  feel,
+  isSelected,
+  onClick,
+}: {
+  name: string;
+  feel: string;
+  isSelected: boolean;
+  onClick: () => void;
+}) {
+  const theme = useTheme();
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      css={css`
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        padding: ${theme.spacing[4]} ${theme.spacing[4]} ${theme.spacing[5]};
+        border-radius: ${theme.borderRadius.md};
+        cursor: pointer;
+        text-align: left;
+        border: 1px solid ${isSelected ? 'transparent' : theme.colors.border.default};
+        outline: none;
+        font-family: inherit;
+        transition: all ${theme.transitions.normal};
+
+        ${isSelected
+          ? css`
+              background: ${theme.colors.background.paper};
+              backdrop-filter: blur(16px);
+              -webkit-backdrop-filter: blur(16px);
+
+              /* Rim lighting */
+              &::before {
+                content: '';
+                position: absolute;
+                inset: -1px;
+                border-radius: inherit;
+                padding: 1px;
+                background: ${theme.colors.rimGradient};
+                mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+                mask-composite: exclude;
+                -webkit-mask-composite: xor;
+                pointer-events: none;
+              }
+            `
+          : css`
+              background: transparent;
+
+              &:hover {
+                background: ${theme.colors.background.elevated};
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
+                border-color: ${theme.colors.border.focus};
+              }
+            `}
+
+        &:focus-visible {
+          outline: 2px solid ${theme.colors.border.focus};
+          outline-offset: 2px;
+        }
+      `}
+    >
+      {/* Checkmark indicator */}
+      {isSelected && (
+        <div
+          css={css`
+            position: absolute;
+            top: ${theme.spacing[3]};
+            right: ${theme.spacing[3]};
+          `}
+        >
+          <CheckCircle size={22} weight="fill" color={theme.colors.accent} />
+        </div>
+      )}
+
+      <span
+        css={css`
+          font-size: ${theme.typography.fontSize.base};
+          font-weight: ${theme.typography.fontWeight.semibold};
+          color: ${isSelected ? theme.colors.text.primary : theme.colors.text.secondary};
+          margin-bottom: ${theme.spacing[1.5]};
+          transition: color ${theme.transitions.fast};
+        `}
+      >
+        {name}
+      </span>
+
+      <span
+        css={css`
+          font-family: ${theme.typography.fontFamily.serif};
+          font-style: italic;
+          font-size: ${theme.typography.fontSize.sm};
+          color: ${isSelected ? theme.colors.text.secondary : theme.colors.text.hint};
+          line-height: ${theme.typography.lineHeight.relaxed};
+          transition: color ${theme.transitions.fast};
+        `}
+      >
+        {feel}
+      </span>
+    </button>
   );
 }
