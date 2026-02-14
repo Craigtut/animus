@@ -61,6 +61,8 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/architecture/open-questions.md` | 5 KB | Resolved design questions (all 7) - concurrent tick handling, crash recovery, MCP tool design, structured output, Claude OAuth, Codex OAuth, contact notes |
 | `docs/architecture/voice-channel.md` | 20 KB | Voice channel architecture - Parakeet TDT v3 STT + Kokoro TTS (both via sherpa-onnx, native Node.js), frontend voice mode UX, audio pipeline (capture → transcribe → mind → synthesize → playback), sentence-buffered TTS streaming, voice channel adapter, configuration, ffmpeg conversion |
 | `docs/architecture/sleep-energy.md` | 16 KB | Sleep & energy system - circadian rhythm, energy level (0-1), 6 energy bands (peak/alert/tired/drowsy/very drowsy/sleeping), experience-driven energy deltas, exponential decay toward circadian baseline, wake-up mechanics (natural + triggered), accelerated emotional decay during sleep, tick interval switching, settings configuration |
+| `docs/architecture/observational-memory.md` | 22 KB | Observational memory — three-stream compression (messages/thoughts/experiences), Observer and Reflector agents, token-based thresholds replacing hard item limits, batch threshold mechanism, async processing in EXECUTE phase, memory.db schema, configuration file, context presentation (temporal annotations, gap markers, continuation hint, read-time optimization), observability/event emission, prompt caching benefits |
+| `docs/architecture/reflex-system.md` | 16 KB | Reflex fast-response system — dual-path voice architecture (reflex + heartbeat), Vercel AI SDK abstraction, lightweight context assembly using observational memory, heartbeat integration & correction path, provider configuration (Anthropic/OpenAI/Google/Ollama), subscription vs API cost model, fallback behavior, streaming pipeline |
 
 ### Frontend
 
@@ -109,6 +111,7 @@ When you need context for a task, follow this approach:
 7. **For heartbeat/inner life**: Read `docs/architecture/heartbeat.md` and `docs/project-vision.md`
 7a. **For sleep/energy/circadian rhythm**: Read `docs/architecture/sleep-energy.md` and `docs/architecture/heartbeat.md`
 7b. **For memory/knowledge/embeddings**: Read `docs/architecture/memory.md` and `docs/architecture/heartbeat.md`
+7b2. **For observational memory/compression/observer/reflector**: Read `docs/architecture/observational-memory.md` and `docs/architecture/memory.md`
 7c. **For context assembly/prompt building**: Read `docs/architecture/context-builder.md`
 7d. **For shared abstractions (embedding, decay, encryption, event bus)**: Read `docs/architecture/tech-stack.md` (Shared Abstractions section)
 7e. **For MCP tools/custom tools**: Read `docs/architecture/mcp-tools.md` and `docs/architecture/agent-orchestration.md`
@@ -116,6 +119,7 @@ When you need context for a task, follow this approach:
 9. **For channels/messaging/SMS/Discord/API**: Read `docs/architecture/channel-packages.md` and `docs/architecture/contacts.md`
 10. **For Codex OAuth/authentication**: Read `docs/agents/codex/oauth.md`
 11. **For voice/speech/STT/TTS/audio**: Read `docs/architecture/voice-channel.md`, `docs/frontend/voice-mode.md`, and `docs/architecture/channel-packages.md`
+12. **For reflex/fast-response/voice-latency**: Read `docs/architecture/reflex-system.md`, `docs/architecture/voice-channel.md`, and `docs/architecture/heartbeat.md`
 
 ## Topic Keyword Guide
 
@@ -142,6 +146,7 @@ Use this to quickly map user questions to the right docs:
 - **context builder, context assembly, prompt compilation, token budget, mind prompt, system prompt, mind instructions** -> `docs/architecture/context-builder.md`
 - **shared abstractions, embedding provider, decay engine, encryption service, event bus, database stores** -> `docs/architecture/tech-stack.md`
 - **memory, embedding, retrieval, long-term, lancedb memories, working memory, core self, consolidation, forgetting, transformers.js** -> `docs/architecture/memory.md`
+- **observational memory, observer, reflector, observation, compression, token threshold, raw window, observation window, short-term compression** -> `docs/architecture/observational-memory.md`
 - **goals, objectives, long-term direction** -> `docs/architecture/goals.md`
 - **tasks, scheduling, cron, scheduled jobs** -> `docs/architecture/tasks-system.md`
 - **open questions, resolved questions** -> `docs/architecture/open-questions.md`
@@ -154,3 +159,4 @@ Use this to quickly map user questions to the right docs:
 - **settings, persona editing, heartbeat config, provider config, channel config, data management** -> `docs/frontend/settings.md`
 - **onboarding, auth, signup, login, first time, birth animation, persona creation UI** -> `docs/frontend/onboarding.md`
 - **voice mode UI, voice UX, voice surface, listening, speaking, barge-in, continuous conversation, voice visualization, transcription** -> `docs/frontend/voice-mode.md`
+- **reflex, fast response, voice latency, TTFT, dual path, Vercel AI SDK, direct LLM, reflex context, reflex provider, fast path, slow path** -> `docs/architecture/reflex-system.md`

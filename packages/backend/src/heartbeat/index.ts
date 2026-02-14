@@ -226,14 +226,18 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
         const ctx: WakeUpContext = { type: 'natural' };
         if (lastEnergyUpdate) ctx.sleepDurationHours = DecayEngine.hoursSince(lastEnergyUpdate);
         wakeUpContext = ctx;
-        log.info('Natural wake-up: bumped energy to', decayed.toFixed(2));
+        // Switch back to normal tick interval
+        tickQueue.updateInterval(settings.heartbeatIntervalMs);
+        log.info('Natural wake-up: bumped energy to', decayed.toFixed(2), '— restored normal tick interval');
       } else if (trigger.type !== 'interval') {
         // Triggered wake-up: non-interval trigger during sleep
         decayed = Math.max(decayed, 0.10);
         const ctx: WakeUpContext = { type: 'triggered', triggerType: trigger.type };
         if (lastEnergyUpdate) ctx.sleepDurationHours = DecayEngine.hoursSince(lastEnergyUpdate);
         wakeUpContext = ctx;
-        log.info(`Triggered wake-up (${trigger.type}): bumped energy to`, decayed.toFixed(2));
+        // Switch back to normal tick interval — we're awake now
+        tickQueue.updateInterval(settings.heartbeatIntervalMs);
+        log.info(`Triggered wake-up (${trigger.type}): bumped energy to`, decayed.toFixed(2), '— restored normal tick interval');
       }
     }
 
@@ -971,27 +975,17 @@ async function executeOutput(
   if (output.reply && output.reply.content && gathered.contact) {
     try {
       const channel = output.reply.channel;
-      // Get or create conversation
-      let conv = messageStore.getConversationByContactAndChannel(
-        msgDb, gathered.contact.id, channel
-      );
-      if (!conv) {
-        conv = messageStore.createConversation(msgDb, {
-          contactId: gathered.contact.id,
-          channel,
-        });
-      }
+      const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
 
-      const msg = messageStore.createMessage(msgDb, {
-        conversationId: conv.id,
+      // Unified outbound: ChannelRouter stores the message and delivers via ChannelManager
+      const { getChannelRouter } = await import('../channels/channel-router.js');
+      const router = getChannelRouter();
+      await router.sendOutbound({
         contactId: gathered.contact.id,
-        direction: 'outbound',
         channel,
         content: output.reply.content,
-        tickNumber,
+        ...(triggerMetadata ? { metadata: triggerMetadata } : {}),
       });
-
-      eventBus.emit('message:sent', msg);
     } catch (err) {
       log.error(`Failed to send reply for tick #${tickNumber}:`, err);
       // Log failure as a tick decision so it's visible in the UI
@@ -1435,6 +1429,7 @@ export function handleIncomingMessage(params: {
   content: string;
   messageId: string;
   conversationId: string;
+  metadata?: Record<string, unknown>;
 }): void {
   // Messages are already written to messages.db by the channel adapter
   // before this function is called. We just trigger a tick.
@@ -1446,6 +1441,7 @@ export function handleIncomingMessage(params: {
     channel: params.channel,
     messageContent: params.content,
     messageId: params.messageId,
+    ...(params.metadata ? { metadata: params.metadata } : {}),
   });
 }
 

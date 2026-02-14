@@ -3,8 +3,9 @@
  *
  * Central message routing: receives inbound messages from any channel,
  * resolves identity, checks permissions, stores messages, and queues ticks.
+ * Outbound delivery is delegated to ChannelManager.
  *
- * See docs/architecture/channels.md — "Outbound Routing"
+ * See docs/architecture/channel-packages.md — "Outbound Routing"
  */
 
 import { getMessagesDb, getSystemDb } from '../db/index.js';
@@ -15,8 +16,8 @@ import { canPerformByTier } from '../contacts/permission-enforcer.js';
 import { handleIncomingMessage } from '../heartbeat/index.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
+import { getChannelManager } from './channel-manager.js';
 import type { ChannelType, Contact, Message, PermissionTier } from '@animus/shared';
-import type { IChannelAdapter } from './types.js';
 
 const log = createLogger('ChannelRouter', 'channels');
 
@@ -25,22 +26,6 @@ const log = createLogger('ChannelRouter', 'channels');
 // ============================================================================
 
 export class ChannelRouter {
-  private adapters = new Map<ChannelType, IChannelAdapter>();
-
-  /**
-   * Register a channel adapter.
-   */
-  registerAdapter(adapter: IChannelAdapter): void {
-    this.adapters.set(adapter.channelType, adapter);
-  }
-
-  /**
-   * Get a registered adapter by channel type.
-   */
-  getAdapter(channel: ChannelType): IChannelAdapter | undefined {
-    return this.adapters.get(channel);
-  }
-
   /**
    * Handle an incoming message from any channel.
    *
@@ -54,9 +39,23 @@ export class ChannelRouter {
     channel: ChannelType;
     identifier: string;
     content: string;
+    conversationId?: string;
+    media?: Array<{
+      type: 'image' | 'audio' | 'video' | 'file';
+      mimeType: string;
+      url: string;
+      filename?: string;
+    }>;
     metadata?: Record<string, unknown>;
   }): Message | null {
-    const { channel, identifier, content, metadata } = params;
+    const { channel, identifier, content, conversationId, media, metadata } = params;
+
+    // Combine metadata with external conversationId and media attachments
+    const combinedMetadata = {
+      ...metadata,
+      ...(conversationId ? { externalConversationId: conversationId } : {}),
+      ...(media && media.length > 0 ? { media } : {}),
+    };
 
     // Step 1: Resolve contact
     const resolved = resolveContact(channel, identifier);
@@ -95,12 +94,13 @@ export class ChannelRouter {
       direction: 'inbound',
       channel,
       content,
-      metadata,
+      metadata: combinedMetadata,
     });
 
     // Step 4: Emit event and trigger tick
     getEventBus().emit('message:received', msg);
 
+    const hasMetadata = Object.keys(combinedMetadata).length > 0;
     handleIncomingMessage({
       contactId: contact.id,
       contactName: contact.fullName,
@@ -108,13 +108,14 @@ export class ChannelRouter {
       content,
       messageId: msg.id,
       conversationId: conv.id,
+      ...(hasMetadata ? { metadata: combinedMetadata } : {}),
     });
 
     return msg;
   }
 
   /**
-   * Send an outbound message through the appropriate channel adapter.
+   * Send an outbound message — stores in messages.db and delivers via ChannelManager.
    */
   async sendOutbound(params: {
     contactId: string;
@@ -124,32 +125,7 @@ export class ChannelRouter {
   }): Promise<Message | null> {
     const { contactId, channel, content, metadata } = params;
 
-    const adapter = this.adapters.get(channel);
-    if (!adapter) {
-      log.error(`No adapter for channel: ${channel}`);
-      return null;
-    }
-
-    if (!adapter.isEnabled()) {
-      log.error(
-        `Channel ${channel} is disabled, cannot send`
-      );
-      return null;
-    }
-
-    // Send via adapter
-    try {
-      await adapter.send(contactId, content, metadata);
-    } catch (err) {
-      log.error(
-        `Failed to send via ${channel}:`,
-        err
-      );
-      // Log failure but don't crash — per docs, don't auto-retry
-      return null;
-    }
-
-    // Store outbound message
+    // Store outbound message first (even if delivery fails, the message is persisted)
     const msgDb = getMessagesDb();
     let conv = messageStore.getActiveConversation(msgDb, contactId, channel);
     if (!conv) {
@@ -165,46 +141,24 @@ export class ChannelRouter {
       direction: 'outbound',
       channel,
       content,
-      metadata,
+      ...(metadata ? { metadata } : {}),
     });
 
     getEventBus().emit('message:sent', msg);
+
+    // Deliver via ChannelManager (handles both built-in and package channels)
+    const channelManager = getChannelManager();
+    try {
+      const delivered = await channelManager.sendToChannel(channel, contactId, content, metadata);
+      if (!delivered) {
+        log.warn(`Message stored but delivery failed for channel ${channel}`);
+      }
+    } catch (err) {
+      log.error(`Failed to deliver via ${channel}:`, err);
+      // Message is already stored — don't crash, per docs: don't auto-retry
+    }
+
     return msg;
-  }
-
-  /**
-   * Start all registered adapters.
-   */
-  async startAll(): Promise<void> {
-    for (const [channelType, adapter] of this.adapters) {
-      try {
-        await adapter.start();
-        log.info(`Started adapter: ${channelType}`);
-      } catch (err) {
-        log.error(
-          `Failed to start adapter ${channelType}:`,
-          err
-        );
-        // Continue — don't let one adapter failure block others
-      }
-    }
-  }
-
-  /**
-   * Stop all registered adapters.
-   */
-  async stopAll(): Promise<void> {
-    for (const [channelType, adapter] of this.adapters) {
-      try {
-        await adapter.stop();
-        log.info(`Stopped adapter: ${channelType}`);
-      } catch (err) {
-        log.error(
-          `Failed to stop adapter ${channelType}:`,
-          err
-        );
-      }
-    }
   }
 
   // --------------------------------------------------------------------------

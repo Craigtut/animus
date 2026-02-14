@@ -18,12 +18,6 @@ import type {
   userSchema,
   contactSchema,
   contactChannelSchema,
-  channelConfigTypeSchema,
-  smsChannelConfigSchema,
-  discordChannelConfigSchema,
-  openaiApiChannelConfigSchema,
-  ollamaApiChannelConfigSchema,
-  channelConfigSchema,
   systemSettingsSchema,
   personalitySettingsSchema,
   onboardingStateSchema,
@@ -129,12 +123,6 @@ export type AgentProvider = z.infer<typeof agentProviderSchema>;
 export type User = z.infer<typeof userSchema>;
 export type Contact = z.infer<typeof contactSchema>;
 export type ContactChannel = z.infer<typeof contactChannelSchema>;
-export type ChannelConfigType = z.infer<typeof channelConfigTypeSchema>;
-export type SmsChannelConfig = z.infer<typeof smsChannelConfigSchema>;
-export type DiscordChannelConfig = z.infer<typeof discordChannelConfigSchema>;
-export type OpenaiApiChannelConfig = z.infer<typeof openaiApiChannelConfigSchema>;
-export type OllamaApiChannelConfig = z.infer<typeof ollamaApiChannelConfigSchema>;
-export type ChannelConfig = z.infer<typeof channelConfigSchema>;
 export type SystemSettings = z.infer<typeof systemSettingsSchema>;
 export type PersonalitySettings = z.infer<typeof personalitySettingsSchema>;
 export type PaginationInput = z.infer<typeof paginationInputSchema>;
@@ -256,6 +244,29 @@ export type HookDefinition = z.infer<typeof HookDefinitionSchema>;
 export type DecisionTypeDefinition = z.infer<typeof DecisionTypeSchema>;
 export type TriggerDefinition = z.infer<typeof TriggerDefinitionSchema>;
 export type PluginMcpServer = z.infer<typeof PluginMcpServerSchema>;
+
+// ============================================================================
+// Channel Packages
+// ============================================================================
+
+export type {
+  ChannelManifestAuthor,
+  ChannelIdentity,
+  ChannelCapability,
+  ChannelPermissions,
+  ChannelStoreMetadata,
+  ChannelManifest,
+  ConfigFieldType,
+  ConfigFieldOption,
+  ConfigField,
+  ConfigSchema,
+  ChannelPackageStatus,
+  ChannelPackage,
+  ChannelInfo,
+  IpcMessageType,
+  IpcMessageBase,
+  ChannelStatusEvent,
+} from './channel-packages.js';
 
 // ============================================================================
 // API Types (not schema-derived)

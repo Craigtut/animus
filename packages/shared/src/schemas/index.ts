@@ -23,3 +23,4 @@ export * from './agent-logs.js';
 export * from './channels.js';
 export * from './mind-output.js';
 export * from './plugin.js';
+export * from './channel-packages.js';

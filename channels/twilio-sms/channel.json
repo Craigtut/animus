@@ -1,0 +1,31 @@
+{
+  "$schema": "https://animus.dev/schemas/channel/v1.json",
+  "name": "twilio-sms",
+  "type": "sms",
+  "displayName": "SMS (Twilio)",
+  "description": "Send and receive text messages via Twilio's messaging API.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Animus",
+    "url": "https://animus.dev"
+  },
+  "license": "MIT",
+  "icon": "./assets/icon.svg",
+  "adapter": "./adapter.js",
+  "identity": {
+    "identifierLabel": "Phone Number",
+    "identifierPlaceholder": "+1 (555) 123-4567",
+    "identifierValidation": "^\\+[1-9]\\d{1,14}$",
+    "identifierHelpText": "E.164 format phone number"
+  },
+  "capabilities": ["text", "media-inbound"],
+  "replyGuidance": "Keep replies concise — 1-2 sentences. Plain text only, no markdown or formatting. SMS has a 1600 character limit.",
+  "permissions": {
+    "network": ["api.twilio.com", "*.twilio.com"],
+    "env": []
+  },
+  "store": {
+    "categories": ["messaging"],
+    "tags": ["sms", "twilio", "text"]
+  }
+}

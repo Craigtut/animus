@@ -14,11 +14,13 @@ Animus is an autonomous AI assistant designed to be genuinely helpful while main
 
 ```
 /packages
-  /shared     - Shared types, Zod schemas, utilities
-  /agents     - Agent SDK abstraction layer (Claude, Codex, OpenCode)
-  /backend    - Fastify + tRPC server
-  /frontend   - Vite + React 19 SPA
-/docs         - Documentation
+  /shared       - Shared types, Zod schemas, utilities
+  /agents       - Agent SDK abstraction layer (Claude, Codex, OpenCode)
+  /backend      - Fastify + tRPC server
+  /frontend     - Vite + React 19 SPA
+  /channel-sdk  - Types-only package for channel adapter authors
+/channels       - Reference channel packages (not part of the engine, installed separately)
+/docs           - Documentation
 ```
 
 ### Tech Stack
@@ -287,6 +289,8 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - **Architecture**: `docs/architecture/mcp-tools.md` (cross-provider MCP tool architecture, tool definitions, handlers, registry, permission filtering)
 - **Architecture**: `docs/architecture/voice-channel.md` (voice channel — Parakeet TDT v3 STT + Kokoro TTS, both via sherpa-onnx, frontend voice mode, audio pipeline)
 - **Architecture**: `docs/architecture/sleep-energy.md` (sleep & energy system, circadian rhythm, energy bands, wake-up mechanics, accelerated emotional decay)
+- **Architecture**: `docs/architecture/observational-memory.md` (observational memory — three-stream compression, Observer/Reflector agents, token-based thresholds, async processing, memory.db schema)
+- **Architecture**: `docs/architecture/reflex-system.md` (reflex fast-response layer — Vercel AI SDK, dual-path voice architecture, lightweight context, heartbeat integration, provider configuration)
 - **Open Questions**: `docs/architecture/open-questions.md` (all 7 resolved)
 - **Open Concerns**: `docs/architecture/open-concerns.md` (known acceptable concerns)
 - **Frontend Design**: `docs/frontend/design-principles.md`, `docs/frontend/onboarding.md`
@@ -303,10 +307,12 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on persona/personality system → `/doc-explorer persona`
 - Working on the heartbeat system → `/doc-explorer heartbeat`
 - Working on memory/knowledge/embeddings → `/doc-explorer memory`
+- Working on observational memory/compression/observer/reflector → `/doc-explorer observational-memory`
 - Working on context assembly/prompt building → `/doc-explorer context-builder`
 - Working on shared abstractions (embedding, decay, encryption, auth, migrations) → `/doc-explorer tech-stack`
 - Working on MCP tools/custom tools → `/doc-explorer mcp-tools`
 - Working on voice/speech/STT/TTS/audio → `/doc-explorer voice`
+- Working on reflex/fast-response/voice-latency → `/doc-explorer reflex`
 - Working on sleep/energy/circadian rhythm → `/doc-explorer sleep-energy`
 - Working on agent SDKs → `/doc-explorer agents`
 - Working on backend/API → `/doc-explorer architecture`

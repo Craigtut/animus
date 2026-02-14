@@ -1,0 +1,30 @@
+{
+  "$schema": "https://animus.dev/schemas/channel/v1.json",
+  "name": "api-compat",
+  "type": "api",
+  "displayName": "API (OpenAI / Ollama Compatible)",
+  "description": "Expose Animus as an OpenAI or Ollama compatible API endpoint. Works with any client that supports these APIs.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Animus",
+    "url": "https://animus.dev"
+  },
+  "license": "MIT",
+  "icon": "./assets/icon.svg",
+  "adapter": "./adapter.js",
+  "identity": {
+    "identifierLabel": "API Client ID",
+    "identifierPlaceholder": "api-client",
+    "identifierHelpText": "Identifier for API clients (usually 'api-default')"
+  },
+  "capabilities": ["text", "markdown"],
+  "replyGuidance": "Respond naturally with full markdown formatting. No length restrictions for API responses.",
+  "permissions": {
+    "network": [],
+    "env": []
+  },
+  "store": {
+    "categories": ["integration", "api"],
+    "tags": ["openai", "ollama", "api", "rest", "home-assistant"]
+  }
+}

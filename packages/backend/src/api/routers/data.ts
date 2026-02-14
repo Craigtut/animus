@@ -149,7 +149,7 @@ export const dataRouter = router({
         contacts: systemStore.listContacts(sysDb),
         settings: systemStore.getSystemSettings(sysDb),
         persona: systemStore.getPersona(sysDb),
-        channelConfigs: systemStore.getChannelConfigs(sysDb),
+        channelPackages: systemStore.getChannelPackages(sysDb),
       },
       heartbeat: {
         state: heartbeatStore.getHeartbeatState(hbDb),

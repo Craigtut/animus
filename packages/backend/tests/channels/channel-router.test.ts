@@ -2,8 +2,6 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import { createTestSystemDb, createTestMessagesDb } from '../helpers.js';
 import * as systemStore from '../../src/db/stores/system-store.js';
-import type { IChannelAdapter } from '../../src/channels/types.js';
-import type { ChannelType } from '@animus/shared';
 
 // Mock DB access
 let mockSysDb: Database.Database;
@@ -29,17 +27,15 @@ vi.mock('../../src/lib/event-bus.js', () => ({
   }),
 }));
 
-const { ChannelRouter } = await import('../../src/channels/channel-router.js');
+// Mock channel manager
+const mockSendToChannel = vi.fn(async () => true);
+vi.mock('../../src/channels/channel-manager.js', () => ({
+  getChannelManager: () => ({
+    sendToChannel: mockSendToChannel,
+  }),
+}));
 
-function createMockAdapter(channelType: ChannelType): IChannelAdapter {
-  return {
-    channelType,
-    start: vi.fn(async () => {}),
-    stop: vi.fn(async () => {}),
-    isEnabled: vi.fn(() => true),
-    send: vi.fn(async () => {}),
-  };
-}
+const { ChannelRouter } = await import('../../src/channels/channel-router.js');
 
 describe('channel-router', () => {
   let router: InstanceType<typeof ChannelRouter>;
@@ -48,18 +44,7 @@ describe('channel-router', () => {
     mockSysDb = createTestSystemDb();
     mockMsgDb = createTestMessagesDb();
     router = new ChannelRouter();
-  });
-
-  describe('registerAdapter', () => {
-    it('registers and retrieves an adapter', () => {
-      const adapter = createMockAdapter('sms');
-      router.registerAdapter(adapter);
-      expect(router.getAdapter('sms')).toBe(adapter);
-    });
-
-    it('returns undefined for unregistered channel', () => {
-      expect(router.getAdapter('discord')).toBeUndefined();
-    });
+    mockSendToChannel.mockClear();
   });
 
   describe('handleIncoming', () => {
@@ -99,19 +84,7 @@ describe('channel-router', () => {
   });
 
   describe('sendOutbound', () => {
-    it('returns null when no adapter is registered', async () => {
-      const result = await router.sendOutbound({
-        contactId: 'test',
-        channel: 'sms',
-        content: 'Hello',
-      });
-      expect(result).toBeNull();
-    });
-
-    it('sends via the adapter and stores the message', async () => {
-      const adapter = createMockAdapter('web');
-      router.registerAdapter(adapter);
-
+    it('stores message and delivers via ChannelManager', async () => {
       // Create a contact
       const contact = systemStore.createContact(mockSysDb, {
         fullName: 'Test',
@@ -127,53 +100,26 @@ describe('channel-router', () => {
       expect(result).not.toBeNull();
       expect(result!.content).toBe('Reply to you');
       expect(result!.direction).toBe('outbound');
-      expect(adapter.send).toHaveBeenCalledWith(contact.id, 'Reply to you', undefined);
+      expect(mockSendToChannel).toHaveBeenCalledWith('web', contact.id, 'Reply to you', undefined);
     });
 
-    it('returns null when adapter is disabled', async () => {
-      const adapter = createMockAdapter('sms');
-      (adapter.isEnabled as ReturnType<typeof vi.fn>).mockReturnValue(false);
-      router.registerAdapter(adapter);
+    it('still stores message when delivery fails', async () => {
+      mockSendToChannel.mockResolvedValueOnce(false);
+
+      const contact = systemStore.createContact(mockSysDb, {
+        fullName: 'Test',
+        isPrimary: true,
+      });
 
       const result = await router.sendOutbound({
-        contactId: 'test',
+        contactId: contact.id,
         channel: 'sms',
         content: 'Hello',
       });
-      expect(result).toBeNull();
-    });
-  });
 
-  describe('startAll / stopAll', () => {
-    it('starts all adapters', async () => {
-      const sms = createMockAdapter('sms');
-      const discord = createMockAdapter('discord');
-      router.registerAdapter(sms);
-      router.registerAdapter(discord);
-
-      await router.startAll();
-      expect(sms.start).toHaveBeenCalled();
-      expect(discord.start).toHaveBeenCalled();
-    });
-
-    it('stops all adapters', async () => {
-      const sms = createMockAdapter('sms');
-      router.registerAdapter(sms);
-
-      await router.stopAll();
-      expect(sms.stop).toHaveBeenCalled();
-    });
-
-    it('continues if one adapter fails to start', async () => {
-      const failing = createMockAdapter('sms');
-      (failing.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('bad token'));
-      const working = createMockAdapter('discord');
-      router.registerAdapter(failing);
-      router.registerAdapter(working);
-
-      // Should not throw
-      await router.startAll();
-      expect(working.start).toHaveBeenCalled();
+      // Message should still be stored even though delivery failed
+      expect(result).not.toBeNull();
+      expect(result!.content).toBe('Hello');
     });
   });
 });

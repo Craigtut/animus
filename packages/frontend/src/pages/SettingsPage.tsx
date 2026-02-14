@@ -35,6 +35,8 @@ import {
   FolderOpen,
   GitBranch,
   Package,
+  ArrowClockwise,
+  Plugs,
 } from '@phosphor-icons/react';
 import { Card, Button, Input, Modal, Badge, Toggle, Slider, Typography, CityAutocomplete, TimezoneSelect } from '../components/ui';
 import { trpc } from '../utils/trpc';
@@ -1713,218 +1715,822 @@ function ProviderSection() {
 // Section: Channels
 // ============================================================================
 
+// Status → Badge variant mapping for channels
+const channelStatusBadge: Record<string, { variant: 'default' | 'success' | 'warning' | 'error'; label: string }> = {
+  disabled: { variant: 'default', label: 'Disabled' },
+  unconfigured: { variant: 'warning', label: 'Needs Configuration' },
+  starting: { variant: 'warning', label: 'Starting' },
+  connected: { variant: 'success', label: 'Connected' },
+  error: { variant: 'error', label: 'Error' },
+  failed: { variant: 'error', label: 'Failed' },
+};
+
+// Icon mapping for common channel types
+const channelIconMap: Record<string, React.ElementType> = {
+  web: Globe,
+  sms: ChatText,
+  discord: DiscordLogo,
+  openai_api: Code,
+  api: Code,
+};
+
 function ChannelsSection() {
   const theme = useTheme();
   const utils = trpc.useUtils();
 
-  const { data: channelConfigs } = trpc.channels.getConfigs.useQuery();
-  const configureMutation = trpc.channels.configure.useMutation({
-    onSuccess: () => utils.channels.getConfigs.invalidate(),
+  // Queries
+  const { data: packages, isLoading } = trpc.channels.listPackages.useQuery();
+
+  // Mutations
+  const installMutation = trpc.channels.install.useMutation({
+    onSuccess: () => {
+      utils.channels.listPackages.invalidate();
+      setShowInstallModal(false);
+      setInstallPath('');
+    },
   });
-  const validateMutation = trpc.channels.validate.useMutation();
+  const uninstallMutation = trpc.channels.uninstall.useMutation({
+    onSuccess: () => utils.channels.listPackages.invalidate(),
+  });
+  const enableMutation = trpc.channels.enable.useMutation({
+    onSuccess: () => utils.channels.listPackages.invalidate(),
+  });
+  const disableMutation = trpc.channels.disable.useMutation({
+    onSuccess: () => utils.channels.listPackages.invalidate(),
+  });
+  const restartMutation = trpc.channels.restart.useMutation({
+    onSuccess: () => utils.channels.listPackages.invalidate(),
+  });
 
+  // Local state
+  const [showInstallModal, setShowInstallModal] = useState(false);
+  const [installPath, setInstallPath] = useState('');
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
-  const [smsConfig, setSmsConfig] = useState({ accountSid: '', authToken: '', phoneNumber: '', webhookUrl: '' });
-  const [discordConfig, setDiscordConfig] = useState({ botToken: '', applicationId: '', allowedGuildIds: '' });
-  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+  const [configChannel, setConfigChannel] = useState<string | null>(null);
+  const [uninstallConfirm, setUninstallConfirm] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
-  // Channel config details are stored server-side; the getConfigs list
-  // only returns metadata (id, type, enabled, timestamps). The form
-  // fields start empty -- the user fills them in or re-enters on save.
-  // A future enhancement could fetch individual channel configs on expand.
+  // Real-time status subscription
+  trpc.channels.onStatusChange.useSubscription(undefined, {
+    onData: () => {
+      utils.channels.listPackages.invalidate();
+    },
+  });
 
-  const getChannelStatus = (type: string) => {
-    const cfg = channelConfigs?.find((c: any) => c.channelType === type);
-    if (!cfg) return 'default';
-    return cfg.isEnabled ? 'success' : 'default';
+  const handleToggleEnabled = (name: string, currentlyEnabled: boolean) => {
+    setMutationError(null);
+    if (currentlyEnabled) {
+      disableMutation.mutate({ name }, { onError: (err) => setMutationError(err.message) });
+    } else {
+      enableMutation.mutate({ name }, { onError: (err) => setMutationError(err.message) });
+    }
   };
 
-  const isEnabled = (type: string) => {
-    const cfg = channelConfigs?.find((c: any) => c.channelType === type);
-    return cfg?.isEnabled ?? false;
+  const handleRestart = (name: string) => {
+    setMutationError(null);
+    restartMutation.mutate({ name }, { onError: (err) => setMutationError(err.message) });
   };
 
-  const channelDefs = [
-    { type: 'web', name: 'Web', icon: Globe, alwaysOn: true },
-    { type: 'sms', name: 'SMS', icon: ChatText, alwaysOn: false },
-    { type: 'discord', name: 'Discord', icon: DiscordLogo, alwaysOn: false },
-    { type: 'openai_api', name: 'API', icon: Code, alwaysOn: true },
-  ];
-
-  const handleSaveSms = () => {
-    configureMutation.mutate({
-      channelType: 'sms',
-      config: smsConfig,
-      isEnabled: true,
-    });
+  const handleUninstall = (name: string) => {
+    setMutationError(null);
+    uninstallMutation.mutate(
+      { name },
+      {
+        onSuccess: () => setUninstallConfirm(null),
+        onError: (err) => {
+          setMutationError(err.message);
+          setUninstallConfirm(null);
+        },
+      }
+    );
   };
 
-  const handleSaveDiscord = () => {
-    configureMutation.mutate({
-      channelType: 'discord',
-      config: {
-        ...discordConfig,
-        allowedGuildIds: discordConfig.allowedGuildIds.split(',').map((s) => s.trim()).filter(Boolean),
-      },
-      isEnabled: true,
-    });
+  const handleInstall = () => {
+    setMutationError(null);
+    installMutation.mutate(
+      { path: installPath },
+      { onError: (err) => setMutationError(err.message) }
+    );
   };
 
-  const handleToggle = (type: string, enabled: boolean) => {
-    configureMutation.mutate({
-      channelType: type as any,
-      config: {},
-      isEnabled: enabled,
-    });
-  };
+  if (isLoading) {
+    return <Typography.Body color="hint" css={css`padding: ${theme.spacing[8]};`}>Loading channels...</Typography.Body>;
+  }
+
+  const channelList = packages ?? [];
+
+  // Web channel shown first as built-in
+  const webChannel = { name: 'web', displayName: 'Web', description: 'Built-in browser chat interface', status: 'connected' as const, isBuiltIn: true };
 
   return (
-    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-      {channelDefs.map((ch) => (
-        <Card key={ch.type} variant="outlined" padding="md">
-          <div
-            css={css`display: flex; align-items: center; justify-content: space-between; cursor: pointer;`}
-            onClick={() => setExpandedChannel(expandedChannel === ch.type ? null : ch.type)}
-          >
-            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-              <ch.icon size={20} />
-              <Typography.BodyAlt as="span">{ch.name}</Typography.BodyAlt>
-              <Badge variant={ch.alwaysOn ? 'success' : getChannelStatus(ch.type) as any}>
-                {ch.alwaysOn ? 'Always on' : (isEnabled(ch.type) ? 'Active' : 'Not configured')}
-              </Badge>
-            </div>
-            {!ch.alwaysOn && (
-              <div onClick={(e) => e.stopPropagation()}>
-                <Toggle
-                  checked={isEnabled(ch.type)}
-                  onChange={(checked) => handleToggle(ch.type, checked)}
-                />
-              </div>
-            )}
-          </div>
+    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
+      {/* Header */}
+      <div css={css`display: flex; align-items: center; justify-content: space-between;`}>
+        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+          <Typography.Subtitle as="h2" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+            Channels
+          </Typography.Subtitle>
+          {channelList.length > 0 && (
+            <Badge variant="default">{channelList.length + 1}</Badge>
+          )}
+        </div>
+        <Button size="sm" onClick={() => { setShowInstallModal(true); setInstallPath(''); }}>
+          <Plus size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+          Add Channel
+        </Button>
+      </div>
 
-          <AnimatePresence>
-            {expandedChannel === ch.type && ch.type === 'sms' && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                css={css`overflow: hidden;`}
-              >
-                <div css={css`
-                  margin-top: ${theme.spacing[4]};
-                  padding-top: ${theme.spacing[4]};
-                  border-top: 1px solid ${theme.colors.border.light};
-                  display: flex; flex-direction: column; gap: ${theme.spacing[3]};
-                `}>
-                  <Input
-                    label="Twilio Account SID"
-                    value={smsConfig.accountSid}
-                    onChange={(e) => setSmsConfig({ ...smsConfig, accountSid: (e.target as HTMLInputElement).value })}
-                  />
-                  <Input
-                    label="Auth Token"
-                    type={showSecrets['smsAuth'] ? 'text' : 'password'}
-                    value={smsConfig.authToken}
-                    onChange={(e) => setSmsConfig({ ...smsConfig, authToken: (e.target as HTMLInputElement).value })}
-                    rightElement={
-                      <button
-                        onClick={() => setShowSecrets({ ...showSecrets, smsAuth: !showSecrets['smsAuth'] })}
-                        css={css`cursor: pointer; padding: 0; color: ${theme.colors.text.hint}; &:hover { color: ${theme.colors.text.primary}; }`}
-                      >
-                        {showSecrets['smsAuth'] ? <EyeSlash size={16} /> : <Eye size={16} />}
-                      </button>
-                    }
-                  />
-                  <Input
-                    label="Phone Number"
-                    value={smsConfig.phoneNumber}
-                    onChange={(e) => setSmsConfig({ ...smsConfig, phoneNumber: (e.target as HTMLInputElement).value })}
-                    placeholder="+1234567890"
-                  />
-                  <Input
-                    label="Webhook URL"
-                    value={smsConfig.webhookUrl}
-                    onChange={(e) => setSmsConfig({ ...smsConfig, webhookUrl: (e.target as HTMLInputElement).value })}
-                    placeholder="https://..."
-                  />
-                  <Button size="sm" onClick={handleSaveSms} loading={configureMutation.isPending}>
-                    Save
-                  </Button>
+      {/* Error banner */}
+      <AnimatePresence>
+        {mutationError && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            css={css`
+              padding: ${theme.spacing[3]} ${theme.spacing[4]};
+              background: ${theme.colors.error.main}1a;
+              border-radius: ${theme.borderRadius.default};
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+            `}
+          >
+            <Typography.SmallBody color={theme.colors.error.main}>
+              {mutationError}
+            </Typography.SmallBody>
+            <button
+              onClick={() => setMutationError(null)}
+              css={css`cursor: pointer; padding: ${theme.spacing[1]}; color: ${theme.colors.error.main}; &:hover { opacity: 0.7; }`}
+            >
+              <X size={14} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Channel list */}
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+        {/* Built-in Web Channel */}
+        <Card variant="outlined" padding="md">
+          <div css={css`display: flex; align-items: center; justify-content: space-between;`}>
+            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+              <Globe size={20} />
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]};`}>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                  <Typography.BodyAlt as="span">{webChannel.displayName}</Typography.BodyAlt>
+                  <Badge variant="success">Always on</Badge>
                 </div>
-              </motion.div>
-            )}
-            {expandedChannel === ch.type && ch.type === 'discord' && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                css={css`overflow: hidden;`}
-              >
-                <div css={css`
-                  margin-top: ${theme.spacing[4]};
-                  padding-top: ${theme.spacing[4]};
-                  border-top: 1px solid ${theme.colors.border.light};
-                  display: flex; flex-direction: column; gap: ${theme.spacing[3]};
-                `}>
-                  <Input
-                    label="Bot Token"
-                    type={showSecrets['discordToken'] ? 'text' : 'password'}
-                    value={discordConfig.botToken}
-                    onChange={(e) => setDiscordConfig({ ...discordConfig, botToken: (e.target as HTMLInputElement).value })}
-                    rightElement={
-                      <button
-                        onClick={() => setShowSecrets({ ...showSecrets, discordToken: !showSecrets['discordToken'] })}
-                        css={css`cursor: pointer; padding: 0; color: ${theme.colors.text.hint}; &:hover { color: ${theme.colors.text.primary}; }`}
-                      >
-                        {showSecrets['discordToken'] ? <EyeSlash size={16} /> : <Eye size={16} />}
-                      </button>
-                    }
-                  />
-                  <Input
-                    label="Application ID"
-                    value={discordConfig.applicationId}
-                    onChange={(e) => setDiscordConfig({ ...discordConfig, applicationId: (e.target as HTMLInputElement).value })}
-                  />
-                  <Input
-                    label="Allowed Guild IDs"
-                    value={discordConfig.allowedGuildIds}
-                    onChange={(e) => setDiscordConfig({ ...discordConfig, allowedGuildIds: (e.target as HTMLInputElement).value })}
-                    helperText="Comma-separated list of Discord server IDs"
-                  />
-                  <Button size="sm" onClick={handleSaveDiscord} loading={configureMutation.isPending}>
-                    Save
-                  </Button>
-                </div>
-              </motion.div>
-            )}
-            {expandedChannel === ch.type && (ch.type === 'web' || ch.type === 'openai_api') && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                css={css`overflow: hidden;`}
-              >
-                <div css={css`
-                  margin-top: ${theme.spacing[4]};
-                  padding-top: ${theme.spacing[4]};
-                  border-top: 1px solid ${theme.colors.border.light};
-                `}>
-                  <Typography.SmallBody color="secondary">
-                    {ch.type === 'web'
-                      ? 'The web channel is always active. No additional configuration needed.'
-                      : 'The API channel is always available. Use it to integrate Animus with external systems.'}
-                  </Typography.SmallBody>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                <Typography.Caption color="secondary">{webChannel.description}</Typography.Caption>
+              </div>
+            </div>
+          </div>
         </Card>
-      ))}
+
+        {/* Installed Channel Packages */}
+        {channelList.map((channel) => {
+          const isExpanded = expandedChannel === channel.name;
+          const statusInfo = channelStatusBadge[channel.status] ?? { variant: 'default' as const, label: channel.status };
+          const IconComponent = channelIconMap[channel.channelType] ?? Plugs;
+          const hasError = channel.status === 'error' || channel.status === 'failed';
+
+          return (
+            <Card key={channel.name} variant="outlined" padding="md">
+              <div
+                css={css`display: flex; align-items: flex-start; justify-content: space-between; cursor: pointer;`}
+                onClick={() => setExpandedChannel(isExpanded ? null : channel.name)}
+              >
+                <div css={css`display: flex; align-items: flex-start; gap: ${theme.spacing[3]}; flex: 1; min-width: 0;`}>
+                  <IconComponent size={20} css={css`flex-shrink: 0; margin-top: 2px;`} />
+                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]}; flex: 1; min-width: 0;`}>
+                    <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
+                      <Typography.BodyAlt as="span">{channel.displayName}</Typography.BodyAlt>
+                      <Typography.Caption as="span" color="hint">v{channel.version}</Typography.Caption>
+                      <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                    </div>
+                    {channel.description && (
+                      <Typography.SmallBody color="secondary" css={css`
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        white-space: ${isExpanded ? 'normal' : 'nowrap'};
+                      `}>
+                        {channel.description}
+                      </Typography.SmallBody>
+                    )}
+                    {/* Error message inline */}
+                    {hasError && channel.lastError && (
+                      <div css={css`
+                        display: flex;
+                        align-items: center;
+                        gap: ${theme.spacing[2]};
+                        margin-top: ${theme.spacing[1]};
+                        padding: ${theme.spacing[1.5]} ${theme.spacing[2]};
+                        background: ${theme.colors.error.main}0d;
+                        border-radius: ${theme.borderRadius.sm};
+                      `}>
+                        <Warning size={14} css={css`color: ${theme.colors.error.main}; flex-shrink: 0;`} />
+                        <Typography.Caption color={theme.colors.error.main} css={css`flex: 1; word-break: break-word;`}>
+                          {channel.lastError}
+                        </Typography.Caption>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleRestart(channel.name); }}
+                          css={css`
+                            display: inline-flex;
+                            align-items: center;
+                            gap: ${theme.spacing[1]};
+                            padding: ${theme.spacing[0.5]} ${theme.spacing[2]};
+                            font-size: ${theme.typography.fontSize.xs};
+                            color: ${theme.colors.error.main};
+                            border: 1px solid ${theme.colors.error.main}33;
+                            border-radius: ${theme.borderRadius.sm};
+                            cursor: pointer;
+                            background: transparent;
+                            white-space: nowrap;
+                            &:hover { background: ${theme.colors.error.main}0d; }
+                          `}
+                        >
+                          <ArrowClockwise size={12} />
+                          Retry
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-shrink: 0; margin-left: ${theme.spacing[3]};`} onClick={(e) => e.stopPropagation()}>
+                  <Toggle
+                    checked={channel.enabled}
+                    onChange={() => handleToggleEnabled(channel.name, channel.enabled)}
+                  />
+                </div>
+              </div>
+
+              {/* Expanded detail */}
+              <AnimatePresence>
+                {isExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    css={css`overflow: hidden;`}
+                  >
+                    <div css={css`
+                      margin-top: ${theme.spacing[4]};
+                      padding-top: ${theme.spacing[4]};
+                      border-top: 1px solid ${theme.colors.border.light};
+                      display: flex;
+                      flex-direction: column;
+                      gap: ${theme.spacing[3]};
+                    `}>
+                      {/* Metadata */}
+                      <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[3]};`}>
+                        {channel.author && (
+                          <Typography.Caption as="span" color="hint">
+                            Author: {channel.author.name}
+                            {channel.author.url && (
+                              <a
+                                href={channel.author.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                css={css`
+                                  margin-left: ${theme.spacing[1]};
+                                  color: ${theme.colors.text.secondary};
+                                  &:hover { color: ${theme.colors.text.primary}; }
+                                `}
+                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                              >
+                                <ArrowSquareOut size={10} css={css`vertical-align: middle;`} />
+                              </a>
+                            )}
+                          </Typography.Caption>
+                        )}
+                        <Typography.Caption as="span" color="hint">
+                          Installed: {new Date(channel.installedAt).toLocaleDateString()}
+                        </Typography.Caption>
+                      </div>
+
+                      {/* Capabilities */}
+                      {channel.capabilities.length > 0 && (
+                        <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[1.5]};`}>
+                          {channel.capabilities.map((cap) => (
+                            <Typography.SmallBody
+                              key={cap}
+                              as="span"
+                              css={css`
+                                padding: ${theme.spacing[0.5]} ${theme.spacing[2]};
+                                background: ${theme.colors.background.elevated};
+                                border-radius: ${theme.borderRadius.sm};
+                                font-size: ${theme.typography.fontSize.xs};
+                              `}
+                            >
+                              {cap}
+                            </Typography.SmallBody>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Actions */}
+                      <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={(e: React.MouseEvent) => { e.stopPropagation(); setConfigChannel(channel.name); }}
+                        >
+                          <GearFine size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+                          Configure
+                        </Button>
+                        {channel.enabled && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleRestart(channel.name); }}
+                            loading={restartMutation.isPending}
+                          >
+                            <ArrowClockwise size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+                            Restart
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e: React.MouseEvent) => { e.stopPropagation(); setUninstallConfirm(channel.name); }}
+                        >
+                          <Trash size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+                          Uninstall
+                        </Button>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </Card>
+          );
+        })}
+
+        {channelList.length === 0 && (
+          <div css={css`
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: ${theme.spacing[8]} ${theme.spacing[4]};
+            gap: ${theme.spacing[3]};
+          `}>
+            <Plugs size={32} css={css`color: ${theme.colors.text.disabled};`} />
+            <Typography.SmallBody color="hint">No channel packages installed</Typography.SmallBody>
+          </div>
+        )}
+      </div>
+
+      {/* Install Modal */}
+      <Modal open={showInstallModal} onClose={() => setShowInstallModal(false)}>
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+          <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+            Add Channel Package
+          </Typography.Subtitle>
+          <Input
+            label="Absolute path to channel package directory"
+            value={installPath}
+            onChange={(e) => setInstallPath((e.target as HTMLInputElement).value)}
+            placeholder="/path/to/channel-package"
+          />
+          {installMutation.isError && (
+            <div css={css`
+              padding: ${theme.spacing[2]} ${theme.spacing[4]};
+              background: ${theme.colors.error.main}1a;
+              border-radius: ${theme.borderRadius.default};
+            `}>
+              <Typography.SmallBody color={theme.colors.error.main}>
+                {installMutation.error?.message ?? 'Installation failed'}
+              </Typography.SmallBody>
+            </div>
+          )}
+          <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+            <Button variant="ghost" size="sm" onClick={() => setShowInstallModal(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              onClick={handleInstall}
+              disabled={!installPath.trim()}
+              loading={installMutation.isPending}
+            >
+              Install
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Uninstall confirmation modal */}
+      <Modal open={uninstallConfirm !== null} onClose={() => setUninstallConfirm(null)}>
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+            <Warning size={20} css={css`color: ${theme.colors.error.main};`} />
+            <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+              Uninstall {uninstallConfirm}?
+            </Typography.Subtitle>
+          </div>
+          <Typography.SmallBody color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+            This will stop the channel and remove it completely. Any contacts using this channel will no longer be reachable through it.
+          </Typography.SmallBody>
+          <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+            <Button variant="ghost" size="sm" onClick={() => setUninstallConfirm(null)}>Cancel</Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => uninstallConfirm && handleUninstall(uninstallConfirm)}
+              loading={uninstallMutation.isPending}
+            >
+              Uninstall
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Channel Config Modal */}
+      {configChannel && (
+        <ChannelConfigModal
+          channelName={configChannel}
+          onClose={() => setConfigChannel(null)}
+        />
+      )}
     </div>
+  );
+}
+
+// ============================================================================
+// Channel Config Modal
+// ============================================================================
+
+function ChannelConfigModal({
+  channelName,
+  onClose,
+}: {
+  channelName: string;
+  onClose: () => void;
+}) {
+  const theme = useTheme();
+  const utils = trpc.useUtils();
+
+  const { data: configSchema, isLoading: schemaLoading } = trpc.channels.getConfigSchema.useQuery({ name: channelName });
+  const { data: currentConfig, isLoading: configLoading } = trpc.channels.getConfig.useQuery({ name: channelName });
+  const configureMutation = trpc.channels.configure.useMutation({
+    onSuccess: () => {
+      utils.channels.getConfig.invalidate({ name: channelName });
+      utils.channels.listPackages.invalidate();
+      onClose();
+    },
+  });
+
+  const [configValues, setConfigValues] = useState<Record<string, unknown>>({});
+  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [initialized, setInitialized] = useState(false);
+
+  const fields = configSchema?.fields ?? [];
+
+  // Initialize form values from current config
+  useEffect(() => {
+    if (initialized || configLoading || schemaLoading) return;
+    if (currentConfig !== undefined) {
+      const cfg = currentConfig ?? {};
+      // Set defaults for fields not in config
+      const values: Record<string, unknown> = { ...cfg };
+      for (const field of fields) {
+        if (values[field.key] === undefined && field.default !== undefined) {
+          values[field.key] = field.default;
+        }
+        // Convert comma-separated strings to arrays for text-list fields
+        if (field.type === 'text-list' && typeof values[field.key] === 'string') {
+          values[field.key] = (values[field.key] as string).split(',').map((s) => s.trim()).filter(Boolean);
+        }
+      }
+      setConfigValues(values);
+      setInitialized(true);
+    }
+  }, [currentConfig, configLoading, schemaLoading, fields, initialized]);
+
+  // Client-side validation (Bug #20)
+  function validateConfig(): boolean {
+    const errors: Record<string, string> = {};
+
+    for (const field of fields) {
+      const value = configValues[field.key];
+
+      // Required check
+      if (field.required) {
+        const isEmpty = value === undefined || value === null || value === '' ||
+          (Array.isArray(value) && value.length === 0);
+        if (isEmpty) {
+          errors[field.key] = `${field.label} is required`;
+          continue;
+        }
+      }
+
+      // Skip further validation if empty and not required
+      if (value === undefined || value === null || value === '') continue;
+
+      // Regex validation
+      if (field.validation && typeof value === 'string') {
+        try {
+          if (!new RegExp(field.validation).test(value)) {
+            errors[field.key] = `Invalid format for ${field.label}`;
+          }
+        } catch { /* invalid regex, skip */ }
+      }
+
+      // URL validation
+      if (field.type === 'url' && typeof value === 'string') {
+        try {
+          new URL(value);
+        } catch {
+          errors[field.key] = 'Must be a valid URL';
+        }
+      }
+
+      // Number validation with min/max
+      if (field.type === 'number' && value !== undefined && value !== '') {
+        const num = Number(value);
+        if (isNaN(num)) {
+          errors[field.key] = 'Must be a number';
+        } else {
+          if (field.min !== undefined && num < field.min) {
+            errors[field.key] = `Must be at least ${field.min}`;
+          }
+          if (field.max !== undefined && num > field.max) {
+            errors[field.key] = `Must be at most ${field.max}`;
+          }
+        }
+      }
+    }
+
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  }
+
+  const handleSave = () => {
+    if (!validateConfig()) return;
+    configureMutation.mutate({ name: channelName, config: configValues });
+  };
+
+  const isLoading = schemaLoading || configLoading;
+
+  return (
+    <Modal open onClose={onClose} maxWidth="520px">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSave();
+        }}
+        css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}
+      >
+        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+          Configure: {channelName}
+        </Typography.Subtitle>
+
+        {isLoading ? (
+          <Typography.SmallBody color="hint">Loading configuration...</Typography.SmallBody>
+        ) : fields.length === 0 ? (
+          <Typography.SmallBody color="secondary">
+            This channel has no configurable settings.
+          </Typography.SmallBody>
+        ) : (
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+            {fields.map((field) => {
+              const value = configValues[field.key];
+              const fieldError = validationErrors[field.key];
+
+              if (field.type === 'toggle') {
+                return (
+                  <div key={field.key} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+                    <Toggle
+                      checked={!!value}
+                      onChange={(checked) => setConfigValues({ ...configValues, [field.key]: checked })}
+                      label={field.label}
+                    />
+                    {field.helpText && (
+                      <Typography.Caption as="p" color="hint" css={css`margin-left: ${theme.spacing[12]};`}>
+                        {field.helpText}
+                      </Typography.Caption>
+                    )}
+                    {fieldError && (
+                      <span css={css`color: ${theme.colors.error.main}; font-size: 12px; margin-top: 4px; display: block;`}>
+                        {fieldError}
+                      </span>
+                    )}
+                  </div>
+                );
+              }
+
+              if (field.type === 'select' && field.options) {
+                return (
+                  <div key={field.key} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                    <label css={css`
+                      font-size: ${theme.typography.fontSize.sm};
+                      font-weight: ${theme.typography.fontWeight.medium};
+                      color: ${theme.colors.text.secondary};
+                    `}>
+                      {field.label}{field.required && <span css={css`color: ${theme.colors.error.main}; margin-left: 2px;`}>*</span>}
+                    </label>
+                    <select
+                      value={value != null ? String(value) : ''}
+                      onChange={(e) => setConfigValues({ ...configValues, [field.key]: e.target.value })}
+                      css={css`
+                        width: 100%;
+                        padding: ${theme.spacing[3]};
+                        background: ${theme.colors.background.paper};
+                        border: 1px solid ${fieldError ? theme.colors.error.main : theme.colors.border.default};
+                        border-radius: ${theme.borderRadius.default};
+                        color: ${theme.colors.text.primary};
+                        font-size: ${theme.typography.fontSize.base};
+                        outline: none;
+                        cursor: pointer;
+                        &:focus { border-color: ${fieldError ? theme.colors.error.main : theme.colors.border.focus}; }
+                      `}
+                    >
+                      <option value="">Select...</option>
+                      {field.options.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                    {field.helpText && (
+                      <Typography.Caption as="p" color="hint">{field.helpText}</Typography.Caption>
+                    )}
+                    {fieldError && (
+                      <span css={css`color: ${theme.colors.error.main}; font-size: 12px; margin-top: 4px; display: block;`}>
+                        {fieldError}
+                      </span>
+                    )}
+                  </div>
+                );
+              }
+
+              if (field.type === 'secret') {
+                return (
+                  <div key={field.key} css={css`display: flex; flex-direction: column;`}>
+                    <Input
+                      label={`${field.label}${field.required ? ' *' : ''}`}
+                      type={showSecrets[field.key] ? 'text' : 'password'}
+                      value={value != null ? String(value) : ''}
+                      onChange={(e) => setConfigValues({ ...configValues, [field.key]: (e.target as HTMLInputElement).value })}
+                      placeholder={field.placeholder}
+                      helperText={field.helpText}
+                      error={fieldError}
+                      rightElement={
+                        <button
+                          type="button"
+                          onClick={() => setShowSecrets({ ...showSecrets, [field.key]: !showSecrets[field.key] })}
+                          css={css`cursor: pointer; padding: 0; color: ${theme.colors.text.hint}; &:hover { color: ${theme.colors.text.primary}; }`}
+                        >
+                          {showSecrets[field.key] ? <EyeSlash size={16} /> : <Eye size={16} />}
+                        </button>
+                      }
+                    />
+                  </div>
+                );
+              }
+
+              // text-list: tag-style input (Bug #18)
+              if (field.type === 'text-list') {
+                const tags = (Array.isArray(value) ? value : []) as string[];
+                return (
+                  <div key={field.key} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                    <label css={css`
+                      font-size: ${theme.typography.fontSize.sm};
+                      font-weight: ${theme.typography.fontWeight.medium};
+                      color: ${theme.colors.text.secondary};
+                    `}>
+                      {field.label}{field.required && <span css={css`color: ${theme.colors.error.main}; margin-left: 2px;`}>*</span>}
+                    </label>
+                    <div>
+                      {tags.length > 0 && (
+                        <div css={css`
+                          display: flex;
+                          flex-wrap: wrap;
+                          gap: 6px;
+                          margin-bottom: 8px;
+                        `}>
+                          {tags.map((tag, i) => (
+                            <span key={i} css={css`
+                              display: inline-flex;
+                              align-items: center;
+                              gap: 4px;
+                              padding: 2px 8px;
+                              background: ${theme.colors.background.elevated};
+                              border: 1px solid ${theme.colors.border.default};
+                              border-radius: 4px;
+                              font-size: 13px;
+                              color: ${theme.colors.text.secondary};
+                            `}>
+                              {tag}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setConfigValues((prev) => ({
+                                    ...prev,
+                                    [field.key]: tags.filter((_, idx) => idx !== i),
+                                  }));
+                                }}
+                                css={css`
+                                  background: none;
+                                  border: none;
+                                  cursor: pointer;
+                                  padding: 0 2px;
+                                  color: ${theme.colors.text.hint};
+                                  font-size: 14px;
+                                  line-height: 1;
+                                  &:hover { color: ${theme.colors.text.primary}; }
+                                `}
+                              >
+                                &times;
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <input
+                        type="text"
+                        placeholder={field.placeholder || 'Type and press Enter to add'}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const val = e.currentTarget.value.trim();
+                            if (val) {
+                              setConfigValues((prev) => ({
+                                ...prev,
+                                [field.key]: [...tags, val],
+                              }));
+                              e.currentTarget.value = '';
+                            }
+                          }
+                        }}
+                        css={css`
+                          width: 100%;
+                          padding: ${theme.spacing[3]};
+                          background: ${theme.colors.background.paper};
+                          border: 1px solid ${fieldError ? theme.colors.error.main : theme.colors.border.default};
+                          border-radius: ${theme.borderRadius.default};
+                          color: ${theme.colors.text.primary};
+                          font-size: ${theme.typography.fontSize.base};
+                          outline: none;
+                          &:focus { border-color: ${fieldError ? theme.colors.error.main : theme.colors.border.focus}; }
+                          &::placeholder { color: ${theme.colors.text.hint}; }
+                        `}
+                      />
+                    </div>
+                    {field.helpText && (
+                      <Typography.Caption as="p" color="hint">{field.helpText}</Typography.Caption>
+                    )}
+                    {fieldError && (
+                      <span css={css`color: ${theme.colors.error.main}; font-size: 12px; margin-top: 4px; display: block;`}>
+                        {fieldError}
+                      </span>
+                    )}
+                  </div>
+                );
+              }
+
+              // text, url, number
+              return (
+                <Input
+                  key={field.key}
+                  label={`${field.label}${field.required ? ' *' : ''}`}
+                  type={field.type === 'number' ? 'number' : 'text'}
+                  value={value != null ? String(value) : ''}
+                  onChange={(e) => {
+                    const raw = (e.target as HTMLInputElement).value;
+                    const parsed = field.type === 'number' ? (raw === '' ? '' : Number(raw)) : raw;
+                    setConfigValues({ ...configValues, [field.key]: parsed });
+                  }}
+                  placeholder={field.placeholder}
+                  helperText={field.helpText}
+                  error={fieldError}
+                />
+              );
+            })}
+          </div>
+        )}
+
+        {configureMutation.isError && (
+          <div css={css`
+            padding: ${theme.spacing[2]} ${theme.spacing[4]};
+            background: ${theme.colors.error.main}1a;
+            border-radius: ${theme.borderRadius.default};
+          `}>
+            <Typography.SmallBody color={theme.colors.error.main}>
+              {configureMutation.error?.message ?? 'Configuration failed'}
+            </Typography.SmallBody>
+          </div>
+        )}
+
+        <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+          <Button variant="ghost" size="sm" onClick={onClose} type="button">Cancel</Button>
+          <Button size="sm" type="submit" loading={configureMutation.isPending} disabled={fields.length === 0}>
+            Save
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

@@ -1,0 +1,19 @@
+{
+  "name": "@animus/channel-sdk",
+  "version": "0.1.0",
+  "description": "Types for Animus channel adapter authors",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["src", "dist"],
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

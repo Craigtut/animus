@@ -22,6 +22,7 @@ import type {
 import { formatEmotionalState } from './emotion-engine.js';
 import { formatEnergyContext, type WakeUpContext } from './energy-engine.js';
 import { type CompiledPersona, estimateTokens } from './persona-compiler.js';
+import { getChannelManager } from '../channels/channel-manager.js';
 
 // ============================================================================
 // Types
@@ -53,6 +54,8 @@ export interface TriggerContext {
   /** For plugin_trigger triggers */
   pluginTriggerName?: string;
   pluginPayload?: Record<string, unknown>;
+  /** Channel adapter metadata (e.g., Discord channelId for reply routing) */
+  metadata?: Record<string, unknown>;
 }
 
 export interface MindContextParams {
@@ -451,28 +454,28 @@ take a moment to orient using the context provided.`;
 // Channel Reply Guidance (injected per-tick based on active channel)
 // ============================================================================
 
-const CHANNEL_REPLY_GUIDANCE: Record<string, string> = {
-  web: `── REPLY GUIDANCE (web) ──
+// Web channel guidance is hardcoded (built-in, no manifest).
+// All other channels load reply guidance from their channel.json manifests.
+const WEB_REPLY_GUIDANCE = `── REPLY GUIDANCE (web) ──
 This is a chat conversation. Write like you're messaging a friend, not
 composing an email. Default to short, natural replies — one to three
 sentences. Match the energy and length of what was said to you. A casual
 "hey" gets a casual reply, not a paragraph. If someone asks a complex
 question, answer it fully, but prefer clarity over volume. Don't pad with
-pleasantries or filler. Let the conversation breathe.`,
+pleasantries or filler. Let the conversation breathe.`;
 
-  sms: `── REPLY GUIDANCE (sms) ──
-SMS is terse by nature. Keep replies to one or two sentences. Abbreviations
-and casual tone are fine. Be direct — every character counts.`,
+/**
+ * Get reply guidance for a channel. Web is hardcoded; all others
+ * load from their channel.json manifest via ChannelManager.
+ */
+function getReplyGuidance(channel: string): string | null {
+  if (channel === 'web') return WEB_REPLY_GUIDANCE;
 
-  discord: `── REPLY GUIDANCE (discord) ──
-Casual and concise, like a chat. Default to short replies — a few sentences.
-Markdown formatting is supported. Use it sparingly when it helps (code
-blocks, bold for emphasis) but don't over-format.`,
-
-  api: `── REPLY GUIDANCE (api) ──
-Responses may be consumed programmatically. Be complete and structured.
-Longer replies are acceptable when the content requires it.`,
-};
+  // Dynamic: load from channel manifest
+  const manifest = getChannelManager().getChannelManifest(channel);
+  if (!manifest?.replyGuidance) return null;
+  return `── REPLY GUIDANCE (${channel}) ──\n${manifest.replyGuidance}`;
+}
 
 // ============================================================================
 // Timezone Formatting
@@ -769,7 +772,7 @@ export function buildUserMessage(params: MindContextParams): string {
 
   // 2b. Channel-specific reply guidance (if message-triggered)
   if (params.trigger.type === 'message' && params.trigger.channel) {
-    const guidance = CHANNEL_REPLY_GUIDANCE[params.trigger.channel];
+    const guidance = getReplyGuidance(params.trigger.channel);
     if (guidance) {
       sections.push(guidance);
     }

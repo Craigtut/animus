@@ -73,12 +73,82 @@ async function main() {
     },
   });
 
+  // Capture raw body for channel webhook routes (needed for signature validation)
+  fastify.addHook('preParsing', async (request, _reply, payload) => {
+    if (request.url.startsWith('/channels/')) {
+      const chunks: Buffer[] = [];
+      for await (const chunk of payload) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const rawBody = Buffer.concat(chunks);
+      (request as any).rawBody = rawBody;
+      const { Readable } = await import('node:stream');
+      return Readable.from(rawBody);
+    }
+    return payload;
+  });
+
   // Health check endpoint
   fastify.get('/api/health', async () => {
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),
     };
+  });
+
+  // Channel webhook catch-all route — forwards to channel child processes
+  // Must be registered before SPA fallback
+  fastify.all('/channels/:channelType/*', async (request, reply) => {
+    const { channelType } = request.params as { channelType: string };
+    const { getChannelManager: getCM } = await import('./channels/channel-manager.js');
+    const cm = getCM();
+    const processHost = cm.getProcess(channelType);
+
+    if (!processHost) {
+      return reply.status(404).send({ error: `Channel ${channelType} not installed` });
+    }
+    if (!processHost.isRunning) {
+      return reply.status(503).send({ error: `Channel ${channelType} is not currently running` });
+    }
+
+    // Build the sub-path (everything after /channels/:channelType/)
+    const fullUrl = request.url;
+    const prefix = `/channels/${channelType}`;
+    const subPath = fullUrl.substring(prefix.length);
+
+    // Forward to child process
+    const result = await processHost.forwardRequest({
+      method: request.method,
+      url: subPath,
+      headers: request.headers as Record<string, string>,
+      body: request.body,
+      rawBody: (request as any).rawBody ?? Buffer.alloc(0),
+      query: request.query as Record<string, string>,
+    });
+
+    if (result.type === 'response') {
+      const resp = result.data;
+      if (resp.headers) {
+        for (const [key, value] of Object.entries(resp.headers)) {
+          reply.header(key, value);
+        }
+      }
+      return reply.status(resp.status).send(resp.body);
+    } else {
+      // Streaming response
+      reply.raw.writeHead(result.status, result.headers);
+      try {
+        for await (const chunk of result.stream) {
+          reply.raw.write(chunk);
+        }
+      } catch (streamErr) {
+        // Log but don't crash — the client connection may have closed
+        const { createLogger } = await import('./lib/logger.js');
+        createLogger('Channels', 'channels').error('Stream error:', streamErr);
+      } finally {
+        reply.raw.end();
+      }
+    }
   });
 
   // SPA fallback for client-side routing (production only)
@@ -96,6 +166,21 @@ async function main() {
   const { getPluginManager } = await import('./services/plugin-manager.js');
   const pluginManager = getPluginManager();
   await pluginManager.loadAll();
+
+  // Initialize channel manager (after plugins, before heartbeat)
+  log.info('Initializing channel manager...');
+  const { getChannelManager } = await import('./channels/channel-manager.js');
+
+  const channelManager = getChannelManager();
+
+  // Register web as a built-in channel. Its "send" is a no-op because
+  // the tRPC subscription pushes messages to the frontend via EventBus.
+  channelManager.registerBuiltIn('web', async (_contactId, _content, _metadata) => {
+    // No-op: web outbound is handled by message:sent event → tRPC subscription
+  });
+
+  // Load installed channel packages
+  await channelManager.loadAll();
 
   // Initialize heartbeat system
   log.info('Initializing heartbeat system...');
@@ -120,6 +205,8 @@ async function main() {
     await stopHeartbeat();
     await pluginManager.stopTriggers();
     await pluginManager.cleanupSkills();
+    // Stop all channel child processes
+    await channelManager.stopAll();
     await fastify.close();
     closeDatabases();
     process.exit(0);

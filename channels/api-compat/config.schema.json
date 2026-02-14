@@ -1,0 +1,35 @@
+{
+  "fields": [
+    {
+      "key": "apiKey",
+      "label": "API Key",
+      "type": "secret",
+      "required": false,
+      "helpText": "Optional API key for authentication. If set, clients must include it in the Authorization header."
+    },
+    {
+      "key": "enableOllama",
+      "label": "Enable Ollama Endpoints",
+      "type": "toggle",
+      "required": false,
+      "default": true,
+      "helpText": "Enable Ollama-compatible API endpoints (/api/tags, /api/chat, /api/generate)"
+    },
+    {
+      "key": "enableOpenai",
+      "label": "Enable OpenAI Endpoints",
+      "type": "toggle",
+      "required": false,
+      "default": true,
+      "helpText": "Enable OpenAI-compatible API endpoints (/v1/models, /v1/chat/completions)"
+    },
+    {
+      "key": "maxTokens",
+      "label": "Max Response Tokens",
+      "type": "number",
+      "required": false,
+      "default": 4096,
+      "helpText": "Maximum number of tokens in API responses"
+    }
+  ]
+}

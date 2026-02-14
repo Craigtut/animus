@@ -1,0 +1,31 @@
+{
+  "$schema": "https://animus.dev/schemas/channel/v1.json",
+  "name": "discord",
+  "type": "discord",
+  "displayName": "Discord",
+  "description": "Connect to Discord as a bot. Respond in server channels, DMs, and threads.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Animus",
+    "url": "https://animus.dev"
+  },
+  "license": "MIT",
+  "icon": "./assets/icon.svg",
+  "adapter": "./adapter.js",
+  "identity": {
+    "identifierLabel": "Discord User ID",
+    "identifierPlaceholder": "123456789012345678",
+    "identifierValidation": "^\\d{17,20}$",
+    "identifierHelpText": "The user's Discord snowflake ID (enable Developer Mode to copy)"
+  },
+  "capabilities": ["text", "markdown", "embeds", "media-inbound"],
+  "replyGuidance": "Discord supports markdown formatting: **bold**, *italic*, `code`, ```code blocks```, > quotes, and [links](url). Keep replies under 2000 characters. Use embeds sparingly.",
+  "permissions": {
+    "network": ["discord.com", "*.discord.com", "gateway.discord.gg", "cdn.discordapp.com"],
+    "env": []
+  },
+  "store": {
+    "categories": ["messaging", "social"],
+    "tags": ["discord", "bot", "chat"]
+  }
+}

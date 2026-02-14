@@ -15,8 +15,14 @@ export const timestampSchema = z.string().datetime();
 // Shared Enums
 // ============================================================================
 
-/** Supported communication channels */
-export const channelTypeSchema = z.enum(['web', 'sms', 'discord', 'api']);
+/** Supported communication channels — dynamic string (packages add new types) */
+export const channelTypeSchema = z.string().min(1);
+
+/** Built-in channel type (always available) */
+export const BUILT_IN_CHANNELS = ['web'] as const;
+
+/** Known channel types (built-in + first-party packages) */
+export const KNOWN_CHANNEL_TYPES = ['web', 'sms', 'discord', 'api', 'voice'] as const;
 
 /** Contact permission tier */
 export const permissionTierSchema = z.enum(['primary', 'standard']);

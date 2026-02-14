@@ -1,0 +1,36 @@
+{
+  "fields": [
+    {
+      "key": "accountSid",
+      "label": "Account SID",
+      "type": "text",
+      "required": true,
+      "placeholder": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "helpText": "Found in your Twilio console dashboard"
+    },
+    {
+      "key": "authToken",
+      "label": "Auth Token",
+      "type": "secret",
+      "required": true,
+      "helpText": "Found in your Twilio console dashboard"
+    },
+    {
+      "key": "phoneNumber",
+      "label": "Twilio Phone Number",
+      "type": "text",
+      "required": true,
+      "placeholder": "+15551234567",
+      "validation": "^\\+[1-9]\\d{1,14}$",
+      "helpText": "Your Twilio phone number in E.164 format"
+    },
+    {
+      "key": "webhookUrl",
+      "label": "Webhook URL",
+      "type": "url",
+      "required": false,
+      "placeholder": "https://your-domain.com/channels/sms/webhook",
+      "helpText": "Public URL where Twilio sends inbound messages. Configure this in your Twilio console. Will be: https://your-domain/channels/sms/webhook"
+    }
+  ]
+}

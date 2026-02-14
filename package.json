@@ -19,6 +19,7 @@
     "lint": "eslint packages --ext .ts,.tsx",
     "lint:fix": "eslint packages --ext .ts,.tsx --fix",
     "typecheck": "tsc --noEmit",
+    "build:channels": "for dir in channels/*/; do (cd \"$dir\" && npx tsc); done",
     "clean": "rm -rf packages/*/dist packages/*/.turbo node_modules/.cache"
   },
   "devDependencies": {

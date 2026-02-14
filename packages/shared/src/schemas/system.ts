@@ -69,42 +69,6 @@ export const contactChannelSchema = z.object({
 });
 
 // ============================================================================
-// Channel Configuration
-// ============================================================================
-
-export const channelConfigTypeSchema = z.enum([
-  'sms',
-  'discord',
-  'openai_api',
-  'ollama_api',
-]);
-
-export const smsChannelConfigSchema = z.object({
-  accountSid: z.string().min(1),
-  authToken: z.string().min(1),
-  phoneNumber: z.string().min(1),
-  webhookUrl: z.string().url(),
-});
-
-export const discordChannelConfigSchema = z.object({
-  botToken: z.string().min(1),
-  applicationId: z.string().min(1),
-  allowedGuildIds: z.array(z.string()).default([]),
-});
-
-export const openaiApiChannelConfigSchema = z.object({});
-
-export const ollamaApiChannelConfigSchema = z.object({});
-
-export const channelConfigSchema = z.object({
-  id: uuidSchema,
-  channelType: channelConfigTypeSchema,
-  isEnabled: z.boolean(),
-  createdAt: timestampSchema,
-  updatedAt: timestampSchema,
-});
-
-// ============================================================================
 // Settings
 // ============================================================================
 

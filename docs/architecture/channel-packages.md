@@ -10,6 +10,14 @@ How Animus receives messages from the outside world and sends responses back thr
 
 The web channel is built directly into the backend — always on, no installation needed. **Every other channel is a channel package** that can be installed, configured, enabled, disabled, and removed at any time without restarting the engine. Channel packages we build ourselves (SMS, Discord) follow the exact same format and lifecycle as community-built packages. There is no distinction between "first-party" and "third-party" at the engine level.
 
+### Where channel packages live
+
+Channel packages are standalone directories that can exist **anywhere on disk**. They are **not part of the Animus engine**. When a user installs a channel, they point the Channel Manager at the directory path — the directory stays where it is.
+
+The `/channels/` directory at the monorepo root contains reference channel implementations (SMS, Discord, API). These are **not bundled into the engine** — they are independent packages that happen to live in the same repository for development convenience. They follow the exact same format and install process as any community-built channel. A user must still install them via Settings > Channels > Install by pointing at the directory path.
+
+- **`packages/channel-sdk/`** is a types-only workspace package that provides `AdapterContext`, `ChannelAdapter`, and related types for channel adapter authors. It's a `devDependency` — types are erased at compile time, so compiled adapters have zero imports from it.
+
 ## Relationship to Plugins
 
 Channel packages are **not plugins**. They share similar concepts (manifests, store distribution, install/remove lifecycle) but are a separate system because channels have fundamentally different requirements:

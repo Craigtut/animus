@@ -77,6 +77,12 @@ export interface AnimusEventMap {
     createdAt: string;
   };
 
+  // Channels
+  'channels:loaded': Record<string, never>;
+  'channel:installed': { name: string; channelType: string };
+  'channel:uninstalled': { name: string; channelType: string };
+  'channel:status_changed': { name: string; channelType: string; status: string; lastError: string | null };
+
   // Plugins
   'plugin:changed': { pluginName: string; action: 'installed' | 'uninstalled' | 'enabled' | 'disabled' };
   'plugin:config_updated': { pluginName: string };

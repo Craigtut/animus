@@ -1,7 +1,7 @@
 /**
  * System Store — data access for system.db
  *
- * Tables: users, contacts, contact_channels, channel_configs,
+ * Tables: users, contacts, contact_channels, channel_packages,
  *         system_settings, personality_settings, api_keys
  */
 
@@ -17,8 +17,8 @@ import type {
   PermissionTier,
   OnboardingState,
   Persona,
-  ChannelConfig,
-  ChannelConfigType,
+  ChannelPackage,
+  ChannelPackageStatus,
 } from '@animus/shared';
 import { snakeToCamel, boolToInt, intToBool } from '../utils.js';
 import { encrypt, decrypt } from '../../lib/encryption-service.js';
@@ -254,6 +254,15 @@ export function deleteContact(db: Database.Database, id: string): boolean {
 export function deleteContactChannel(db: Database.Database, id: string): boolean {
   const result = db.prepare('DELETE FROM contact_channels WHERE id = ?').run(id);
   return result.changes > 0;
+}
+
+/**
+ * Delete all contact_channels for a given channel type.
+ * Used during channel uninstall to clean up identity mappings.
+ */
+export function deleteContactChannelsByChannel(db: Database.Database, channel: string): number {
+  const result = db.prepare('DELETE FROM contact_channels WHERE channel = ?').run(channel);
+  return result.changes;
 }
 
 // ============================================================================
@@ -689,76 +698,184 @@ export function finalizePersona(db: Database.Database): void {
 }
 
 // ============================================================================
-// Channel Configs
+// Channel Packages
 // ============================================================================
 
-function rowToChannelConfig(row: Record<string, unknown>): ChannelConfig {
+function rowToChannelPackage(row: Record<string, unknown>): ChannelPackage {
+  const raw = snakeToCamel<Record<string, unknown>>(row);
   return {
-    id: row['id'] as string,
-    channelType: row['channel_type'] as ChannelConfigType,
-    isEnabled: intToBool(row['is_enabled'] as number),
-    createdAt: row['created_at'] as string,
-    updatedAt: row['updated_at'] as string,
+    name: raw['name'] as string,
+    channelType: raw['channelType'] as string,
+    version: raw['version'] as string,
+    path: raw['path'] as string,
+    enabled: intToBool(raw['enabled'] as number),
+    config: row['config'] ? JSON.parse(row['config'] as string) as Record<string, unknown> : null,
+    installedAt: raw['installedAt'] as string,
+    updatedAt: raw['updatedAt'] as string,
+    checksum: raw['checksum'] as string,
+    status: raw['status'] as ChannelPackageStatus,
+    lastError: (raw['lastError'] as string) ?? null,
   };
 }
 
-export function getChannelConfigs(db: Database.Database): ChannelConfig[] {
-  const rows = db.prepare('SELECT * FROM channel_configs ORDER BY channel_type').all() as Array<
-    Record<string, unknown>
-  >;
-  return rows.map(rowToChannelConfig);
+export function getChannelPackages(db: Database.Database): ChannelPackage[] {
+  const rows = db
+    .prepare('SELECT * FROM channel_packages ORDER BY installed_at')
+    .all() as Array<Record<string, unknown>>;
+  return rows.map(rowToChannelPackage);
 }
 
-export function getChannelConfig(
+export function getChannelPackage(
   db: Database.Database,
-  channelType: ChannelConfigType
-): (ChannelConfig & { config: string }) | null {
+  name: string
+): ChannelPackage | null {
   const row = db
-    .prepare('SELECT * FROM channel_configs WHERE channel_type = ?')
-    .get(channelType) as Record<string, unknown> | undefined;
-  if (!row) return null;
-  return {
-    ...rowToChannelConfig(row),
-    config: row['config'] as string,
-  };
+    .prepare('SELECT * FROM channel_packages WHERE name = ?')
+    .get(name) as Record<string, unknown> | undefined;
+  return row ? rowToChannelPackage(row) : null;
 }
 
-export function upsertChannelConfig(
+export function getChannelPackageByType(
+  db: Database.Database,
+  channelType: string
+): ChannelPackage | null {
+  const row = db
+    .prepare('SELECT * FROM channel_packages WHERE channel_type = ?')
+    .get(channelType) as Record<string, unknown> | undefined;
+  return row ? rowToChannelPackage(row) : null;
+}
+
+export function createChannelPackage(
   db: Database.Database,
   data: {
-    channelType: ChannelConfigType;
-    config: string;
-    isEnabled?: boolean;
+    name: string;
+    channelType: string;
+    version: string;
+    path: string;
+    checksum: string;
   }
-): ChannelConfig {
-  const existing = db
-    .prepare('SELECT id FROM channel_configs WHERE channel_type = ?')
-    .get(data.channelType) as { id: string } | undefined;
-
+): ChannelPackage {
   const timestamp = now();
-  if (existing) {
-    const fields: string[] = ['config = ?', 'updated_at = ?'];
-    const values: unknown[] = [data.config, timestamp];
-    if (data.isEnabled !== undefined) {
-      fields.push('is_enabled = ?');
-      values.push(boolToInt(data.isEnabled));
-    }
-    values.push(existing.id);
-    db.prepare(`UPDATE channel_configs SET ${fields.join(', ')} WHERE id = ?`).run(...values);
-    const row = db.prepare('SELECT * FROM channel_configs WHERE id = ?').get(existing.id) as Record<string, unknown>;
-    return rowToChannelConfig(row);
-  } else {
-    const id = generateUUID();
-    db.prepare(
-      `INSERT INTO channel_configs (id, channel_type, config, is_enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(id, data.channelType, data.config, boolToInt(data.isEnabled ?? false), timestamp, timestamp);
-    return {
-      id,
-      channelType: data.channelType,
-      isEnabled: data.isEnabled ?? false,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
+  db.prepare(
+    `INSERT INTO channel_packages (name, channel_type, version, path, checksum, installed_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(data.name, data.channelType, data.version, data.path, data.checksum, timestamp, timestamp);
+  return {
+    name: data.name,
+    channelType: data.channelType,
+    version: data.version,
+    path: data.path,
+    enabled: false,
+    config: null,
+    installedAt: timestamp,
+    updatedAt: timestamp,
+    checksum: data.checksum,
+    status: 'disabled',
+    lastError: null,
+  };
+}
+
+export function updateChannelPackage(
+  db: Database.Database,
+  name: string,
+  data: Partial<{
+    version: string;
+    path: string;
+    enabled: boolean;
+    config: Record<string, unknown> | null;
+    checksum: string;
+    status: ChannelPackageStatus;
+    lastError: string | null;
+  }>
+): void {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+
+  if (data.version !== undefined) {
+    fields.push('version = ?');
+    values.push(data.version);
   }
+  if (data.path !== undefined) {
+    fields.push('path = ?');
+    values.push(data.path);
+  }
+  if (data.enabled !== undefined) {
+    fields.push('enabled = ?');
+    values.push(boolToInt(data.enabled));
+  }
+  if (data.config !== undefined) {
+    fields.push('config = ?');
+    values.push(data.config ? JSON.stringify(data.config) : null);
+  }
+  if (data.checksum !== undefined) {
+    fields.push('checksum = ?');
+    values.push(data.checksum);
+  }
+  if (data.status !== undefined) {
+    fields.push('status = ?');
+    values.push(data.status);
+  }
+  if (data.lastError !== undefined) {
+    fields.push('last_error = ?');
+    values.push(data.lastError);
+  }
+
+  if (fields.length === 0) return;
+  fields.push('updated_at = ?');
+  values.push(now());
+  values.push(name);
+  db.prepare(`UPDATE channel_packages SET ${fields.join(', ')} WHERE name = ?`).run(...values);
+}
+
+export function deleteChannelPackage(db: Database.Database, name: string): boolean {
+  const result = db.prepare('DELETE FROM channel_packages WHERE name = ?').run(name);
+  return result.changes > 0;
+}
+
+export function updateChannelPackageStatus(
+  db: Database.Database,
+  name: string,
+  status: ChannelPackageStatus,
+  lastError?: string | null
+): void {
+  db.prepare(
+    'UPDATE channel_packages SET status = ?, last_error = ?, updated_at = ? WHERE name = ?'
+  ).run(status, lastError ?? null, now(), name);
+}
+
+export function getChannelPackageConfig(
+  db: Database.Database,
+  name: string,
+  secretKeys: string[]
+): Record<string, unknown> | null {
+  const row = db
+    .prepare('SELECT config FROM channel_packages WHERE name = ?')
+    .get(name) as { config: string | null } | undefined;
+  if (!row?.config) return null;
+  const config = JSON.parse(row.config) as Record<string, unknown>;
+  // Decrypt secret fields
+  for (const key of secretKeys) {
+    if (typeof config[key] === 'string' && config[key]) {
+      config[key] = decrypt(config[key] as string);
+    }
+  }
+  return config;
+}
+
+export function setChannelPackageConfig(
+  db: Database.Database,
+  name: string,
+  config: Record<string, unknown>,
+  secretKeys: string[]
+): void {
+  const encrypted = { ...config };
+  // Encrypt secret fields
+  for (const key of secretKeys) {
+    if (typeof encrypted[key] === 'string' && encrypted[key]) {
+      encrypted[key] = encrypt(encrypted[key] as string);
+    }
+  }
+  db.prepare(
+    'UPDATE channel_packages SET config = ?, updated_at = ? WHERE name = ?'
+  ).run(JSON.stringify(encrypted), now(), name);
 }
