@@ -61,6 +61,8 @@ interface QueryOptions {
     type: 'json_schema';
     schema: Record<string, unknown>;
   };
+  /** Control which filesystem settings to load. Include 'project' to discover skills and CLAUDE.md. */
+  settingSources?: Array<'user' | 'project' | 'local'>;
   stderr?: (message: string) => void;
 }
 
@@ -643,6 +645,8 @@ class ClaudeSession extends BaseSession {
       hooks: this.buildSdkHooks(),
       env: this.config.env,
       outputFormat: this.config.outputFormat,
+      // Load project settings so the SDK discovers .claude/skills/ and CLAUDE.md
+      settingSources: ['project'],
       // Capture stderr from the Claude CLI subprocess for diagnostics
       stderr: (message: string) => {
         this.logger.debug('Claude CLI stderr:', { stderr: message.trim() });

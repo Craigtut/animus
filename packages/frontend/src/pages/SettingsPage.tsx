@@ -29,6 +29,12 @@ import {
   Trash,
   List,
   X,
+  PuzzlePiece,
+  Plus,
+  GearFine,
+  FolderOpen,
+  GitBranch,
+  Package,
 } from '@phosphor-icons/react';
 import { Card, Button, Input, Modal, Badge, Toggle, Slider, Typography, CityAutocomplete, TimezoneSelect } from '../components/ui';
 import { trpc } from '../utils/trpc';
@@ -101,7 +107,7 @@ const allValues = [
 // Types
 // ============================================================================
 
-type SettingsSection = 'persona' | 'heartbeat' | 'provider' | 'channels' | 'goals' | 'system';
+type SettingsSection = 'persona' | 'heartbeat' | 'provider' | 'channels' | 'plugins' | 'goals' | 'system';
 
 interface SidebarItem {
   id: SettingsSection;
@@ -114,6 +120,7 @@ const sections: SidebarItem[] = [
   { id: 'heartbeat', label: 'Heartbeat', icon: HeartbeatIcon },
   { id: 'provider', label: 'Agent Provider', icon: Robot },
   { id: 'channels', label: 'Channels', icon: ChatCircle },
+  { id: 'plugins', label: 'Plugins', icon: PuzzlePiece },
   { id: 'goals', label: 'Goals', icon: Target },
   { id: 'system', label: 'System', icon: GearSix },
 ];
@@ -1998,6 +2005,818 @@ function GoalsSection() {
 }
 
 // ============================================================================
+// Section: Plugins
+// ============================================================================
+
+// Component label map for human-friendly display
+const componentLabelMap: Record<string, { singular: string; plural: string }> = {
+  skills: { singular: 'skill', plural: 'skills' },
+  tools: { singular: 'tool', plural: 'tools' },
+  contextSources: { singular: 'context source', plural: 'context sources' },
+  hooks: { singular: 'hook', plural: 'hooks' },
+  decisionTypes: { singular: 'decision type', plural: 'decision types' },
+  triggers: { singular: 'trigger', plural: 'triggers' },
+  agents: { singular: 'agent', plural: 'agents' },
+};
+
+// Source badge configuration
+const sourceBadgeConfig: Record<string, { variant: 'default' | 'info' | 'success' | 'warning'; label: string }> = {
+  'built-in': { variant: 'default', label: 'built-in' },
+  local: { variant: 'info', label: 'local' },
+  git: { variant: 'success', label: 'git' },
+  npm: { variant: 'warning', label: 'npm' },
+};
+
+function PluginsSection() {
+  const theme = useTheme();
+  const utils = trpc.useUtils();
+
+  // Queries
+  const { data: plugins, isLoading } = trpc.plugins.list.useQuery();
+
+  // Mutations
+  const installMutation = trpc.plugins.install.useMutation({
+    onSuccess: () => {
+      utils.plugins.list.invalidate();
+      setShowInstallModal(false);
+      setInstallPath('');
+      setInstallValidation(null);
+    },
+  });
+  const uninstallMutation = trpc.plugins.uninstall.useMutation({
+    onSuccess: () => utils.plugins.list.invalidate(),
+  });
+  const enableMutation = trpc.plugins.enable.useMutation({
+    onSuccess: () => utils.plugins.list.invalidate(),
+  });
+  const disableMutation = trpc.plugins.disable.useMutation({
+    onSuccess: () => utils.plugins.list.invalidate(),
+  });
+  const setConfigMutation = trpc.plugins.setConfig.useMutation({
+    onSuccess: () => {
+      utils.plugins.list.invalidate();
+      setConfigPlugin(null);
+    },
+  });
+
+  // Local state
+  const [showInstallModal, setShowInstallModal] = useState(false);
+  const [installTab, setInstallTab] = useState<'local' | 'git' | 'npm'>('local');
+  const [installPath, setInstallPath] = useState('');
+  const [installValidation, setInstallValidation] = useState<{
+    valid: boolean;
+    manifest?: any;
+    error?: string;
+  } | null>(null);
+  const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null);
+  const [configPlugin, setConfigPlugin] = useState<string | null>(null);
+  const [uninstallConfirm, setUninstallConfirm] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+
+  // Validate path query (lazy)
+  const validateQuery = trpc.plugins.validatePath.useQuery(
+    { path: installPath },
+    { enabled: false }
+  );
+
+  const handleValidatePath = async () => {
+    const result = await validateQuery.refetch();
+    if (result.data) {
+      setInstallValidation(result.data);
+    }
+  };
+
+  const handleInstall = () => {
+    setMutationError(null);
+    installMutation.mutate(
+      { source: installTab, path: installPath },
+      {
+        onError: (err) => setMutationError(err.message),
+      }
+    );
+  };
+
+  const handleToggleEnabled = (name: string, currentlyEnabled: boolean) => {
+    setMutationError(null);
+    if (currentlyEnabled) {
+      disableMutation.mutate({ name }, { onError: (err) => setMutationError(err.message) });
+    } else {
+      enableMutation.mutate({ name }, { onError: (err) => setMutationError(err.message) });
+    }
+  };
+
+  const handleUninstall = (name: string) => {
+    setMutationError(null);
+    uninstallMutation.mutate(
+      { name },
+      {
+        onSuccess: () => setUninstallConfirm(null),
+        onError: (err) => {
+          setMutationError(err.message);
+          setUninstallConfirm(null);
+        },
+      }
+    );
+  };
+
+  if (isLoading) {
+    return <Typography.Body color="hint" css={css`padding: ${theme.spacing[8]};`}>Loading plugins...</Typography.Body>;
+  }
+
+  const pluginList = plugins ?? [];
+
+  return (
+    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
+      {/* Header */}
+      <div css={css`display: flex; align-items: center; justify-content: space-between;`}>
+        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+          <Typography.Subtitle as="h2" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+            Plugins
+          </Typography.Subtitle>
+          {pluginList.length > 0 && (
+            <Badge variant="default">{pluginList.length}</Badge>
+          )}
+        </div>
+        <Button size="sm" onClick={() => { setShowInstallModal(true); setInstallPath(''); setInstallValidation(null); setInstallTab('local'); }}>
+          <Plus size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+          Add Plugin
+        </Button>
+      </div>
+
+      {/* Error banner */}
+      <AnimatePresence>
+        {mutationError && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            css={css`
+              padding: ${theme.spacing[3]} ${theme.spacing[4]};
+              background: ${theme.colors.error.main}1a;
+              border-radius: ${theme.borderRadius.default};
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+            `}
+          >
+            <Typography.SmallBody color={theme.colors.error.main}>
+              {mutationError}
+            </Typography.SmallBody>
+            <button
+              onClick={() => setMutationError(null)}
+              css={css`cursor: pointer; padding: ${theme.spacing[1]}; color: ${theme.colors.error.main}; &:hover { opacity: 0.7; }`}
+            >
+              <X size={14} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Plugin list */}
+      {pluginList.length === 0 ? (
+        <div css={css`
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: ${theme.spacing[12]} ${theme.spacing[4]};
+          gap: ${theme.spacing[4]};
+        `}>
+          <PuzzlePiece size={40} css={css`color: ${theme.colors.text.disabled};`} />
+          <Typography.Body color="hint">No plugins installed</Typography.Body>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => { setShowInstallModal(true); setInstallPath(''); setInstallValidation(null); setInstallTab('local'); }}
+          >
+            Add Plugin
+          </Button>
+        </div>
+      ) : (
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+          {pluginList.map((plugin) => {
+            const isExpanded = expandedPlugin === plugin.name;
+            const source = sourceBadgeConfig[plugin.source] ?? { variant: 'default' as const, label: plugin.source };
+            const componentBadges = Object.entries(plugin.components)
+              .filter(([, count]) => (count as number) > 0)
+              .map(([key, count]) => {
+                const labels = componentLabelMap[key];
+                return labels
+                  ? `${count} ${(count as number) === 1 ? labels.singular : labels.plural}`
+                  : `${count} ${key}`;
+              });
+
+            return (
+              <Card key={plugin.name} variant="outlined" padding="md">
+                <div
+                  css={css`display: flex; align-items: flex-start; justify-content: space-between; cursor: pointer;`}
+                  onClick={() => setExpandedPlugin(isExpanded ? null : plugin.name)}
+                >
+                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]}; flex: 1; min-width: 0;`}>
+                    <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
+                      <Typography.BodyAlt as="span">{plugin.name}</Typography.BodyAlt>
+                      <Typography.Caption as="span" color="hint">v{plugin.version}</Typography.Caption>
+                      <Badge variant={source.variant}>{source.label}</Badge>
+                    </div>
+                    {plugin.description && (
+                      <Typography.SmallBody color="secondary" css={css`
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        white-space: ${isExpanded ? 'normal' : 'nowrap'};
+                      `}>
+                        {plugin.description}
+                      </Typography.SmallBody>
+                    )}
+                    {componentBadges.length > 0 && (
+                      <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[1.5]}; margin-top: ${theme.spacing[0.5]};`}>
+                        {componentBadges.map((label) => (
+                          <Typography.Caption
+                            key={label}
+                            as="span"
+                            color="hint"
+                            css={css`
+                              padding: 1px ${theme.spacing[2]};
+                              border: 1px solid ${theme.colors.border.default};
+                              border-radius: ${theme.borderRadius.full};
+                              white-space: nowrap;
+                            `}
+                          >
+                            {label}
+                          </Typography.Caption>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-shrink: 0; margin-left: ${theme.spacing[3]};`} onClick={(e) => e.stopPropagation()}>
+                    <Toggle
+                      checked={plugin.enabled}
+                      onChange={() => handleToggleEnabled(plugin.name, plugin.enabled)}
+                    />
+                  </div>
+                </div>
+
+                {/* Expanded detail */}
+                <AnimatePresence>
+                  {isExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      css={css`overflow: hidden;`}
+                    >
+                      <PluginDetail
+                        pluginName={plugin.name}
+                        source={plugin.source}
+                        hasConfig={plugin.hasConfig}
+                        onConfigure={() => setConfigPlugin(plugin.name)}
+                        onUninstall={() => setUninstallConfirm(plugin.name)}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Install Modal */}
+      <Modal open={showInstallModal} onClose={() => setShowInstallModal(false)}>
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+          <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+            Add Plugin
+          </Typography.Subtitle>
+
+          {/* Tabs */}
+          <div css={css`display: flex; gap: ${theme.spacing[1]}; border-bottom: 1px solid ${theme.colors.border.light}; padding-bottom: 0;`}>
+            {([
+              { id: 'local' as const, label: 'Local Path', icon: FolderOpen },
+              { id: 'git' as const, label: 'Git URL', icon: GitBranch },
+              { id: 'npm' as const, label: 'npm Package', icon: Package },
+            ]).map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  setInstallTab(tab.id);
+                  setInstallValidation(null);
+                  setInstallPath('');
+                }}
+                css={css`
+                  display: flex;
+                  align-items: center;
+                  gap: ${theme.spacing[1.5]};
+                  padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                  font-size: ${theme.typography.fontSize.sm};
+                  font-weight: ${installTab === tab.id ? theme.typography.fontWeight.medium : theme.typography.fontWeight.normal};
+                  color: ${installTab === tab.id ? theme.colors.text.primary : theme.colors.text.secondary};
+                  cursor: pointer;
+                  border-bottom: 2px solid ${installTab === tab.id ? theme.colors.accent : 'transparent'};
+                  margin-bottom: -1px;
+                  transition: all ${theme.transitions.micro};
+
+                  &:hover {
+                    color: ${theme.colors.text.primary};
+                  }
+                `}
+              >
+                <tab.icon size={14} />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Local path form */}
+          {installTab === 'local' && (
+            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+              <Input
+                label="Absolute path to plugin directory"
+                value={installPath}
+                onChange={(e) => { setInstallPath((e.target as HTMLInputElement).value); setInstallValidation(null); }}
+                placeholder="/path/to/my-plugin"
+              />
+              <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleValidatePath}
+                  disabled={!installPath.trim()}
+                  loading={validateQuery.isFetching}
+                >
+                  Validate
+                </Button>
+              </div>
+
+              {/* Validation result */}
+              <AnimatePresence>
+                {installValidation && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    css={css`
+                      padding: ${theme.spacing[3]};
+                      border-radius: ${theme.borderRadius.default};
+                      background: ${installValidation.valid ? theme.colors.success.main : theme.colors.error.main}0d;
+                      border: 1px solid ${installValidation.valid ? theme.colors.success.main : theme.colors.error.main}33;
+                    `}
+                  >
+                    {installValidation.valid ? (
+                      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                          <CheckCircle size={16} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+                          <Typography.SmallBodyAlt as="span" color={theme.colors.success.main}>
+                            Valid plugin manifest
+                          </Typography.SmallBodyAlt>
+                        </div>
+                        {installValidation.manifest && (
+                          <div css={css`padding-left: ${theme.spacing[6]};`}>
+                            <Typography.SmallBody as="div">
+                              {installValidation.manifest.name} <Typography.Caption as="span" color="hint">v{installValidation.manifest.version}</Typography.Caption>
+                            </Typography.SmallBody>
+                            {installValidation.manifest.description && (
+                              <Typography.Caption as="div" color="secondary" css={css`margin-top: ${theme.spacing[0.5]};`}>
+                                {installValidation.manifest.description}
+                              </Typography.Caption>
+                            )}
+                            {installValidation.manifest.author && (
+                              <Typography.Caption as="div" color="hint" css={css`margin-top: ${theme.spacing[0.5]};`}>
+                                by {typeof installValidation.manifest.author === 'string'
+                                  ? installValidation.manifest.author
+                                  : installValidation.manifest.author.name}
+                              </Typography.Caption>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div css={css`display: flex; align-items: flex-start; gap: ${theme.spacing[2]};`}>
+                        <XCircle size={16} weight="fill" css={css`color: ${theme.colors.error.main}; flex-shrink: 0; margin-top: 2px;`} />
+                        <Typography.SmallBody color={theme.colors.error.main}>
+                          {installValidation.error}
+                        </Typography.SmallBody>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+                <Button variant="ghost" size="sm" onClick={() => setShowInstallModal(false)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  onClick={handleInstall}
+                  disabled={!installValidation?.valid}
+                  loading={installMutation.isPending}
+                >
+                  Install
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Git URL form */}
+          {installTab === 'git' && (
+            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+              <Input
+                label="Git repository URL"
+                value={installPath}
+                onChange={(e) => setInstallPath((e.target as HTMLInputElement).value)}
+                placeholder="https://github.com/user/animus-plugin.git"
+              />
+              <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+                <Button variant="ghost" size="sm" onClick={() => setShowInstallModal(false)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  onClick={handleInstall}
+                  disabled={!installPath.trim()}
+                  loading={installMutation.isPending}
+                >
+                  Install
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* npm package form */}
+          {installTab === 'npm' && (
+            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+              <Input
+                label="npm package name"
+                value={installPath}
+                onChange={(e) => setInstallPath((e.target as HTMLInputElement).value)}
+                placeholder="@animus/plugin-example"
+              />
+              <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+                <Button variant="ghost" size="sm" onClick={() => setShowInstallModal(false)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  onClick={handleInstall}
+                  disabled={!installPath.trim()}
+                  loading={installMutation.isPending}
+                >
+                  Install
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Install error */}
+          {installMutation.isError && (
+            <div css={css`
+              padding: ${theme.spacing[2]} ${theme.spacing[4]};
+              background: ${theme.colors.error.main}1a;
+              border-radius: ${theme.borderRadius.default};
+            `}>
+              <Typography.SmallBody color={theme.colors.error.main}>
+                {installMutation.error?.message ?? 'Installation failed'}
+              </Typography.SmallBody>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Uninstall confirmation modal */}
+      <Modal open={uninstallConfirm !== null} onClose={() => setUninstallConfirm(null)}>
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+            <Warning size={20} css={css`color: ${theme.colors.error.main};`} />
+            <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+              Uninstall {uninstallConfirm}?
+            </Typography.Subtitle>
+          </div>
+          <Typography.SmallBody color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+            This will remove the plugin and all its components. Any skills, tools, or hooks it provides will no longer be available.
+          </Typography.SmallBody>
+          <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+            <Button variant="ghost" size="sm" onClick={() => setUninstallConfirm(null)}>Cancel</Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => uninstallConfirm && handleUninstall(uninstallConfirm)}
+              loading={uninstallMutation.isPending}
+            >
+              Uninstall
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Configure Plugin Modal */}
+      {configPlugin && (
+        <PluginConfigModal
+          pluginName={configPlugin}
+          onClose={() => setConfigPlugin(null)}
+          onSave={(config) => {
+            setConfigMutation.mutate({ name: configPlugin, config });
+          }}
+          isSaving={setConfigMutation.isPending}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Plugin Detail (expanded view within plugin card)
+// ============================================================================
+
+function PluginDetail({
+  pluginName,
+  source,
+  hasConfig,
+  onConfigure,
+  onUninstall,
+}: {
+  pluginName: string;
+  source: string;
+  hasConfig: boolean;
+  onConfigure: () => void;
+  onUninstall: () => void;
+}) {
+  const theme = useTheme();
+  const { data: detail, isLoading } = trpc.plugins.get.useQuery({ name: pluginName });
+
+  if (isLoading) {
+    return (
+      <div css={css`
+        margin-top: ${theme.spacing[4]};
+        padding-top: ${theme.spacing[4]};
+        border-top: 1px solid ${theme.colors.border.light};
+      `}>
+        <Typography.SmallBody color="hint">Loading details...</Typography.SmallBody>
+      </div>
+    );
+  }
+
+  if (!detail) return null;
+
+  const componentSections = [
+    { label: 'Skills', items: detail.components.skills },
+    { label: 'Tools (MCP)', items: detail.components.tools },
+    { label: 'Context Sources', items: detail.components.contextSources },
+    { label: 'Hooks', items: detail.components.hooks },
+    { label: 'Decision Types', items: detail.components.decisionTypes },
+    { label: 'Triggers', items: detail.components.triggers },
+    { label: 'Agents', items: detail.components.agents },
+  ].filter((s) => s.items.length > 0);
+
+  return (
+    <div css={css`
+      margin-top: ${theme.spacing[4]};
+      padding-top: ${theme.spacing[4]};
+      border-top: 1px solid ${theme.colors.border.light};
+      display: flex;
+      flex-direction: column;
+      gap: ${theme.spacing[4]};
+    `}>
+      {/* Author & license */}
+      {(detail.author || detail.license) && (
+        <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[3]};`}>
+          {detail.author && (
+            <Typography.Caption as="span" color="hint">
+              Author: {detail.author.name}
+              {detail.author.url && (
+                <a
+                  href={detail.author.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  css={css`
+                    margin-left: ${theme.spacing[1]};
+                    color: ${theme.colors.text.secondary};
+                    &:hover { color: ${theme.colors.text.primary}; }
+                  `}
+                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                >
+                  <ArrowSquareOut size={10} css={css`vertical-align: middle;`} />
+                </a>
+              )}
+            </Typography.Caption>
+          )}
+          {detail.license && (
+            <Typography.Caption as="span" color="hint">
+              License: {detail.license}
+            </Typography.Caption>
+          )}
+        </div>
+      )}
+
+      {/* Component lists */}
+      {componentSections.length > 0 && (
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+          {componentSections.map((section) => (
+            <div key={section.label} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+              <Typography.Caption as="span" color="hint" css={css`
+                font-weight: ${theme.typography.fontWeight.medium};
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+              `}>
+                {section.label}
+              </Typography.Caption>
+              <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[1.5]};`}>
+                {section.items.map((item) => (
+                  <Typography.SmallBody
+                    key={item}
+                    as="span"
+                    css={css`
+                      padding: ${theme.spacing[0.5]} ${theme.spacing[2]};
+                      background: ${theme.colors.background.elevated};
+                      border-radius: ${theme.borderRadius.sm};
+                      font-size: ${theme.typography.fontSize.xs};
+                    `}
+                  >
+                    {item}
+                  </Typography.SmallBody>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
+        {hasConfig && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={(e: React.MouseEvent) => { e.stopPropagation(); onConfigure(); }}
+          >
+            <GearFine size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+            Configure
+          </Button>
+        )}
+        {source !== 'built-in' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={(e: React.MouseEvent) => { e.stopPropagation(); onUninstall(); }}
+          >
+            <Trash size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+            Uninstall
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Plugin Config Modal
+// ============================================================================
+
+function PluginConfigModal({
+  pluginName,
+  onClose,
+  onSave,
+  isSaving,
+}: {
+  pluginName: string;
+  onClose: () => void;
+  onSave: (config: Record<string, unknown>) => void;
+  isSaving: boolean;
+}) {
+  const theme = useTheme();
+  const { data: currentConfig, isLoading: configLoading } = trpc.plugins.getConfig.useQuery({ name: pluginName });
+  const { data: detail } = trpc.plugins.get.useQuery({ name: pluginName });
+
+  const [configValues, setConfigValues] = useState<Record<string, unknown>>({});
+  const [rawJson, setRawJson] = useState('');
+  const [jsonError, setJsonError] = useState('');
+  const [initialized, setInitialized] = useState(false);
+
+  // Determine if we have a schema or should use raw JSON
+  const configSchema = detail?.manifest?.configSchema;
+  const hasSchema = configSchema && typeof configSchema === 'object' && Object.keys(configSchema).length > 0;
+
+  // Initialize values from current config
+  useEffect(() => {
+    if (initialized) return;
+    if (currentConfig !== undefined) {
+      const cfg = currentConfig ?? {};
+      if (hasSchema) {
+        setConfigValues(cfg as Record<string, unknown>);
+      } else {
+        setRawJson(JSON.stringify(cfg, null, 2));
+      }
+      setInitialized(true);
+    }
+  }, [currentConfig, hasSchema, initialized]);
+
+  const handleSave = () => {
+    if (hasSchema) {
+      onSave(configValues);
+    } else {
+      try {
+        const parsed = JSON.parse(rawJson || '{}');
+        setJsonError('');
+        onSave(parsed);
+      } catch {
+        setJsonError('Invalid JSON');
+      }
+    }
+  };
+
+  // Determine if a config key likely holds a secret
+  const isSecretKey = (key: string) => {
+    const lower = key.toLowerCase();
+    return ['key', 'secret', 'token', 'password', 'credential'].some((s) => lower.includes(s));
+  };
+
+  return (
+    <Modal open onClose={onClose}>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+          Configure: {pluginName}
+        </Typography.Subtitle>
+
+        {configLoading ? (
+          <Typography.SmallBody color="hint">Loading configuration...</Typography.SmallBody>
+        ) : hasSchema ? (
+          // Schema-based form
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+            {Object.entries(configSchema as Record<string, any>).map(([key, schemaDef]) => {
+              const value = configValues[key];
+              const fieldType = schemaDef?.type ?? (typeof value === 'boolean' ? 'boolean' : 'string');
+              const label = schemaDef?.title ?? schemaDef?.label ?? key;
+              const description = schemaDef?.description;
+
+              if (fieldType === 'boolean') {
+                return (
+                  <div key={key} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+                    <Toggle
+                      checked={!!value}
+                      onChange={(checked) => setConfigValues({ ...configValues, [key]: checked })}
+                      label={label}
+                    />
+                    {description && (
+                      <Typography.Caption as="p" color="hint">{description}</Typography.Caption>
+                    )}
+                  </div>
+                );
+              }
+
+              return (
+                <div key={key}>
+                  <Input
+                    label={label}
+                    type={isSecretKey(key) ? 'password' : 'text'}
+                    value={value != null ? String(value) : ''}
+                    onChange={(e) => setConfigValues({ ...configValues, [key]: (e.target as HTMLInputElement).value })}
+                    helperText={description}
+                    placeholder={schemaDef?.default != null ? String(schemaDef.default) : undefined}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          // Raw JSON editor
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+            <Typography.SmallBody color="secondary">
+              This plugin does not define a config schema. Edit the raw JSON below.
+            </Typography.SmallBody>
+            <textarea
+              value={rawJson}
+              onChange={(e) => { setRawJson(e.target.value); setJsonError(''); }}
+              rows={10}
+              css={css`
+                font-family: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;
+                font-size: ${theme.typography.fontSize.sm};
+                padding: ${theme.spacing[3]};
+                border-radius: ${theme.borderRadius.default};
+                border: 1px solid ${jsonError ? theme.colors.error.main : theme.colors.border.default};
+                background: ${theme.colors.background.paper};
+                color: ${theme.colors.text.primary};
+                resize: vertical;
+                width: 100%;
+                box-sizing: border-box;
+
+                &:focus {
+                  outline: none;
+                  border-color: ${jsonError ? theme.colors.error.main : theme.colors.border.focus};
+                }
+              `}
+            />
+            {jsonError && (
+              <Typography.Caption color={theme.colors.error.main}>{jsonError}</Typography.Caption>
+            )}
+          </div>
+        )}
+
+        <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+          <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" onClick={handleSave} loading={isSaving}>
+            Save
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ============================================================================
 // Section: System
 // ============================================================================
 
@@ -2332,6 +3151,7 @@ export function SettingsPage() {
       case 'heartbeat': return <HeartbeatSection />;
       case 'provider': return <ProviderSection />;
       case 'channels': return <ChannelsSection />;
+      case 'plugins': return <PluginsSection />;
       case 'goals': return <GoalsSection />;
       case 'system': return <SystemSection />;
       default: return <PersonaSection />;

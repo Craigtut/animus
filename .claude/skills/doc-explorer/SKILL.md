@@ -1,7 +1,7 @@
 ---
 name: doc-explorer
 description: Explore Animus project documentation. Use when you need context about how the system works, its architecture, design principles, agent SDKs, the heartbeat system, persona system, frontend design, or any project documentation. Also use when the user asks about docs, wants to understand a feature, or when you need deeper context to implement something correctly.
-allowed-tools: Read, Grep, Glob
+allowed-tools: Read Grep Glob
 ---
 
 # Animus Documentation Explorer

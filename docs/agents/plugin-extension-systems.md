@@ -553,6 +553,11 @@ Should plugins run in isolated environments?
 
 ## References
 
+### Agent Skills Standard (Cross-Vendor)
+- [Agent Skills Specification](https://agentskills.io/specification) — the open format for SKILL.md, adopted by Claude, Codex, OpenCode, Cursor, GitHub, Gemini CLI, and 20+ others
+- [Agent Skills GitHub](https://github.com/agentskills/agentskills) — reference library and validation tools
+- [Example Skills](https://github.com/anthropics/skills) — official example skills
+
 ### Claude Plugin System
 - [Create plugins — Claude Code Docs](https://code.claude.com/docs/en/plugins)
 - [Plugins reference — Claude Code Docs](https://code.claude.com/docs/en/plugins-reference)

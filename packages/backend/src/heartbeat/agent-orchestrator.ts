@@ -20,6 +20,7 @@ import type { IEventBus } from '@animus/shared';
 import { prepareCodexSessionAuth } from '../services/codex-oauth.js';
 import { getSystemDb } from '../db/index.js';
 import { createLogger } from '../lib/logger.js';
+import { PROJECT_ROOT } from '../utils/env.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -259,6 +260,7 @@ export class AgentOrchestrator {
       // Create the agent session
       const session = await this.manager.createSession({
         provider,
+        cwd: PROJECT_ROOT,
         systemPrompt: params.systemPrompt,
         permissions: {
           executionMode: 'build',

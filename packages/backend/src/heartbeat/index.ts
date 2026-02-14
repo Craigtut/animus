@@ -14,6 +14,7 @@ import * as systemStore from '../db/stores/system-store.js';
 import * as messageStore from '../db/stores/message-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
+import { PROJECT_ROOT } from '../utils/env.js';
 import { DecayEngine, expiresIn, now, clamp } from '@animus/shared';
 import { mindOutputSchema } from '@animus/shared';
 import type {
@@ -53,6 +54,8 @@ import { createAgentLogStoreAdapter } from './agent-log-adapter.js';
 import { AgentOrchestrator, type AgentTaskStore } from './agent-orchestrator.js';
 import { buildMindMcpServer, type MutableToolContext } from '../tools/index.js';
 import type { ToolHandlerContext } from '../tools/index.js';
+import { getPluginManager } from '../services/plugin-manager.js';
+import { builtInDecisionTypeSchema } from '@animus/shared';
 import { getChannelRouter } from '../channels/index.js';
 import {
   getEnergyBand,
@@ -144,6 +147,9 @@ let sessionWarmSince: number | null = null;
 const mindToolContext: MutableToolContext = { current: null };
 let mindMcpServer: { serverConfig: Record<string, unknown>; allowedTools: string[] } | null = null;
 
+// Plugin session invalidation flag
+let sessionInvalidated = false;
+
 // Memory & goal system state
 let memoryManager: MemoryManager | null = null;
 let vectorStore: VectorStore | null = null;
@@ -174,6 +180,8 @@ interface GatherResult {
   circadianBaseline: number | null;
   wakeUpContext: WakeUpContext | null;
   energySystemEnabled: boolean;
+  pluginDecisionDescriptions: string;
+  pluginContextSources: string;
 }
 
 async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
@@ -315,6 +323,28 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
     }
   }
 
+  // Gather plugin context (decision descriptions + context sources)
+  let pluginDecisionDescriptions = '';
+  let pluginContextSources = '';
+  try {
+    const pluginManager = getPluginManager();
+    pluginDecisionDescriptions = pluginManager.getDecisionDescriptions();
+
+    const staticSources = pluginManager.getStaticContextSources();
+    const retrievalSources = await pluginManager.getRetrievalContextSources(trigger);
+
+    const allSources = [...staticSources, ...retrievalSources]
+      .sort((a, b) => a.priority - b.priority);
+
+    if (allSources.length > 0) {
+      pluginContextSources = allSources
+        .map(s => `### ${s.name}\n${s.content}`)
+        .join('\n\n');
+    }
+  } catch (err) {
+    log.warn('Plugin context gathering failed:', err);
+  }
+
   return {
     trigger,
     contact,
@@ -334,6 +364,8 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
     circadianBaseline,
     wakeUpContext,
     energySystemEnabled: settings.energySystemEnabled,
+    pluginDecisionDescriptions,
+    pluginContextSources,
   };
 }
 
@@ -474,6 +506,7 @@ async function getOrCreateMindSession(
 
   const session = await agentManager.createSession({
     provider,
+    cwd: PROJECT_ROOT,
     ...(systemPrompt != null ? { systemPrompt } : {}),
     permissions: {
       executionMode: 'build',
@@ -567,6 +600,8 @@ async function mindQuery(
     wakeUpContext: gathered.wakeUpContext,
     energySystemEnabled: gathered.energySystemEnabled,
     mindToolsEnabled: !!mindMcpServer,
+    ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
+    ...(gathered.pluginContextSources ? { pluginContextSources: gathered.pluginContextSources } : {}),
   });
 
   // If no agent manager configured, fall back to safe output
@@ -894,6 +929,42 @@ async function executeOutput(
     }
   }
 
+  // 4c. Handle plugin decision types (outside transaction — subprocess execution)
+  {
+    const pluginManager = getPluginManager();
+    for (const decision of output.decisions) {
+      const isBuiltIn = builtInDecisionTypeSchema.safeParse(decision.type).success;
+      if (isBuiltIn) continue;
+
+      try {
+        const result = await pluginManager.executeDecision(
+          decision.type,
+          decision.parameters,
+          gathered.contact?.permissionTier ?? 'unknown'
+        );
+
+        heartbeatStore.insertTickDecision(hbDb, {
+          tickNumber,
+          type: decision.type,
+          description: decision.description,
+          parameters: decision.parameters,
+          outcome: result.success ? 'executed' : 'failed',
+          ...(result.error ? { outcomeDetail: result.error } : {}),
+        });
+      } catch (err) {
+        log.error(`Failed to execute plugin decision ${decision.type}:`, err);
+        heartbeatStore.insertTickDecision(hbDb, {
+          tickNumber,
+          type: decision.type,
+          description: decision.description,
+          parameters: decision.parameters,
+          outcome: 'failed',
+          outcomeDetail: String(err),
+        });
+      }
+    }
+  }
+
   // 5. Handle reply (outside transaction — message goes to messages.db)
   // Per docs: "Channel send failure → log error with full context, do NOT auto-retry.
   // Other EXECUTE operations continue."
@@ -1122,6 +1193,13 @@ function determineSessionState(
   state: HeartbeatState,
   warmthMs: number
 ): 'cold' | 'warm' {
+  // Plugin change forces cold session on next tick
+  if (sessionInvalidated) {
+    sessionInvalidated = false;
+    log.info('Session invalidated by plugin change — forcing cold start');
+    return 'cold';
+  }
+
   if (state.sessionState === 'cold') return 'cold';
 
   // Check if warmth window has expired
@@ -1264,6 +1342,12 @@ export async function initializeHeartbeat(): Promise<void> {
       onAgentComplete: handleAgentComplete,
     });
   }
+
+  // Listen for plugin changes to invalidate the session
+  getEventBus().on('plugin:changed', () => {
+    sessionInvalidated = true;
+    log.info('Plugin changed — next tick will force cold session');
+  });
 
   // Set up the tick queue processor
   tickQueue.setProcessor(executeTick);

@@ -35,6 +35,7 @@ const MAX_QUEUE_DEPTH = 10;
 const PRIORITY_MAP: Record<TriggerType, number> = {
   message: 1,
   agent_complete: 2,
+  plugin_trigger: 2,
   scheduled_task: 3,
   interval: 4,
 };

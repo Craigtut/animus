@@ -23,6 +23,7 @@ import { memoryRouter } from './routers/memory.js';
 import { goalsRouter } from './routers/goals.js';
 import { agentLogsRouter } from './routers/agent-logs.js';
 import { codexAuthRouter } from './routers/codex-auth.js';
+import { pluginsRouter } from './routers/plugins.js';
 
 // ============================================================================
 // App Router
@@ -47,6 +48,7 @@ export const appRouter = router({
   memory: memoryRouter,
   goals: goalsRouter,
   agentLogs: agentLogsRouter,
+  plugins: pluginsRouter,
 });
 
 export type AppRouter = typeof appRouter;

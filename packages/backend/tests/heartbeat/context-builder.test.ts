@@ -530,6 +530,100 @@ describe('context-builder', () => {
     });
   });
 
+  describe('plugin integration', () => {
+    it('includes plugin decision descriptions in system prompt when provided', () => {
+      const persona = compilePersona(makePersonaConfig());
+      const prompt = buildSystemPrompt(persona, {
+        pluginDecisionDescriptions: '- control_device: Control a smart home device\n    Payload: { deviceId: string, action: "turn_on"|"turn_off" }\n    Required contact tier: primary',
+      });
+
+      expect(prompt).toContain('Plugin Decision Types');
+      expect(prompt).toContain('control_device');
+      expect(prompt).toContain('smart home device');
+    });
+
+    it('omits plugin decision section from system prompt when no descriptions', () => {
+      const persona = compilePersona(makePersonaConfig());
+      const prompt = buildSystemPrompt(persona);
+
+      expect(prompt).not.toContain('Plugin Decision Types');
+    });
+
+    it('omits plugin decision section when descriptions are empty string', () => {
+      const persona = compilePersona(makePersonaConfig());
+      const prompt = buildSystemPrompt(persona, {
+        pluginDecisionDescriptions: '',
+      });
+
+      expect(prompt).not.toContain('Plugin Decision Types');
+    });
+
+    it('includes plugin context sources in user message when provided', () => {
+      const msg = buildUserMessage(makeParams({
+        pluginContextSources: '### weather-data\nCurrent temperature: 72F, sunny skies.',
+      }));
+
+      expect(msg).toContain('PLUGIN CONTEXT');
+      expect(msg).toContain('weather-data');
+      expect(msg).toContain('72F');
+    });
+
+    it('omits plugin context section from user message when not provided', () => {
+      const msg = buildUserMessage(makeParams());
+
+      expect(msg).not.toContain('PLUGIN CONTEXT');
+    });
+
+    it('formats plugin_trigger trigger context', () => {
+      const msg = buildUserMessage(makeParams({
+        trigger: {
+          type: 'plugin_trigger',
+          pluginTriggerName: 'home-assistant/webhook',
+          pluginPayload: { deviceId: 'light.office', state: 'on' },
+        },
+      }));
+
+      expect(msg).toContain('plugin trigger has fired');
+      expect(msg).toContain('home-assistant/webhook');
+      expect(msg).toContain('deviceId: light.office');
+      expect(msg).toContain('state: on');
+      expect(msg).toContain('full agency');
+    });
+
+    it('formats plugin_trigger without payload', () => {
+      const msg = buildUserMessage(makeParams({
+        trigger: {
+          type: 'plugin_trigger',
+          pluginTriggerName: 'cron/daily',
+        },
+      }));
+
+      expect(msg).toContain('plugin trigger has fired');
+      expect(msg).toContain('cron/daily');
+      expect(msg).not.toContain('Trigger payload');
+    });
+
+    it('plugin decision descriptions flow through buildMindContext for cold sessions', () => {
+      const ctx = buildMindContext(makeParams({
+        sessionState: 'cold',
+        pluginDecisionDescriptions: '- send_notification: Send a push notification',
+      }));
+
+      expect(ctx.systemPrompt).toBeTruthy();
+      expect(ctx.systemPrompt).toContain('Plugin Decision Types');
+      expect(ctx.systemPrompt).toContain('send_notification');
+    });
+
+    it('plugin context sources flow through buildMindContext', () => {
+      const ctx = buildMindContext(makeParams({
+        pluginContextSources: '### team-conventions\nUse camelCase for variables.',
+      }));
+
+      expect(ctx.userMessage).toContain('PLUGIN CONTEXT');
+      expect(ctx.userMessage).toContain('camelCase');
+    });
+  });
+
   describe('full persona rendering', () => {
     it('system prompt includes all persona sections from a fully configured persona', () => {
       const persona = compilePersona(makeFullPersonaConfig());

@@ -2,6 +2,15 @@
 import { css, useTheme } from '@emotion/react';
 import { useState, useMemo, useCallback, useRef } from 'react';
 import { motion } from 'motion/react';
+import {
+  CoffeeBean,
+  Sparkle,
+  Eye,
+  EyeClosed,
+  Moon,
+  MoonStars,
+} from '@phosphor-icons/react';
+import type { Icon } from '@phosphor-icons/react';
 import { trpc } from '../../utils/trpc';
 import { Card } from '../ui/Card';
 import { Typography } from '../ui';
@@ -13,13 +22,13 @@ import { useHeartbeatStore } from '../../store/heartbeat-store';
 
 type EnergyBand = 'peak' | 'alert' | 'tired' | 'drowsy' | 'very_drowsy' | 'sleeping';
 
-const bandMeta: Record<EnergyBand, { label: string; description: string; color: string }> = {
-  peak:        { label: 'Peak',        description: 'Feeling sharp and energized', color: '#4ade80' },
-  alert:       { label: 'Alert',       description: 'Normal operating mode',       color: '' }, // set at render from theme
-  tired:       { label: 'Tired',       description: 'Energy is fading',            color: '#fbbf24' },
-  drowsy:      { label: 'Drowsy',      description: 'Thoughts are slowing',        color: '#f97316' },
-  very_drowsy: { label: 'Very Drowsy', description: 'Sleep is pulling at every thought', color: '#ef4444' },
-  sleeping:    { label: 'Sleeping',    description: 'Sleeping',                    color: '#818cf8' },
+const bandMeta: Record<EnergyBand, { label: string; description: string; color: string; icon: Icon }> = {
+  peak:        { label: 'Peak',        description: 'Feeling sharp and energized',       color: '#4ade80', icon: CoffeeBean },
+  alert:       { label: 'Alert',       description: 'Normal operating mode',              color: '',        icon: Sparkle },    // color set at render from theme
+  tired:       { label: 'Tired',       description: 'Energy is fading',                   color: '#fbbf24', icon: Eye },
+  drowsy:      { label: 'Drowsy',      description: 'Thoughts are slowing',               color: '#f97316', icon: EyeClosed },
+  very_drowsy: { label: 'Very Drowsy', description: 'Sleep is pulling at every thought',  color: '#ef4444', icon: Moon },
+  sleeping:    { label: 'Sleeping',    description: 'Sleeping',                            color: '#818cf8', icon: MoonStars },
 };
 
 function getBandFromLevel(level: number): EnergyBand {
@@ -453,96 +462,75 @@ export function EnergySection() {
             No energy changes recorded yet.
           </Typography.SmallBody>
         ) : (
-          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
             {recentDeltas.map((entry: EnergyHistoryEntry) => {
               const entryBand = entry.energyBand as EnergyBand;
               const entryColor = getBandColor(entryBand, theme.colors.text.secondary);
               const deltaColor = entry.delta >= 0
                 ? theme.colors.success.main
                 : theme.colors.error.main;
+              const BandIcon = bandMeta[entryBand]?.icon ?? Sparkle;
 
               return (
-                <div
-                  key={entry.id}
-                  css={css`
-                    display: flex;
-                    gap: ${theme.spacing[3]};
-                    padding: ${theme.spacing[3]} 0;
-                    border-bottom: 1px solid ${theme.colors.border.light};
-                    &:last-of-type { border-bottom: none; }
-                  `}
-                >
-                  {/* Left accent — colored bar indicating band */}
+                <Card key={entry.id} variant="outlined" padding="sm">
+                  {/* Row 1: Delta + band icon + timestamp */}
                   <div css={css`
-                    width: 2px;
-                    flex-shrink: 0;
-                    border-radius: 1px;
-                    background: ${entryColor};
-                    opacity: 0.6;
-                  `} />
-
-                  {/* Content */}
-                  <div css={css`flex: 1; min-width: 0;`}>
-                    {/* Row 1: Delta + timestamp */}
-                    <div css={css`
-                      display: flex;
-                      align-items: baseline;
-                      justify-content: space-between;
-                      margin-bottom: ${theme.spacing[1]};
-                    `}>
-                      <div css={css`display: flex; align-items: baseline; gap: ${theme.spacing[2]};`}>
-                        <Typography.SmallBody as="span" serif css={css`
-                          font-weight: ${theme.typography.fontWeight.semibold};
-                          color: ${deltaColor};
-                          letter-spacing: -0.01em;
-                        `}>
-                          {entry.delta >= 0 ? '+' : ''}{entry.delta.toFixed(3)}
-                        </Typography.SmallBody>
-                        <Typography.Tiny as="span" css={css`
-                          color: ${entryColor};
-                          font-weight: ${theme.typography.fontWeight.medium};
-                          text-transform: uppercase;
-                          letter-spacing: 0.04em;
-                        `}>
-                          {bandMeta[entryBand]?.label ?? entryBand}
-                        </Typography.Tiny>
-                      </div>
-                      <Typography.Tiny as="span" color="hint" css={css`
-                        flex-shrink: 0;
-                        opacity: 0.7;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    margin-bottom: ${theme.spacing[1.5]};
+                  `}>
+                    <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                      <Typography.SmallBody as="span" serif css={css`
+                        font-weight: ${theme.typography.fontWeight.semibold};
+                        color: ${deltaColor};
+                        letter-spacing: -0.01em;
                       `}>
-                        {formatHistoryTime(entry.createdAt)}
-                      </Typography.Tiny>
-                    </div>
-
-                    {/* Row 2: Reasoning — the narrative */}
-                    {entry.reasoning && (
-                      <Typography.SmallBody serif italic color="secondary" css={css`
-                        line-height: ${theme.typography.lineHeight.normal};
-                        margin-bottom: ${theme.spacing[1]};
-                      `}>
-                        {entry.reasoning}
+                        {entry.delta >= 0 ? '+' : ''}{entry.delta.toFixed(3)}
                       </Typography.SmallBody>
-                    )}
-
-                    {/* Row 3: Metadata — subdued */}
-                    <div css={css`
-                      display: flex;
-                      align-items: center;
-                      gap: ${theme.spacing[1]};
-                    `}>
-                      <Typography.Tiny as="span" color="hint" css={css`opacity: 0.6;`}>
-                        {(entry.energyBefore * 100).toFixed(0)}% → {(entry.energyAfter * 100).toFixed(0)}%
-                      </Typography.Tiny>
-                      <Typography.Tiny as="span" color="hint" css={css`opacity: 0.35;`}>
-                        ·
-                      </Typography.Tiny>
-                      <Typography.Tiny as="span" color="hint" css={css`opacity: 0.6;`}>
-                        Tick {entry.tickNumber}
-                      </Typography.Tiny>
+                      <BandIcon
+                        size={14}
+                        weight="fill"
+                        color={entryColor}
+                        css={css`opacity: 0.8; flex-shrink: 0;`}
+                        aria-label={bandMeta[entryBand]?.label ?? entryBand}
+                      />
                     </div>
+                    <Typography.Caption as="span" color="hint" css={css`
+                      flex-shrink: 0;
+                      opacity: 0.45;
+                    `}>
+                      {formatHistoryTime(entry.createdAt)}
+                    </Typography.Caption>
                   </div>
-                </div>
+
+                  {/* Row 2: Reasoning — the narrative */}
+                  {entry.reasoning && (
+                    <Typography.SmallBody serif italic color="secondary" css={css`
+                      line-height: ${theme.typography.lineHeight.normal};
+                      margin-bottom: ${theme.spacing[1.5]};
+                    `}>
+                      {entry.reasoning}
+                    </Typography.SmallBody>
+                  )}
+
+                  {/* Row 3: Metadata */}
+                  <div css={css`
+                    display: flex;
+                    align-items: center;
+                    gap: ${theme.spacing[1]};
+                  `}>
+                    <Typography.Caption as="span" color="hint" css={css`opacity: 0.55;`}>
+                      {(entry.energyBefore * 100).toFixed(0)}% → {(entry.energyAfter * 100).toFixed(0)}%
+                    </Typography.Caption>
+                    <Typography.Caption as="span" color="hint" css={css`opacity: 0.3;`}>
+                      ·
+                    </Typography.Caption>
+                    <Typography.Caption as="span" color="hint" css={css`opacity: 0.55;`}>
+                      Tick {entry.tickNumber}
+                    </Typography.Caption>
+                  </div>
+                </Card>
               );
             })}
 

@@ -91,6 +91,12 @@ async function main() {
     });
   }
 
+  // Initialize plugin manager (must be before heartbeat so plugins are available)
+  log.info('Initializing plugin manager...');
+  const { getPluginManager } = await import('./services/plugin-manager.js');
+  const pluginManager = getPluginManager();
+  await pluginManager.loadAll();
+
   // Initialize heartbeat system
   log.info('Initializing heartbeat system...');
   await initializeHeartbeat();
@@ -112,6 +118,8 @@ async function main() {
   const shutdown = async () => {
     log.info('Shutting down...');
     await stopHeartbeat();
+    await pluginManager.stopTriggers();
+    await pluginManager.cleanupSkills();
     await fastify.close();
     closeDatabases();
     process.exit(0);

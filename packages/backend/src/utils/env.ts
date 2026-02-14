@@ -5,6 +5,8 @@
  */
 
 import { z } from 'zod';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -50,3 +52,7 @@ function loadEnv() {
 export const env = loadEnv();
 
 export type Env = z.infer<typeof envSchema>;
+
+// Monorepo root: utils/ → src/ → backend/ → packages/ → root
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..', '..');

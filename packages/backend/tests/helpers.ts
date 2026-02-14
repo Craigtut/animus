@@ -20,6 +20,10 @@ export function createTestSystemDb(): Database.Database {
   db.pragma('foreign_keys = ON');
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '001_initial.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '002_persona_expansion.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '003_credentials.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '004_log_categories.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '005_energy_settings.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '006_plugins.sql'));
   return db;
 }
 

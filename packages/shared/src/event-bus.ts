@@ -77,6 +77,10 @@ export interface AnimusEventMap {
     createdAt: string;
   };
 
+  // Plugins
+  'plugin:changed': { pluginName: string; action: 'installed' | 'uninstalled' | 'enabled' | 'disabled' };
+  'plugin:config_updated': { pluginName: string };
+
   // System
   'system:settings_updated': Record<string, unknown>;
   'system:shutdown': void;

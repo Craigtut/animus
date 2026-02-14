@@ -45,6 +45,7 @@ import type {
   energyHistoryEntrySchema,
   thoughtSchema,
   experienceSchema,
+  builtInDecisionTypeSchema,
   decisionTypeSchema,
   decisionOutcomeSchema,
   tickDecisionSchema,
@@ -94,6 +95,16 @@ import type {
   mindOutputSchema,
   taskResultOutcomeSchema,
   taskTickOutputSchema,
+  // Plugins
+  PluginManifestSchema,
+  pluginSourceSchema,
+  PluginRecordSchema,
+  AgentFrontmatterSchema,
+  ContextSourceSchema,
+  HookDefinitionSchema,
+  DecisionTypeSchema,
+  TriggerDefinitionSchema,
+  PluginMcpServerSchema,
 } from '../schemas/index.js';
 
 // ============================================================================
@@ -154,6 +165,7 @@ export type EnergyHistoryEntry = z.infer<typeof energyHistoryEntrySchema>;
 export type Thought = z.infer<typeof thoughtSchema>;
 export type Experience = z.infer<typeof experienceSchema>;
 
+export type BuiltInDecisionType = z.infer<typeof builtInDecisionTypeSchema>;
 export type DecisionType = z.infer<typeof decisionTypeSchema>;
 export type DecisionOutcome = z.infer<typeof decisionOutcomeSchema>;
 export type TickDecision = z.infer<typeof tickDecisionSchema>;
@@ -230,6 +242,20 @@ export type IncomingMessage = z.infer<typeof incomingMessageSchema>;
 export type MindOutput = z.infer<typeof mindOutputSchema>;
 export type TaskResultOutcome = z.infer<typeof taskResultOutcomeSchema>;
 export type TaskTickOutput = z.infer<typeof taskTickOutputSchema>;
+
+// ============================================================================
+// Plugins
+// ============================================================================
+
+export type PluginManifest = z.infer<typeof PluginManifestSchema>;
+export type PluginSource = z.infer<typeof pluginSourceSchema>;
+export type PluginRecord = z.infer<typeof PluginRecordSchema>;
+export type AgentFrontmatter = z.infer<typeof AgentFrontmatterSchema>;
+export type ContextSource = z.infer<typeof ContextSourceSchema>;
+export type HookDefinition = z.infer<typeof HookDefinitionSchema>;
+export type DecisionTypeDefinition = z.infer<typeof DecisionTypeSchema>;
+export type TriggerDefinition = z.infer<typeof TriggerDefinitionSchema>;
+export type PluginMcpServer = z.infer<typeof PluginMcpServerSchema>;
 
 // ============================================================================
 // API Types (not schema-derived)

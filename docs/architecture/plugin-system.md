@@ -190,11 +190,7 @@ description: >
   and maintainability issues. Use when asked to review code, audit security,
   or check code quality.
 license: MIT
-allowed-tools:
-  - Read
-  - Grep
-  - Glob
-  - Bash
+allowed-tools: Read Grep Glob Bash
 metadata:
   author: animus-labs
   version: "1.0"
@@ -222,11 +218,11 @@ For each issue found, report:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | Yes | 1-64 chars, lowercase alphanumeric + hyphens |
-| `description` | Yes | Max 1024 chars. Describes when and how to use the skill. |
-| `license` | No | SPDX license identifier |
-| `compatibility` | No | System requirements or compatibility notes |
-| `allowed-tools` | No | SDK-native tools this skill needs |
+| `name` | Yes | 1-64 chars, lowercase alphanumeric + hyphens, no consecutive `--`, must match parent directory name |
+| `description` | Yes | Max 1024 chars. Describes when and how to use the skill. Include keywords for task matching. |
+| `license` | No | License name or reference to bundled license file |
+| `compatibility` | No | Max 500 chars. Environment requirements (intended product, system packages, network access) |
+| `allowed-tools` | No | Space-delimited list of pre-approved tools (experimental). E.g. `Read Grep Glob Bash` |
 | `metadata` | No | Arbitrary key-value pairs (author, version, tags, etc.) |
 
 **How skills flow through the system (native SDK passthrough):**
@@ -236,9 +232,9 @@ Engine Startup
   └→ Plugin Manager scans plugin skills/ directories
       └→ Symlinks or copies SKILL.md directories to the active provider's
          discovery path:
-           • Claude:   .claude/skills/{plugin}--{skill}/SKILL.md
-           • Codex:    .agents/skills/{plugin}--{skill}/SKILL.md
-           • OpenCode: .opencode/skills/{plugin}--{skill}/SKILL.md
+           • Claude:   .claude/skills/{skill}/SKILL.md
+           • Codex:    .agents/skills/{skill}/SKILL.md
+           • OpenCode: .opencode/skills/{skill}/SKILL.md
 
 Per Session (Mind or Sub-Agent)
   └→ SDK discovers skills automatically
@@ -800,10 +796,14 @@ async function deploySkills(plugin: PluginManifest, provider: 'claude' | 'codex'
   const skillDirs = await scanSkillDirectories(plugin.path, plugin.components.skills);
 
   for (const skillDir of skillDirs) {
-    const targetName = `${plugin.name}--${skillDir.name}`;
-    const targetPath = getProviderSkillPath(provider, targetName);
-    // Symlink the skill directory into the provider's discovery path
+    // Use skill name directly — Agent Skills spec requires name to match parent dir
+    const targetPath = getProviderSkillPath(provider, skillDir.name);
+    // Collision detection: error if another plugin already has a skill with this name
+    if (deployedSkills.has(skillDir.name)) {
+      throw new Error(`Skill name collision: "${skillDir.name}"`);
+    }
     await symlink(skillDir.absolutePath, targetPath);
+    deployedSkills.add(skillDir.name);
   }
 }
 
@@ -1642,6 +1642,7 @@ System prompt injection was the previous approach but has critical flaws:
 - `docs/agents/architecture-overview.md` — Adapter interface, session lifecycle
 
 ### External References
+- [Agent Skills — agentskills.io](https://agentskills.io/home) (cross-vendor standard)
 - [Agent Skills Specification](https://agentskills.io/specification)
 - [MCP Specification (Jun 2025)](https://modelcontextprotocol.io/specification/2025-06-18)
 - [Claude Code Plugins](https://code.claude.com/docs/en/plugins)

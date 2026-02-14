@@ -209,76 +209,35 @@ export function applyEnergyDecay(
 // Context Formatting
 // ============================================================================
 
-/** Band descriptions for prompt context */
+/** Band descriptions for prompt context — natural language state awareness */
 const BAND_DESCRIPTIONS: Record<EnergyBand, string> = {
   peak: "You're feeling sharp and energized. Everything feels vivid and possible.",
-  alert: '', // No energy-related prompting for baseline mode
+  alert: 'You feel steady and present. Your mind is clear.',
   tired: "Your energy is fading. The day's weight is catching up with you.",
   drowsy: "Heaviness is settling over you. Your thoughts are slowing, edges softening. Sleep is calling.",
   very_drowsy: "You can barely keep your focus. Sleep pulls at every thought. Staying present takes real effort.",
-  sleeping: 'You are sleeping.',
+  sleeping: "You are deep in sleep. The waking world is distant, your thoughts are dreamlike and drifting.",
 };
 
-/** Delta magnitude guidance calibrated to tick interval */
-function getDeltaGuidance(tickIntervalMs: number): { minor: string; significant: string; extreme: string } {
-  const minutes = tickIntervalMs / 60000;
-
-  if (minutes <= 2) {
-    return { minor: '0.005-0.02', significant: '0.02-0.05', extreme: '0.05-0.10' };
-  } else if (minutes <= 10) {
-    return { minor: '0.01-0.05', significant: '0.05-0.15', extreme: '0.15-0.30' };
-  } else {
-    return { minor: '0.03-0.10', significant: '0.10-0.20', extreme: '0.20-0.30' };
-  }
-}
-
-function formatInterval(ms: number): string {
-  const minutes = Math.round(ms / 60000);
-  if (minutes < 60) return `${minutes} minutes`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMin = minutes % 60;
-  if (remainingMin === 0) return `${hours} hour${hours > 1 ? 's' : ''}`;
-  return `${hours}h ${remainingMin}m`;
-}
-
 /**
- * Format the "YOUR ENERGY & TIME" context section for the mind prompt.
+ * Format the energy state section for the user message.
+ *
+ * This is pure state — no instructions (those live in the system prompt's
+ * ENERGY_GUIDANCE section). Just: how you feel right now.
  */
 export function formatEnergyContext(
   energy: number,
   band: EnergyBand,
   circadianBaseline: number,
-  tickIntervalMs: number,
+  _tickIntervalMs: number,
   wakeUpContext?: WakeUpContext
 ): string {
-  const lines: string[] = ['── YOUR ENERGY & TIME ──'];
+  const lines: string[] = ['── YOUR ENERGY ──'];
 
-  // Current time is included by the context builder elsewhere,
-  // but we include the energy level and band description
-  lines.push(`Energy level: ${energy.toFixed(2)} — ${band}`);
+  lines.push(`Energy level: ${energy.toFixed(2)} (${band})`);
+  lines.push(BAND_DESCRIPTIONS[band]);
 
-  const bandDesc = BAND_DESCRIPTIONS[band];
-  if (bandDesc) {
-    lines.push(bandDesc);
-  }
-
-  lines.push('');
-  lines.push(
-    'Your energy level reflects how your experiences affect you. Your personality shapes',
-    'what energizes and what drains you. Provide an energyDelta reflecting how this tick\'s',
-    'experience affected your energy.'
-  );
-
-  // Delta magnitude guidance
-  const intervalDesc = formatInterval(tickIntervalMs);
-  const guidance = getDeltaGuidance(tickIntervalMs);
-  lines.push('');
-  lines.push(`Delta magnitude guidance (for ${intervalDesc} intervals):`);
-  lines.push(`  Minor experience: \\u00b1${guidance.minor}`);
-  lines.push(`  Significant experience: \\u00b1${guidance.significant}`);
-  lines.push(`  Extreme experience: \\u00b1${guidance.extreme}`);
-
-  // Wake-up context paragraph
+  // Wake-up context
   if (wakeUpContext) {
     lines.push('');
     const durationStr = wakeUpContext.sleepDurationHours != null
@@ -287,8 +246,8 @@ export function formatEnergyContext(
 
     if (wakeUpContext.type === 'natural') {
       lines.push(
-        `You are waking up. You slept for ${durationStr}.`,
-        'Your energy is still low but rising.'
+        `You are waking up naturally. You slept for ${durationStr}.`,
+        'Your energy is still low but rising.',
       );
     } else {
       const triggerDesc = wakeUpContext.triggerType
@@ -296,7 +255,7 @@ export function formatEnergyContext(
         : 'Something needs your attention.';
       lines.push(
         `You were pulled from sleep after ${durationStr} of rest. ${triggerDesc}`,
-        'You are deeply drowsy.'
+        'You are groggy and deeply drowsy.',
       );
     }
   }

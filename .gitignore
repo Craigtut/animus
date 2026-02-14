@@ -45,6 +45,11 @@ tmp/
 temp/
 .cache/
 
+# Plugin skill symlinks (managed by Plugin Manager)
+.claude/skills/
+.agents/skills/
+.opencode/skills/
+
 # Claude local settings (keep .claude/settings.json for shared settings)
 .claude/settings.local.json
 

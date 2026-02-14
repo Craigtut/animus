@@ -50,6 +50,9 @@ export interface TriggerContext {
   goalTitle?: string;
   planTitle?: string;
   currentMilestone?: string;
+  /** For plugin_trigger triggers */
+  pluginTriggerName?: string;
+  pluginPayload?: Record<string, unknown>;
 }
 
 export interface MindContextParams {
@@ -95,6 +98,10 @@ export interface MindContextParams {
   energySystemEnabled?: boolean;
   /** Whether mind MCP tools are available this session */
   mindToolsEnabled?: boolean;
+  /** Plugin decision type descriptions for system prompt */
+  pluginDecisionDescriptions?: string;
+  /** Plugin context sources formatted for user message */
+  pluginContextSources?: string;
 }
 
 export interface CompiledContext {
@@ -327,7 +334,18 @@ project we discussed brings a quiet satisfaction — I'd been wondering how
 it would turn out." The reasoning is your inner emotional narrative — it
 should feel like genuine introspection, not a report.`;
 
-const ENERGY_GUIDANCE = `── YOUR ENERGY ──
+function buildEnergyGuidance(tickIntervalMs: number): string {
+  const minutes = tickIntervalMs / 60000;
+  let magnitudes: string;
+  if (minutes <= 2) {
+    magnitudes = 'Minor: \u00b10.005-0.02 | Significant: \u00b10.02-0.05 | Extreme: \u00b10.05-0.10';
+  } else if (minutes <= 10) {
+    magnitudes = 'Minor: \u00b10.01-0.05 | Significant: \u00b10.05-0.15 | Extreme: \u00b10.15-0.30';
+  } else {
+    magnitudes = 'Minor: \u00b10.03-0.10 | Significant: \u00b10.10-0.20 | Extreme: \u00b10.20-0.30';
+  }
+
+  return `── YOUR ENERGY ──
 
 Your energy level (0.0–1.0) reflects how your experiences affect you. Your
 personality shapes what energizes and what drains you — an introvert at a
@@ -338,15 +356,18 @@ affected your energy:
 
   { delta: number, reasoning: string }
 
-A positive delta means you felt energized. A negative delta means you felt
-drained. The reasoning should ground the delta in the specific experience.
+Positive = energized, negative = drained. Ground the reasoning in the
+specific experience, not a generic observation.
+
+Delta magnitudes: ${magnitudes}
 
 IMPORTANT: Do not use energyDelta to control when you sleep or wake. The
-circadian rhythm handles that — your energy naturally gravitates toward a
-time-of-day baseline. Your delta should purely reflect the quality of your
-experience, not an attempt to manage your sleep schedule.`;
+circadian rhythm handles that automatically. Your delta should purely
+reflect how the experience affected you.`;
+}
 
-const DECISION_REF = `── DECISIONS ──
+function buildDecisionRef(pluginDecisionDescriptions?: string): string {
+  let ref = `── DECISIONS ──
 
 Decisions are how you act on the world. Each decision has a type and
 type-specific parameters. You can make zero or many decisions per tick.
@@ -358,6 +379,13 @@ Types: spawn_agent, update_agent, cancel_agent, send_message,
 Each has a { type, description, parameters: {...} } structure.
 Use no_action when you're aware of something you could do but deliberately
 choose not to. This is different from an empty decisions array.`;
+
+  if (pluginDecisionDescriptions) {
+    ref += `\n\n### Plugin Decision Types\n${pluginDecisionDescriptions}`;
+  }
+
+  return ref;
+}
 
 const MEMORY_INSTRUCTIONS = `── YOUR MEMORY ──
 
@@ -514,9 +542,30 @@ function buildTriggerSection(trigger: TriggerContext): string {
         trigger.resultContent || '',
       ].join('\n');
 
+    case 'plugin_trigger':
+      return buildPluginTriggerSection(trigger);
+
     default:
       return '── THIS MOMENT ──\nA new tick has fired.';
   }
+}
+
+function buildPluginTriggerSection(trigger: TriggerContext): string {
+  const lines = [
+    '── THIS MOMENT ──',
+    `A plugin trigger has fired: ${trigger.pluginTriggerName || 'unknown'}.`,
+  ];
+
+  if (trigger.pluginPayload && Object.keys(trigger.pluginPayload).length > 0) {
+    lines.push('', 'Trigger payload:');
+    for (const [key, value] of Object.entries(trigger.pluginPayload)) {
+      lines.push(`  ${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`);
+    }
+  }
+
+  lines.push('', 'You have full agency over how to respond to this event.');
+
+  return lines.join('\n');
 }
 
 function buildContactSection(contact: Contact): string {
@@ -672,7 +721,12 @@ function buildFirstTickKickstart(
  */
 export function buildSystemPrompt(
   compiledPersona: CompiledPersona,
-  options?: { energySystemEnabled?: boolean; mindToolsEnabled?: boolean }
+  options?: {
+    energySystemEnabled?: boolean;
+    tickIntervalMs?: number;
+    mindToolsEnabled?: boolean;
+    pluginDecisionDescriptions?: string;
+  }
 ): string {
   const sections = [
     compiledPersona.compiledText,
@@ -682,10 +736,13 @@ export function buildSystemPrompt(
   ];
 
   if (options?.energySystemEnabled) {
-    sections.push(ENERGY_GUIDANCE);
+    sections.push(buildEnergyGuidance(options.tickIntervalMs ?? 300000));
   }
 
-  sections.push(DECISION_REF, MEMORY_INSTRUCTIONS);
+  sections.push(
+    buildDecisionRef(options?.pluginDecisionDescriptions),
+    MEMORY_INSTRUCTIONS,
+  );
 
   if (options?.mindToolsEnabled) {
     sections.push(TOOL_REFERENCE);
@@ -811,14 +868,19 @@ export function buildUserMessage(params: MindContextParams): string {
     sections.push(prevSection);
   }
 
-  // 10. Spawn budget note
+  // 10. Plugin context sources
+  if (params.pluginContextSources) {
+    sections.push(`── PLUGIN CONTEXT ──\n${params.pluginContextSources}`);
+  }
+
+  // 11. Spawn budget note
   if (params.spawnBudgetNote) {
     sections.push(
       '── SESSION CONTEXT NOTE ──\n' + params.spawnBudgetNote
     );
   }
 
-  // 11. Memory flush warning (session approaching context limit)
+  // 12. Memory flush warning (session approaching context limit)
   if (params.memoryFlushPending) {
     sections.push(
       '── SESSION CONTEXT NOTE ──\n' +
@@ -837,11 +899,17 @@ export function buildUserMessage(params: MindContextParams): string {
  * Build the full context for a mind tick.
  */
 export function buildMindContext(params: MindContextParams): CompiledContext {
+  const systemPromptOptions: Parameters<typeof buildSystemPrompt>[1] = {
+    energySystemEnabled: params.energySystemEnabled ?? false,
+    tickIntervalMs: params.tickIntervalMs,
+    mindToolsEnabled: params.mindToolsEnabled ?? false,
+  };
+  if (params.pluginDecisionDescriptions) {
+    systemPromptOptions.pluginDecisionDescriptions = params.pluginDecisionDescriptions;
+  }
+
   const systemPrompt = params.sessionState === 'cold'
-    ? buildSystemPrompt(params.compiledPersona, {
-        energySystemEnabled: params.energySystemEnabled ?? false,
-        mindToolsEnabled: params.mindToolsEnabled ?? false,
-      })
+    ? buildSystemPrompt(params.compiledPersona, systemPromptOptions)
     : null;
 
   const userMessage = buildUserMessage(params);

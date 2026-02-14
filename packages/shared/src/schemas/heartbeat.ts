@@ -32,6 +32,7 @@ export const triggerTypeSchema = z.enum([
   'message',
   'scheduled_task',
   'agent_complete',
+  'plugin_trigger',
 ]);
 
 export const heartbeatStateSchema = z.object({
@@ -148,7 +149,7 @@ export const experienceSchema = z.object({
 // Tick Decisions
 // ============================================================================
 
-export const decisionTypeSchema = z.enum([
+export const builtInDecisionTypeSchema = z.enum([
   'spawn_agent',
   'update_agent',
   'cancel_agent',
@@ -165,6 +166,8 @@ export const decisionTypeSchema = z.enum([
   'skip_task',
   'no_action',
 ]);
+
+export const decisionTypeSchema = z.union([builtInDecisionTypeSchema, z.string()]);
 
 export const decisionOutcomeSchema = z.enum(['executed', 'dropped', 'failed']);
 

@@ -259,24 +259,28 @@ describe('isInSleepHours', () => {
 describe('formatEnergyContext', () => {
   it('includes band description for peak', () => {
     const ctx = formatEnergyContext(0.85, 'peak', 0.85, 300000);
-    expect(ctx).toContain('YOUR ENERGY & TIME');
+    expect(ctx).toContain('YOUR ENERGY');
     expect(ctx).toContain('peak');
     expect(ctx).toContain('sharp and energized');
   });
 
-  it('does NOT include band description for alert', () => {
+  it('includes band description for alert', () => {
     const ctx = formatEnergyContext(0.55, 'alert', 0.85, 300000);
     expect(ctx).toContain('alert');
-    // Alert band has empty description
-    expect(ctx).not.toContain('sharp and energized');
-    expect(ctx).not.toContain('energy is fading');
-    // Should still include delta guidance
-    expect(ctx).toContain('Delta magnitude guidance');
+    expect(ctx).toContain('steady and present');
   });
 
   it('includes band description for sleeping', () => {
     const ctx = formatEnergyContext(0.02, 'sleeping', 0.0, 1800000);
-    expect(ctx).toContain('You are sleeping');
+    expect(ctx).toContain('deep in sleep');
+  });
+
+  it('is pure state — no instructional content', () => {
+    const ctx = formatEnergyContext(0.55, 'alert', 0.85, 300000);
+    // Delta guidance moved to system prompt
+    expect(ctx).not.toContain('Delta magnitude');
+    expect(ctx).not.toContain('energyDelta');
+    expect(ctx).not.toContain('Provide');
   });
 
   it('includes wake-up context for natural wake', () => {
@@ -293,28 +297,13 @@ describe('formatEnergyContext', () => {
     expect(ctx).toContain('pulled from sleep');
     expect(ctx).toContain('3.0 hours');
     expect(ctx).toContain('message');
-    expect(ctx).toContain('deeply drowsy');
+    expect(ctx).toContain('groggy');
   });
 
   it('excludes wake-up context when not provided', () => {
     const ctx = formatEnergyContext(0.55, 'alert', 0.85, 300000);
     expect(ctx).not.toContain('waking up');
     expect(ctx).not.toContain('pulled from sleep');
-  });
-
-  it('provides short interval magnitude guidance', () => {
-    const ctx = formatEnergyContext(0.55, 'alert', 0.85, 60000); // 1 min
-    expect(ctx).toContain('0.005-0.02');
-  });
-
-  it('provides medium interval magnitude guidance', () => {
-    const ctx = formatEnergyContext(0.55, 'alert', 0.85, 300000); // 5 min
-    expect(ctx).toContain('0.01-0.05');
-  });
-
-  it('provides long interval magnitude guidance', () => {
-    const ctx = formatEnergyContext(0.55, 'alert', 0.85, 1800000); // 30 min
-    expect(ctx).toContain('0.03-0.10');
   });
 });
 
