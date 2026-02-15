@@ -42,6 +42,7 @@ import { BirthPage } from './pages/onboarding/BirthPage';
 import { PresencePage } from './pages/PresencePage';
 import { MindPage } from './pages/MindPage';
 import { PeoplePage } from './pages/PeoplePage';
+import { PersonaPage } from './pages/PersonaPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { MaintenanceOverlay } from './components/MaintenanceOverlay';
@@ -187,6 +188,8 @@ export function App() {
                 <Route path="/mind/*" element={<MindPage />} />
                 <Route path="/people" element={<PeoplePage />} />
                 <Route path="/people/*" element={<PeoplePage />} />
+                <Route path="/persona" element={<PersonaPage />} />
+                <Route path="/persona/*" element={<PersonaPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/settings/*" element={<SettingsPage />} />
               </Route>

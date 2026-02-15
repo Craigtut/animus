@@ -70,6 +70,7 @@ export interface ToolHandlerContext {
         contactId: string;
         channel: ChannelType;
         content: string;
+        media?: Array<{ type: 'image' | 'audio' | 'video' | 'file'; path: string; filename?: string }>;
       }): Promise<{ id: string } | null>;
     };
   };

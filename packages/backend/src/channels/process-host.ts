@@ -6,6 +6,7 @@
  */
 
 import { fork, type ChildProcess } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
@@ -370,13 +371,40 @@ export class ChannelProcessHost {
     await this.start();
   }
 
-  async send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<boolean> {
+  async send(
+    contactId: string,
+    content: string,
+    metadata?: Record<string, unknown>,
+    media?: Array<{ type: string; path: string; mimeType: string; filename?: string }>
+  ): Promise<boolean> {
     if (!this.childProcess || this.childProcess.killed) {
       this.log.error('Cannot send: process not running');
       return false;
     }
 
     const id = generateCorrelationId();
+
+    // Read files and base64-encode for IPC (child process may not have fs permissions)
+    let ipcMedia: import('./ipc/protocol.js').SendMessage['media'];
+    if (media && media.length > 0) {
+      ipcMedia = [];
+      for (const m of media) {
+        try {
+          const data = fs.readFileSync(m.path);
+          const entry: NonNullable<import('./ipc/protocol.js').SendMessage['media']>[number] = {
+            type: m.type as 'image' | 'audio' | 'video' | 'file',
+            path: m.path,
+            mimeType: m.mimeType,
+            data: data.toString('base64'),
+          };
+          if (m.filename) entry.filename = m.filename;
+          ipcMedia.push(entry);
+        } catch (err) {
+          this.log.error(`Failed to read media file ${m.path} for IPC:`, err);
+        }
+      }
+      if (ipcMedia.length === 0) ipcMedia = undefined;
+    }
 
     return new Promise<boolean>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -386,13 +414,14 @@ export class ChannelProcessHost {
 
       this.pendingSendRequests.set(id, { resolve, reject, timer });
 
-      const msg: ParentToChildMessage = {
+      const msg: import('./ipc/protocol.js').SendMessage = {
         type: 'send',
         id,
         contactId,
         content,
       };
-      if (metadata) (msg as import('./ipc/protocol.js').SendMessage).metadata = metadata;
+      if (metadata) msg.metadata = metadata;
+      if (ipcMedia) msg.media = ipcMedia;
       this.sendToChild(msg);
     });
   }

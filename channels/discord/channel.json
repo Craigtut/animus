@@ -18,7 +18,7 @@
     "identifierValidation": "^\\d{17,20}$",
     "identifierHelpText": "The user's Discord snowflake ID (enable Developer Mode to copy)"
   },
-  "capabilities": ["text", "markdown", "embeds", "media-inbound"],
+  "capabilities": ["text", "markdown", "embeds", "media-inbound", "media-outbound"],
   "replyGuidance": "Discord supports markdown formatting: **bold**, *italic*, `code`, ```code blocks```, > quotes, and [links](url). Keep replies under 2000 characters. Use embeds sparingly.",
   "permissions": {
     "network": ["discord.com", "*.discord.com", "gateway.discord.gg", "cdn.discordapp.com"],

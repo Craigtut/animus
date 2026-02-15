@@ -7,9 +7,10 @@ interface TooltipProps {
   content: string;
   children: ReactNode;
   position?: 'top' | 'bottom';
+  align?: 'center' | 'right';
 }
 
-export function Tooltip({ content, children, position = 'top' }: TooltipProps) {
+export function Tooltip({ content, children, position = 'top', align = 'center' }: TooltipProps) {
   const theme = useTheme();
   const [visible, setVisible] = useState(false);
 
@@ -33,11 +34,10 @@ export function Tooltip({ content, children, position = 'top' }: TooltipProps) {
             css={css`
               position: absolute;
               ${position === 'top' ? 'bottom: calc(100% + 6px);' : 'top: calc(100% + 6px);'}
-              left: 50%;
-              transform: translateX(-50%);
+              ${align === 'right' ? 'right: 0;' : 'left: 50%; transform: translateX(-50%);'}
               z-index: ${theme.zIndex.tooltip};
               padding: ${theme.spacing[1]} ${theme.spacing[2]};
-              background: ${theme.colors.background.elevated};
+              background: ${theme.colors.background.default};
               border: 1px solid ${theme.colors.border.default};
               border-radius: ${theme.borderRadius.sm};
               font-size: ${theme.typography.fontSize.xs};

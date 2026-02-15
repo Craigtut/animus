@@ -114,6 +114,51 @@ export default function createAdapter(ctx: AdapterContext): ChannelAdapter {
     }
   }
 
+  /**
+   * Send a message with media attachments via multipart/form-data.
+   * Discord supports up to 10 attachments per message.
+   */
+  async function sendDiscordMessageWithMedia(
+    channelId: string,
+    content: string,
+    media: Array<{ type: string; data: string; mimeType: string; filename?: string }>
+  ): Promise<void> {
+    const form = new FormData();
+
+    // Build the payload_json with attachment references
+    const attachments = media.map((m, i) => ({
+      id: i,
+      filename: m.filename ?? `attachment-${i}`,
+    }));
+    const payloadJson = JSON.stringify({
+      content: content.length > 2000 ? content.substring(0, 2000) : content,
+      attachments,
+    });
+    form.append('payload_json', payloadJson);
+
+    // Append each file as a numbered field
+    for (let i = 0; i < media.length; i++) {
+      const m = media[i]!;
+      const buffer = Buffer.from(m.data, 'base64');
+      const blob = new Blob([buffer], { type: m.mimeType });
+      const filename = m.filename ?? `attachment-${i}`;
+      form.append(`files[${i}]`, blob, filename);
+    }
+
+    const resp = await fetch(`${API_BASE}/channels/${channelId}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bot ${botToken}`,
+      },
+      body: form,
+    });
+
+    if (!resp.ok) {
+      const body = await resp.text();
+      throw new Error(`Discord API ${resp.status}: ${body}`);
+    }
+  }
+
   // --- Gateway WebSocket ---
 
   function clearGatewayTimers(): void {
@@ -427,28 +472,36 @@ export default function createAdapter(ctx: AdapterContext): ChannelAdapter {
     ): Promise<void> {
       // Prefer channelId from metadata (reply in the same channel the message came from)
       const channelId = metadata?.['channelId'] as string | undefined;
+      const media = metadata?.['media'] as
+        | Array<{ type: string; data: string; mimeType: string; filename?: string }>
+        | undefined;
 
+      // Determine target channel
+      let targetChannelId: string;
       if (channelId) {
-        await sendDiscordMessage(channelId, content);
-        ctx.log.debug(`Message sent to channel ${channelId}`);
-        return;
+        targetChannelId = channelId;
+      } else {
+        // Fallback: DM the user directly
+        const contact = await ctx.resolveContact(contactId);
+        if (!contact) {
+          ctx.log.error(`Cannot send: contact ${contactId} not found`);
+          return;
+        }
+        const dm = (await discordFetch('/users/@me/channels', {
+          method: 'POST',
+          body: JSON.stringify({ recipient_id: contact.identifier }),
+        })) as { id: string };
+        targetChannelId = dm.id;
       }
 
-      // Fallback: DM the user directly
-      const contact = await ctx.resolveContact(contactId);
-      if (!contact) {
-        ctx.log.error(`Cannot send: contact ${contactId} not found`);
-        return;
+      // Send with or without media
+      if (media && media.length > 0) {
+        await sendDiscordMessageWithMedia(targetChannelId, content, media);
+        ctx.log.debug(`Message with ${media.length} attachment(s) sent to channel ${targetChannelId}`);
+      } else {
+        await sendDiscordMessage(targetChannelId, content);
+        ctx.log.debug(`Message sent to channel ${targetChannelId}`);
       }
-
-      // Create or fetch the DM channel
-      const dm = (await discordFetch('/users/@me/channels', {
-        method: 'POST',
-        body: JSON.stringify({ recipient_id: contact.identifier }),
-      })) as { id: string };
-
-      await sendDiscordMessage(dm.id, content);
-      ctx.log.debug(`DM sent to user ${contact.identifier}`);
     },
   };
 }

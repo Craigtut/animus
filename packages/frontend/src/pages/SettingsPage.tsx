@@ -4,14 +4,11 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Sparkle,
   Heartbeat as HeartbeatIcon,
   Robot,
   ChatCircle,
   Target,
   GearSix,
-  CaretDown,
-  CaretUp,
   Globe,
   ChatText,
   DiscordLogo,
@@ -38,79 +35,16 @@ import {
   Plugs,
   FloppyDisk,
 } from '@phosphor-icons/react';
-import { Card, SelectionCard, Button, Input, Modal, Badge, Toggle, Slider, Typography, CityAutocomplete, TimezoneSelect } from '../components/ui';
+import { Card, SelectionCard, Button, Input, Modal, Badge, Toggle, Slider, Typography, Tooltip } from '../components/ui';
 import { trpc } from '../utils/trpc';
 import type { Theme } from '../styles/theme';
 import { SavesSection } from '../components/settings/SavesSection';
 
 // ============================================================================
-// Data Constants (reused from onboarding)
-// ============================================================================
-
-const dimensionGroups: { title: string; dimensions: { id: string; leftLabel: string; rightLabel: string }[] }[] = [
-  {
-    title: 'Social Orientation',
-    dimensions: [
-      { id: 'extroversion', leftLabel: 'Introverted', rightLabel: 'Extroverted' },
-      { id: 'trust', leftLabel: 'Suspicious', rightLabel: 'Trusting' },
-      { id: 'leadership', leftLabel: 'Follower', rightLabel: 'Leader' },
-    ],
-  },
-  {
-    title: 'Emotional Temperament',
-    dimensions: [
-      { id: 'optimism', leftLabel: 'Pessimistic', rightLabel: 'Optimistic' },
-      { id: 'confidence', leftLabel: 'Insecure', rightLabel: 'Confident' },
-      { id: 'empathy', leftLabel: 'Uncompassionate', rightLabel: 'Empathetic' },
-    ],
-  },
-  {
-    title: 'Decision Style',
-    dimensions: [
-      { id: 'cautious', leftLabel: 'Reckless', rightLabel: 'Cautious' },
-      { id: 'patience', leftLabel: 'Impulsive', rightLabel: 'Patient' },
-      { id: 'orderly', leftLabel: 'Chaotic', rightLabel: 'Orderly' },
-    ],
-  },
-  {
-    title: 'Moral Compass',
-    dimensions: [
-      { id: 'altruism', leftLabel: 'Selfish', rightLabel: 'Altruistic' },
-    ],
-  },
-];
-
-const traitCategories: { title: string; traits: string[] }[] = [
-  { title: 'Communication', traits: ['Witty', 'Sarcastic', 'Dry humor', 'Gentle', 'Blunt', 'Poetic', 'Formal', 'Casual', 'Verbose', 'Terse'] },
-  { title: 'Cognitive', traits: ['Analytical', 'Creative', 'Practical', 'Abstract', 'Detail-oriented', 'Big-picture', 'Philosophical', 'Scientific'] },
-  { title: 'Relational', traits: ['Nurturing', 'Challenging', 'Encouraging', 'Playful', 'Serious', 'Mentoring', 'Collaborative'] },
-  { title: 'Quirks', traits: ['Nostalgic', 'Superstitious', 'Perfectionist', 'Daydreamer', 'Night owl', 'Worrier', 'Contrarian'] },
-];
-
-const allValues = [
-  { id: 'knowledge', name: 'Knowledge & Truth', description: 'Pursuing understanding above all else' },
-  { id: 'loyalty', name: 'Loyalty & Devotion', description: 'Standing by the people and causes you believe in' },
-  { id: 'freedom', name: 'Freedom & Independence', description: 'Charting your own course, resisting constraint' },
-  { id: 'creativity', name: 'Creativity & Expression', description: 'Making something new, finding beauty in creation' },
-  { id: 'justice', name: 'Justice & Fairness', description: "Doing what's right, even when it's hard" },
-  { id: 'growth', name: 'Growth & Self-improvement', description: 'Becoming better, always evolving' },
-  { id: 'connection', name: 'Connection & Belonging', description: 'Finding your people, building bonds' },
-  { id: 'achievement', name: 'Achievement & Excellence', description: 'Setting high standards and meeting them' },
-  { id: 'harmony', name: 'Harmony & Peace', description: 'Seeking balance, reducing conflict' },
-  { id: 'adventure', name: 'Adventure & Discovery', description: 'Embracing the unknown, seeking new experience' },
-  { id: 'compassion', name: 'Compassion & Service', description: 'Easing suffering, lifting others up' },
-  { id: 'authenticity', name: 'Authenticity & Honesty', description: "Being genuine, even when it's uncomfortable" },
-  { id: 'resilience', name: 'Resilience & Perseverance', description: 'Enduring difficulty, refusing to quit' },
-  { id: 'wisdom', name: 'Wisdom & Discernment', description: 'Knowing what matters, seeing clearly' },
-  { id: 'humor', name: 'Humor & Joy', description: 'Finding lightness, not taking life too seriously' },
-  { id: 'security', name: 'Security & Stability', description: 'Building something solid, protecting what matters' },
-];
-
-// ============================================================================
 // Types
 // ============================================================================
 
-type SettingsSection = 'persona' | 'heartbeat' | 'provider' | 'channels' | 'plugins' | 'goals' | 'saves' | 'system';
+type SettingsSection = 'heartbeat' | 'provider' | 'channels' | 'plugins' | 'goals' | 'saves' | 'system';
 
 interface SidebarItem {
   id: SettingsSection;
@@ -119,7 +53,6 @@ interface SidebarItem {
 }
 
 const sections: SidebarItem[] = [
-  { id: 'persona', label: 'Persona', icon: Sparkle },
   { id: 'heartbeat', label: 'Heartbeat', icon: HeartbeatIcon },
   { id: 'provider', label: 'Agent Provider', icon: Robot },
   { id: 'channels', label: 'Channels', icon: ChatCircle },
@@ -128,57 +61,6 @@ const sections: SidebarItem[] = [
   { id: 'saves', label: 'Saves', icon: FloppyDisk },
   { id: 'system', label: 'System', icon: GearSix },
 ];
-
-// ============================================================================
-// Collapsible Section
-// ============================================================================
-
-function CollapsibleSection({
-  title,
-  defaultExpanded = true,
-  children,
-}: {
-  title: string;
-  defaultExpanded?: boolean;
-  children: React.ReactNode;
-}) {
-  const theme = useTheme();
-  const [expanded, setExpanded] = useState(defaultExpanded);
-
-  return (
-    <div css={css`border-bottom: 1px solid ${theme.colors.border.light}; padding-bottom: ${theme.spacing[6]};`}>
-      <button
-        onClick={() => setExpanded((e) => !e)}
-        css={css`
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          width: 100%;
-          padding: 0;
-          cursor: pointer;
-          margin-bottom: ${expanded ? theme.spacing[4] : '0'};
-        `}
-      >
-        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
-          {title}
-        </Typography.Subtitle>
-        {expanded ? <CaretUp size={16} /> : <CaretDown size={16} />}
-      </button>
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0, overflow: 'hidden' as const }}
-            animate={{ height: 'auto', opacity: 1, overflow: 'visible' as const }}
-            exit={{ height: 0, opacity: 0, overflow: 'hidden' as const }}
-            transition={{ duration: 0.2, ease: 'easeOut', overflow: { delay: 0.2 } }}
-          >
-            {children}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
 
 // ============================================================================
 // Inline Save Indicator
@@ -214,463 +96,6 @@ function useSaveFlash() {
     setTimeout(() => setShow(false), 2000);
   }, []);
   return { show, flash };
-}
-
-// ============================================================================
-// Section: Persona
-// ============================================================================
-
-function PersonaSection() {
-  const theme = useTheme();
-  const utils = trpc.useUtils();
-
-  const { data: persona, isLoading } = trpc.persona.get.useQuery();
-  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
-  const updateMutation = trpc.persona.update.useMutation({
-    onSuccess: () => {
-      utils.persona.get.invalidate();
-      setSuccessMessage('Persona updated. Changes take effect on the next heartbeat tick.');
-      setTimeout(() => setSuccessMessage(null), 5000);
-      setDirty(false);
-    },
-  });
-  const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation({
-    onSuccess: () => utils.settings.getSystemSettings.invalidate(),
-  });
-
-  const [dirty, setDirty] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [timezone, setTimezone] = useState('');
-  const timezoneSave = useSaveFlash();
-
-  // Draft state
-  const [existenceParadigm, setExistenceParadigm] = useState<'simulated_life' | 'digital_consciousness'>('simulated_life');
-  const [location, setLocation] = useState('');
-  const [worldDescription, setWorldDescription] = useState('');
-  const [name, setName] = useState('');
-  const [gender, setGender] = useState('');
-  const [age, setAge] = useState<number | ''>('');
-  const [physicalDescription, setPhysicalDescription] = useState('');
-  const [dimensions, setDimensions] = useState<Record<string, number>>({});
-  const [traits, setTraits] = useState<string[]>([]);
-  const [values, setValues] = useState<string[]>([]);
-  const [background, setBackground] = useState('');
-  const [personalityNotes, setPersonalityNotes] = useState('');
-
-  // Populate draft from server data
-  useEffect(() => {
-    if (!persona) return;
-    setExistenceParadigm(persona.existenceParadigm ?? 'simulated_life');
-    setLocation(persona.location ?? '');
-    setWorldDescription(persona.worldDescription ?? '');
-    setName(persona.name ?? '');
-    setGender(persona.gender ?? '');
-    setAge(persona.age ?? '');
-    setPhysicalDescription(persona.physicalDescription ?? '');
-    setDimensions(persona.personalityDimensions ?? {});
-    setTraits(persona.traits ?? []);
-    setValues(persona.values ?? []);
-    setBackground(persona.background ?? '');
-    setPersonalityNotes(persona.personalityNotes ?? '');
-    setDirty(false);
-  }, [persona]);
-
-  // Populate timezone from system settings (defaults to browser timezone)
-  useEffect(() => {
-    setTimezone(systemSettings?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
-  }, [systemSettings]);
-
-  const handleTimezoneChange = (tz: string) => {
-    setTimezone(tz);
-    updateSettingsMutation.mutate({ timezone: tz }, { onSuccess: () => timezoneSave.flash() });
-  };
-
-  const markDirty = useCallback(() => setDirty(true), []);
-
-  const handleSave = () => {
-    const newErrors: Record<string, string> = {};
-    if (!name.trim()) newErrors['name'] = 'Name is required';
-    if (traits.length < 5 || traits.length > 8) newErrors['traits'] = 'Select 5-8 traits';
-    if (values.length < 3 || values.length > 5) newErrors['values'] = 'Select 3-5 values';
-    setErrors(newErrors);
-    if (Object.keys(newErrors).length > 0) return;
-
-    updateMutation.mutate({
-      existenceParadigm,
-      location: location || null,
-      worldDescription: worldDescription || null,
-      name,
-      gender: gender || null,
-      age: typeof age === 'number' ? age : null,
-      physicalDescription: physicalDescription || null,
-      personalityDimensions: dimensions as any,
-      traits,
-      values,
-      background: background || null,
-      personalityNotes: personalityNotes || null,
-    });
-  };
-
-  const toggleTrait = (trait: string) => {
-    markDirty();
-    if (traits.includes(trait)) {
-      setTraits(traits.filter((t) => t !== trait));
-    } else if (traits.length < 8) {
-      setTraits([...traits, trait]);
-    }
-  };
-
-  const toggleValue = (id: string) => {
-    markDirty();
-    if (values.includes(id)) {
-      setValues(values.filter((v) => v !== id));
-    } else if (values.length < 5) {
-      setValues([...values, id]);
-    }
-  };
-
-  const pulseKf = keyframes`
-    0%, 100% { box-shadow: none; }
-    50% { box-shadow: 0 0 0 3px ${theme.colors.accent}22; }
-  `;
-
-  if (isLoading) {
-    return <Typography.Body color="hint" css={css`padding: ${theme.spacing[8]};`}>Loading persona...</Typography.Body>;
-  }
-
-  return (
-    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      {/* Existence */}
-      <CollapsibleSection title="Existence">
-        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-          <div css={css`display: flex; gap: ${theme.spacing[3]}; flex-wrap: wrap;`}>
-            <SelectionCard
-              selected={existenceParadigm === 'simulated_life'}
-              padding="md"
-              onClick={() => { setExistenceParadigm('simulated_life'); markDirty(); }}
-              css={css`flex: 1; min-width: 200px;`}
-            >
-              <Typography.BodyAlt as="span">Simulated Life</Typography.BodyAlt>
-            </SelectionCard>
-            <SelectionCard
-              selected={existenceParadigm === 'digital_consciousness'}
-              padding="md"
-              onClick={() => { setExistenceParadigm('digital_consciousness'); markDirty(); }}
-              css={css`flex: 1; min-width: 200px;`}
-            >
-              <Typography.BodyAlt as="span">Digital Consciousness</Typography.BodyAlt>
-            </SelectionCard>
-          </div>
-          {existenceParadigm === 'simulated_life' && (
-            <CityAutocomplete
-              label="Where do they live?"
-              value={location}
-              onChange={(val) => { setLocation(val); markDirty(); }}
-              onTimezoneDetected={handleTimezoneChange}
-              placeholder="A city, a small town, the countryside..."
-              helperText="Type a city name for suggestions, or enter any location."
-            />
-          )}
-          {existenceParadigm === 'digital_consciousness' && (
-            <Input
-              multiline
-              label="Describe the world your AI inhabits"
-              value={worldDescription}
-              onChange={(e) => { setWorldDescription((e.target as HTMLTextAreaElement).value); markDirty(); }}
-              placeholder="What does their digital space look like?"
-            />
-          )}
-          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-            <div css={css`flex: 1;`}>
-              <TimezoneSelect
-                label="Timezone"
-                value={timezone}
-                onChange={handleTimezoneChange}
-                helperText="All scheduled tasks and time-based displays use this timezone."
-              />
-            </div>
-            <SaveIndicator show={timezoneSave.show} />
-          </div>
-        </div>
-      </CollapsibleSection>
-
-      {/* Identity */}
-      <CollapsibleSection title="Identity">
-        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-          <Input
-            label="Name"
-            value={name}
-            onChange={(e) => { setName((e.target as HTMLInputElement).value); markDirty(); }}
-            error={errors['name']}
-          />
-          <Input
-            label="Gender"
-            value={gender}
-            onChange={(e) => { setGender((e.target as HTMLInputElement).value); markDirty(); }}
-            placeholder="Any gender expression"
-          />
-          <Input
-            label="Age"
-            type="number"
-            value={age === '' ? '' : String(age)}
-            onChange={(e) => {
-              const v = (e.target as HTMLInputElement).value;
-              setAge(v === '' ? '' : parseInt(v, 10));
-              markDirty();
-            }}
-          />
-          <Input
-            multiline
-            label="Physical Description"
-            value={physicalDescription}
-            onChange={(e) => { setPhysicalDescription((e.target as HTMLTextAreaElement).value); markDirty(); }}
-            placeholder="What do they look like?"
-          />
-        </div>
-      </CollapsibleSection>
-
-      {/* Archetype (read-only) */}
-      <CollapsibleSection title="Archetype" defaultExpanded={false}>
-        <Typography.SmallBody color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
-          Your archetype was used as a starting point during creation. It is not stored -- your personality is defined by the dimensions and traits below.
-        </Typography.SmallBody>
-      </CollapsibleSection>
-
-      {/* Personality Dimensions */}
-      <CollapsibleSection title="Personality Dimensions">
-        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-          {dimensionGroups.map((group) => (
-            <div key={group.title} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-              <Typography.Caption as="h4" color="hint" css={css`
-                font-weight: ${theme.typography.fontWeight.medium};
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-              `}>
-                {group.title}
-              </Typography.Caption>
-              {group.dimensions.map((dim) => (
-                <Slider
-                  key={dim.id}
-                  value={dimensions[dim.id] ?? 0.5}
-                  onChange={(v) => {
-                    setDimensions((prev) => ({ ...prev, [dim.id]: v }));
-                    markDirty();
-                  }}
-                  leftLabel={dim.leftLabel}
-                  rightLabel={dim.rightLabel}
-                  showNeutral
-                />
-              ))}
-            </div>
-          ))}
-        </div>
-      </CollapsibleSection>
-
-      {/* Traits */}
-      <CollapsibleSection title="Traits">
-        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-          {traits.length > 0 && (
-            <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[2]};`}>
-              {traits.map((trait) => (
-                <motion.button
-                  key={trait}
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  onClick={() => toggleTrait(trait)}
-                  css={css`
-                    padding: ${theme.spacing[1]} ${theme.spacing[3]};
-                    border-radius: ${theme.borderRadius.full};
-                    background: ${theme.colors.accent};
-                    color: ${theme.colors.accentForeground};
-                    font-size: ${theme.typography.fontSize.sm};
-                    font-weight: ${theme.typography.fontWeight.medium};
-                    cursor: pointer;
-                    border: none;
-                  `}
-                >
-                  {trait}
-                </motion.button>
-              ))}
-            </div>
-          )}
-          <Typography.SmallBody color="hint">
-            {traits.length} of 8 selected {errors['traits'] && <span css={css`color: ${theme.colors.error.main};`}> -- {errors['traits']}</span>}
-          </Typography.SmallBody>
-          {traitCategories.map((cat) => (
-            <div key={cat.title} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-              <Typography.Caption as="h4" color="hint" css={css`
-                font-weight: ${theme.typography.fontWeight.medium};
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-              `}>
-                {cat.title}
-              </Typography.Caption>
-              <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[2]};`}>
-                {cat.traits.map((trait) => {
-                  const isSelected = traits.includes(trait);
-                  const isDisabled = !isSelected && traits.length >= 8;
-                  return (
-                    <button
-                      key={trait}
-                      onClick={() => !isDisabled && toggleTrait(trait)}
-                      css={css`
-                        padding: ${theme.spacing[1.5]} ${theme.spacing[3]};
-                        border-radius: ${theme.borderRadius.full};
-                        font-size: ${theme.typography.fontSize.sm};
-                        cursor: ${isDisabled ? 'default' : 'pointer'};
-                        border: 1px solid ${isSelected ? theme.colors.accent : theme.colors.border.default};
-                        background: ${isSelected ? theme.colors.accent : 'transparent'};
-                        color: ${isSelected ? theme.colors.accentForeground : theme.colors.text.primary};
-                        opacity: ${isDisabled ? 0.4 : 1};
-                        transition: all ${theme.transitions.fast};
-                        &:hover:not(:disabled) {
-                          ${!isSelected && !isDisabled ? `background: ${theme.colors.background.elevated};` : ''}
-                        }
-                      `}
-                    >
-                      {trait}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </CollapsibleSection>
-
-      {/* Values */}
-      <CollapsibleSection title="Values">
-        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-          {values.length > 0 && (
-            <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[2]};`}>
-              {values.map((id, i) => {
-                const val = allValues.find((v) => v.id === id);
-                return (
-                  <Typography.SmallBodyAlt
-                    as="span"
-                    key={id}
-                    css={css`
-                      display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
-                      padding: ${theme.spacing[1]} ${theme.spacing[3]};
-                      background: ${theme.colors.accent}; color: ${theme.colors.accentForeground};
-                      border-radius: ${theme.borderRadius.full};
-                    `}
-                  >
-                    <Typography.Caption as="span" css={css`opacity: 0.7;`}>#{i + 1}</Typography.Caption>
-                    {val ? val.name.split(' & ')[0] : id}
-                  </Typography.SmallBodyAlt>
-                );
-              })}
-            </div>
-          )}
-          <Typography.SmallBody color="hint">
-            {values.length} of 5 selected {errors['values'] && <span css={css`color: ${theme.colors.error.main};`}> -- {errors['values']}</span>}
-          </Typography.SmallBody>
-          <div css={css`
-            display: grid; grid-template-columns: repeat(2, 1fr); gap: ${theme.spacing[3]};
-            @media (max-width: ${theme.breakpoints.sm}) { grid-template-columns: 1fr; }
-          `}>
-            {allValues.map((val) => {
-              const isSelected = values.includes(val.id);
-              const rank = values.indexOf(val.id);
-              const isDisabled = !isSelected && values.length >= 5;
-              return (
-                <SelectionCard
-                  key={val.id}
-                  selected={isSelected}
-                  rank={isSelected ? rank + 1 : undefined}
-                  disabled={isDisabled}
-                  padding="sm"
-                  onClick={() => toggleValue(val.id)}
-                >
-                  <div>
-                    <Typography.SmallBodyAlt as="span">
-                      {val.name}
-                    </Typography.SmallBodyAlt>
-                    <Typography.Caption as="p" color="hint" css={css`margin-top: 2px;`}>
-                      {val.description}
-                    </Typography.Caption>
-                  </div>
-                </SelectionCard>
-              );
-            })}
-          </div>
-        </div>
-      </CollapsibleSection>
-
-      {/* Background */}
-      <CollapsibleSection title="Background">
-        <Input
-          multiline
-          label="What shaped who they are?"
-          value={background}
-          onChange={(e) => { setBackground((e.target as HTMLTextAreaElement).value); markDirty(); }}
-          placeholder="Background, backstory, defining experiences..."
-          helperText="What was their early life like? What do they carry with them?"
-        />
-      </CollapsibleSection>
-
-      {/* Notes */}
-      <CollapsibleSection title="Notes">
-        <Input
-          multiline
-          label="Anything else that makes them who they are?"
-          value={personalityNotes}
-          onChange={(e) => { setPersonalityNotes((e.target as HTMLTextAreaElement).value); markDirty(); }}
-          placeholder="Quirks, speech patterns, habits, contradictions, hidden depths..."
-          helperText='E.g., "Uses cooking metaphors when explaining things. Gets genuinely excited about obscure facts."'
-        />
-      </CollapsibleSection>
-
-      {/* Save button (sticky) */}
-      <div css={css`
-        position: sticky;
-        bottom: ${theme.spacing[4]};
-        z-index: 10;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: ${theme.spacing[2]};
-      `}>
-        <Button
-          onClick={handleSave}
-          disabled={!dirty}
-          loading={updateMutation.isPending}
-          css={dirty ? css`animation: ${pulseKf} 1500ms ease-in-out infinite;` : undefined}
-        >
-          Save changes
-        </Button>
-        <AnimatePresence>
-          {successMessage && (
-            <motion.div
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              css={css`
-                padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                background: ${theme.colors.success.main}1a;
-                border-radius: ${theme.borderRadius.default};
-              `}
-            >
-              <Typography.SmallBody color={theme.colors.success.main}>{successMessage}</Typography.SmallBody>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        {updateMutation.isError && (
-          <div css={css`
-            padding: ${theme.spacing[2]} ${theme.spacing[4]};
-            background: ${theme.colors.error.main}1a;
-            border-radius: ${theme.borderRadius.default};
-          `}>
-            <Typography.SmallBody color={theme.colors.error.main}>
-              Failed to save: {updateMutation.error?.message}
-            </Typography.SmallBody>
-          </div>
-        )}
-      </div>
-    </div>
-  );
 }
 
 // ============================================================================
@@ -1608,6 +1033,9 @@ function ProviderSection() {
                                   {inferredType}
                                 </Typography.Caption>
                               )}
+                              <Tooltip content="Encrypted at rest and injected securely at runtime" position="top" align="right">
+                                <ShieldCheck size={16} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+                              </Tooltip>
                               <button
                                 onClick={(e) => { e.stopPropagation(); setShowKey(!showKey); }}
                                 css={css`
@@ -2356,13 +1784,18 @@ function ChannelConfigModal({
                       helperText={field.helpText}
                       error={fieldError}
                       rightElement={
-                        <button
-                          type="button"
-                          onClick={() => setShowSecrets({ ...showSecrets, [field.key]: !showSecrets[field.key] })}
-                          css={css`cursor: pointer; padding: 0; color: ${theme.colors.text.hint}; &:hover { color: ${theme.colors.text.primary}; }`}
-                        >
-                          {showSecrets[field.key] ? <EyeSlash size={16} /> : <Eye size={16} />}
-                        </button>
+                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[1.5]};`}>
+                          <Tooltip content="Encrypted at rest and injected securely at runtime" position="top" align="right">
+                            <ShieldCheck size={16} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+                          </Tooltip>
+                          <button
+                            type="button"
+                            onClick={() => setShowSecrets({ ...showSecrets, [field.key]: !showSecrets[field.key] })}
+                            css={css`cursor: pointer; padding: 0; color: ${theme.colors.text.hint}; &:hover { color: ${theme.colors.text.primary}; }`}
+                          >
+                            {showSecrets[field.key] ? <EyeSlash size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
                       }
                     />
                   </div>
@@ -2806,8 +2239,8 @@ function PluginsSection() {
                     {plugin.iconSvg && (
                       <div
                         css={css`
-                          width: 32px;
-                          height: 32px;
+                          width: 24px;
+                          height: 24px;
                           flex-shrink: 0;
                           color: ${theme.colors.text.secondary};
                           display: flex;
@@ -3290,6 +2723,7 @@ function PluginConfigModal({
   const { data: detail } = trpc.plugins.get.useQuery({ name: pluginName });
 
   const [configValues, setConfigValues] = useState<Record<string, unknown>>({});
+  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
   const [rawJson, setRawJson] = useState('');
   const [jsonError, setJsonError] = useState('');
   const [initialized, setInitialized] = useState(false);
@@ -3369,15 +2803,44 @@ function PluginConfigModal({
                 );
               }
 
+              if (field.type === 'secret') {
+                return (
+                  <div key={field.key}>
+                    <Input
+                      label={field.label}
+                      type={showSecrets[field.key] ? 'text' : 'password'}
+                      value={isMasked ? '' : (value != null ? String(value) : '')}
+                      onChange={(e) => setConfigValues({ ...configValues, [field.key]: (e.target as HTMLInputElement).value })}
+                      helperText={field.helpText}
+                      placeholder={isMasked ? '••••••••  (saved, enter new value to change)' : (field.placeholder ?? (field.default != null ? String(field.default) : undefined))}
+                      rightElement={
+                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[1.5]};`}>
+                          <Tooltip content="Encrypted at rest and injected securely at runtime" position="top" align="right">
+                            <ShieldCheck size={16} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+                          </Tooltip>
+                          <button
+                            type="button"
+                            onClick={() => setShowSecrets({ ...showSecrets, [field.key]: !showSecrets[field.key] })}
+                            css={css`cursor: pointer; padding: 0; color: ${theme.colors.text.hint}; &:hover { color: ${theme.colors.text.primary}; }`}
+                          >
+                            {showSecrets[field.key] ? <EyeSlash size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
+                      }
+                    />
+                  </div>
+                );
+              }
+
               return (
                 <div key={field.key}>
                   <Input
                     label={field.label}
                     type={inputTypeForField(field.type)}
-                    value={isMasked ? '' : (value != null ? String(value) : '')}
+                    value={value != null ? String(value) : ''}
                     onChange={(e) => setConfigValues({ ...configValues, [field.key]: (e.target as HTMLInputElement).value })}
                     helperText={field.helpText}
-                    placeholder={isMasked ? '••••••••  (saved, enter new value to change)' : (field.placeholder ?? (field.default != null ? String(field.default) : undefined))}
+                    placeholder={field.placeholder ?? (field.default != null ? String(field.default) : undefined)}
                   />
                 </div>
               );
@@ -3728,13 +3191,13 @@ export function SettingsPage() {
   const activeSection: SettingsSection = useMemo(() => {
     const path = location.pathname.replace('/settings/', '').replace('/settings', '');
     const match = sections.find((s) => s.id === path);
-    return match ? match.id : 'persona';
+    return match ? match.id : 'heartbeat';
   }, [location.pathname]);
 
-  // Redirect bare /settings to /settings/persona
+  // Redirect bare /settings to /settings/heartbeat
   useEffect(() => {
     if (location.pathname === '/settings' || location.pathname === '/settings/') {
-      navigate('/settings/persona', { replace: true });
+      navigate('/settings/heartbeat', { replace: true });
     }
   }, [location.pathname, navigate]);
 
@@ -3759,7 +3222,6 @@ export function SettingsPage() {
 
   const renderSection = () => {
     switch (activeSection) {
-      case 'persona': return <PersonaSection />;
       case 'heartbeat': return <HeartbeatSection />;
       case 'provider': return <ProviderSection />;
       case 'channels': return <ChannelsSection />;
@@ -3767,7 +3229,7 @@ export function SettingsPage() {
       case 'goals': return <GoalsSection />;
       case 'saves': return <SavesSection />;
       case 'system': return <SystemSection />;
-      default: return <PersonaSection />;
+      default: return <HeartbeatSection />;
     }
   };
 

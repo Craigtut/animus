@@ -34,6 +34,13 @@ interface SendMessage {
   contactId: string;
   content: string;
   metadata?: Record<string, unknown>;
+  media?: Array<{
+    type: 'image' | 'audio' | 'video' | 'file';
+    path: string;
+    mimeType: string;
+    filename?: string;
+    data: string;
+  }>;
 }
 
 interface RouteRequestMessage {
@@ -356,8 +363,12 @@ function handleParentMessage(raw: unknown): void {
         sendToParent({ type: 'send_response', id: msg.id, ok: false, error: 'Adapter not initialized' });
         return;
       }
+      // Merge media into metadata so adapters receive it via the existing send() signature
+      const sendMetadata = msg.media
+        ? { ...msg.metadata, media: msg.media }
+        : msg.metadata;
       adapter
-        .send(msg.contactId, msg.content, msg.metadata)
+        .send(msg.contactId, msg.content, sendMetadata)
         .then(() => sendToParent({ type: 'send_response', id: msg.id, ok: true }))
         .catch((err: unknown) =>
           sendToParent({

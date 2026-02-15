@@ -181,7 +181,7 @@ async function main(): Promise<void> {
 
   // Initialize Gemini client
   const ai = new GoogleGenAI({ apiKey });
-  const model = "gemini-3-pro-image-preview";
+  const model = "gemini-2.5-pro";
 
   try {
     let contents: any[];

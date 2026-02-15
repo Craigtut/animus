@@ -275,7 +275,8 @@ export class ChannelManager {
     channelType: string,
     contactId: string,
     content: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
+    media?: Array<{ type: string; path: string; mimeType: string; filename?: string }>
   ): Promise<boolean> {
     // Check built-in channels first (e.g., web)
     const builtIn = this.builtInSenders.get(channelType);
@@ -295,7 +296,7 @@ export class ChannelManager {
       log.error(`Cannot send to channel ${channelType}: not running`);
       return false;
     }
-    return host.send(contactId, content, metadata);
+    return host.send(contactId, content, metadata, media);
   }
 
   /**

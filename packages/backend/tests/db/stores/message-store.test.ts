@@ -110,4 +110,96 @@ describe('message-store', () => {
       expect(recent[0]!.metadata).toEqual({ source: 'web-ui', priority: 1 });
     });
   });
+
+  describe('media attachments', () => {
+    it('creates a media attachment for a message', () => {
+      const conv = store.createConversation(db, { contactId: 'c1', channel: 'discord' });
+      const msg = store.createMessage(db, {
+        conversationId: conv.id,
+        contactId: 'c1',
+        direction: 'outbound',
+        channel: 'discord',
+        content: 'Here is an image',
+      });
+
+      const attachment = store.createMediaAttachment(db, {
+        messageId: msg.id,
+        type: 'image',
+        mimeType: 'image/png',
+        localPath: '/data/media/test.png',
+        originalFilename: 'test.png',
+        sizeBytes: 12345,
+      });
+
+      expect(attachment.id).toBeDefined();
+      expect(attachment.messageId).toBe(msg.id);
+      expect(attachment.type).toBe('image');
+      expect(attachment.mimeType).toBe('image/png');
+      expect(attachment.localPath).toBe('/data/media/test.png');
+      expect(attachment.originalFilename).toBe('test.png');
+      expect(attachment.sizeBytes).toBe(12345);
+      expect(attachment.createdAt).toBeDefined();
+    });
+
+    it('creates multiple attachments for the same message', () => {
+      const conv = store.createConversation(db, { contactId: 'c1', channel: 'discord' });
+      const msg = store.createMessage(db, {
+        conversationId: conv.id,
+        contactId: 'c1',
+        direction: 'outbound',
+        channel: 'discord',
+        content: 'Multiple files',
+      });
+
+      const att1 = store.createMediaAttachment(db, {
+        messageId: msg.id,
+        type: 'image',
+        mimeType: 'image/jpeg',
+        localPath: '/data/media/photo.jpg',
+        originalFilename: 'photo.jpg',
+        sizeBytes: 50000,
+      });
+
+      const att2 = store.createMediaAttachment(db, {
+        messageId: msg.id,
+        type: 'file',
+        mimeType: 'application/pdf',
+        localPath: '/data/media/doc.pdf',
+        originalFilename: null,
+        sizeBytes: 100000,
+      });
+
+      expect(att1.id).not.toBe(att2.id);
+      expect(att1.type).toBe('image');
+      expect(att2.type).toBe('file');
+      expect(att2.originalFilename).toBeNull();
+    });
+
+    it('cascades deletion when parent message is deleted', () => {
+      const conv = store.createConversation(db, { contactId: 'c1', channel: 'discord' });
+      const msg = store.createMessage(db, {
+        conversationId: conv.id,
+        contactId: 'c1',
+        direction: 'outbound',
+        channel: 'discord',
+        content: 'Will be deleted',
+      });
+
+      store.createMediaAttachment(db, {
+        messageId: msg.id,
+        type: 'image',
+        mimeType: 'image/png',
+        localPath: '/data/media/temp.png',
+        originalFilename: 'temp.png',
+        sizeBytes: 5000,
+      });
+
+      // Delete the message
+      db.prepare('DELETE FROM messages WHERE id = ?').run(msg.id);
+
+      // Attachment should be cascade-deleted
+      const remaining = db.prepare('SELECT COUNT(*) as count FROM media_attachments WHERE message_id = ?').get(msg.id) as { count: number };
+      expect(remaining.count).toBe(0);
+    });
+  });
 });

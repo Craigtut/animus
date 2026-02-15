@@ -21,6 +21,14 @@ export interface SendMessage {
   contactId: string;
   content: string;
   metadata?: Record<string, unknown>;
+  media?: Array<{
+    type: 'image' | 'audio' | 'video' | 'file';
+    path: string;
+    mimeType: string;
+    filename?: string;
+    /** File contents as base64 — avoids child process needing fs read permission */
+    data: string;
+  }>;
 }
 
 export interface StopMessage {

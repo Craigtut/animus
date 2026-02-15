@@ -8,6 +8,8 @@
  * See docs/architecture/channel-packages.md — "Outbound Routing"
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { getMessagesDb, getSystemDb } from '../db/index.js';
 import * as messageStore from '../db/stores/message-store.js';
 import * as systemStore from '../db/stores/system-store.js';
@@ -122,8 +124,9 @@ export class ChannelRouter {
     channel: ChannelType;
     content: string;
     metadata?: Record<string, unknown>;
+    media?: Array<{ type: 'image' | 'audio' | 'video' | 'file'; path: string; filename?: string }>;
   }): Promise<Message | null> {
-    const { contactId, channel, content, metadata } = params;
+    const { contactId, channel, content, metadata, media } = params;
 
     // Store outbound message first (even if delivery fails, the message is persisted)
     const msgDb = getMessagesDb();
@@ -144,12 +147,41 @@ export class ChannelRouter {
       ...(metadata ? { metadata } : {}),
     });
 
+    // Persist media attachments and build the delivery array
+    let deliveryMedia: Array<{ type: string; path: string; mimeType: string; filename?: string }> | undefined;
+    if (media && media.length > 0) {
+      deliveryMedia = [];
+      for (const m of media) {
+        try {
+          const stat = fs.statSync(m.path);
+          const ext = path.extname(m.path).toLowerCase().replace('.', '');
+          const mimeType = extToMime(ext);
+          const filename = m.filename ?? path.basename(m.path);
+
+          messageStore.createMediaAttachment(msgDb, {
+            messageId: msg.id,
+            type: m.type,
+            mimeType,
+            localPath: m.path,
+            originalFilename: filename,
+            sizeBytes: stat.size,
+          });
+
+          deliveryMedia.push({ type: m.type, path: m.path, mimeType, filename });
+        } catch (err) {
+          log.error(`Failed to process media attachment ${m.path}:`, err);
+          // Skip this attachment, continue with others
+        }
+      }
+      if (deliveryMedia.length === 0) deliveryMedia = undefined;
+    }
+
     getEventBus().emit('message:sent', msg);
 
     // Deliver via ChannelManager (handles both built-in and package channels)
     const channelManager = getChannelManager();
     try {
-      const delivered = await channelManager.sendToChannel(channel, contactId, content, metadata);
+      const delivered = await channelManager.sendToChannel(channel, contactId, content, metadata, deliveryMedia);
       if (!delivered) {
         log.warn(`Message stored but delivery failed for channel ${channel}`);
       }
@@ -186,6 +218,23 @@ export class ChannelRouter {
       // TODO: Send notification to primary contact when notification system is built
     }
   }
+}
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
+const MIME_MAP: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', svg: 'image/svg+xml',
+  mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac',
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+  pdf: 'application/pdf', zip: 'application/zip',
+  txt: 'text/plain', json: 'application/json',
+};
+
+function extToMime(ext: string): string {
+  return MIME_MAP[ext] ?? 'application/octet-stream';
 }
 
 // ============================================================================

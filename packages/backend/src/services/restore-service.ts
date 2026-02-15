@@ -1,27 +1,30 @@
 /**
  * Restore Service
  *
- * Restores Animus AI state from a save snapshot. This is the critical path
- * that swaps database files with a full shutdown/reinit sequence.
+ * Restores Animus AI state from a .animus save archive. This is the critical
+ * path that extracts database files and swaps them with a full shutdown/reinit.
  *
  * The restore flow:
  *  1. Validate save exists
- *  2. Enter maintenance mode (503s all API requests)
- *  3. Stop heartbeat, channels, plugins, and in-flight operations
- *  4. Checkpoint and close all databases
- *  5. Create rollback backup, then swap database files
- *  6. Reopen databases (runs migrations to bring old schemas forward)
- *  7. Reinitialize heartbeat, channels, and start if persona is finalized
- *  8. Exit maintenance mode
+ *  2. Extract .animus zip to temp directory
+ *  3. Enter maintenance mode (503s all API requests)
+ *  4. Stop heartbeat, channels, plugins, and in-flight operations
+ *  5. Checkpoint and close all databases
+ *  6. Create rollback backup, then swap database files from extracted save
+ *  7. Reopen databases (runs migrations to bring old schemas forward)
+ *  8. Reinitialize heartbeat, channels, and start if persona is finalized
+ *  9. Exit maintenance mode
+ *  10. Clean up temp directory
  */
 
 import path from 'path';
 import fs from 'fs/promises';
+import { randomUUID } from 'crypto';
+import { tmpdir } from 'os';
 import { env } from '../utils/env.js';
 import { createLogger } from '../lib/logger.js';
 import { setMaintenanceMode } from '../lib/maintenance.js';
-import { operationInProgress } from './save-service.js';
-import { getSave } from './save-service.js';
+import { operationInProgress, getSave, extractArchive } from './save-service.js';
 
 const log = createLogger('RestoreService', 'saves');
 
@@ -30,6 +33,7 @@ const log = createLogger('RestoreService', 'saves');
 // ---------------------------------------------------------------------------
 
 const DATA_DIR = path.dirname(env.DB_SYSTEM_PATH);
+const SAVES_DIR = path.join(DATA_DIR, 'saves');
 const ROLLBACK_DIR = path.join(DATA_DIR, '.restore-backup');
 
 const AI_DB_FILES = [
@@ -40,7 +44,7 @@ const AI_DB_FILES = [
 ];
 
 // ---------------------------------------------------------------------------
-// Concurrency guard — reuse save-service's flag via module reference
+// Concurrency guard
 // ---------------------------------------------------------------------------
 
 let restoreInProgress = false;
@@ -86,7 +90,6 @@ async function createRollbackBackup(): Promise<void> {
     }
   }
 
-  // Backup LanceDB directory
   try {
     await fs.cp(env.LANCEDB_PATH, path.join(ROLLBACK_DIR, 'lancedb'), { recursive: true });
   } catch {
@@ -107,7 +110,6 @@ async function restoreFromRollback(): Promise<void> {
     }
   }
 
-  // Restore LanceDB
   try {
     await fs.rm(env.LANCEDB_PATH, { recursive: true, force: true });
     await fs.cp(path.join(ROLLBACK_DIR, 'lancedb'), env.LANCEDB_PATH, { recursive: true });
@@ -146,14 +148,15 @@ export async function checkForOrphanedRollback(): Promise<void> {
 }
 
 /**
- * Restore AI state from a save snapshot.
+ * Restore AI state from a .animus save archive.
  *
- * This is a destructive operation that replaces all AI databases and LanceDB
- * with the contents of the save. The current state is backed up in case of
- * failure, but the backup is deleted after successful restore.
+ * Extracts the archive to a temp directory, then swaps the database files
+ * through a full shutdown/reinit cycle. The current state is backed up
+ * for rollback in case of failure.
  */
 export async function restoreFromSave(saveId: string): Promise<void> {
   acquireGuard();
+  const extractDir = path.join(tmpdir(), `animus-restore-${randomUUID()}`);
 
   try {
     // 1. Validate save exists
@@ -163,37 +166,40 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     }
 
     const saveName = save.manifest.name;
-    const savesDir = path.join(DATA_DIR, 'saves');
-    const saveDir = path.join(savesDir, saveId);
+    const animusPath = path.join(SAVES_DIR, `${saveId}.animus`);
 
     log.info(`Starting restore from save "${saveName}" (${saveId})`);
 
-    // 2. Enter maintenance mode
+    // 2. Extract .animus archive to temp directory
+    await extractArchive(animusPath, extractDir);
+    log.info('Archive extracted to temp directory');
+
+    // 3. Enter maintenance mode
     setMaintenanceMode(true, `Restoring from save "${saveName}"...`);
 
-    // 3. Stop heartbeat (stops ticks, ends mind session, cancels sub-agents)
+    // 4. Stop heartbeat (stops ticks, ends mind session, cancels sub-agents)
     const { stopHeartbeat } = await import('../heartbeat/index.js');
     await stopHeartbeat();
     log.info('Heartbeat stopped');
 
-    // 4. Stop channels
+    // 5. Stop channels
     const { getChannelManager } = await import('../channels/channel-manager.js');
     const channelManager = getChannelManager();
     await channelManager.stopAll();
     log.info('Channels stopped');
 
-    // 5. Stop plugin triggers
+    // 6. Stop plugin triggers
     const { getPluginManager } = await import('./plugin-manager.js');
     const pluginManager = getPluginManager();
     await pluginManager.stopTriggers();
     log.info('Plugin triggers stopped');
 
-    // 6. Wait for in-flight observational memory
+    // 7. Wait for in-flight observational memory
     const { waitForActiveOps } = await import('../memory/observational-memory/index.js');
     await waitForActiveOps();
     log.info('Observational memory operations complete');
 
-    // 7. Checkpoint all AI databases (flush WAL into main file)
+    // 8. Checkpoint all AI databases (flush WAL into main file)
     const { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb } = await import('../db/index.js');
     const dbs = [getPersonaDb(), getHeartbeatDb(), getMemoryDb(), getMessagesDb()];
     for (const db of dbs) {
@@ -205,29 +211,26 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     }
     log.info('Database WAL checkpoints complete');
 
-    // 8. Close all database connections
+    // 9. Close all database connections
     const { closeDatabases, initializeDatabases } = await import('../db/index.js');
     closeDatabases();
     log.info('All databases closed');
 
-    // 9-11. Create rollback, swap files, cleanup
+    // 10-12. Create rollback, swap files from extracted archive, cleanup
     try {
-      // 9. Create rollback backup
       await createRollbackBackup();
       log.info('Rollback backup created');
 
-      // 10. Copy save files over live files
+      // Copy extracted DB files over live files
       for (const { name, envPath } of AI_DB_FILES) {
-        await fs.copyFile(path.join(saveDir, name), envPath);
+        await fs.copyFile(path.join(extractDir, name), envPath);
       }
 
       // Copy LanceDB
       await fs.rm(env.LANCEDB_PATH, { recursive: true, force: true });
-      const saveLanceDir = path.join(saveDir, 'lancedb');
       try {
-        await fs.cp(saveLanceDir, env.LANCEDB_PATH, { recursive: true });
+        await fs.cp(path.join(extractDir, 'lancedb'), env.LANCEDB_PATH, { recursive: true });
       } catch {
-        // Save might have an empty lancedb or none at all
         await fs.mkdir(env.LANCEDB_PATH, { recursive: true });
       }
 
@@ -236,38 +239,34 @@ export async function restoreFromSave(saveId: string): Promise<void> {
 
       log.info('Database files swapped');
 
-      // 11. Clean up rollback backup
       await cleanupRollback();
       log.info('Rollback backup cleaned up');
     } catch (swapError) {
-      // Swap failed — restore from rollback
       log.error('File swap failed, restoring from rollback:', swapError);
       await restoreFromRollback();
       await deleteWalFiles();
-
-      // Reopen DBs so the server can continue operating
       await initializeDatabases();
       setMaintenanceMode(false, '');
       throw new Error(`Restore failed during file swap: ${swapError}`);
     }
 
-    // 12. Reopen databases (runs migrations to bring old schemas forward)
+    // 13. Reopen databases (runs migrations to bring old schemas forward)
     await initializeDatabases();
     log.info('Databases reopened and migrations applied');
 
-    // 13. Reinitialize heartbeat
+    // 14. Reinitialize heartbeat
     const { initializeHeartbeat, startHeartbeat } = await import('../heartbeat/index.js');
     await initializeHeartbeat();
     log.info('Heartbeat reinitialized');
 
-    // 14. Reload channels
+    // 15. Reload channels
     channelManager.registerBuiltIn('web', async () => {
       // No-op: web outbound is handled by message:sent event → tRPC subscription
     });
     await channelManager.loadAll();
     log.info('Channels reloaded');
 
-    // 15. Start heartbeat if persona is finalized
+    // 16. Start heartbeat if persona is finalized
     const { getPersonaDb: getRestoredPersonaDb } = await import('../db/index.js');
     const { getPersona } = await import('../db/stores/persona-store.js');
     const persona = getPersona(getRestoredPersonaDb());
@@ -276,15 +275,16 @@ export async function restoreFromSave(saveId: string): Promise<void> {
       log.info('Heartbeat started');
     }
 
-    // 16. Exit maintenance mode
+    // 17. Exit maintenance mode
     setMaintenanceMode(false, '');
     log.info(`Restore from save "${saveName}" complete`);
   } catch (err) {
-    // Ensure maintenance mode is cleared even on unexpected errors
     setMaintenanceMode(false, '');
     log.error('Restore failed:', err);
     throw err;
   } finally {
+    // Clean up extracted temp directory
+    await fs.rm(extractDir, { recursive: true, force: true }).catch(() => {});
     releaseGuard();
   }
 }

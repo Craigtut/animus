@@ -7,7 +7,7 @@
 
 import { create } from 'zustand';
 
-export type SpaceName = 'presence' | 'mind' | 'people' | 'settings';
+export type SpaceName = 'presence' | 'mind' | 'people' | 'persona' | 'settings';
 
 interface ShellState {
   activeSpace: SpaceName;

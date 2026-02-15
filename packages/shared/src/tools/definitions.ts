@@ -45,6 +45,11 @@ export const sendMessageDef: AnimusToolDef = {
       .describe(
         'Message priority. Use "urgent" only for time-sensitive information'
       ),
+    media: z.array(z.object({
+      type: z.enum(['image', 'audio', 'video', 'file']).describe('Media type'),
+      path: z.string().describe('Local file path to the media file'),
+      filename: z.string().optional().describe('Display filename for the attachment'),
+    })).optional().describe('Optional media attachments to include with the message'),
   }),
   category: 'messaging',
 };
@@ -132,6 +137,11 @@ export const sendProactiveMessageDef: AnimusToolDef = {
       .enum(['web', 'sms', 'discord', 'api'])
       .describe('Channel to send through'),
     content: z.string().describe('Message content'),
+    media: z.array(z.object({
+      type: z.enum(['image', 'audio', 'video', 'file']).describe('Media type'),
+      path: z.string().describe('Local file path to the media file'),
+      filename: z.string().optional().describe('Display filename for the attachment'),
+    })).optional().describe('Optional media attachments to include with the message'),
   }),
   category: 'messaging',
 };

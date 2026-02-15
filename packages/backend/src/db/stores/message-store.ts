@@ -222,6 +222,59 @@ export function getMessagesByContact(
   return rows.map(rowToMessage);
 }
 
+// ============================================================================
+// Media Attachments
+// ============================================================================
+
+export interface StoredMediaAttachment {
+  id: string;
+  messageId: string;
+  type: 'image' | 'audio' | 'video' | 'file';
+  mimeType: string;
+  localPath: string;
+  originalFilename: string | null;
+  sizeBytes: number;
+  createdAt: string;
+}
+
+export function createMediaAttachment(
+  db: Database.Database,
+  data: {
+    messageId: string;
+    type: 'image' | 'audio' | 'video' | 'file';
+    mimeType: string;
+    localPath: string;
+    originalFilename: string | null;
+    sizeBytes: number;
+  }
+): StoredMediaAttachment {
+  const id = generateUUID();
+  const timestamp = now();
+  db.prepare(
+    `INSERT INTO media_attachments (id, message_id, type, mime_type, local_path, original_filename, size_bytes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    data.messageId,
+    data.type,
+    data.mimeType,
+    data.localPath,
+    data.originalFilename,
+    data.sizeBytes,
+    timestamp
+  );
+  return {
+    id,
+    messageId: data.messageId,
+    type: data.type,
+    mimeType: data.mimeType,
+    localPath: data.localPath,
+    originalFilename: data.originalFilename,
+    sizeBytes: data.sizeBytes,
+    createdAt: timestamp,
+  };
+}
+
 export function getLastMessageForContact(
   db: Database.Database,
   contactId: string

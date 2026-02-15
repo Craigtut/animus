@@ -1808,8 +1808,21 @@ export function AgentTimeline({ tickNumber, onBack }: AgentTimelineProps) {
     );
   }
 
-  // Empty state — tick is active but not yet in DB (gathering context)
+  // Empty state — tick is active but not yet in DB
+  // Show stage-specific messages so the user knows what's actually happening
   if (!timeline && isTickActive) {
+    const stage = heartbeatState?.currentStage ?? 'gather';
+    const stageLabel = stage === 'gather'
+      ? 'Gathering context...'
+      : stage === 'mind'
+        ? 'Starting mind session...'
+        : 'Processing...';
+    const stageDetail = stage === 'gather'
+      ? 'Assembling memories, emotions, and context.'
+      : stage === 'mind'
+        ? 'Connecting to the agent provider. Events will appear shortly.'
+        : `Tick #${tickNumber} is running.`;
+
     return (
       <div>
         <BackButton onBack={onBack} />
@@ -1836,14 +1849,14 @@ export function AgentTimeline({ tickNumber, onBack }: AgentTimelineProps) {
             font-style: italic;
             color: ${theme.colors.text.hint};
           `}>
-            Gathering context...
+            {stageLabel}
           </span>
           <span css={css`
             font-family: ${theme.typography.fontFamily.sans};
             font-size: 14px;
             color: ${theme.colors.text.secondary};
           `}>
-            Tick #{tickNumber} is starting up. Events will appear shortly.
+            {stageDetail}
           </span>
         </div>
       </div>

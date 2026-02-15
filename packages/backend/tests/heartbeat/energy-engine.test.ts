@@ -161,6 +161,73 @@ describe('computeCircadianBaseline', () => {
     it('12:00 returns 0.85 (plateau)', () => {
       expect(computeCircadianBaseline(dateAtUTCHour(12), sleepStart, sleepEnd, tz)).toBe(0.85);
     });
+
+    it('22:00 returns 0.85 (start of decline)', () => {
+      const result = computeCircadianBaseline(dateAtUTCHour(22), sleepStart, sleepEnd, tz);
+      expect(result).toBeCloseTo(0.85, 1);
+    });
+
+    it('23:00 returns ~0.567 (1h into decline, decline crosses midnight)', () => {
+      const result = computeCircadianBaseline(dateAtUTCHour(23), sleepStart, sleepEnd, tz);
+      expect(result).toBeCloseTo(0.567, 1);
+    });
+
+    it('0:00 returns ~0.283 (2h into decline, after midnight)', () => {
+      const result = computeCircadianBaseline(dateAtUTCHour(0), sleepStart, sleepEnd, tz);
+      expect(result).toBeCloseTo(0.283, 1);
+    });
+
+    it('0:30 returns ~0.142 (2.5h into decline)', () => {
+      const result = computeCircadianBaseline(dateAtUTCHour(0, 30), sleepStart, sleepEnd, tz);
+      expect(result).toBeCloseTo(0.142, 1);
+    });
+  });
+
+  describe('non-crossing sleep range (2:00-8:00) — decline crosses midnight', () => {
+    const sleepStart = 2;
+    const sleepEnd = 8;
+    const tz = 'UTC';
+
+    it('3:00 returns 0.0 (sleep floor)', () => {
+      expect(computeCircadianBaseline(dateAtUTCHour(3), sleepStart, sleepEnd, tz)).toBe(0.0);
+    });
+
+    it('8:00 returns 0.0 (wake time, start of ramp)', () => {
+      expect(computeCircadianBaseline(dateAtUTCHour(8), sleepStart, sleepEnd, tz)).toBeCloseTo(0.0, 1);
+    });
+
+    it('10:00 returns 0.85 (ramp complete)', () => {
+      expect(computeCircadianBaseline(dateAtUTCHour(10), sleepStart, sleepEnd, tz)).toBeCloseTo(0.85, 1);
+    });
+
+    it('14:00 returns 0.85 (plateau)', () => {
+      expect(computeCircadianBaseline(dateAtUTCHour(14), sleepStart, sleepEnd, tz)).toBe(0.85);
+    });
+
+    it('23:00 returns 0.85 (start of decline)', () => {
+      const result = computeCircadianBaseline(dateAtUTCHour(23), sleepStart, sleepEnd, tz);
+      expect(result).toBeCloseTo(0.85, 1);
+    });
+
+    it('0:00 returns ~0.567 (1h into decline, after midnight)', () => {
+      const result = computeCircadianBaseline(dateAtUTCHour(0), sleepStart, sleepEnd, tz);
+      expect(result).toBeCloseTo(0.567, 1);
+    });
+
+    it('1:00 returns ~0.283 (2h into decline)', () => {
+      const result = computeCircadianBaseline(dateAtUTCHour(1), sleepStart, sleepEnd, tz);
+      expect(result).toBeCloseTo(0.283, 1);
+    });
+
+    it('1:15 returns ~0.213 (2.25h into decline)', () => {
+      const result = computeCircadianBaseline(dateAtUTCHour(1, 15), sleepStart, sleepEnd, tz);
+      expect(result).toBeCloseTo(0.213, 1);
+    });
+
+    it('2:00 returns 0.0 (sleep starts)', () => {
+      const result = computeCircadianBaseline(dateAtUTCHour(2), sleepStart, sleepEnd, tz);
+      expect(result).toBe(0.0);
+    });
   });
 });
 

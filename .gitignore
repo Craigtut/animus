@@ -56,3 +56,5 @@ temp/
 .playwright-mcp
 /data
 /design-mockups
+/generated-images
+/backup

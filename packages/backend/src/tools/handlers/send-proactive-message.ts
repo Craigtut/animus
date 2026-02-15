@@ -65,6 +65,7 @@ export const sendProactiveMessageHandler: ToolHandler<SendProactiveMessageInput>
     contactId: input.contactId,
     channel: input.channel,
     content: input.content,
+    ...(input.media ? { media: input.media } : {}),
   });
 
   if (!result) {

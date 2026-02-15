@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PaperPlaneRight, Moon } from '@phosphor-icons/react';
 import { motion, AnimatePresence, useScroll, useTransform } from 'motion/react';
+import ReactMarkdown from 'react-markdown';
 import { Typography } from '../components/ui';
 import { FluidBackground } from '../components/effects/FluidBackground';
 import { trpc } from '../utils/trpc';
@@ -208,6 +209,126 @@ function ThinkingDots() {
 }
 
 // ============================================================================
+// Markdown message renderer
+// ============================================================================
+
+function useMarkdownComponents(): import('react-markdown').Components {
+  const theme = useTheme();
+
+  return {
+    p: ({ children }) => (
+      <p css={css`margin: 0.6em 0; &:first-child { margin-top: 0; } &:last-child { margin-bottom: 0; }`}>
+        {children}
+      </p>
+    ),
+    strong: ({ children }) => (
+      <strong css={css`font-weight: 700;`}>{children}</strong>
+    ),
+    em: ({ children }) => (
+      <em css={css`font-style: italic; font-synthesis: style;`}>{children}</em>
+    ),
+    code: ({ children, className }) => {
+      const isBlock = className?.startsWith('language-');
+      if (isBlock) {
+        return (
+          <code
+            className={className}
+            css={css`
+              font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+              font-size: 0.85em;
+              padding: 0;
+              background: none;
+            `}
+          >
+            {children}
+          </code>
+        );
+      }
+      return (
+        <code
+          css={css`
+            font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+            font-size: 0.88em;
+            padding: 0.15em 0.35em;
+            border-radius: 4px;
+            background: ${theme.mode === 'light'
+              ? 'rgba(26, 24, 22, 0.06)'
+              : 'rgba(250, 249, 244, 0.08)'};
+          `}
+        >
+          {children}
+        </code>
+      );
+    },
+    pre: ({ children }) => (
+      <pre
+        css={css`
+          margin: 0.6em 0;
+          padding: ${theme.spacing[3]};
+          border-radius: 8px;
+          overflow-x: auto;
+          background: ${theme.mode === 'light'
+            ? 'rgba(26, 24, 22, 0.04)'
+            : 'rgba(250, 249, 244, 0.06)'};
+        `}
+      >
+        {children}
+      </pre>
+    ),
+    ul: ({ children }) => (
+      <ul css={css`margin: 0.6em 0; padding-left: 1.4em; list-style: disc;`}>
+        {children}
+      </ul>
+    ),
+    ol: ({ children }) => (
+      <ol css={css`margin: 0.6em 0; padding-left: 1.4em; list-style: decimal;`}>
+        {children}
+      </ol>
+    ),
+    li: ({ children }) => (
+      <li css={css`margin: 0.2em 0;`}>{children}</li>
+    ),
+    blockquote: ({ children }) => (
+      <blockquote
+        css={css`
+          margin: 0.6em 0;
+          padding-left: ${theme.spacing[3]};
+          border-left: 2px solid ${theme.colors.border.default};
+          color: ${theme.colors.text.secondary};
+        `}
+      >
+        {children}
+      </blockquote>
+    ),
+    a: ({ href, children }) => (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        css={css`
+          color: ${theme.colors.accent};
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        `}
+      >
+        {children}
+      </a>
+    ),
+    hr: () => (
+      <hr css={css`border: none; border-top: 1px solid ${theme.colors.border.light}; margin: 0.8em 0;`} />
+    ),
+    h1: ({ children }) => <h1 css={css`font-size: 1.25em; font-weight: 600; margin: 0.6em 0 0.3em; &:first-child { margin-top: 0; }`}>{children}</h1>,
+    h2: ({ children }) => <h2 css={css`font-size: 1.15em; font-weight: 600; margin: 0.6em 0 0.3em; &:first-child { margin-top: 0; }`}>{children}</h2>,
+    h3: ({ children }) => <h3 css={css`font-size: 1.05em; font-weight: 600; margin: 0.6em 0 0.3em; &:first-child { margin-top: 0; }`}>{children}</h3>,
+  };
+}
+
+function MessageMarkdown({ content }: { content: string }) {
+  const components = useMarkdownComponents();
+  return <ReactMarkdown components={components}>{content}</ReactMarkdown>;
+}
+
+// ============================================================================
 // Conversation
 // ============================================================================
 
@@ -376,10 +497,9 @@ function Conversation() {
                           padding: ${theme.spacing[3]} ${theme.spacing[4]};
                         `
                         : ''}
-                      white-space: pre-wrap;
                     `}
                   >
-                    {msg.content}
+                    <MessageMarkdown content={msg.content} />
                   </Typography.Body>
                 </div>
               </FadingMessage>
@@ -398,12 +518,9 @@ function Conversation() {
                 <Typography.Body
                   as="div"
                   color="primary"
-                  css={css`
-                    max-width: 85%;
-                    white-space: pre-wrap;
-                  `}
+                  css={css`max-width: 85%;`}
                 >
-                  {replyStream.accumulated}
+                  <MessageMarkdown content={replyStream.accumulated} />
                   <BlinkingCursor />
                 </Typography.Body>
               </div>

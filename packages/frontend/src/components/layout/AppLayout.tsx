@@ -19,6 +19,7 @@ export function AppLayout() {
     const path = location.pathname;
     if (path.startsWith('/mind')) return 'mind';
     if (path.startsWith('/people')) return 'people';
+    if (path.startsWith('/persona')) return 'persona';
     if (path.startsWith('/settings')) return 'settings';
     return 'presence';
   };

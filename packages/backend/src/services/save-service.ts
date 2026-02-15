@@ -6,10 +6,9 @@
  * vector store. System.db and agent_logs.db are excluded — they contain
  * user credentials and ephemeral logs, not AI state.
  *
- * Each save is a directory under `data/saves/{uuid}/` containing:
- *   - persona.db, heartbeat.db, memory.db, messages.db (SQLite backups)
- *   - lancedb/ (recursive copy of the vector store)
- *   - manifest.json (metadata, stats, schema versions)
+ * Each save is stored in `data/saves/` as:
+ *   {uuid}.animus  — zip archive (DBs + lancedb/ + manifest.json)
+ *   {uuid}.json    — sidecar manifest cache (for fast listing without unzipping)
  */
 
 import path from 'path';
@@ -37,7 +36,7 @@ const SAVES_DIR = path.join(path.dirname(env.DB_SYSTEM_PATH), 'saves');
 const DB_NAMES = ['persona', 'heartbeat', 'memory', 'messages'] as const;
 type DbName = (typeof DB_NAMES)[number];
 
-/** Read root package.json version at import time. */
+/** Read root package.json version. */
 async function getAnimusVersion(): Promise<string> {
   try {
     const pkgPath = path.resolve(
@@ -48,9 +47,7 @@ async function getAnimusVersion(): Promise<string> {
     const raw = await fs.readFile(pkgPath, 'utf-8');
     return JSON.parse(raw).version ?? '0.0.0';
   } catch {
-    // Fallback: walk up from this file to find root package.json
     try {
-      // services/ -> src/ -> backend/ -> packages/ -> root
       const thisDir = path.dirname(fileURLToPath(import.meta.url));
       const rootPkg = path.resolve(thisDir, '..', '..', '..', '..', 'package.json');
       const raw = await fs.readFile(rootPkg, 'utf-8');
@@ -82,29 +79,6 @@ function releaseGuard(): void {
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function getDirectorySize(dirPath: string): Promise<number> {
-  let size = 0;
-  try {
-    const entries = await fs.readdir(dirPath, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(dirPath, entry.name);
-      if (entry.isFile()) {
-        const stat = await fs.stat(fullPath);
-        size += stat.size;
-      } else if (entry.isDirectory()) {
-        size += await getDirectorySize(fullPath);
-      }
-    }
-  } catch {
-    // directory doesn't exist or unreadable
-  }
-  return size;
-}
-
-/**
- * Extract the numeric prefix from a migration version string.
- * E.g. "001_initial" -> 1, "002_energy_state" -> 2
- */
 function getSchemaVersion(dbPath: string): number {
   const db = new Database(dbPath, { readonly: true });
   try {
@@ -122,76 +96,45 @@ function getSchemaVersion(dbPath: string): number {
   }
 }
 
-/** Map DB name to the live getter function. */
 function getLiveDb(name: DbName): Database.Database {
   switch (name) {
-    case 'persona':
-      return getPersonaDb();
-    case 'heartbeat':
-      return getHeartbeatDb();
-    case 'memory':
-      return getMemoryDb();
-    case 'messages':
-      return getMessagesDb();
+    case 'persona': return getPersonaDb();
+    case 'heartbeat': return getHeartbeatDb();
+    case 'memory': return getMemoryDb();
+    case 'messages': return getMessagesDb();
   }
 }
 
-/** Gather stats from backed-up database files. */
+/** Gather stats from backed-up database files in a staging directory. */
 function gatherStats(
-  saveDir: string,
+  stageDir: string,
 ): { tickCount: number; messageCount: number; memoryCount: number; personaName?: string } {
   const stats: { tickCount: number; messageCount: number; memoryCount: number; personaName?: string } = {
     tickCount: 0, messageCount: 0, memoryCount: 0,
   };
 
-  // Tick count from heartbeat.db -> heartbeat_state
-  const hbPath = path.join(saveDir, 'heartbeat.db');
-  try {
-    const db = new Database(hbPath, { readonly: true });
+  const queries: { file: string; sql: string; key: keyof typeof stats }[] = [
+    { file: 'heartbeat.db', sql: 'SELECT tick_number FROM heartbeat_state WHERE id = 1', key: 'tickCount' },
+    { file: 'messages.db', sql: 'SELECT COUNT(*) as cnt FROM messages', key: 'messageCount' },
+    { file: 'memory.db', sql: 'SELECT COUNT(*) as cnt FROM long_term_memories', key: 'memoryCount' },
+  ];
+
+  for (const { file, sql, key } of queries) {
     try {
-      const row = db.prepare('SELECT tick_number FROM heartbeat_state WHERE id = 1').get() as
-        | { tick_number: number }
-        | undefined;
-      stats.tickCount = row?.tick_number ?? 0;
-    } finally {
-      db.close();
+      const db = new Database(path.join(stageDir, file), { readonly: true });
+      try {
+        const row = db.prepare(sql).get() as Record<string, number> | undefined;
+        if (row) (stats as Record<string, number>)[key] = row.tick_number ?? row.cnt ?? 0;
+      } finally {
+        db.close();
+      }
+    } catch {
+      log.warn(`Could not read ${key} from ${file}`);
     }
-  } catch {
-    log.warn('Could not read tick count from heartbeat.db');
   }
 
-  // Message count from messages.db
-  const msgPath = path.join(saveDir, 'messages.db');
   try {
-    const db = new Database(msgPath, { readonly: true });
-    try {
-      const row = db.prepare('SELECT COUNT(*) as cnt FROM messages').get() as { cnt: number };
-      stats.messageCount = row.cnt;
-    } finally {
-      db.close();
-    }
-  } catch {
-    log.warn('Could not read message count from messages.db');
-  }
-
-  // Memory count from memory.db
-  const memPath = path.join(saveDir, 'memory.db');
-  try {
-    const db = new Database(memPath, { readonly: true });
-    try {
-      const row = db.prepare('SELECT COUNT(*) as cnt FROM long_term_memories').get() as { cnt: number };
-      stats.memoryCount = row.cnt;
-    } finally {
-      db.close();
-    }
-  } catch {
-    log.warn('Could not read memory count from memory.db');
-  }
-
-  // Persona name from persona.db
-  const personaPath = path.join(saveDir, 'persona.db');
-  try {
-    const db = new Database(personaPath, { readonly: true });
+    const db = new Database(path.join(stageDir, 'persona.db'), { readonly: true });
     try {
       const row = db.prepare('SELECT name FROM personality_settings WHERE id = 1').get() as
         | { name: string }
@@ -207,12 +150,13 @@ function gatherStats(
   return stats;
 }
 
-async function readManifest(saveDir: string): Promise<SaveManifest | null> {
+/** Read and validate a manifest from a sidecar JSON file. */
+async function readSidecar(sidecarPath: string): Promise<SaveManifest | null> {
   try {
-    const raw = await fs.readFile(path.join(saveDir, 'manifest.json'), 'utf-8');
+    const raw = await fs.readFile(sidecarPath, 'utf-8');
     const parsed = saveManifestSchema.safeParse(JSON.parse(raw));
     if (!parsed.success) {
-      log.warn('Invalid manifest in', saveDir, parsed.error.message);
+      log.warn('Invalid sidecar manifest at', sidecarPath, parsed.error.message);
       return null;
     }
     return parsed.data;
@@ -221,60 +165,99 @@ async function readManifest(saveDir: string): Promise<SaveManifest | null> {
   }
 }
 
+/** Zip a staging directory into an .animus archive. */
+async function zipDirectory(stageDir: string, destPath: string): Promise<void> {
+  const archive = archiver('zip', { zlib: { level: 6 } });
+  const chunks: Buffer[] = [];
+
+  const collectPromise = new Promise<Buffer>((resolve, reject) => {
+    archive.on('data', (chunk: Buffer) => chunks.push(chunk));
+    archive.on('end', () => resolve(Buffer.concat(chunks)));
+    archive.on('error', reject);
+  });
+
+  archive.directory(stageDir, false);
+  await archive.finalize();
+
+  const buffer = await collectPromise;
+  await fs.writeFile(destPath, buffer);
+}
+
+/** Extract an .animus archive to a directory using extract-zip. */
+export async function extractArchive(archivePath: string, destDir: string): Promise<void> {
+  await fs.mkdir(destDir, { recursive: true });
+  await extractZip(archivePath, { dir: destDir });
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /**
  * Create a save snapshot of all AI databases.
+ *
+ * 1. Backup DBs to a temp staging directory
+ * 2. Copy LanceDB
+ * 3. Gather stats + schema versions
+ * 4. Write manifest.json into staging dir
+ * 5. Zip staging dir → {uuid}.animus
+ * 6. Write {uuid}.json sidecar
+ * 7. Clean up staging dir
  */
 export async function createSave(name: string, description?: string): Promise<SaveInfo> {
   acquireGuard();
+  const stageDir = path.join(tmpdir(), `animus-save-${randomUUID()}`);
+
   try {
     const id = randomUUID();
-    const saveDir = path.join(SAVES_DIR, id);
-    await fs.mkdir(saveDir, { recursive: true });
+    await fs.mkdir(SAVES_DIR, { recursive: true });
+    await fs.mkdir(stageDir, { recursive: true });
 
     log.info(`Creating save "${name}" (${id})`);
 
     // Backup each database using better-sqlite3's safe backup API
     for (const dbName of DB_NAMES) {
-      const destPath = path.join(saveDir, `${dbName}.db`);
-      await getLiveDb(dbName).backup(destPath);
+      await getLiveDb(dbName).backup(path.join(stageDir, `${dbName}.db`));
     }
 
     // Copy LanceDB directory
     try {
-      await fs.cp(env.LANCEDB_PATH, path.join(saveDir, 'lancedb'), { recursive: true });
+      await fs.cp(env.LANCEDB_PATH, path.join(stageDir, 'lancedb'), { recursive: true });
     } catch {
-      // LanceDB might not exist yet if no embeddings have been created
-      await fs.mkdir(path.join(saveDir, 'lancedb'), { recursive: true });
+      await fs.mkdir(path.join(stageDir, 'lancedb'), { recursive: true });
       log.warn('LanceDB directory not found, created empty directory');
     }
 
     // Read schema versions from backed-up DBs
     const schemaVersions: Record<string, number> = {};
     for (const dbName of DB_NAMES) {
-      schemaVersions[dbName] = getSchemaVersion(path.join(saveDir, `${dbName}.db`));
+      schemaVersions[dbName] = getSchemaVersion(path.join(stageDir, `${dbName}.db`));
     }
 
-    // Gather stats
-    const stats = gatherStats(saveDir);
-    const animusVersion = await getAnimusVersion();
-
-    // Write manifest
+    // Build manifest
+    const stats = gatherStats(stageDir);
     const manifest: SaveManifest = {
       version: 1,
       name,
       description,
       createdAt: new Date().toISOString(),
-      animusVersion,
+      animusVersion: await getAnimusVersion(),
       schemaVersions,
       stats,
     };
-    await fs.writeFile(path.join(saveDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
-    const sizeBytes = await getDirectorySize(saveDir);
+    // Write manifest into staging dir (included in the zip)
+    await fs.writeFile(path.join(stageDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+
+    // Zip staging dir → .animus file
+    const animusPath = path.join(SAVES_DIR, `${id}.animus`);
+    await zipDirectory(stageDir, animusPath);
+
+    // Write sidecar JSON (for fast listing)
+    await fs.writeFile(path.join(SAVES_DIR, `${id}.json`), JSON.stringify(manifest, null, 2));
+
+    const stat = await fs.stat(animusPath);
+    const sizeBytes = stat.size;
 
     log.info(`Save "${name}" created (${id}), ${(sizeBytes / 1024 / 1024).toFixed(1)} MB`);
 
@@ -283,40 +266,48 @@ export async function createSave(name: string, description?: string): Promise<Sa
     log.error('Failed to create save:', err);
     throw err;
   } finally {
+    await fs.rm(stageDir, { recursive: true, force: true }).catch(() => {});
     releaseGuard();
   }
 }
 
 /**
  * List all saves, sorted by creation date (newest first).
+ * Reads from sidecar .json files for speed.
  */
 export async function listSaves(): Promise<SaveInfo[]> {
   const saves: SaveInfo[] = [];
 
-  let dirNames: string[];
+  let entries: string[];
   try {
-    const entries = await fs.readdir(SAVES_DIR, { withFileTypes: true });
-    dirNames = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+    entries = await fs.readdir(SAVES_DIR);
   } catch {
-    // saves directory doesn't exist yet
     return [];
   }
 
-  for (const dirName of dirNames) {
-    const saveDir = path.join(SAVES_DIR, dirName);
-    const manifest = await readManifest(saveDir);
+  // Find all .animus files and pair with their .json sidecars
+  const animusFiles = entries.filter((e) => e.endsWith('.animus'));
+
+  for (const file of animusFiles) {
+    const id = file.replace('.animus', '');
+    const sidecarPath = path.join(SAVES_DIR, `${id}.json`);
+    const animusPath = path.join(SAVES_DIR, file);
+
+    const manifest = await readSidecar(sidecarPath);
     if (!manifest) {
-      log.warn(`Skipping save "${dirName}" — invalid or missing manifest`);
+      log.warn(`Skipping save "${id}" — missing or invalid sidecar`);
       continue;
     }
 
-    const sizeBytes = await getDirectorySize(saveDir);
-    saves.push({ id: dirName, manifest, sizeBytes });
+    try {
+      const stat = await fs.stat(animusPath);
+      saves.push({ id, manifest, sizeBytes: stat.size });
+    } catch {
+      log.warn(`Skipping save "${id}" — cannot stat .animus file`);
+    }
   }
 
-  // Sort newest first
   saves.sort((a, b) => b.manifest.createdAt.localeCompare(a.manifest.createdAt));
-
   return saves;
 }
 
@@ -324,70 +315,67 @@ export async function listSaves(): Promise<SaveInfo[]> {
  * Get a single save by ID.
  */
 export async function getSave(saveId: string): Promise<SaveInfo | null> {
-  const saveDir = path.join(SAVES_DIR, saveId);
-  const manifest = await readManifest(saveDir);
+  const sidecarPath = path.join(SAVES_DIR, `${saveId}.json`);
+  const animusPath = path.join(SAVES_DIR, `${saveId}.animus`);
+
+  const manifest = await readSidecar(sidecarPath);
   if (!manifest) return null;
 
-  const sizeBytes = await getDirectorySize(saveDir);
-  return { id: saveId, manifest, sizeBytes };
+  try {
+    const stat = await fs.stat(animusPath);
+    return { id: saveId, manifest, sizeBytes: stat.size };
+  } catch {
+    return null;
+  }
 }
 
 /**
- * Delete a save.
+ * Delete a save (both .animus and .json sidecar).
  */
 export async function deleteSave(saveId: string): Promise<void> {
-  const saveDir = path.join(SAVES_DIR, saveId);
+  const animusPath = path.join(SAVES_DIR, `${saveId}.animus`);
+  const sidecarPath = path.join(SAVES_DIR, `${saveId}.json`);
 
-  // Verify it exists
   try {
-    await fs.access(saveDir);
+    await fs.access(animusPath);
   } catch {
     throw new Error(`Save "${saveId}" not found`);
   }
 
-  await fs.rm(saveDir, { recursive: true, force: true });
+  await fs.rm(animusPath, { force: true });
+  await fs.rm(sidecarPath, { force: true });
   log.info(`Deleted save "${saveId}"`);
 }
 
 /**
- * Export a save as a zip buffer for download.
+ * Export a save — returns the .animus file buffer directly.
+ * The .animus file IS the export format; no extra zipping needed.
  */
 export async function exportSave(saveId: string): Promise<{ buffer: Buffer; name: string }> {
-  acquireGuard();
-  try {
-    const saveDir = path.join(SAVES_DIR, saveId);
-    const manifest = await readManifest(saveDir);
-    if (!manifest) {
-      throw new Error(`Save "${saveId}" not found or has invalid manifest`);
-    }
+  const animusPath = path.join(SAVES_DIR, `${saveId}.animus`);
+  const sidecarPath = path.join(SAVES_DIR, `${saveId}.json`);
 
-    log.info(`Exporting save "${manifest.name}" (${saveId})`);
-
-    const archive = archiver('zip', { zlib: { level: 6 } });
-    const chunks: Buffer[] = [];
-
-    const collectPromise = new Promise<Buffer>((resolve, reject) => {
-      archive.on('data', (chunk: Buffer) => chunks.push(chunk));
-      archive.on('end', () => resolve(Buffer.concat(chunks)));
-      archive.on('error', reject);
-    });
-
-    archive.directory(saveDir, false);
-    await archive.finalize();
-
-    const buffer = await collectPromise;
-    const safeName = manifest.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-
-    log.info(`Export complete: ${(buffer.length / 1024 / 1024).toFixed(1)} MB`);
-
-    return { buffer, name: safeName };
-  } finally {
-    releaseGuard();
+  const manifest = await readSidecar(sidecarPath);
+  if (!manifest) {
+    throw new Error(`Save "${saveId}" not found or has invalid manifest`);
   }
+
+  log.info(`Exporting save "${manifest.name}" (${saveId})`);
+
+  const buffer = await fs.readFile(animusPath);
+  const safeName = manifest.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  return { buffer, name: safeName };
 }
 
 /**
- * Import a save from a zip buffer.
+ * Import a save from an .animus file buffer.
+ *
+ * 1. Write buffer to temp .animus file
+ * 2. Extract to temp dir to validate manifest + required files
+ * 3. Copy .animus to saves dir with new UUID
+ * 4. Write sidecar .json
+ * 5. Clean up temp
  */
 export async function importSave(fileBuffer: Buffer): Promise<SaveInfo> {
   acquireGuard();
@@ -396,19 +384,26 @@ export async function importSave(fileBuffer: Buffer): Promise<SaveInfo> {
   try {
     await fs.mkdir(tempDir, { recursive: true });
 
-    // Write buffer to temp zip
-    const zipPath = path.join(tempDir, 'import.zip');
-    await fs.writeFile(zipPath, fileBuffer);
+    // Write buffer to temp file for extraction
+    const tempAnimusPath = path.join(tempDir, 'import.animus');
+    await fs.writeFile(tempAnimusPath, fileBuffer);
 
-    // Extract
+    // Extract to validate contents
     const extractDir = path.join(tempDir, 'extracted');
-    await fs.mkdir(extractDir, { recursive: true });
-    await extractZip(zipPath, { dir: extractDir });
+    await extractArchive(tempAnimusPath, extractDir);
 
     // Validate manifest
-    const manifest = await readManifest(extractDir);
-    if (!manifest) {
-      throw new Error('Invalid or missing manifest.json in save archive');
+    const manifestPath = path.join(extractDir, 'manifest.json');
+    let manifest: SaveManifest;
+    try {
+      const raw = await fs.readFile(manifestPath, 'utf-8');
+      const parsed = saveManifestSchema.safeParse(JSON.parse(raw));
+      if (!parsed.success) {
+        throw new Error(`Invalid manifest: ${parsed.error.message}`);
+      }
+      manifest = parsed.data;
+    } catch (err) {
+      throw new Error(`Invalid or missing manifest.json in save archive: ${err}`);
     }
 
     // Verify expected DB files exist
@@ -420,35 +415,24 @@ export async function importSave(fileBuffer: Buffer): Promise<SaveInfo> {
       }
     }
 
-    // Ensure lancedb directory exists (create if not present in archive)
-    const lanceDir = path.join(extractDir, 'lancedb');
-    try {
-      await fs.access(lanceDir);
-    } catch {
-      await fs.mkdir(lanceDir, { recursive: true });
-    }
-
-    // Assign new UUID and move to saves directory
+    // Assign new UUID, copy .animus to saves dir
     const id = randomUUID();
-    const destDir = path.join(SAVES_DIR, id);
-    await fs.mkdir(path.dirname(destDir), { recursive: true });
-    await fs.rename(extractDir, destDir);
+    await fs.mkdir(SAVES_DIR, { recursive: true });
+    await fs.copyFile(tempAnimusPath, path.join(SAVES_DIR, `${id}.animus`));
 
-    const sizeBytes = await getDirectorySize(destDir);
+    // Write sidecar JSON
+    await fs.writeFile(path.join(SAVES_DIR, `${id}.json`), JSON.stringify(manifest, null, 2));
+
+    const stat = await fs.stat(path.join(SAVES_DIR, `${id}.animus`));
 
     log.info(`Imported save "${manifest.name}" as ${id}`);
 
-    return { id, manifest, sizeBytes };
+    return { id, manifest, sizeBytes: stat.size };
   } catch (err) {
     log.error('Failed to import save:', err);
     throw err;
   } finally {
-    // Cleanup temp directory
-    try {
-      await fs.rm(tempDir, { recursive: true, force: true });
-    } catch {
-      // best-effort cleanup
-    }
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
     releaseGuard();
   }
 }

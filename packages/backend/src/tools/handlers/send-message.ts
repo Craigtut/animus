@@ -15,6 +15,27 @@ export const sendMessageHandler: ToolHandler<SendMessageInput> = async (
   input,
   context
 ): Promise<ToolResult> => {
+  // For external channels with media, route through the channel router for full delivery
+  if (input.media && input.media.length > 0 && context.stores.channels) {
+    const result = await context.stores.channels.sendOutbound({
+      contactId: context.contactId,
+      channel: context.sourceChannel as import('@animus/shared').ChannelType,
+      content: input.content,
+      media: input.media,
+    });
+
+    if (!result) {
+      return {
+        content: [{ type: 'text', text: `Failed to send message with media via ${context.sourceChannel}.` }],
+        isError: true,
+      };
+    }
+
+    return {
+      content: [{ type: 'text', text: `Message with ${input.media.length} attachment(s) sent to ${context.sourceChannel} channel.` }],
+    };
+  }
+
   // 1. Write message to messages.db
   const msg = context.stores.messages.createMessage({
     conversationId: context.conversationId,

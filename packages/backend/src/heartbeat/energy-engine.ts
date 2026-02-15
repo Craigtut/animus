@@ -126,67 +126,39 @@ export function computeCircadianBaseline(
   if (sleepStart === sleepEnd) return 0.85;
 
   const hour = getCurrentHourFraction(now, timezone);
-
   const wakeHour = sleepEnd;
-  const rampEnd = wakeHour + 2;
-  const declineStart = sleepStart > sleepEnd
-    ? sleepStart - 3
-    : sleepStart - 3;
 
-  // Normalize hours for midnight-crossing comparison
-  // We work in a "shifted" timeline where wakeHour is the anchor at 0
-  if (sleepStart > sleepEnd) {
-    // Midnight-crossing case (e.g., 22:00–07:00)
-    // Shift everything so wakeHour = 0, full day = 24
-    const shift = (h: number) => {
-      const shifted = h - wakeHour;
-      return shifted < 0 ? shifted + 24 : shifted;
-    };
+  // Unified approach: shift all hours so wakeHour = 0.
+  // This eliminates ALL midnight-crossing issues — the day is always:
+  //   wake(0) → ramp(0–2) → plateau(2–declineStart) → decline → sleep → wake
+  const shift = (h: number) => {
+    const shifted = h - wakeHour;
+    return shifted < 0 ? shifted + 24 : shifted;
+  };
 
-    const shiftedHour = shift(hour);
-    const shiftedRampEnd = 2; // wakeHour + 2 → shifted = 2
-    const shiftedDeclineStart = shift(sleepStart - 3 < 0 ? sleepStart - 3 + 24 : sleepStart - 3);
-    const shiftedSleepStart = shift(sleepStart);
+  const shiftedHour = shift(hour);
+  const shiftedRampEnd = 2; // wakeHour + 2 → shifted = 2
+  const rawDeclineStart = sleepStart - 3;
+  const shiftedDeclineStart = shift(rawDeclineStart < 0 ? rawDeclineStart + 24 : rawDeclineStart);
+  const shiftedSleepStart = shift(sleepStart);
 
-    // During sleep hours (shifted: past sleepStart or before 0)
-    if (shiftedHour >= shiftedSleepStart) return 0.0;
+  // Sleep: past sleepStart in shifted timeline
+  if (shiftedHour >= shiftedSleepStart) return 0.0;
 
-    // Morning ramp: 0 → 2h
-    if (shiftedHour < shiftedRampEnd) {
-      return lerp(0.0, 0.85, shiftedHour / 2);
-    }
-
-    // Daytime plateau
-    if (shiftedHour < shiftedDeclineStart) return 0.85;
-
-    // Evening decline
-    if (shiftedHour < shiftedSleepStart) {
-      return lerp(0.85, 0.0, (shiftedHour - shiftedDeclineStart) / 3);
-    }
-
-    return 0.85; // Fallback
-  } else {
-    // Same-day sleep range (e.g., 01:00–06:00) — less common but supported
-    // Sleep hours: sleepStart to sleepEnd
-    if (hour >= sleepStart && hour < sleepEnd) return 0.0;
-
-    // Morning ramp: sleepEnd to sleepEnd+2
-    if (hour >= wakeHour && hour < rampEnd) {
-      return lerp(0.0, 0.85, (hour - wakeHour) / 2);
-    }
-
-    // Check decline start (may need wrapping for next-day sleep)
-    // For same-day sleep, decline starts at sleepStart-3 which might be < 0
-    const effectiveDeclineStart = declineStart < 0 ? declineStart + 24 : declineStart;
-
-    if (hour >= rampEnd && hour < effectiveDeclineStart) return 0.85;
-
-    if (hour >= effectiveDeclineStart && hour < sleepStart) {
-      return lerp(0.85, 0.0, (hour - effectiveDeclineStart) / 3);
-    }
-
-    return 0.85; // Fallback
+  // Morning ramp: 0 → 2h after wake
+  if (shiftedHour < shiftedRampEnd) {
+    return lerp(0.0, 0.85, shiftedHour / 2);
   }
+
+  // Daytime plateau
+  if (shiftedHour < shiftedDeclineStart) return 0.85;
+
+  // Evening decline
+  if (shiftedHour < shiftedSleepStart) {
+    return lerp(0.85, 0.0, (shiftedHour - shiftedDeclineStart) / 3);
+  }
+
+  return 0.85; // Fallback (shouldn't reach here)
 }
 
 // ============================================================================

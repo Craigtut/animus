@@ -267,6 +267,9 @@ export function SavesSection() {
                       </Typography.Caption>
                     )}
                     <Typography.Caption color="hint">
+                      Tick #{save.manifest.stats.tickCount.toLocaleString()}
+                    </Typography.Caption>
+                    <Typography.Caption color="hint">
                       {formatBytes(save.sizeBytes)}
                     </Typography.Caption>
                   </div>

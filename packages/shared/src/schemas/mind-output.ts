@@ -33,6 +33,11 @@ export const mindOutputSchema = z.object({
       channel: channelTypeSchema,
       replyToMessageId: z.string(),
       tone: z.string().optional(),
+      media: z.array(z.object({
+        type: z.enum(['image', 'audio', 'video', 'file']),
+        path: z.string(),
+        filename: z.string().optional(),
+      })).optional(),
     })
     .nullable(),
 

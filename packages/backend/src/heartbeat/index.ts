@@ -762,11 +762,13 @@ async function mindQuery(
     const parser = JsonStream.parse(channel.iterable);
     const replyContentStream = parser.get<string>('reply.content');
     const replyChannelStream = parser.get<string>('reply.channel');
+    const replyMediaStream = parser.get<Array<{ type: string; path: string; filename?: string }>>('reply.media');
 
     // Catch the internal promise rejection that fires when reply is null
     // (property path not found). Without this, Node emits an unhandled rejection.
     (replyContentStream as Promise<string>).catch(() => {});
     (replyChannelStream as Promise<string>).catch(() => {});
+    (replyMediaStream as Promise<unknown>).catch(() => {});
 
     // Consume reply chunks in parallel — emits to frontend in real-time
     let replyAccumulated = '';
@@ -778,10 +780,14 @@ async function mindQuery(
           replyAccumulated += chunk;
           eventBus.emit('reply:chunk', { content: chunk, accumulated: replyAccumulated });
         }
-        // Content finished — await channel (short string, finishes ms after content)
+        // Content finished — await channel and media (short values, finish ms after content)
         if (replyAccumulated && gathered.contact) {
           try {
             const replyChannel = await replyChannelStream;
+            let replyMedia: Array<{ type: string; path: string; filename?: string }> | undefined;
+            try {
+              replyMedia = await replyMediaStream as Array<{ type: string; path: string; filename?: string }>;
+            } catch { /* media is optional */ }
             if (replyChannel) {
               const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
               const { getChannelRouter } = await import('../channels/channel-router.js');
@@ -791,6 +797,16 @@ async function mindQuery(
                 channel: replyChannel,
                 content: replyAccumulated,
                 ...(triggerMetadata ? { metadata: triggerMetadata } : {}),
+                ...(replyMedia && replyMedia.length > 0 ? {
+                  media: replyMedia.map(m => {
+                    const entry: { type: 'image' | 'audio' | 'video' | 'file'; path: string; filename?: string } = {
+                      type: m.type as 'image' | 'audio' | 'video' | 'file',
+                      path: m.path,
+                    };
+                    if (m.filename) entry.filename = m.filename;
+                    return entry;
+                  }),
+                } : {}),
               });
               replySentEarly = true;
               log.info(`Early reply sent on "${replyChannel}" for tick #${tickNumber}`);
@@ -1043,6 +1059,7 @@ async function executeOutput(
     try {
       const channel = output.reply!.channel;
       const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
+      const replyMedia = output.reply!.media;
 
       // Unified outbound: ChannelRouter stores the message and delivers via ChannelManager
       const { getChannelRouter } = await import('../channels/channel-router.js');
@@ -1052,6 +1069,16 @@ async function executeOutput(
         channel,
         content: finalReplyContent,
         ...(triggerMetadata ? { metadata: triggerMetadata } : {}),
+        ...(replyMedia && replyMedia.length > 0 ? {
+          media: replyMedia.map(m => {
+            const entry: { type: 'image' | 'audio' | 'video' | 'file'; path: string; filename?: string } = {
+              type: m.type,
+              path: m.path,
+            };
+            if (m.filename) entry.filename = m.filename;
+            return entry;
+          }),
+        } : {}),
       });
 
       if (finalReplyDiffers) {
