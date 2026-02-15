@@ -1,0 +1,11 @@
+{
+  "fields": [
+    {
+      "key": "GEMINI_API_KEY",
+      "label": "Gemini API Key",
+      "type": "secret",
+      "required": true,
+      "helpText": "Google Gemini API key. Get one at https://aistudio.google.com/apikey"
+    }
+  ]
+}

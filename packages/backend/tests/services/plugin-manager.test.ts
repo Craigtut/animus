@@ -68,6 +68,7 @@ import * as pluginStore from '../../src/db/stores/plugin-store.js';
 
 const VALID_MANIFEST = {
   name: 'test-plugin',
+  displayName: 'Test Plugin',
   version: '1.0.0',
   description: 'A test plugin',
   author: { name: 'Test Author' },
@@ -84,6 +85,7 @@ const VALID_MANIFEST = {
 
 const MINIMAL_MANIFEST = {
   name: 'minimal-plugin',
+  displayName: 'Minimal Plugin',
   version: '0.1.0',
   description: 'A minimal plugin',
   author: { name: 'Test' },
@@ -215,6 +217,7 @@ describe('PluginManager', () => {
         if (filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'skill-plugin',
+            displayName: 'Skill Plugin',
             version: '1.0.0',
             description: 'Has skills',
             author: { name: 'Test' },
@@ -255,6 +258,7 @@ describe('PluginManager', () => {
         if (filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'cleanup-test',
+            displayName: 'Cleanup Test',
             version: '1.0.0',
             description: 'Cleanup test',
             author: { name: 'Test' },
@@ -294,6 +298,7 @@ describe('PluginManager', () => {
         if (filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'decision-plugin',
+            displayName: 'Decision Plugin',
             version: '1.0.0',
             description: 'Has decisions',
             author: { name: 'Test' },
@@ -342,6 +347,7 @@ describe('PluginManager', () => {
         if (filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'desc-plugin',
+            displayName: 'Description Plugin',
             version: '1.0.0',
             description: 'Has descriptions',
             author: { name: 'Test' },
@@ -403,6 +409,7 @@ describe('PluginManager', () => {
         if (filePath.includes('plugin-a') && filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'plugin-a',
+            displayName: 'Plugin A',
             version: '1.0.0',
             description: 'Plugin A',
             author: { name: 'Test' },
@@ -412,6 +419,7 @@ describe('PluginManager', () => {
         if (filePath.includes('plugin-b') && filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'plugin-b',
+            displayName: 'Plugin B',
             version: '1.0.0',
             description: 'Plugin B',
             author: { name: 'Test' },
@@ -450,6 +458,7 @@ describe('PluginManager', () => {
         if (filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'hook-plugin',
+            displayName: 'Hook Plugin',
             version: '1.0.0',
             description: 'Has hooks',
             author: { name: 'Test' },
@@ -499,6 +508,7 @@ describe('PluginManager', () => {
         if (filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'post-hook',
+            displayName: 'Post Hook',
             version: '1.0.0',
             description: 'Post hook',
             author: { name: 'Test' },
@@ -616,6 +626,7 @@ describe('PluginManager', () => {
         if (filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'installed-plugin',
+            displayName: 'Installed Plugin',
             version: '2.0.0',
             description: 'Freshly installed',
             author: { name: 'Test' },
@@ -654,6 +665,7 @@ describe('PluginManager', () => {
         if (filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'dup',
+            displayName: 'Duplicate',
             version: '2.0.0',
             description: 'Duplicate',
             author: { name: 'Test' },
@@ -676,6 +688,7 @@ describe('PluginManager', () => {
         if (filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'removable',
+            displayName: 'Removable',
             version: '1.0.0',
             description: 'Can be removed',
             author: { name: 'Test' },
@@ -706,6 +719,7 @@ describe('PluginManager', () => {
         if (filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'core-plugin',
+            displayName: 'Core Plugin',
             version: '1.0.0',
             description: 'Built-in',
             author: { name: 'Test' },
@@ -737,6 +751,7 @@ describe('PluginManager', () => {
         if (filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'toggle-plugin',
+            displayName: 'Toggle Plugin',
             version: '1.0.0',
             description: 'Toggleable',
             author: { name: 'Test' },
@@ -780,6 +795,7 @@ describe('PluginManager', () => {
         if (filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'mcp-plugin',
+            displayName: 'MCP Plugin',
             version: '1.0.0',
             description: 'MCP test',
             author: { name: 'Test' },
@@ -832,6 +848,7 @@ describe('PluginManager', () => {
         if (filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'agent-plugin',
+            displayName: 'Agent Plugin',
             version: '1.0.0',
             description: 'Has agents',
             author: { name: 'Test' },
@@ -912,6 +929,7 @@ Check all code for vulnerabilities.`;
         if (filePath.includes('built-in-a') && filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'built-in-a',
+            displayName: 'Built-in A',
             version: '1.0.0',
             description: 'Built-in A',
             author: { name: 'Test' },
@@ -921,6 +939,7 @@ Check all code for vulnerabilities.`;
         if (filePath.includes('downloaded-b') && filePath.endsWith('plugin.json')) {
           return JSON.stringify({
             name: 'downloaded-b',
+            displayName: 'Downloaded B',
             version: '2.0.0',
             description: 'Downloaded B',
             author: { name: 'Test' },

@@ -278,6 +278,17 @@ export class OpenCodeAdapter extends BaseAdapter {
   }
 
   /**
+   * List available models for the OpenCode provider.
+   *
+   * Returns the hardcoded capability list. OpenCode supports 75+
+   * providers but does not expose a runtime model discovery API
+   * through the SDK.
+   */
+  async listModels(): Promise<Array<{ id: string; name: string }>> {
+    return this.capabilities.supportedModels.map((id) => ({ id, name: id }));
+  }
+
+  /**
    * Create a new OpenCode session.
    */
   async createSession(config: AgentSessionConfig): Promise<IAgentSession> {
@@ -397,6 +408,14 @@ class OpenCodeSession extends BaseSession {
    * Initialize the session.
    */
   async initialize(): Promise<void> {
+    // temperature and maxOutputTokens are not supported by OpenCode prompt API
+    if (this.config.temperature !== undefined) {
+      this.logger.debug('temperature not supported by OpenCode prompt API, ignoring');
+    }
+    if (this.config.maxOutputTokens !== undefined) {
+      this.logger.debug('maxOutputTokens not supported by OpenCode SDK, ignoring');
+    }
+
     if (!this.nativeSessionId) {
       const response = await this.client.session.create({
         body: { title: 'Animus Session' },

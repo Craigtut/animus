@@ -18,6 +18,7 @@ import type {
   AgentCost,
   AgentResponse,
   PromptOptions,
+  ModelInfo,
 } from '../types.js';
 import { AgentError } from '../errors.js';
 import { createTaggedLogger, type Logger } from '../logger.js';
@@ -60,6 +61,7 @@ export abstract class BaseAdapter implements IAgentAdapter {
 
   abstract isConfigured(): boolean;
   abstract createSession(config: AgentSessionConfig): Promise<IAgentSession>;
+  abstract listModels(): Promise<ModelInfo[]>;
 
   /**
    * Resume an existing session by ID.

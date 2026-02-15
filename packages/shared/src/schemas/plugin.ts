@@ -14,6 +14,7 @@ import { z } from 'zod';
 
 export const PluginManifestSchema = z.object({
   name: z.string().regex(/^[a-z0-9-]+$/),
+  displayName: z.string().min(1),
   version: z.string().regex(/^\d+\.\d+\.\d+/),
   description: z.string().max(200),
   author: z.object({
@@ -22,6 +23,7 @@ export const PluginManifestSchema = z.object({
   }),
   license: z.string().optional(),
   engine: z.string().optional(),
+  icon: z.string().optional(), // relative path to icon file (SVG or PNG)
 
   components: z.object({
     skills: z.string().optional(),
@@ -46,7 +48,7 @@ export const PluginManifestSchema = z.object({
     memory: z.enum(['none', 'read-only', 'read-write']).default('none'),
   }).default({}),
 
-  configSchema: z.record(z.unknown()).optional(),
+  configSchema: z.string().optional(), // path to config.schema.json (uses same field format as channels)
   setup: z.string().optional(),
 
   store: z.object({

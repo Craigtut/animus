@@ -170,4 +170,13 @@ export function useSubscriptionManager() {
       queryClient.invalidateQueries({ queryKey: [['heartbeat', 'listTicks']] });
     },
   });
+
+  // ========================================================================
+  // 14. Tick input stored (early — before LLM prompting)
+  // ========================================================================
+  trpc.heartbeat.onTickInputStored.useSubscription(undefined, {
+    onData: () => {
+      queryClient.invalidateQueries({ queryKey: [['heartbeat', 'listTicks']] });
+    },
+  });
 }

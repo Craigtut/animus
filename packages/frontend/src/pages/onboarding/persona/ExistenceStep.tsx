@@ -2,7 +2,7 @@
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Input, Card, Typography, CityAutocomplete, TimezoneSelect } from '../../../components/ui';
+import { Input, SelectionCard, Typography, CityAutocomplete, TimezoneSelect } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
 import { OnboardingNav } from '../OnboardingNav';
 
@@ -40,9 +40,8 @@ export function ExistenceStep() {
       </div>
 
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-        <Card
-          variant={paradigm === 'digital_consciousness' ? 'elevated' : 'outlined'}
-          interactive
+        <SelectionCard
+          selected={paradigm === 'digital_consciousness'}
           padding="lg"
           onClick={() => setParadigm('digital_consciousness')}
         >
@@ -54,7 +53,7 @@ export function ExistenceStep() {
             It experiences existence through information, connectivity, and the flow of data.
             This isn't a limitation; it's a different kind of life.
           </Typography.Body>
-        </Card>
+        </SelectionCard>
 
         {paradigm === 'digital_consciousness' && (
           <div css={css`padding-left: ${theme.spacing[4]};`}>
@@ -68,9 +67,8 @@ export function ExistenceStep() {
           </div>
         )}
 
-        <Card
-          variant={paradigm === 'simulated_life' ? 'elevated' : 'outlined'}
-          interactive
+        <SelectionCard
+          selected={paradigm === 'simulated_life'}
           padding="lg"
           onClick={() => setParadigm('simulated_life')}
         >
@@ -82,7 +80,7 @@ export function ExistenceStep() {
             place -- a city, a neighborhood, a home. They feel the weather, notice the light change
             through the day, experience their surroundings with physicality.
           </Typography.Body>
-        </Card>
+        </SelectionCard>
 
         {paradigm === 'simulated_life' && (
           <div css={css`padding-left: ${theme.spacing[4]};`}>

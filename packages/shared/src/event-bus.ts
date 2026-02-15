@@ -16,6 +16,8 @@ import type {
   Goal,
   GoalSeed,
   LongTermMemory,
+  StreamType,
+  AgentEventType,
 } from './types/index.js';
 
 /**
@@ -69,6 +71,11 @@ export interface AnimusEventMap {
   'agent:rate_limited': { taskId: string; count: number; limit: number };
 
   // Tick inspector
+  'tick:input_stored': {
+    tickNumber: number;
+    triggerType: string;
+    sessionState: string;
+  };
   'tick:context_stored': {
     tickNumber: number;
     triggerType: string;
@@ -86,6 +93,23 @@ export interface AnimusEventMap {
   // Plugins
   'plugin:changed': { pluginName: string; action: 'installed' | 'uninstalled' | 'enabled' | 'disabled' };
   'plugin:config_updated': { pluginName: string };
+
+  // Observational Memory
+  'observation:started': { stream: StreamType; contactId: string | null; batchTokens: number; cycleId: string };
+  'observation:completed': { stream: StreamType; contactId: string | null; observedTokens: number; outputTokens: number; durationMs: number; cycleId: string };
+  'observation:failed': { stream: StreamType; contactId: string | null; error: string; cycleId: string };
+  'reflection:started': { stream: StreamType; contactId: string | null; inputTokens: number; compressionLevel: number; cycleId: string };
+  'reflection:completed': { stream: StreamType; contactId: string | null; inputTokens: number; outputTokens: number; generation: number; durationMs: number; cycleId: string };
+  'reflection:failed': { stream: StreamType; contactId: string | null; error: string; cycleId: string };
+
+  // Agent event logging (for timeline)
+  'agent:event:logged': {
+    id: string;
+    sessionId: string;
+    eventType: AgentEventType;
+    data: Record<string, unknown>;
+    createdAt: string;
+  };
 
   // System
   'system:settings_updated': Record<string, unknown>;

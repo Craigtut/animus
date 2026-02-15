@@ -1,11 +1,12 @@
 /**
- * Encryption Service — AES-256-GCM encryption for API keys.
+ * Encryption Service — AES-256-GCM encryption for secrets.
  *
  * Key derived from ANIMUS_ENCRYPTION_KEY env var via PBKDF2.
- * Falls back to plaintext storage with warning if key not set.
+ * ANIMUS_ENCRYPTION_KEY is required — the server won't start without it.
  */
 
 import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync } from 'crypto';
+import type Database from 'better-sqlite3';
 import { env } from '../utils/env.js';
 import { createLogger } from './logger.js';
 
@@ -17,6 +18,7 @@ const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
 const SALT = 'animus-encryption-salt'; // Static salt — key uniqueness from env var
 const ITERATIONS = 100_000;
+const SENTINEL = 'animus-key-ok';
 
 let derivedKey: Buffer | null = null;
 
@@ -37,13 +39,11 @@ export function isConfigured(): boolean {
 /**
  * Encrypt plaintext.
  * Returns `{iv}:{ciphertext}:{authTag}` in base64.
- * Falls back to `plain:{base64}` if no encryption key.
  */
 export function encrypt(plaintext: string): string {
   const key = getKey();
   if (!key) {
-    log.warn('No encryption key set — storing value as plaintext');
-    return `plain:${Buffer.from(plaintext).toString('base64')}`;
+    throw new Error('Cannot encrypt: ANIMUS_ENCRYPTION_KEY is not configured');
   }
 
   const iv = randomBytes(IV_LENGTH);
@@ -56,10 +56,10 @@ export function encrypt(plaintext: string): string {
 
 /**
  * Decrypt ciphertext.
- * Accepts both encrypted format and plaintext fallback.
+ * Accepts both encrypted format and legacy `plain:` format (for migration).
  */
 export function decrypt(ciphertext: string): string {
-  // Handle plaintext fallback
+  // Handle legacy plaintext values from before encryption was mandatory
   if (ciphertext.startsWith('plain:')) {
     return Buffer.from(ciphertext.slice(6), 'base64').toString('utf8');
   }
@@ -84,4 +84,46 @@ export function decrypt(ciphertext: string): string {
   const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
 
   return decrypted.toString('utf8');
+}
+
+/**
+ * Verify the encryption key matches what was used to encrypt existing data.
+ *
+ * On first run (no sentinel stored), encrypts and stores a sentinel value.
+ * On subsequent runs, decrypts the sentinel to verify the key hasn't changed.
+ *
+ * Throws if the key has changed — all encrypted data would be unreadable.
+ */
+export function verifyEncryptionKey(db: Database.Database): void {
+  const row = db.prepare(
+    'SELECT encryption_key_check FROM system_settings WHERE id = 1'
+  ).get() as { encryption_key_check: string | null } | undefined;
+
+  const stored = row?.encryption_key_check ?? null;
+
+  // Key is always set (enforced by env validation), so only two cases remain.
+
+  // First time using this key — store sentinel
+  if (!stored) {
+    const sentinel = encrypt(SENTINEL);
+    db.prepare(
+      'UPDATE system_settings SET encryption_key_check = ? WHERE id = 1'
+    ).run(sentinel);
+    log.info('Encryption key verified and sentinel stored');
+    return;
+  }
+
+  // Sentinel exists — verify the key matches
+  try {
+    const decrypted = decrypt(stored!);
+    if (decrypted !== SENTINEL) {
+      throw new Error('Sentinel mismatch');
+    }
+  } catch {
+    throw new Error(
+      'ANIMUS_ENCRYPTION_KEY does not match the key used to encrypt existing data. ' +
+      'Restore the original encryption key to start the server. ' +
+      'All stored secrets (API keys, channel configs) are encrypted with the original key.'
+    );
+  }
 }

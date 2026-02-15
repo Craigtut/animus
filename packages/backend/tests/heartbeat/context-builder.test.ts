@@ -451,7 +451,7 @@ describe('context-builder', () => {
         energySystemEnabled: true,
       }));
 
-      expect(msg).toContain('YOUR ENERGY & TIME');
+      expect(msg).toContain('YOUR ENERGY');
       expect(msg).toContain('peak');
       expect(msg).toContain('sharp and energized');
     });
@@ -463,7 +463,7 @@ describe('context-builder', () => {
         energySystemEnabled: false,
       }));
 
-      expect(msg).not.toContain('YOUR ENERGY & TIME');
+      expect(msg).not.toContain('YOUR ENERGY');
     });
 
     it('includes wake-up context paragraph when wakeUpContext provided', () => {
@@ -501,7 +501,7 @@ describe('context-builder', () => {
       }));
 
       const emotionalIdx = msg.indexOf('EMOTIONAL STATE');
-      const energyIdx = msg.indexOf('YOUR ENERGY & TIME');
+      const energyIdx = msg.indexOf('YOUR ENERGY');
       expect(emotionalIdx).toBeGreaterThan(-1);
       expect(energyIdx).toBeGreaterThan(-1);
       expect(energyIdx).toBeGreaterThan(emotionalIdx);

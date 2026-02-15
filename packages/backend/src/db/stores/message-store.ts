@@ -172,10 +172,28 @@ export function getRecentMessages(
   return rows.map(rowToMessage);
 }
 
+/**
+ * Get all messages since a given timestamp (exclusive), newest first.
+ * Used by the observation pipeline to load all unsummarized items.
+ */
+export function getMessagesSince(
+  db: Database.Database,
+  conversationId: string,
+  since: string,
+  limit: number = 2000
+): Message[] {
+  const rows = db
+    .prepare(
+      'SELECT * FROM messages WHERE conversation_id = ? AND created_at > ? ORDER BY created_at DESC LIMIT ?'
+    )
+    .all(conversationId, since, limit) as Array<Record<string, unknown>>;
+  return rows.map(rowToMessage);
+}
+
 export function getMessagesByContact(
   db: Database.Database,
   contactId: string,
-  options: { limit?: number; since?: string } = {}
+  options: { limit?: number; since?: string; channel?: string; before?: string } = {}
 ): Message[] {
   const limit = options.limit ?? 50;
   const conditions = ['contact_id = ?'];
@@ -184,6 +202,16 @@ export function getMessagesByContact(
   if (options.since) {
     conditions.push('created_at >= ?');
     params.push(options.since);
+  }
+
+  if (options.channel) {
+    conditions.push('channel = ?');
+    params.push(options.channel);
+  }
+
+  if (options.before) {
+    conditions.push('created_at < ?');
+    params.push(options.before);
   }
 
   const rows = db

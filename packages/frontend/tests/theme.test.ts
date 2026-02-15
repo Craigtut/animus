@@ -2,7 +2,7 @@
  * Theme Tests
  *
  * Validates that the theme objects are structurally correct and
- * conform to the design spec (warm neutrals, Plus Jakarta Sans, etc.)
+ * conform to the design spec (warm neutrals, Outfit, etc.)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -45,8 +45,8 @@ describe('Theme Structure', () => {
         expect(theme.colors.text.hint).toBeTruthy();
       });
 
-      it('has typography with Plus Jakarta Sans', () => {
-        expect(theme.typography.fontFamily.sans).toContain('Plus Jakarta Sans');
+      it('has typography with Outfit', () => {
+        expect(theme.typography.fontFamily.sans).toContain('Outfit');
       });
 
       it('has all font sizes', () => {

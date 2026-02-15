@@ -50,6 +50,10 @@ HEARTBEAT_INTERVAL_MS=300000
 JWT_SECRET=your-secret-key-change-in-production
 SESSION_EXPIRY_DAYS=7
 
+# Encryption (REQUIRED — server won't start without this)
+# Set to any secret string. Do NOT change after first run.
+ANIMUS_ENCRYPTION_KEY=your-secret-encryption-key
+
 # Agent API Keys (optional for development)
 ANTHROPIC_API_KEY=your-anthropic-key
 OPENAI_API_KEY=your-openai-key

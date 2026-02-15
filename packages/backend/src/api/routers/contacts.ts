@@ -44,8 +44,15 @@ export const contactsRouter = router({
 
     return contacts.map((contact) => {
       const lastMessage = messageStore.getLastMessageForContact(msgDb, contact.id);
+      const channels = systemStore.getContactChannelsByContactId(sysDb, contact.id);
       return {
         ...contact,
+        channels: channels.map(ch => ({
+          id: ch.id,
+          channel: ch.channel,
+          identifier: ch.identifier,
+          isVerified: ch.isVerified,
+        })),
         lastMessage: lastMessage
           ? {
               content: lastMessage.content,

@@ -301,16 +301,21 @@ Build an **Animus-level plugin format** that operates above the SDK adapters. An
 └────────┘ └────────┘ └────────┘
 ```
 
+### Self-Containment Principle
+
+Plugins must be **self-contained standalone entities**. They should never depend on monorepo packages or `node_modules` from the parent project. If a plugin includes scripts that use external dependencies, those dependencies must be bundled into standalone files (e.g., via esbuild) so the plugin works out of the box with zero installation steps.
+
 ### Plugin Format (Proposed)
 
 An Animus plugin is a directory with a manifest:
 
 ```
 my-plugin/
-├── plugin.json               # Manifest
+├── plugin.json               # Manifest (required)
+├── config.schema.json        # Configuration form definition (optional)
 ├── skills/                    # Skills (Animus-managed)
 │   └── code-review/
-│       ├── skill.md           # Instructions + frontmatter
+│       ├── SKILL.md           # Instructions + frontmatter
 │       └── resources/         # Supporting files (templates, examples)
 ├── tools/                     # Custom tools (MCP servers)
 │   ├── mcp.json               # MCP server definitions
@@ -325,16 +330,94 @@ my-plugin/
 ```json
 {
   "name": "code-quality",
+  "displayName": "Code Quality",
   "version": "1.0.0",
   "description": "Code review and quality analysis tools",
-  "author": "animus-plugins",
+  "author": { "name": "animus-plugins" },
+  "icon": "./icon.svg",
 
-  "skills": "./skills/",
-  "tools": "./tools/mcp.json",
-  "hooks": "./hooks/hooks.json",
-  "agents": "./agents/"
+  "components": {
+    "skills": "./skills/",
+    "tools": "./tools/mcp.json",
+    "hooks": "./hooks/hooks.json",
+    "agents": "./agents/"
+  },
+  "configSchema": "./config.schema.json"
 }
 ```
+
+**Manifest Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Kebab-case identifier (`^[a-z0-9-]+$`) — used internally |
+| `displayName` | Yes | Human-readable name shown in the UI |
+| `version` | Yes | Semver version string |
+| `description` | Yes | Short description (max 200 chars) |
+| `author` | Yes | Object with `name` (required) and `url` (optional) |
+| `license` | No | License identifier (e.g., "MIT") |
+| `engine` | No | Minimum Animus engine version |
+| `icon` | No | Relative path to icon file (SVG or PNG) |
+| `components` | Yes | Paths to plugin components (skills, tools, hooks, agents, etc.) |
+| `configSchema` | No | Path to `config.schema.json` for user-configurable settings |
+| `permissions` | No | Required permissions (network, filesystem, contacts, memory, tools) |
+| `dependencies` | No | Plugin and system dependencies |
+| `setup` | No | Path to setup script run on install |
+| `store` | No | Marketplace metadata (categories, tags, pricing, screenshots) |
+
+### Configuration Schema (`config.schema.json`)
+
+Defines the configuration form the frontend renders for this plugin. Separated from the manifest to keep `plugin.json` focused on metadata and component paths.
+
+Uses the **same field format as channels** — identical field types, validation, and encryption behavior. Fields with `type: "secret"` are encrypted at rest and masked when returned to the frontend.
+
+```json
+{
+  "fields": [
+    {
+      "key": "API_KEY",
+      "label": "API Key",
+      "type": "secret",
+      "required": true,
+      "helpText": "Your service API key"
+    },
+    {
+      "key": "endpoint",
+      "label": "API Endpoint",
+      "type": "url",
+      "required": false,
+      "placeholder": "https://api.example.com"
+    }
+  ]
+}
+```
+
+**Field Types** (shared with channel config):
+
+| Type | Renders As | Notes |
+|------|-----------|-------|
+| `text` | Text input | General string input |
+| `secret` | Password input with show/hide toggle | Value encrypted in DB, masked when returned to frontend |
+| `url` | URL input with validation | Validates URL format |
+| `number` | Numeric input | With optional `min`/`max` |
+| `select` | Dropdown | Requires `options` array: `[{ "value": "...", "label": "..." }]` |
+| `text-list` | Multi-value text input | Comma-separated or tag-style |
+| `toggle` | Toggle switch | Boolean value |
+
+**Field Properties:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `key` | string | Yes | Config key (used as env var name when injected) |
+| `label` | string | Yes | Display label for the form field |
+| `type` | string | Yes | One of the field types above |
+| `required` | boolean | No | Whether the field must be filled (default: false) |
+| `placeholder` | string | No | Placeholder text for the input |
+| `helpText` | string | No | Help text shown below the field |
+| `validation` | string | No | Regex pattern for validation |
+| `options` | array | No | Options for `select` type |
+| `default` | any | No | Default value |
+| `min` / `max` | number | No | Range for `number` type |
 
 ### How Each Component Works
 

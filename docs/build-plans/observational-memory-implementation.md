@@ -97,7 +97,33 @@ getGlobalObservations(db): Observation[]
 
 Follow existing store patterns: `snakeToCamel()` for reads, SQL parameterized queries, UUID generation via `generateUUID()`.
 
-#### Task 1.4 — EventBus Event Types [Foundation]
+#### Task 1.4 — Extract Token Estimation to Shared [Foundation]
+
+`estimateTokens()` currently lives in `packages/backend/src/heartbeat/persona-compiler.ts` (line 382). It's a general-purpose utility needed by the observation processor, context builder, and persona compiler. Extract it to the shared package.
+
+**Create** `packages/shared/src/token-utils.ts`:
+```typescript
+/**
+ * Estimate token count for a string using word-count heuristic.
+ * Approximate but sufficient for budget management — no need for tiktoken precision.
+ */
+export function estimateTokens(text: string): number {
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return Math.ceil(words * 1.3);
+}
+```
+
+**Modify** `packages/shared/src/index.ts` — export `estimateTokens`
+
+**Modify** `packages/backend/src/heartbeat/persona-compiler.ts` — replace local `estimateTokens` with import from `@animus/shared`:
+```typescript
+import { estimateTokens } from '@animus/shared';
+```
+Remove the local function definition (lines 382-385). Keep all existing call sites unchanged — they'll use the imported version.
+
+Verify no other files have local token estimation duplicates.
+
+#### Task 1.5 — EventBus Event Types [Foundation]
 
 **Modify** `packages/shared/src/event-bus.ts` — add to `AnimusEventMap`:
 
@@ -110,14 +136,14 @@ Follow existing store patterns: `snakeToCamel()` for reads, SQL parameterized qu
 'reflection:failed': { stream: StreamType; contactId: string | null; error: string; cycleId: string }
 ```
 
-#### Task 1.5 — Observation Config [Memory]
+#### Task 1.6 — Observation Config [Memory]
 
 **Create** `packages/backend/src/config/observational-memory.config.ts`:
 - Export `OBSERVATIONAL_MEMORY_CONFIG` as defined in the architecture doc
 - Export `StreamType` type alias
 - All values as described: model, observer/reflector settings, per-stream token budgets, batch thresholds
 
-#### Task 1.6 — Temporal Annotation Utilities [Memory]
+#### Task 1.7 — Temporal Annotation Utilities [Memory]
 
 **Create** `packages/backend/src/memory/observational-memory/temporal.ts`:
 
@@ -497,6 +523,7 @@ Phase 4 (depends on Phase 3):
 |------|-------|-------|
 | `packages/shared/src/schemas/observational-memory.ts` | Foundation | 1 |
 | `packages/shared/src/types/observational-memory.ts` | Foundation | 1 |
+| `packages/shared/src/token-utils.ts` | Foundation | 1 |
 | `packages/backend/src/db/migrations/memory/002_observational_memory.sql` | Foundation | 1 |
 | `packages/backend/src/config/observational-memory.config.ts` | Memory | 1 |
 | `packages/backend/src/memory/observational-memory/temporal.ts` | Memory | 1 |
@@ -510,8 +537,10 @@ Phase 4 (depends on Phase 3):
 |------|-------|-------|---------|
 | `packages/shared/src/schemas/index.ts` | Foundation | 1 | Re-export observation schemas |
 | `packages/shared/src/types/index.ts` | Foundation | 1 | Re-export observation types |
+| `packages/shared/src/index.ts` | Foundation | 1 | Export `estimateTokens` |
 | `packages/shared/src/event-bus.ts` | Foundation | 1 | Add 6 observation/reflection events |
 | `packages/backend/src/db/stores/memory-store.ts` | Foundation | 1 | Add observation CRUD functions |
+| `packages/backend/src/heartbeat/persona-compiler.ts` | Foundation | 1 | Replace local `estimateTokens` with import from `@animus/shared` |
 | `packages/backend/src/heartbeat/index.ts` | Heartbeat | 4 | GATHER + EXECUTE integration |
 | `packages/backend/src/heartbeat/context-builder.ts` | Heartbeat | 4 | Observation context sections |
 
@@ -519,7 +548,7 @@ Phase 4 (depends on Phase 3):
 
 ## Key Implementation Decisions
 
-1. **`estimateTokens()` reuse** — Use the existing `estimateTokens()` from `persona-compiler.ts` (words × 1.3). Export it or extract to a shared utility so the observation processor can import it.
+1. **`estimateTokens()` in shared** — Extracted from `persona-compiler.ts` to `@animus/shared` as a general-purpose utility. All consumers (persona compiler, observation processor, context builder) import from the same place.
 
 2. **`loadStreamContext()` queries** — For thoughts/experiences, query `getRecentThoughts`/`getRecentExperiences` without a hard limit, then filter by token budget. For messages, similar approach with `getRecentMessages`. Items newer than the observation watermark (`last_raw_timestamp`) are loaded.
 

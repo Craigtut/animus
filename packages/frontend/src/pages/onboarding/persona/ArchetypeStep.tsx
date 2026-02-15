@@ -2,10 +2,9 @@
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle } from '@phosphor-icons/react';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import { Grid, Pagination } from 'swiper/modules';
-import { Typography } from '../../../components/ui';
+import { SelectionCard, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
 import { OnboardingNav } from '../OnboardingNav';
 
@@ -125,12 +124,36 @@ export function ArchetypeStep() {
             const isSelected = selected === archetype.id;
             return (
               <SwiperSlide key={archetype.id}>
-                <ArchetypeCard
-                  name={archetype.name}
-                  feel={archetype.feel}
-                  isSelected={isSelected}
+                <SelectionCard
+                  selected={isSelected}
+                  padding="md"
                   onClick={() => handleSelect(archetype.id)}
-                />
+                  css={css`height: 100%;`}
+                >
+                  <span
+                    css={css`
+                      display: block;
+                      font-size: ${theme.typography.fontSize.base};
+                      font-weight: ${theme.typography.fontWeight.semibold};
+                      color: ${theme.colors.text.primary};
+                      margin-bottom: ${theme.spacing[1.5]};
+                    `}
+                  >
+                    {archetype.name}
+                  </span>
+                  <span
+                    css={css`
+                      display: block;
+                      font-family: ${theme.typography.fontFamily.serif};
+                      font-style: italic;
+                      font-size: ${theme.typography.fontSize.sm};
+                      color: ${theme.colors.text.secondary};
+                      line-height: ${theme.typography.lineHeight.relaxed};
+                    `}
+                  >
+                    {archetype.feel}
+                  </span>
+                </SelectionCard>
               </SwiperSlide>
             );
           })}
@@ -162,118 +185,5 @@ export function ArchetypeStep() {
         continueDisabled={selected === null}
       />
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ArchetypeCard
-// ---------------------------------------------------------------------------
-
-function ArchetypeCard({
-  name,
-  feel,
-  isSelected,
-  onClick,
-}: {
-  name: string;
-  feel: string;
-  isSelected: boolean;
-  onClick: () => void;
-}) {
-  const theme = useTheme();
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      css={css`
-        position: relative;
-        display: flex;
-        flex-direction: column;
-        width: 100%;
-        padding: ${theme.spacing[4]} ${theme.spacing[4]} ${theme.spacing[5]};
-        border-radius: ${theme.borderRadius.md};
-        cursor: pointer;
-        text-align: left;
-        border: 1px solid ${isSelected ? 'transparent' : theme.colors.border.default};
-        outline: none;
-        font-family: inherit;
-        transition: all ${theme.transitions.normal};
-
-        ${isSelected
-          ? css`
-              background: ${theme.colors.background.paper};
-              backdrop-filter: blur(16px);
-              -webkit-backdrop-filter: blur(16px);
-
-              /* Rim lighting */
-              &::before {
-                content: '';
-                position: absolute;
-                inset: -1px;
-                border-radius: inherit;
-                padding: 1px;
-                background: ${theme.colors.rimGradient};
-                mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-                mask-composite: exclude;
-                -webkit-mask-composite: xor;
-                pointer-events: none;
-              }
-            `
-          : css`
-              background: transparent;
-
-              &:hover {
-                background: ${theme.colors.background.elevated};
-                backdrop-filter: blur(8px);
-                -webkit-backdrop-filter: blur(8px);
-                border-color: ${theme.colors.border.focus};
-              }
-            `}
-
-        &:focus-visible {
-          outline: 2px solid ${theme.colors.border.focus};
-          outline-offset: 2px;
-        }
-      `}
-    >
-      {/* Checkmark indicator */}
-      {isSelected && (
-        <div
-          css={css`
-            position: absolute;
-            top: ${theme.spacing[3]};
-            right: ${theme.spacing[3]};
-          `}
-        >
-          <CheckCircle size={22} weight="fill" color={theme.colors.accent} />
-        </div>
-      )}
-
-      <span
-        css={css`
-          font-size: ${theme.typography.fontSize.base};
-          font-weight: ${theme.typography.fontWeight.semibold};
-          color: ${isSelected ? theme.colors.text.primary : theme.colors.text.secondary};
-          margin-bottom: ${theme.spacing[1.5]};
-          transition: color ${theme.transitions.fast};
-        `}
-      >
-        {name}
-      </span>
-
-      <span
-        css={css`
-          font-family: ${theme.typography.fontFamily.serif};
-          font-style: italic;
-          font-size: ${theme.typography.fontSize.sm};
-          color: ${isSelected ? theme.colors.text.secondary : theme.colors.text.hint};
-          line-height: ${theme.typography.lineHeight.relaxed};
-          transition: color ${theme.transitions.fast};
-        `}
-      >
-        {feel}
-      </span>
-    </button>
   );
 }

@@ -9,6 +9,7 @@ import type Database from 'better-sqlite3';
 import type { AgentLogStore } from '@animus/agents';
 import * as agentLogStore from '../db/stores/agent-log-store.js';
 import type { AgentEventType } from '@animus/shared';
+import { getEventBus } from '../lib/event-bus.js';
 
 /**
  * Create an AgentLogStore adapter that curries the db parameter.
@@ -21,10 +22,22 @@ export function createAgentLogStoreAdapter(db: Database.Database): AgentLogStore
   return {
     createSession: (data) => agentLogStore.createSession(db, data),
     endSession: (id, status) => agentLogStore.endSession(db, id, status),
-    insertEvent: (data) => agentLogStore.insertEvent(db, {
-      ...data,
-      eventType: data.eventType as AgentEventType,
-    }),
+    insertEvent: (data) => {
+      const event = agentLogStore.insertEvent(db, {
+        ...data,
+        eventType: data.eventType as AgentEventType,
+      });
+      try {
+        getEventBus().emit('agent:event:logged', {
+          id: event.id,
+          sessionId: event.sessionId,
+          eventType: event.eventType,
+          data: event.data,
+          createdAt: event.createdAt,
+        });
+      } catch { /* don't break logging if EventBus fails */ }
+      return event;
+    },
     insertUsage: (data) => agentLogStore.insertUsage(db, data),
   };
 }

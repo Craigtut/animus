@@ -12,7 +12,7 @@ import {
   ArrowSquareOut,
   CircleNotch,
 } from '@phosphor-icons/react';
-import { Button, Input, Typography } from '../../components/ui';
+import { Button, Input, SelectionCard, Typography } from '../../components/ui';
 import { useOnboardingStore } from '../../store';
 import { OnboardingNav } from './OnboardingNav';
 import { trpc } from '../../utils/trpc';
@@ -275,74 +275,29 @@ export function AgentProviderStep() {
         {(['claude', 'codex'] as const).map((p) => {
           const isSelected = provider === p;
           return (
-            <div
+            <SelectionCard
               key={p}
-              role="button"
-              tabIndex={0}
+              selected={isSelected}
+              padding="lg"
               onClick={() => handleSwitchProvider(p)}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSwitchProvider(p); }}
-              css={css`
-                padding: ${theme.spacing[5]};
-                border-radius: ${theme.borderRadius.md};
-                cursor: pointer;
-                transition: all ${theme.transitions.normal};
-                position: relative;
-                overflow: hidden;
-                outline: none;
-
-                ${isSelected ? css`
-                  background: ${theme.colors.background.paper};
-                  backdrop-filter: blur(16px);
-                  -webkit-backdrop-filter: blur(16px);
-                  border: 1px solid transparent;
-
-                  /* Rim lighting */
-                  &::before {
-                    content: '';
-                    position: absolute;
-                    inset: -1px;
-                    border-radius: inherit;
-                    padding: 1px;
-                    background: ${theme.colors.rimGradient};
-                    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-                    mask-composite: exclude;
-                    -webkit-mask-composite: xor;
-                    pointer-events: none;
-                  }
-                ` : css`
-                  border: 1px dashed ${theme.colors.border.default};
-
-                  &:hover, &:focus-visible {
-                    border-style: solid;
-                    background: ${theme.colors.background.elevated};
-                    backdrop-filter: blur(8px);
-                    -webkit-backdrop-filter: blur(8px);
-                  }
-
-                  &:hover h3, &:focus-visible h3 { color: ${theme.colors.text.secondary}; }
-                  &:hover p, &:focus-visible p { color: ${theme.colors.text.hint}; }
-                `}
-              `}
             >
               <Typography.Subtitle
                 as="h3"
                 css={css`
                   margin-bottom: ${theme.spacing[1]};
-                  color: ${isSelected ? theme.colors.text.primary : theme.colors.text.hint};
-                  transition: color ${theme.transitions.fast};
+                  color: ${theme.colors.text.primary};
                 `}
               >
                 {p === 'claude' ? 'Claude' : 'Codex'}
               </Typography.Subtitle>
               <Typography.SmallBody css={css`
-                color: ${isSelected ? theme.colors.text.secondary : theme.colors.text.disabled};
-                transition: color ${theme.transitions.fast};
+                color: ${theme.colors.text.secondary};
               `}>
                 {p === 'claude'
                   ? 'The default choice. Full-featured and the most capable.'
                   : 'An alternative with strong agentic abilities.'}
               </Typography.SmallBody>
-            </div>
+            </SelectionCard>
           );
         })}
       </div>

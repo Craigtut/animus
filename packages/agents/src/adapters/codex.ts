@@ -43,6 +43,7 @@ interface CodexClient {
 }
 
 interface ThreadOptions {
+  model?: string;
   workingDirectory?: string;
   skipGitRepoCheck?: boolean;
 }
@@ -201,6 +202,16 @@ export class CodexAdapter extends BaseAdapter {
   }
 
   /**
+   * List available models for the Codex provider.
+   *
+   * Returns the hardcoded capability list. Codex SDK does not
+   * provide a runtime model discovery API.
+   */
+  async listModels(): Promise<Array<{ id: string; name: string }>> {
+    return this.capabilities.supportedModels.map((id) => ({ id, name: id }));
+  }
+
+  /**
    * Create a new Codex session.
    */
   async createSession(config: AgentSessionConfig): Promise<IAgentSession> {
@@ -329,9 +340,18 @@ class CodexSession extends BaseSession {
 
     // Start new thread
     this.thread = this.codex.startThread({
+      model: this.config.model,
       workingDirectory: this.config.workingDirectory ?? this.config.cwd,
       skipGitRepoCheck: this.config.skipGitRepoCheck,
     });
+
+    // temperature and maxOutputTokens are not supported by Codex SDK
+    if (this.config.temperature !== undefined) {
+      this.logger.debug('temperature not supported by Codex SDK, ignoring');
+    }
+    if (this.config.maxOutputTokens !== undefined) {
+      this.logger.debug('maxOutputTokens not supported by Codex SDK, ignoring');
+    }
 
     return this.thread;
   }

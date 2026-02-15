@@ -2,7 +2,7 @@
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Typography } from '../../../components/ui';
+import { SelectionCard, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
 import { OnboardingNav } from '../OnboardingNav';
 
@@ -106,42 +106,23 @@ export function ValuesStep() {
           const isDisabled = !isSelected && selected.length >= MAX_VALUES;
 
           return (
-            <Card
+            <SelectionCard
               key={val.id}
-              variant={isSelected ? 'elevated' : 'outlined'}
-              interactive={!isDisabled}
+              selected={isSelected}
+              rank={isSelected ? rank + 1 : undefined}
+              disabled={isDisabled}
               padding="sm"
-              onClick={() => !isDisabled && toggleValue(val.id)}
-              css={css`
-                opacity: ${isDisabled ? 0.4 : 1};
-                cursor: ${isDisabled ? 'default' : 'pointer'};
-              `}
+              onClick={() => toggleValue(val.id)}
             >
-              <div css={css`display: flex; align-items: flex-start; gap: ${theme.spacing[2]};`}>
-                {isSelected && (
-                  <span css={css`
-                    display: flex; align-items: center; justify-content: center;
-                    width: 20px; height: 20px; border-radius: 50%;
-                    background: ${theme.colors.accent};
-                    color: ${theme.colors.accentForeground};
-                    font-size: ${theme.typography.fontSize.xs};
-                    font-weight: ${theme.typography.fontWeight.semibold};
-                    flex-shrink: 0;
-                    margin-top: 2px;
-                  `}>
-                    {rank + 1}
-                  </span>
-                )}
-                <div>
-                  <Typography.SmallBodyAlt as="span">
-                    {val.name}
-                  </Typography.SmallBodyAlt>
-                  <Typography.Caption as="p" color="hint" css={css`margin-top: 2px;`}>
-                    {val.description}
-                  </Typography.Caption>
-                </div>
+              <div>
+                <Typography.SmallBodyAlt as="span">
+                  {val.name}
+                </Typography.SmallBodyAlt>
+                <Typography.Caption as="p" color="hint" css={css`margin-top: 2px;`}>
+                  {val.description}
+                </Typography.Caption>
               </div>
-            </Card>
+            </SelectionCard>
           );
         })}
       </div>

@@ -1,7 +1,7 @@
 /**
  * Memory Store — data access for memory.db
  *
- * Tables: working_memory, core_self, long_term_memories
+ * Tables: working_memory, core_self, long_term_memories, observations
  */
 
 import type Database from 'better-sqlite3';
@@ -12,6 +12,8 @@ import type {
   LongTermMemory,
   MemoryType,
   MemorySourceType,
+  Observation,
+  StreamType,
 } from '@animus/shared';
 import { snakeToCamel } from '../utils.js';
 
@@ -190,4 +192,135 @@ export function pruneDecayedMemories(
     )
     .run(importanceThreshold);
   return result.changes;
+}
+
+// ============================================================================
+// Observations (observational memory)
+// ============================================================================
+
+/**
+ * Get observation for a stream. For messages, provide contactId.
+ * For thoughts/experiences (global), contactId is omitted or null.
+ */
+export function getObservation(
+  db: Database.Database,
+  stream: StreamType,
+  contactId?: string | null
+): Observation | null {
+  const row = contactId
+    ? db
+        .prepare('SELECT * FROM observations WHERE stream = ? AND contact_id = ?')
+        .get(stream, contactId) as Record<string, unknown> | undefined
+    : db
+        .prepare('SELECT * FROM observations WHERE stream = ? AND contact_id IS NULL')
+        .get(stream) as Record<string, unknown> | undefined;
+  return row ? snakeToCamel<Observation>(row) : null;
+}
+
+/**
+ * Upsert observation content, token count, and watermark.
+ * One row per stream per scope (global or per-contact).
+ */
+export function upsertObservation(
+  db: Database.Database,
+  data: {
+    stream: StreamType;
+    contactId?: string | null;
+    content: string;
+    tokenCount: number;
+    lastRawId?: string | null;
+    lastRawTimestamp?: string | null;
+  }
+): Observation {
+  const timestamp = now();
+  const contactId = data.contactId ?? null;
+  const existing = getObservation(db, data.stream, contactId);
+
+  if (existing) {
+    db.prepare(
+      `UPDATE observations SET content = ?, token_count = ?, last_raw_id = ?, last_raw_timestamp = ?, updated_at = ? WHERE id = ?`
+    ).run(
+      data.content,
+      data.tokenCount,
+      data.lastRawId ?? null,
+      data.lastRawTimestamp ?? null,
+      timestamp,
+      existing.id
+    );
+    return getObservation(db, data.stream, contactId)!;
+  }
+
+  const id = generateUUID();
+  db.prepare(
+    `INSERT INTO observations (id, contact_id, stream, content, token_count, generation, last_raw_id, last_raw_timestamp, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
+  ).run(
+    id,
+    contactId,
+    data.stream,
+    data.content,
+    data.tokenCount,
+    data.lastRawId ?? null,
+    data.lastRawTimestamp ?? null,
+    timestamp,
+    timestamp
+  );
+  return getObservation(db, data.stream, contactId)!;
+}
+
+/**
+ * Update observation content and token count (for reflection).
+ * Increments the generation counter.
+ */
+export function updateObservationContent(
+  db: Database.Database,
+  id: string,
+  content: string,
+  tokenCount: number,
+  generation: number
+): void {
+  db.prepare(
+    `UPDATE observations SET content = ?, token_count = ?, generation = ?, updated_at = ? WHERE id = ?`
+  ).run(content, tokenCount, generation, now(), id);
+}
+
+/**
+ * Delete observations. If contactId provided, deletes only that contact's observations.
+ * If omitted, deletes all observations (for full reset).
+ */
+export function deleteObservations(
+  db: Database.Database,
+  contactId?: string | null
+): number {
+  if (contactId !== undefined && contactId !== null) {
+    const result = db
+      .prepare('DELETE FROM observations WHERE contact_id = ?')
+      .run(contactId);
+    return result.changes;
+  }
+  const result = db.prepare('DELETE FROM observations').run();
+  return result.changes;
+}
+
+/**
+ * Get all observations for a contact (messages stream).
+ */
+export function getContactObservations(
+  db: Database.Database,
+  contactId: string
+): Observation[] {
+  const rows = db
+    .prepare('SELECT * FROM observations WHERE contact_id = ? ORDER BY updated_at DESC')
+    .all(contactId) as Array<Record<string, unknown>>;
+  return rows.map((row) => snakeToCamel<Observation>(row));
+}
+
+/**
+ * Get global observations (thoughts + experiences streams, contact_id IS NULL).
+ */
+export function getGlobalObservations(db: Database.Database): Observation[] {
+  const rows = db
+    .prepare('SELECT * FROM observations WHERE contact_id IS NULL ORDER BY stream ASC')
+    .all() as Array<Record<string, unknown>>;
+  return rows.map((row) => snakeToCamel<Observation>(row));
 }

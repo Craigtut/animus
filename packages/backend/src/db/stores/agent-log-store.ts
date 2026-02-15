@@ -308,6 +308,138 @@ export function getLastColdSystemPrompt(
 }
 
 // ============================================================================
+// Timeline (for Agent Timeline feature)
+// ============================================================================
+
+export interface TimelineEvent {
+  id: string;
+  sessionId: string;
+  eventType: AgentEventType;
+  data: Record<string, unknown>;
+  createdAt: string;
+  relativeMs: number;
+}
+
+/**
+ * Get all events for a specific tick, ordered chronologically with relativeMs
+ * computed from the earliest SDK event (not tick_input).
+ *
+ * tick_input is logged AFTER mindQuery returns, so SDK events (thinking, tool calls,
+ * response) have earlier timestamps. We use timestamp-based windowing:
+ * - Lower bound: previous tick_output for this session (or epoch for first tick)
+ * - Upper bound: this tick's tick_output (or no upper bound if in progress)
+ *
+ * tick_input is pinned first, tick_output is pinned last.
+ * response_chunk events are excluded (too noisy).
+ */
+export function getTimelineForTick(
+  db: Database.Database,
+  tickNumber: number
+): TimelineEvent[] | null {
+  // 1. Find the tick_input event for this tick number
+  const tickInputRow = db
+    .prepare(
+      `SELECT * FROM agent_events
+       WHERE event_type = 'tick_input'
+         AND JSON_EXTRACT(data, '$.tickNumber') = ?
+       ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(tickNumber) as Record<string, unknown> | undefined;
+
+  if (!tickInputRow) return null;
+
+  const tickInput = snakeToCamel<AgentEvent>(tickInputRow);
+  const sessionId = tickInput.sessionId;
+
+  // 2. Find previous tick_output for this session (lower time bound)
+  const prevOutputRow = db
+    .prepare(
+      `SELECT created_at FROM agent_events
+       WHERE session_id = ?
+         AND event_type = 'tick_output'
+         AND created_at < ?
+       ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(sessionId, tickInput.createdAt) as { created_at: string } | undefined;
+
+  const lowerBound = prevOutputRow?.created_at ?? '1970-01-01T00:00:00.000Z';
+
+  // 3. Find this tick's tick_output (upper time bound)
+  const tickOutputRow = db
+    .prepare(
+      `SELECT * FROM agent_events
+       WHERE event_type = 'tick_output'
+         AND session_id = ?
+         AND JSON_EXTRACT(data, '$.tickNumber') = ?
+       ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(sessionId, tickNumber) as Record<string, unknown> | undefined;
+
+  // 4. Query all events in the window, excluding response_chunk
+  let rows: Array<Record<string, unknown>>;
+  if (tickOutputRow) {
+    const tickOutput = snakeToCamel<AgentEvent>(tickOutputRow);
+    rows = db
+      .prepare(
+        `SELECT * FROM agent_events
+         WHERE session_id = ?
+           AND event_type != 'response_chunk'
+           AND created_at > ?
+           AND created_at <= ?
+         ORDER BY created_at`
+      )
+      .all(sessionId, lowerBound, tickOutput.createdAt) as Array<Record<string, unknown>>;
+  } else {
+    // In-progress tick: no upper bound
+    rows = db
+      .prepare(
+        `SELECT * FROM agent_events
+         WHERE session_id = ?
+           AND event_type != 'response_chunk'
+           AND created_at > ?
+         ORDER BY created_at`
+      )
+      .all(sessionId, lowerBound) as Array<Record<string, unknown>>;
+  }
+
+  // 5. Parse all events
+  const events = rows.map((row) => {
+    const e = snakeToCamel<AgentEvent>(row);
+    return {
+      ...e,
+      data: typeof e.data === 'string' ? JSON.parse(e.data) : e.data,
+    };
+  });
+
+  // 6. Find the earliest SDK event timestamp (not tick_input or tick_output)
+  const sdkEvents = events.filter(
+    (e) => e.eventType !== 'tick_input' && e.eventType !== 'tick_output'
+  );
+  const baseTime = sdkEvents.length > 0
+    ? new Date(sdkEvents[0]!.createdAt).getTime()
+    : new Date(tickInput.createdAt).getTime();
+
+  // 7. Re-order: tick_input first, tick_output last, everything else by timestamp
+  const tickInputEvents = events.filter((e) => e.eventType === 'tick_input');
+  const tickOutputEvents = events.filter((e) => e.eventType === 'tick_output');
+  const middleEvents = events.filter(
+    (e) => e.eventType !== 'tick_input' && e.eventType !== 'tick_output'
+  );
+
+  const ordered = [...tickInputEvents, ...middleEvents, ...tickOutputEvents];
+
+  // 8. Compute relativeMs
+  return ordered.map((e) => ({
+    id: e.id,
+    sessionId: e.sessionId,
+    eventType: e.eventType,
+    data: e.data as Record<string, unknown>,
+    createdAt: e.createdAt,
+    relativeMs: Math.max(0, new Date(e.createdAt).getTime() - baseTime),
+  }));
+}
+
+// ============================================================================
 // Cleanup
 // ============================================================================
 

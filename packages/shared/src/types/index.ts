@@ -99,6 +99,15 @@ import type {
   DecisionTypeSchema,
   TriggerDefinitionSchema,
   PluginMcpServerSchema,
+  // Observational Memory
+  streamTypeSchema,
+  observationSchema,
+  observationStartedEventSchema,
+  observationCompletedEventSchema,
+  observationFailedEventSchema,
+  reflectionStartedEventSchema,
+  reflectionCompletedEventSchema,
+  reflectionFailedEventSchema,
 } from '../schemas/index.js';
 
 // ============================================================================
@@ -244,6 +253,19 @@ export type HookDefinition = z.infer<typeof HookDefinitionSchema>;
 export type DecisionTypeDefinition = z.infer<typeof DecisionTypeSchema>;
 export type TriggerDefinition = z.infer<typeof TriggerDefinitionSchema>;
 export type PluginMcpServer = z.infer<typeof PluginMcpServerSchema>;
+
+// ============================================================================
+// Observational Memory (memory.db)
+// ============================================================================
+
+export type StreamType = z.infer<typeof streamTypeSchema>;
+export type Observation = z.infer<typeof observationSchema>;
+export type ObservationStartedEvent = z.infer<typeof observationStartedEventSchema>;
+export type ObservationCompletedEvent = z.infer<typeof observationCompletedEventSchema>;
+export type ObservationFailedEvent = z.infer<typeof observationFailedEventSchema>;
+export type ReflectionStartedEvent = z.infer<typeof reflectionStartedEventSchema>;
+export type ReflectionCompletedEvent = z.infer<typeof reflectionCompletedEventSchema>;
+export type ReflectionFailedEvent = z.infer<typeof reflectionFailedEventSchema>;
 
 // ============================================================================
 // Channel Packages

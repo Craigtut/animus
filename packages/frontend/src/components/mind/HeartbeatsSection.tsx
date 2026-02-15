@@ -1,16 +1,13 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
 import { useState, useMemo } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, CaretDown, CaretRight } from '@phosphor-icons/react';
 import { trpc } from '../../utils/trpc';
+import { useHeartbeatStore } from '../../store/heartbeat-store';
 import { Typography } from '../ui';
-
-// ============================================================================
-// Types
-// ============================================================================
-
-type ViewMode = 'list' | 'detail';
+import { AgentTimeline } from './AgentTimeline';
 
 // ============================================================================
 // Trigger badge colors
@@ -145,9 +142,18 @@ function TickList({ onSelect }: { onSelect: (tickNumber: number) => void }) {
     { retry: false },
   );
 
+  const heartbeatState = useHeartbeatStore((s) => s.heartbeatState);
+
   const ticks = data?.ticks ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / limit);
+
+  // Show a live entry when a tick is in progress but not yet in the DB
+  const showLiveEntry = useMemo(() => {
+    if (!heartbeatState || heartbeatState.currentStage === 'idle') return false;
+    // Don't show if the current tick is already in the loaded DB ticks
+    return !ticks.some((t) => t.tickNumber === heartbeatState.tickNumber);
+  }, [heartbeatState, ticks]);
 
   if (isLoading) {
     return (
@@ -157,7 +163,7 @@ function TickList({ onSelect }: { onSelect: (tickNumber: number) => void }) {
     );
   }
 
-  if (ticks.length === 0) {
+  if (ticks.length === 0 && !showLiveEntry) {
     return (
       <Typography.Body serif italic color="hint" css={css`text-align: center; padding: 4rem 0;`}>
         No heartbeat ticks recorded yet. Start the heartbeat and trigger a tick.
@@ -168,6 +174,77 @@ function TickList({ onSelect }: { onSelect: (tickNumber: number) => void }) {
   return (
     <div>
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+        {/* Live entry for in-progress tick */}
+        {showLiveEntry && heartbeatState && (
+          <motion.button
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={() => onSelect(heartbeatState.tickNumber)}
+            css={css`
+              display: flex;
+              align-items: center;
+              gap: ${theme.spacing[3]};
+              padding: ${theme.spacing[2]} ${theme.spacing[3]};
+              border-radius: ${theme.borderRadius.md};
+              cursor: pointer;
+              text-align: left;
+              transition: background ${theme.transitions.micro};
+              background: ${theme.mode === 'light'
+                ? 'rgba(0, 0, 0, 0.02)'
+                : 'rgba(255, 255, 255, 0.02)'};
+
+              &:hover {
+                background: ${theme.mode === 'light'
+                  ? 'rgba(0, 0, 0, 0.04)'
+                  : 'rgba(255, 255, 255, 0.05)'};
+              }
+            `}
+          >
+            {/* Pulsing indicator */}
+            <motion.div
+              animate={{ opacity: [0.4, 1, 0.4] }}
+              transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+              css={css`
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+                background: ${theme.colors.accent};
+                flex-shrink: 0;
+              `}
+            />
+
+            {/* Tick number */}
+            <Typography.Caption
+              color="hint"
+              css={css`
+                font-family: ${theme.typography.fontFamily.mono};
+                min-width: 40px;
+                text-align: right;
+              `}
+            >
+              #{heartbeatState.tickNumber}
+            </Typography.Caption>
+
+            {/* Trigger badge */}
+            {heartbeatState.triggerType && (
+              <Badge label={heartbeatState.triggerType} color={triggerColor(heartbeatState.triggerType, theme)} />
+            )}
+
+            {/* In Progress label */}
+            <Typography.SmallBody
+              color="secondary"
+              css={css`
+                flex: 1;
+                min-width: 0;
+                font-style: italic;
+              `}
+            >
+              In Progress — {heartbeatState.currentStage}
+            </Typography.SmallBody>
+          </motion.button>
+        )}
+
         {ticks.map((tick) => (
           <button
             key={tick.tickNumber}
@@ -585,17 +662,27 @@ function BackButton({ onBack }: { onBack: () => void }) {
 // ============================================================================
 
 export function HeartbeatsSection() {
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const [selectedTick, setSelectedTick] = useState<number | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Derive view mode and selected tick from URL
+  const { viewMode, selectedTick } = useMemo(() => {
+    const subPath = location.pathname.replace('/mind/heartbeats', '').replace(/^\//, '');
+    if (subPath) {
+      const tickNum = parseInt(subPath, 10);
+      if (!isNaN(tickNum) && tickNum > 0) {
+        return { viewMode: 'detail' as const, selectedTick: tickNum };
+      }
+    }
+    return { viewMode: 'list' as const, selectedTick: null };
+  }, [location.pathname]);
 
   const handleSelect = (tickNumber: number) => {
-    setSelectedTick(tickNumber);
-    setViewMode('detail');
+    navigate(`/mind/heartbeats/${tickNumber}`);
   };
 
   const handleBack = () => {
-    setViewMode('list');
-    setSelectedTick(null);
+    navigate('/mind/heartbeats');
   };
 
   return (
@@ -618,7 +705,7 @@ export function HeartbeatsSection() {
           exit={{ opacity: 0, x: -12 }}
           transition={{ duration: 0.15 }}
         >
-          <TickDetail tickNumber={selectedTick} onBack={handleBack} />
+          <AgentTimeline tickNumber={selectedTick} onBack={handleBack} />
         </motion.div>
       ) : null}
     </AnimatePresence>

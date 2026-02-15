@@ -20,7 +20,10 @@ vi.mock('../../src/services/plugin-manager.js', () => {
     enable: vi.fn(),
     disable: vi.fn(),
     getPluginConfig: vi.fn(),
+    getPluginConfigMasked: vi.fn(),
+    getPluginConfigSchema: vi.fn().mockReturnValue(null),
     setPluginConfig: vi.fn(),
+    hasRequiredConfig: vi.fn().mockReturnValue(true),
   };
   return {
     getPluginManager: () => mockManager,
@@ -38,7 +41,10 @@ type PluginManagerModule = typeof import('../../src/services/plugin-manager.js')
     enable: ReturnType<typeof vi.fn>;
     disable: ReturnType<typeof vi.fn>;
     getPluginConfig: ReturnType<typeof vi.fn>;
+    getPluginConfigMasked: ReturnType<typeof vi.fn>;
+    getPluginConfigSchema: ReturnType<typeof vi.fn>;
     setPluginConfig: ReturnType<typeof vi.fn>;
+    hasRequiredConfig: ReturnType<typeof vi.fn>;
   };
 };
 
@@ -78,6 +84,7 @@ function getUnauthCaller() {
 
 const sampleManifest = {
   name: 'test-plugin',
+  displayName: 'Test Plugin',
   version: '1.0.0',
   description: 'A test plugin',
   author: { name: 'Test Author' },
@@ -275,12 +282,13 @@ describe('plugins router', () => {
   describe('getConfig', () => {
     it('should return config from plugin manager', async () => {
       mockManager.getPlugin.mockReturnValue(sampleLoaded);
-      mockManager.getPluginConfig.mockReturnValue({ apiKey: '***', region: 'us-east-1' });
+      mockManager.getPluginConfigMasked.mockReturnValue({ apiKey: '••••••••', region: 'us-east-1' });
+      mockManager.getPluginConfigSchema.mockReturnValue(null);
 
       const caller = getAuthedCaller();
       const result = await caller.plugins.getConfig({ name: 'test-plugin' });
 
-      expect(result).toEqual({ apiKey: '***', region: 'us-east-1' });
+      expect(result).toEqual({ values: { apiKey: '••••••••', region: 'us-east-1' }, schema: null });
     });
 
     it('should throw NOT_FOUND when plugin does not exist', async () => {

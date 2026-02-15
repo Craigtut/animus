@@ -22,15 +22,12 @@ const envSchema = z.object({
   DB_AGENT_LOGS_PATH: z.string().default('./data/agent_logs.db'),
   LANCEDB_PATH: z.string().default('./data/lancedb'),
 
-  // Heartbeat configuration
-  HEARTBEAT_INTERVAL_MS: z.coerce.number().default(300000), // 5 minutes
-
   // Auth
   JWT_SECRET: z.string().default('change-me-in-production'),
   SESSION_EXPIRY_DAYS: z.coerce.number().default(7),
 
-  // Encryption
-  ANIMUS_ENCRYPTION_KEY: z.string().default(''),
+  // Encryption (required — used to encrypt API keys stored in the database)
+  ANIMUS_ENCRYPTION_KEY: z.string().min(1, 'ANIMUS_ENCRYPTION_KEY is required. Set any secret string to encrypt stored credentials.'),
 
   // Agent API keys (optional, users can configure these)
   ANTHROPIC_API_KEY: z.string().optional(),

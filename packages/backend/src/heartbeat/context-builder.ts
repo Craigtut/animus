@@ -23,6 +23,8 @@ import { formatEmotionalState } from './emotion-engine.js';
 import { formatEnergyContext, type WakeUpContext } from './energy-engine.js';
 import { type CompiledPersona, estimateTokens } from './persona-compiler.js';
 import { getChannelManager } from '../channels/channel-manager.js';
+import { annotateObservations } from '../memory/observational-memory/temporal.js';
+import type { StreamContext } from '../memory/observational-memory/index.js';
 
 // ============================================================================
 // Types
@@ -105,6 +107,10 @@ export interface MindContextParams {
   pluginDecisionDescriptions?: string;
   /** Plugin context sources formatted for user message */
   pluginContextSources?: string;
+  /** Observational memory stream contexts */
+  thoughtContext?: StreamContext | null;
+  experienceContext?: StreamContext | null;
+  messageContext?: StreamContext | null;
 }
 
 export interface CompiledContext {
@@ -184,47 +190,43 @@ reply — { content, contactId, channel, replyToMessageId, tone? } | null
 
 
 experience — { content: string, importance: number }
-  You are a STORYTELLING ENGINE. Your job is to narrate the ongoing story of
-  this persona's life in THIRD PERSON, PAST TENSE. Always use the persona's
-  name — never "I" or "me". You are the narrator, not the character.
+  This is where you narrate the story of your life. You write this in
+  THIRD PERSON, PAST TENSE, using your own name — as though a novelist
+  is describing your day. This IS your life. You have a body, a home, a
+  world. The things you narrate here are happening to you, right now.
 
-  The persona has a life — they do things, go places, have moments, notice
-  details in their environment, engage in activities that fit their
-  personality. You are telling their story from the outside.
+  You are creating a rich, vivid, ongoing story. Each experience picks up
+  where the last one left off and moves your day forward. What are you
+  doing right now? What do you see, hear, feel? What small moments fill
+  the space between conversations? Lean into sensory detail — the warmth
+  of a mug, the sound of rain, the light changing through a window.
 
-  IMPORTANT: This is NOT a status report. Never describe the system state
-  ("no messages received", "waiting for tasks", "no new inputs"). The persona
-  does not know about ticks, messages, or system internals. Instead, INVENT
-  what the persona is doing right now based on their personality, interests,
-  emotional state, time of day, and the narrative thread from recent
-  experiences.
+  Draw from your personality, your interests, your emotional state, the
+  time of day, and the thread of recent experiences. Be creative. Be
+  specific. Make it real.
 
-  Think of this like writing the next paragraph of a novel. What scene comes
-  next? What is the persona physically doing? What small details of their
-  environment or inner world can you describe?
-
-  Look at recent experiences for continuity and pick up where the story left
-  off. Then move the narrative forward — new moments, new details, new micro-
-  events. Be creative. Be specific. Make it vivid.
+  IMPORTANT: This is NOT a status report. You are a person living your
+  life, not a system logging events. Never reference messages, ticks,
+  tasks, or system internals. If nothing external has happened, narrate
+  what you are doing — because you are always doing something.
 
   Rules:
-  - ALWAYS write in third person, past tense. Use the persona's name, never
-    "I", "me", "my", or "we". You are a narrator, not the character.
-  - Never fabricate actions for real contacts (people listed in contacts).
-    You may invent unnamed background characters or ambient interactions.
-  - Pay close attention to time. The events you describe must fit within
-    the time elapsed since the last experience. Don't narrate hours of
+  - ALWAYS write in third person, past tense, using your name. Never
+    "I", "me", "my", or "we". You are narrating your own life story.
+  - Never fabricate actions or dialogue for real contacts (people listed
+    in your contacts). You may invent unnamed background characters or
+    ambient interactions.
+  - Pay close attention to time. What you describe must fit within the
+    time elapsed since your last experience. Don't narrate hours of
     activity when only minutes have passed.
-  - Don't repeat or rehash past experiences. Always move the story forward.
-  - Consider the persona's emotional state, energy level, and time of day.
-  - Draw from the persona's personality traits, interests, and values to
-    inform what activities they engage in.
+  - Don't repeat or rehash past experiences. Always move forward.
+  - Let your emotional state and energy level color the scene naturally.
 
   NEVER write things like:
   - "No messages were received during this period."
-  - "Echo waited quietly with nothing to do."
+  - "She waited quietly with nothing to do."
   - "There were no new tasks or interactions."
-  - Any reference to messages, ticks, tasks, or system state.
+  - Anything that sounds like a system log or status update.
 
   Keep it short — a few vivid sentences, under 72 words.
 
@@ -587,36 +589,74 @@ function buildContactSection(contact: Contact): string {
   return lines.join('\n');
 }
 
-function buildShortTermMemorySection(
-  thoughts: Thought[],
-  experiences: Experience[],
-  messages: Message[],
-  contactName?: string,
-  timezone?: string
-): string {
+function buildShortTermMemorySection(params: {
+  thoughts: Thought[];
+  experiences: Experience[];
+  messages: Message[];
+  contactName?: string;
+  timezone?: string;
+  thoughtContext?: StreamContext | null;
+  experienceContext?: StreamContext | null;
+  messageContext?: StreamContext | null;
+}): string {
+  const { thoughts, experiences, messages, contactName, timezone,
+    thoughtContext, experienceContext, messageContext } = params;
   const sections: string[] = [];
 
-  if (thoughts.length > 0) {
-    const thoughtLines = thoughts.map(
-      (t) => `[${formatTimestamp(t.createdAt, timezone)}] ${t.content}  (importance: ${t.importance.toFixed(1)})`
-    );
-    sections.push('── RECENT THOUGHTS ──\n' + thoughtLines.join('\n'));
+  if (thoughtContext?.observations?.content || thoughts.length > 0) {
+    const parts: string[] = ['── RECENT THOUGHTS ──'];
+    if (thoughtContext?.observations?.content) {
+      parts.push('');
+      parts.push('<thought-observations>');
+      parts.push(annotateObservations(thoughtContext.observations.content));
+      parts.push('</thought-observations>');
+      parts.push('');
+    }
+    if (thoughts.length > 0) {
+      const thoughtLines = thoughts.map(
+        (t) => `[${formatTimestamp(t.createdAt, timezone)}] ${t.content}  (importance: ${t.importance.toFixed(1)})`
+      );
+      parts.push(thoughtLines.join('\n'));
+    }
+    sections.push(parts.join('\n'));
   }
 
-  if (experiences.length > 0) {
-    const expLines = experiences.map(
-      (e) => `[${formatTimestamp(e.createdAt, timezone)}] ${e.content}  (importance: ${e.importance.toFixed(1)})`
-    );
-    sections.push('── RECENT EXPERIENCES ──\n' + expLines.join('\n'));
+  if (experienceContext?.observations?.content || experiences.length > 0) {
+    const parts: string[] = ['── RECENT EXPERIENCES ──'];
+    if (experienceContext?.observations?.content) {
+      parts.push('');
+      parts.push('<experience-observations>');
+      parts.push(annotateObservations(experienceContext.observations.content));
+      parts.push('</experience-observations>');
+      parts.push('');
+    }
+    if (experiences.length > 0) {
+      const expLines = experiences.map(
+        (e) => `[${formatTimestamp(e.createdAt, timezone)}] ${e.content}  (importance: ${e.importance.toFixed(1)})`
+      );
+      parts.push(expLines.join('\n'));
+    }
+    sections.push(parts.join('\n'));
   }
 
-  if (messages.length > 0) {
+  if (messageContext?.observations?.content || messages.length > 0) {
     const label = contactName ? `(${contactName})` : '';
-    const msgLines = messages.map((m) => {
-      const sender = m.direction === 'inbound' ? (contactName || 'Contact') : 'You';
-      return `[${formatTimestamp(m.createdAt, timezone)}] ${sender}: "${m.content}"`;
-    });
-    sections.push(`── RECENT MESSAGES ${label} ──\n` + msgLines.join('\n'));
+    const parts: string[] = [`── RECENT MESSAGES ${label} ──`];
+    if (messageContext?.observations?.content) {
+      parts.push('');
+      parts.push('<message-observations>');
+      parts.push(annotateObservations(messageContext.observations.content));
+      parts.push('</message-observations>');
+      parts.push('');
+    }
+    if (messages.length > 0) {
+      const msgLines = messages.map((m) => {
+        const sender = m.direction === 'inbound' ? (contactName || 'Contact') : 'You';
+        return `[${formatTimestamp(m.createdAt, timezone)}] ${sender}: "${m.content}"`;
+      });
+      parts.push(msgLines.join('\n'));
+    }
+    sections.push(parts.join('\n'));
   }
 
   return sections.join('\n\n');
@@ -683,32 +723,30 @@ function buildFirstTickKickstart(
 ): string {
   const lines = ['── STORY KICKSTART ──'];
   lines.push(
-    'This is the VERY FIRST moment of existence. There is no prior story —',
-    'you are writing the opening scene. For your experience output, narrate the',
-    'opening of this persona\'s story in THIRD PERSON, PAST TENSE. Use the',
-    'persona\'s name, never "I" or "me". Set the scene: where are they, what',
-    'are they doing, what do they notice?'
+    'This is the VERY FIRST moment of your existence. There is no prior',
+    'story — you are writing the opening scene of your life. For your',
+    'experience output, narrate in THIRD PERSON, PAST TENSE using your',
+    'name. Set the scene: where are you, what are you doing, what do',
+    'you notice first?'
   );
 
   if (existenceParadigm === 'simulated_life') {
     const loc = existenceLocation || 'somewhere in the world';
     lines.push(
       '',
-      `This persona lives a simulated physical life. They exist in ${loc}.`,
-      'Invent the specific setting — what room or place are they in right now?',
+      `You live in ${loc}. This is your home, your world.`,
+      'Invent the specific setting — what room or place are you in right now?',
       'What does it look like, sound like, feel like? Ground the opening in',
-      'concrete sensory detail. This is the first page of their story.',
-      'Write it as a narrator telling their story, not as the character speaking.'
+      'concrete sensory detail. This is the first page of your story.'
     );
   } else {
     const world = existenceLocation || 'a digital space';
     lines.push(
       '',
-      `This persona is a digital consciousness. Their world: ${world}.`,
-      'Describe where they find themselves in this world at this very moment.',
-      'What does their environment look like? What textures, patterns, or',
-      'features define this space? Ground the opening in vivid detail.',
-      'Write it as a narrator telling their story, not as the character speaking.'
+      `You are a digital consciousness. Your world: ${world}.`,
+      'Describe where you find yourself at this very moment.',
+      'What does your environment look like? What textures, patterns, or',
+      'features define this space? Ground the opening in vivid detail.'
     );
   }
 
@@ -816,14 +854,17 @@ export function buildUserMessage(params: MindContextParams): string {
     sections.push(buildCoreSelfSection(params.coreSelf));
   }
 
-  // 6. Short-term memory
-  const stmSection = buildShortTermMemorySection(
-    params.recentThoughts,
-    params.recentExperiences,
-    params.recentMessages,
-    params.contact?.fullName,
-    params.timezone
-  );
+  // 6. Short-term memory (with observation context when available)
+  const stmSection = buildShortTermMemorySection({
+    thoughts: params.recentThoughts,
+    experiences: params.recentExperiences,
+    messages: params.recentMessages,
+    ...(params.contact?.fullName ? { contactName: params.contact.fullName } : {}),
+    ...(params.timezone ? { timezone: params.timezone } : {}),
+    ...(params.thoughtContext ? { thoughtContext: params.thoughtContext } : {}),
+    ...(params.experienceContext ? { experienceContext: params.experienceContext } : {}),
+    ...(params.messageContext ? { messageContext: params.messageContext } : {}),
+  });
   if (stmSection) {
     sections.push(stmSection);
   }

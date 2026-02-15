@@ -29,6 +29,7 @@ import {
   TriggerDefinitionSchema,
   PluginMcpServerSchema,
   AgentFrontmatterSchema,
+  configSchemaSchema,
 } from '@animus/shared';
 import type {
   PluginManifest,
@@ -40,6 +41,7 @@ import type {
   TriggerDefinition,
   PluginMcpServer,
   AgentFrontmatter,
+  ConfigSchema,
 } from '@animus/shared';
 import { z } from 'zod';
 
@@ -54,6 +56,8 @@ interface LoadedPlugin {
   absolutePath: string;
   source: PluginSource;
   enabled: boolean;
+  configSchema: ConfigSchema | null;
+  iconSvg: string | null;
   skills: Array<{ name: string; absolutePath: string }>;
   mcpServers: Record<string, PluginMcpServer>;
   contextSources: ContextSource[];
@@ -117,7 +121,7 @@ class PluginManager {
     for (const [pluginPath, manifest, source] of discovered) {
       const existing = dbMap.get(manifest.name);
       if (!existing) {
-        // New plugin — insert into DB
+        // New plugin — insert into DB (enabled by default, may be overridden below after loading config schema)
         pluginStore.insertPlugin(db, {
           name: manifest.name,
           version: manifest.version,
@@ -158,6 +162,8 @@ class PluginManager {
         absolutePath: pluginPath,
         source,
         enabled: record.enabled,
+        configSchema: null,
+        iconSvg: null,
         skills: [],
         mcpServers: {},
         contextSources: [],
@@ -167,14 +173,23 @@ class PluginManager {
         agents: [],
       };
 
+      // Always add to map first (so hasRequiredConfig can look it up)
+      this.plugins.set(manifest.name, loaded);
+
       if (record.enabled) {
         await this.loadComponents(loaded);
-        this.registerHooks(loaded);
-        this.registerDecisionTypes(loaded);
-        enabledCount++;
-      }
 
-      this.plugins.set(manifest.name, loaded);
+        // Verify config — if required fields are missing, disable instead of enabling
+        if (!this.hasRequiredConfig(manifest.name)) {
+          log.warn(`Plugin "${manifest.name}" is missing required configuration — disabling`);
+          loaded.enabled = false;
+          pluginStore.updatePlugin(db, manifest.name, { enabled: false });
+        } else {
+          this.registerHooks(loaded);
+          this.registerDecisionTypes(loaded);
+          enabledCount++;
+        }
+      }
     }
 
     // 4. Deploy skills for active provider
@@ -197,19 +212,13 @@ class PluginManager {
       throw new Error(`Plugin "${manifest.name}" is already installed`);
     }
 
-    pluginStore.insertPlugin(db, {
-      name: manifest.name,
-      version: manifest.version,
-      path: absolutePath,
-      source: source.type,
-      enabled: true,
-    });
-
     const loaded: LoadedPlugin = {
       manifest,
       absolutePath,
       source: source.type,
       enabled: true,
+      configSchema: null,
+      iconSvg: null,
       skills: [],
       mcpServers: {},
       contextSources: [],
@@ -220,16 +229,41 @@ class PluginManager {
     };
 
     await this.loadComponents(loaded);
-    this.registerHooks(loaded);
-    this.registerDecisionTypes(loaded);
+
+    // Check if required config is missing — install as disabled if so
+    const needsConfig = loaded.configSchema &&
+      loaded.configSchema.fields.some(f => f.required);
+
+    if (needsConfig) {
+      loaded.enabled = false;
+      pluginStore.insertPlugin(db, {
+        name: manifest.name,
+        version: manifest.version,
+        path: absolutePath,
+        source: source.type,
+        enabled: false,
+      });
+      log.info(`Installed plugin: ${manifest.name} (disabled — needs configuration)`);
+    } else {
+      pluginStore.insertPlugin(db, {
+        name: manifest.name,
+        version: manifest.version,
+        path: absolutePath,
+        source: source.type,
+        enabled: true,
+      });
+      this.registerHooks(loaded);
+      this.registerDecisionTypes(loaded);
+
+      const settings = systemStore.getSystemSettings(db);
+      await this.deploySkillsForPlugin(loaded, settings.defaultAgentProvider);
+      await this.startTriggersForPlugin(loaded);
+      log.info(`Installed plugin: ${manifest.name}`);
+    }
+
     this.plugins.set(manifest.name, loaded);
 
-    const settings = systemStore.getSystemSettings(db);
-    await this.deploySkillsForPlugin(loaded, settings.defaultAgentProvider);
-    await this.startTriggersForPlugin(loaded);
-
     getEventBus().emit('plugin:changed', { pluginName: manifest.name, action: 'installed' });
-    log.info(`Installed plugin: ${manifest.name}`);
     return manifest;
   }
 
@@ -264,8 +298,15 @@ class PluginManager {
 
     if (loaded.enabled) return;
 
-    loaded.enabled = true;
+    // Load components first so configSchema is available for validation
     await this.loadComponents(loaded);
+
+    // Block enable when required config fields are missing
+    if (!this.hasRequiredConfig(name)) {
+      throw new Error(`Plugin "${name}" is missing required configuration. Configure it before enabling.`);
+    }
+
+    loaded.enabled = true;
     this.registerHooks(loaded);
     this.registerDecisionTypes(loaded);
 
@@ -767,8 +808,39 @@ class PluginManager {
   // Config Management
   // -------------------------------------------------------------------------
 
+  /**
+   * Get plugin config with secret fields masked for frontend display.
+   * Secret values are replaced with '••••••••' — never sent to the client.
+   */
+  getPluginConfigMasked(name: string): Record<string, unknown> | null {
+    const config = this.getDecryptedConfig(name);
+    if (!config) return null;
+
+    const loaded = this.plugins.get(name);
+    if (!loaded?.configSchema) return config;
+
+    const secretKeys = new Set(
+      loaded.configSchema.fields
+        .filter(f => f.type === 'secret')
+        .map(f => f.key),
+    );
+
+    const masked: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(config)) {
+      masked[key] = secretKeys.has(key) && value ? '••••••••' : value;
+    }
+    return masked;
+  }
+
+  /**
+   * Get fully decrypted plugin config (for internal use / handler injection).
+   */
   getPluginConfig(name: string): Record<string, unknown> | null {
     return this.getDecryptedConfig(name);
+  }
+
+  getPluginConfigSchema(name: string): ConfigSchema | null {
+    return this.plugins.get(name)?.configSchema ?? null;
   }
 
   setPluginConfig(name: string, config: Record<string, unknown>): void {
@@ -795,6 +867,23 @@ class PluginManager {
       source: p.source,
       enabled: p.enabled,
     }));
+  }
+
+  /**
+   * Check whether a plugin has all required config fields filled.
+   * Mirrors ChannelManager.hasRequiredConfig().
+   */
+  hasRequiredConfig(name: string): boolean {
+    const loaded = this.plugins.get(name);
+    if (!loaded?.configSchema) return true; // no schema = no requirements
+
+    const requiredFields = loaded.configSchema.fields.filter(f => f.required);
+    if (requiredFields.length === 0) return true;
+
+    const config = this.getDecryptedConfig(name);
+    return !requiredFields.some(f =>
+      !config || config[f.key] === undefined || config[f.key] === '' || config[f.key] === null
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -872,6 +961,21 @@ class PluginManager {
     const { manifest, absolutePath } = loaded;
     const comps = manifest.components;
 
+    // Config schema
+    if (manifest.configSchema) {
+      loaded.configSchema = await this.loadConfigSchema(absolutePath, manifest.configSchema);
+    }
+
+    // Icon
+    if (manifest.icon) {
+      try {
+        const iconPath = path.resolve(absolutePath, manifest.icon);
+        loaded.iconSvg = await fs.readFile(iconPath, 'utf-8');
+      } catch {
+        log.debug(`No icon found for ${manifest.name}`);
+      }
+    }
+
     // Skills
     if (comps.skills) {
       loaded.skills = await this.loadSkills(absolutePath, comps.skills);
@@ -918,6 +1022,21 @@ class PluginManager {
           log.warn(`Failed to cache static content for ${cs.name} (${manifest.name}):`, err);
         }
       }
+    }
+  }
+
+  private async loadConfigSchema(
+    pluginDir: string,
+    schemaPath: string,
+  ): Promise<ConfigSchema | null> {
+    const filePath = path.resolve(pluginDir, schemaPath);
+    try {
+      const raw = await fs.readFile(filePath, 'utf-8');
+      const json = JSON.parse(raw);
+      return configSchemaSchema.parse(json);
+    } catch (err) {
+      log.warn(`Failed to load config schema from ${filePath}:`, err);
+      return null;
     }
   }
 

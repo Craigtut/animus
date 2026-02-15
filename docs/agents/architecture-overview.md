@@ -96,6 +96,7 @@ interface IAgentSession {
 interface IAgentAdapter {
   createSession(config): Promise<IAgentSession>;
   resumeSession(sessionId: string): Promise<IAgentSession>;
+  listModels(): Promise<ModelInfo[]>;  // { id, name }
 }
 ```
 
@@ -642,6 +643,8 @@ interface ModelInfo {
 ```
 
 **Location**: `/packages/agents/src/models.json` (to be populated)
+
+**Runtime discovery**: Each adapter exposes `listModels(): Promise<ModelInfo[]>` (returning `{ id, name }`). Currently returns the hardcoded `capabilities.supportedModels` list for all providers. Claude adapter also captures the actual model in use from the SDK's init message (`resolvedModel`), so session events and responses report the real model instead of "unknown" when `config.model` is not explicitly set.
 
 ### 11. Adapter Capabilities Interface
 **Decision: Runtime-queryable capabilities object.**

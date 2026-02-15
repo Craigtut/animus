@@ -232,6 +232,12 @@ export interface AgentSessionConfig {
   /** Timeout in milliseconds (default: 300000 = 5 minutes) */
   timeoutMs?: number;
 
+  /** Sampling temperature (0-2). Lower = more deterministic. Provider support varies. */
+  temperature?: number;
+
+  /** Maximum output tokens for the response. Provider support varies. */
+  maxOutputTokens?: number;
+
   /** Unified permission configuration */
   permissions?: PermissionConfig;
 
@@ -390,6 +396,20 @@ export interface ErrorData {
 }
 
 // ============================================================================
+// Model Discovery
+// ============================================================================
+
+/**
+ * Information about an available model.
+ */
+export interface ModelInfo {
+  /** Model identifier (e.g. "claude-opus-4-6", "codex-mini-latest") */
+  id: string;
+  /** Human-readable model name */
+  name: string;
+}
+
+// ============================================================================
 // Usage & Cost Tracking
 // ============================================================================
 
@@ -526,6 +546,9 @@ export interface IAgentAdapter {
 
   /** Resume an existing session by ID */
   resumeSession(sessionId: string): Promise<IAgentSession>;
+
+  /** List available models for this provider */
+  listModels(): Promise<ModelInfo[]>;
 }
 
 // ============================================================================

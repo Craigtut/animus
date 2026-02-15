@@ -81,14 +81,15 @@ describe('EncryptionService (unconfigured)', () => {
     }));
   });
 
-  it('falls back to plaintext when key not set', async () => {
+  it('throws on encrypt when key not set', async () => {
     const mod = await import('../../src/lib/encryption-service.js');
     expect(mod.isConfigured()).toBe(false);
+    expect(() => mod.encrypt('my-key')).toThrow('ANIMUS_ENCRYPTION_KEY is not configured');
+  });
 
-    const encrypted = mod.encrypt('my-key');
-    expect(encrypted.startsWith('plain:')).toBe(true);
-
-    const decrypted = mod.decrypt(encrypted);
-    expect(decrypted).toBe('my-key');
+  it('still decrypts legacy plain: format for migration', async () => {
+    const mod = await import('../../src/lib/encryption-service.js');
+    const legacy = `plain:${Buffer.from('my-key').toString('base64')}`;
+    expect(mod.decrypt(legacy)).toBe('my-key');
   });
 });

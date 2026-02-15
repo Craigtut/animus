@@ -8,6 +8,8 @@
  * See docs/architecture/context-builder.md — "Persona Section"
  */
 
+import { estimateTokens } from '@animus/shared';
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -375,11 +377,5 @@ export function compilePersona(config: PersonaConfig): CompiledPersona {
   };
 }
 
-/**
- * Simple token estimation: words * 1.3
- * From docs/architecture/context-builder.md — "Token counting accuracy"
- */
-export function estimateTokens(text: string): number {
-  const words = text.split(/\s+/).filter(Boolean).length;
-  return Math.ceil(words * 1.3);
-}
+// Re-export estimateTokens from shared for backward compatibility
+export { estimateTokens } from '@animus/shared';

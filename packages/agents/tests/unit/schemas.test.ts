@@ -136,6 +136,73 @@ describe('agentSessionConfigSchema', () => {
       }),
     ).toThrow();
   });
+
+  it('accepts valid temperature values', () => {
+    for (const temp of [0, 0.3, 1.0, 2.0]) {
+      const result = agentSessionConfigSchema.parse({
+        provider: 'claude',
+        temperature: temp,
+      });
+      expect(result.temperature).toBe(temp);
+    }
+  });
+
+  it('rejects temperature outside 0-2 range', () => {
+    expect(() =>
+      agentSessionConfigSchema.parse({
+        provider: 'claude',
+        temperature: -0.1,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      agentSessionConfigSchema.parse({
+        provider: 'claude',
+        temperature: 2.1,
+      }),
+    ).toThrow();
+  });
+
+  it('accepts valid maxOutputTokens values', () => {
+    for (const tokens of [100, 4096, 8000]) {
+      const result = agentSessionConfigSchema.parse({
+        provider: 'claude',
+        maxOutputTokens: tokens,
+      });
+      expect(result.maxOutputTokens).toBe(tokens);
+    }
+  });
+
+  it('rejects non-positive or non-integer maxOutputTokens', () => {
+    expect(() =>
+      agentSessionConfigSchema.parse({
+        provider: 'claude',
+        maxOutputTokens: 0,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      agentSessionConfigSchema.parse({
+        provider: 'claude',
+        maxOutputTokens: -100,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      agentSessionConfigSchema.parse({
+        provider: 'claude',
+        maxOutputTokens: 100.5,
+      }),
+    ).toThrow();
+  });
+
+  it('temperature and maxOutputTokens are optional', () => {
+    const result = agentSessionConfigSchema.parse({
+      provider: 'claude',
+    });
+    expect(result.temperature).toBeUndefined();
+    expect(result.maxOutputTokens).toBeUndefined();
+  });
 });
 
 describe('validateConfig', () => {

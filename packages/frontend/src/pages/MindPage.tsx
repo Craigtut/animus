@@ -66,7 +66,7 @@ export function MindPage() {
 
   const activeSection: MindSection = useMemo(() => {
     const path = location.pathname.replace('/mind/', '').replace('/mind', '');
-    const match = sections.find((s) => s.id === path);
+    const match = sections.find((s) => path === s.id || path.startsWith(s.id + '/'));
     return match ? match.id : 'journal';
   }, [location.pathname]);
 

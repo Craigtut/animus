@@ -104,4 +104,14 @@ describe('CodexAdapter', () => {
       await expect(adapter.resumeSession('claude:some-id')).rejects.toThrow();
     });
   });
+
+  describe('listModels', () => {
+    it('returns models from capabilities', async () => {
+      const models = await adapter.listModels();
+      expect(models.length).toBeGreaterThan(0);
+      expect(models[0]).toHaveProperty('id');
+      expect(models[0]).toHaveProperty('name');
+      expect(models.some((m) => m.id.includes('codex'))).toBe(true);
+    });
+  });
 });

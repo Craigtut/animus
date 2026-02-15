@@ -97,6 +97,12 @@ export const baseSessionConfigSchema = z.object({
   /** Timeout in milliseconds (default: 300000 = 5 minutes) */
   timeoutMs: z.number().positive().optional(),
 
+  /** Sampling temperature (0-2) */
+  temperature: z.number().min(0).max(2).optional(),
+
+  /** Maximum output tokens */
+  maxOutputTokens: z.number().positive().int().optional(),
+
   /** Unified permission configuration */
   permissions: permissionConfigSchema.optional(),
 

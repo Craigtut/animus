@@ -24,3 +24,4 @@ export * from './channels.js';
 export * from './mind-output.js';
 export * from './plugin.js';
 export * from './channel-packages.js';
+export * from './observational-memory.js';

@@ -1,0 +1,17 @@
+{
+  "name": "nano-banana-pro",
+  "displayName": "Nano Banana Pro",
+  "version": "1.0.0",
+  "description": "Generate and edit images using Google's Nano Banana Pro (Gemini 3 Pro Image)",
+  "author": { "name": "animus-community" },
+  "license": "MIT",
+  "icon": "./icon.svg",
+  "components": {
+    "skills": "./skills/"
+  },
+  "permissions": {
+    "network": true,
+    "filesystem": "read-write"
+  },
+  "configSchema": "./config.schema.json"
+}

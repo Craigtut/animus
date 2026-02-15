@@ -173,6 +173,18 @@ export function getRecentThoughts(db: Database.Database, limit: number = 20): Th
   return rows.map((row) => snakeToCamel<Thought>(row));
 }
 
+/**
+ * Get all thoughts since a given timestamp (exclusive), newest first.
+ * Used by the observation pipeline to load all unsummarized items
+ * beyond what the fixed-count limit would return.
+ */
+export function getThoughtsSince(db: Database.Database, since: string, limit: number = 2000): Thought[] {
+  const rows = db
+    .prepare('SELECT * FROM thoughts WHERE created_at > ? ORDER BY created_at DESC LIMIT ?')
+    .all(since, limit) as Array<Record<string, unknown>>;
+  return rows.map((row) => snakeToCamel<Thought>(row));
+}
+
 export function getThoughtsPaginated(
   db: Database.Database,
   limit: number = 20,
@@ -224,6 +236,17 @@ export function getRecentExperiences(db: Database.Database, limit: number = 20):
   const rows = db
     .prepare('SELECT * FROM experiences ORDER BY created_at DESC LIMIT ?')
     .all(limit) as Array<Record<string, unknown>>;
+  return rows.map((row) => snakeToCamel<Experience>(row));
+}
+
+/**
+ * Get all experiences since a given timestamp (exclusive), newest first.
+ * Used by the observation pipeline to load all unsummarized items.
+ */
+export function getExperiencesSince(db: Database.Database, since: string, limit: number = 2000): Experience[] {
+  const rows = db
+    .prepare('SELECT * FROM experiences WHERE created_at > ? ORDER BY created_at DESC LIMIT ?')
+    .all(since, limit) as Array<Record<string, unknown>>;
   return rows.map((row) => snakeToCamel<Experience>(row));
 }
 

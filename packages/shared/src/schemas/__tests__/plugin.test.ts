@@ -23,6 +23,7 @@ import {
 function validManifest(overrides: Record<string, unknown> = {}) {
   return {
     name: 'my-plugin',
+    displayName: 'My Plugin',
     version: '1.0.0',
     description: 'A test plugin',
     author: { name: 'Test Author' },
@@ -75,7 +76,7 @@ describe('PluginManifestSchema', () => {
         contacts: true,
         memory: 'read-write',
       },
-      configSchema: { type: 'object' },
+      configSchema: './config.schema.json',
       setup: './setup.js',
       store: {
         categories: ['productivity'],

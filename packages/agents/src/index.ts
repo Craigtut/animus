@@ -93,6 +93,9 @@ export type {
   // Handlers
   AgentEventHandler,
 
+  // Model discovery
+  ModelInfo,
+
   // Interfaces
   IAgentAdapter,
   IAgentSession,

@@ -129,6 +129,7 @@ interface SystemMessage {
   type: 'system';
   subtype: 'init' | string;
   session_id: string;
+  model?: string;
 }
 
 interface AssistantMessage {
@@ -274,6 +275,17 @@ export class ClaudeAdapter extends BaseAdapter {
   }
 
   /**
+   * List available models from the Claude SDK.
+   *
+   * Returns the hardcoded capability list. Runtime discovery via
+   * `supportedModels()` requires an active query, so we cache results
+   * from the first session and update the list when available.
+   */
+  async listModels(): Promise<Array<{ id: string; name: string }>> {
+    return this.capabilities.supportedModels.map((id) => ({ id, name: id }));
+  }
+
+  /**
    * Create a new Claude session.
    */
   async createSession(config: AgentSessionConfig): Promise<IAgentSession> {
@@ -328,6 +340,8 @@ class ClaudeSession extends BaseSession {
   private nativeSessionId: string | null = null;
   private pendingId: string;
   private stderrBuffer: string = '';
+  /** Model resolved from SDK init message (actual model in use) */
+  private resolvedModel: string | null = null;
 
   constructor(sdk: ClaudeSDK, config: AgentSessionConfig, logger: Logger) {
     super(config, logger);
@@ -340,6 +354,13 @@ class ClaudeSession extends BaseSession {
    */
   get id(): string {
     return this.nativeSessionId ? `claude:${this.nativeSessionId}` : this.pendingId;
+  }
+
+  /**
+   * Get the model name, preferring the resolved model from the SDK init message.
+   */
+  private getModelName(): string {
+    return this.resolvedModel ?? this.getModelName();
   }
 
   /**
@@ -406,7 +427,7 @@ class ClaudeSession extends BaseSession {
         usage: this.getUsage(),
         cost: this.getCost() ?? undefined,
         durationMs: Date.now() - startTime,
-        model: this.config.model ?? 'unknown',
+        model: this.getModelName(),
         structuredOutput,
       };
     } catch (error) {
@@ -541,7 +562,7 @@ class ClaudeSession extends BaseSession {
         usage: this.getUsage(),
         cost: this.getCost() ?? undefined,
         durationMs: Date.now() - startTime,
-        model: this.config.model ?? 'unknown',
+        model: this.getModelName(),
         structuredOutput,
       };
     } catch (error) {
@@ -658,6 +679,14 @@ class ClaudeSession extends BaseSession {
         }
       },
     };
+
+    // temperature and maxOutputTokens are not supported by the Claude Agent SDK
+    if (this.config.temperature !== undefined) {
+      this.logger.debug('temperature not supported by Claude Agent SDK, ignoring');
+    }
+    if (this.config.maxOutputTokens !== undefined) {
+      this.logger.debug('maxOutputTokens not supported by Claude Agent SDK, ignoring');
+    }
 
     return options;
   }
@@ -826,12 +855,17 @@ class ClaudeSession extends BaseSession {
     switch (message.type) {
       case 'system':
         if (message.subtype === 'init') {
+          // Capture actual model from SDK init message
+          if (message.model) {
+            this.resolvedModel = message.model;
+          }
+
           // Strip non-serializable fields (e.g. MCP server instances) for logging
           const safeConfig = this.getSafeConfig();
           await this.emit(
             this.createEvent('session_start', {
               provider: 'claude',
-              model: this.config.model ?? 'unknown',
+              model: this.getModelName(),
               config: safeConfig,
             }),
           );
@@ -841,7 +875,7 @@ class ClaudeSession extends BaseSession {
             await this.hooks.onSessionStart({
               sessionId: this.id,
               provider: 'claude',
-              model: this.config.model ?? 'unknown',
+              model: this.getModelName(),
               config: safeConfig,
             });
           }
@@ -903,7 +937,7 @@ class ClaudeSession extends BaseSession {
       inputCostUsd: 0, // Would need pricing data to calculate
       outputCostUsd: 0,
       totalCostUsd: result.total_cost_usd,
-      model: this.config.model ?? 'unknown',
+      model: this.getModelName(),
       provider: 'claude',
     };
   }

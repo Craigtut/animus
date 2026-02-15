@@ -16,7 +16,6 @@ import {
   ChatText,
   DiscordLogo,
   Code,
-  Check,
   Eye,
   EyeSlash,
   Warning,
@@ -38,7 +37,7 @@ import {
   ArrowClockwise,
   Plugs,
 } from '@phosphor-icons/react';
-import { Card, Button, Input, Modal, Badge, Toggle, Slider, Typography, CityAutocomplete, TimezoneSelect } from '../components/ui';
+import { Card, SelectionCard, Button, Input, Modal, Badge, Toggle, Slider, Typography, CityAutocomplete, TimezoneSelect } from '../components/ui';
 import { trpc } from '../utils/trpc';
 import type { Theme } from '../styles/theme';
 
@@ -165,11 +164,10 @@ function CollapsibleSection({
       <AnimatePresence initial={false}>
         {expanded && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            css={css`overflow: hidden;`}
+            initial={{ height: 0, opacity: 0, overflow: 'hidden' as const }}
+            animate={{ height: 'auto', opacity: 1, overflow: 'visible' as const }}
+            exit={{ height: 0, opacity: 0, overflow: 'hidden' as const }}
+            transition={{ duration: 0.2, ease: 'easeOut', overflow: { delay: 0.2 } }}
           >
             {children}
           </motion.div>
@@ -344,30 +342,22 @@ function PersonaSection() {
       <CollapsibleSection title="Existence">
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
           <div css={css`display: flex; gap: ${theme.spacing[3]}; flex-wrap: wrap;`}>
-            <Card
-              variant={existenceParadigm === 'simulated_life' ? 'elevated' : 'outlined'}
-              interactive
+            <SelectionCard
+              selected={existenceParadigm === 'simulated_life'}
               padding="md"
               onClick={() => { setExistenceParadigm('simulated_life'); markDirty(); }}
               css={css`flex: 1; min-width: 200px;`}
             >
-              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                {existenceParadigm === 'simulated_life' && <Check size={16} weight="bold" />}
-                <Typography.BodyAlt as="span">Simulated Life</Typography.BodyAlt>
-              </div>
-            </Card>
-            <Card
-              variant={existenceParadigm === 'digital_consciousness' ? 'elevated' : 'outlined'}
-              interactive
+              <Typography.BodyAlt as="span">Simulated Life</Typography.BodyAlt>
+            </SelectionCard>
+            <SelectionCard
+              selected={existenceParadigm === 'digital_consciousness'}
               padding="md"
               onClick={() => { setExistenceParadigm('digital_consciousness'); markDirty(); }}
               css={css`flex: 1; min-width: 200px;`}
             >
-              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                {existenceParadigm === 'digital_consciousness' && <Check size={16} weight="bold" />}
-                <Typography.BodyAlt as="span">Digital Consciousness</Typography.BodyAlt>
-              </div>
-            </Card>
+              <Typography.BodyAlt as="span">Digital Consciousness</Typography.BodyAlt>
+            </SelectionCard>
           </div>
           {existenceParadigm === 'simulated_life' && (
             <CityAutocomplete
@@ -583,36 +573,23 @@ function PersonaSection() {
               const rank = values.indexOf(val.id);
               const isDisabled = !isSelected && values.length >= 5;
               return (
-                <Card
+                <SelectionCard
                   key={val.id}
-                  variant={isSelected ? 'elevated' : 'outlined'}
-                  interactive={!isDisabled}
+                  selected={isSelected}
+                  rank={isSelected ? rank + 1 : undefined}
+                  disabled={isDisabled}
                   padding="sm"
-                  onClick={() => !isDisabled && toggleValue(val.id)}
-                  css={css`opacity: ${isDisabled ? 0.4 : 1}; cursor: ${isDisabled ? 'default' : 'pointer'};`}
+                  onClick={() => toggleValue(val.id)}
                 >
-                  <div css={css`display: flex; align-items: flex-start; gap: ${theme.spacing[2]};`}>
-                    {isSelected && (
-                      <Typography.Caption as="span" css={css`
-                        display: flex; align-items: center; justify-content: center;
-                        width: 20px; height: 20px; border-radius: 50%;
-                        background: ${theme.colors.accent}; color: ${theme.colors.accentForeground};
-                        font-weight: ${theme.typography.fontWeight.semibold};
-                        flex-shrink: 0; margin-top: 2px;
-                      `}>
-                        {rank + 1}
-                      </Typography.Caption>
-                    )}
-                    <div>
-                      <Typography.SmallBodyAlt as="span">
-                        {val.name}
-                      </Typography.SmallBodyAlt>
-                      <Typography.Caption as="p" color="hint" css={css`margin-top: 2px;`}>
-                        {val.description}
-                      </Typography.Caption>
-                    </div>
+                  <div>
+                    <Typography.SmallBodyAlt as="span">
+                      {val.name}
+                    </Typography.SmallBodyAlt>
+                    <Typography.Caption as="p" color="hint" css={css`margin-top: 2px;`}>
+                      {val.description}
+                    </Typography.Caption>
                   </div>
-                </Card>
+                </SelectionCard>
               );
             })}
           </div>
@@ -2583,23 +2560,19 @@ function GoalsSection() {
 
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
         {modes.map((mode) => (
-          <Card
+          <SelectionCard
             key={mode.id}
-            variant={currentMode === mode.id ? 'elevated' : 'outlined'}
-            interactive
+            selected={currentMode === mode.id}
             padding="md"
             onClick={() => handleSelect(mode.id)}
           >
-            <div css={css`display: flex; align-items: flex-start; gap: ${theme.spacing[3]};`}>
-              {currentMode === mode.id && <Check size={18} weight="bold" css={css`flex-shrink: 0; margin-top: 2px;`} />}
-              <div>
-                <Typography.BodyAlt as="span">{mode.label}</Typography.BodyAlt>
-                <Typography.SmallBody color="secondary" css={css`margin-top: ${theme.spacing[1]};`}>
-                  {mode.description}
-                </Typography.SmallBody>
-              </div>
+            <div>
+              <Typography.BodyAlt as="span">{mode.label}</Typography.BodyAlt>
+              <Typography.SmallBody color="secondary" css={css`margin-top: ${theme.spacing[1]};`}>
+                {mode.description}
+              </Typography.SmallBody>
             </div>
-          </Card>
+          </SelectionCard>
         ))}
       </div>
 
@@ -2631,6 +2604,13 @@ const sourceBadgeConfig: Record<string, { variant: 'default' | 'info' | 'success
   local: { variant: 'info', label: 'local' },
   git: { variant: 'success', label: 'git' },
   npm: { variant: 'warning', label: 'npm' },
+};
+
+// Status → Badge variant mapping for plugins (mirrors channelStatusBadge)
+const pluginStatusBadge: Record<string, { variant: 'default' | 'success' | 'warning'; label: string }> = {
+  disabled: { variant: 'default', label: 'Disabled' },
+  unconfigured: { variant: 'warning', label: 'Needs Configuration' },
+  active: { variant: 'success', label: 'Active' },
 };
 
 function PluginsSection() {
@@ -2803,6 +2783,7 @@ function PluginsSection() {
           {pluginList.map((plugin) => {
             const isExpanded = expandedPlugin === plugin.name;
             const source = sourceBadgeConfig[plugin.source] ?? { variant: 'default' as const, label: plugin.source };
+            const statusInfo = pluginStatusBadge[plugin.status] ?? { variant: 'default' as const, label: plugin.status };
             const componentBadges = Object.entries(plugin.components)
               .filter(([, count]) => (count as number) > 0)
               .map(([key, count]) => {
@@ -2818,11 +2799,28 @@ function PluginsSection() {
                   css={css`display: flex; align-items: flex-start; justify-content: space-between; cursor: pointer;`}
                   onClick={() => setExpandedPlugin(isExpanded ? null : plugin.name)}
                 >
-                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]}; flex: 1; min-width: 0;`}>
+                  <div css={css`display: flex; gap: ${theme.spacing[3]}; flex: 1; min-width: 0;`}>
+                    {plugin.iconSvg && (
+                      <div
+                        css={css`
+                          width: 32px;
+                          height: 32px;
+                          flex-shrink: 0;
+                          color: ${theme.colors.text.secondary};
+                          display: flex;
+                          align-items: center;
+                          justify-content: center;
+                          & svg { width: 100%; height: 100%; }
+                        `}
+                        dangerouslySetInnerHTML={{ __html: plugin.iconSvg }}
+                      />
+                    )}
+                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]}; flex: 1; min-width: 0;`}>
                     <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
-                      <Typography.BodyAlt as="span">{plugin.name}</Typography.BodyAlt>
+                      <Typography.BodyAlt as="span">{plugin.displayName}</Typography.BodyAlt>
                       <Typography.Caption as="span" color="hint">v{plugin.version}</Typography.Caption>
                       <Badge variant={source.variant}>{source.label}</Badge>
+                      <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
                     </div>
                     {plugin.description && (
                       <Typography.SmallBody color="secondary" css={css`
@@ -2852,6 +2850,7 @@ function PluginsSection() {
                         ))}
                       </div>
                     )}
+                    </div>
                   </div>
 
                   <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-shrink: 0; margin-left: ${theme.spacing[3]};`} onClick={(e) => e.stopPropagation()}>
@@ -3284,7 +3283,7 @@ function PluginConfigModal({
   isSaving: boolean;
 }) {
   const theme = useTheme();
-  const { data: currentConfig, isLoading: configLoading } = trpc.plugins.getConfig.useQuery({ name: pluginName });
+  const { data: configData, isLoading: configLoading } = trpc.plugins.getConfig.useQuery({ name: pluginName });
   const { data: detail } = trpc.plugins.get.useQuery({ name: pluginName });
 
   const [configValues, setConfigValues] = useState<Record<string, unknown>>({});
@@ -3292,15 +3291,15 @@ function PluginConfigModal({
   const [jsonError, setJsonError] = useState('');
   const [initialized, setInitialized] = useState(false);
 
-  // Determine if we have a schema or should use raw JSON
-  const configSchema = detail?.manifest?.configSchema;
-  const hasSchema = configSchema && typeof configSchema === 'object' && Object.keys(configSchema).length > 0;
+  // Schema comes from the getConfig response
+  const schema = configData?.schema;
+  const hasSchema = schema && schema.fields.length > 0;
 
   // Initialize values from current config
   useEffect(() => {
     if (initialized) return;
-    if (currentConfig !== undefined) {
-      const cfg = currentConfig ?? {};
+    if (configData !== undefined) {
+      const cfg = configData?.values ?? {};
       if (hasSchema) {
         setConfigValues(cfg as Record<string, unknown>);
       } else {
@@ -3308,7 +3307,7 @@ function PluginConfigModal({
       }
       setInitialized(true);
     }
-  }, [currentConfig, hasSchema, initialized]);
+  }, [configData, hasSchema, initialized]);
 
   const handleSave = () => {
     if (hasSchema) {
@@ -3324,54 +3323,58 @@ function PluginConfigModal({
     }
   };
 
-  // Determine if a config key likely holds a secret
-  const isSecretKey = (key: string) => {
-    const lower = key.toLowerCase();
-    return ['key', 'secret', 'token', 'password', 'credential'].some((s) => lower.includes(s));
+  const displayName = detail?.displayName ?? pluginName;
+
+  // Map config field type to HTML input type
+  const inputTypeForField = (fieldType: string) => {
+    switch (fieldType) {
+      case 'secret': return 'password';
+      case 'url': return 'url';
+      case 'number': return 'number';
+      default: return 'text';
+    }
   };
 
   return (
     <Modal open onClose={onClose}>
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
         <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
-          Configure: {pluginName}
+          Configure: {displayName}
         </Typography.Subtitle>
 
         {configLoading ? (
           <Typography.SmallBody color="hint">Loading configuration...</Typography.SmallBody>
         ) : hasSchema ? (
-          // Schema-based form
+          // Schema-based form using typed fields
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-            {Object.entries(configSchema as Record<string, any>).map(([key, schemaDef]) => {
-              const value = configValues[key];
-              const fieldType = schemaDef?.type ?? (typeof value === 'boolean' ? 'boolean' : 'string');
-              const label = schemaDef?.title ?? schemaDef?.label ?? key;
-              const description = schemaDef?.description;
+            {schema.fields.map((field: any) => {
+              const value = configValues[field.key];
+              const isMasked = field.type === 'secret' && value === '••••••••';
 
-              if (fieldType === 'boolean') {
+              if (field.type === 'toggle') {
                 return (
-                  <div key={key} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+                  <div key={field.key} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
                     <Toggle
                       checked={!!value}
-                      onChange={(checked) => setConfigValues({ ...configValues, [key]: checked })}
-                      label={label}
+                      onChange={(checked) => setConfigValues({ ...configValues, [field.key]: checked })}
+                      label={field.label}
                     />
-                    {description && (
-                      <Typography.Caption as="p" color="hint">{description}</Typography.Caption>
+                    {field.helpText && (
+                      <Typography.Caption as="p" color="hint">{field.helpText}</Typography.Caption>
                     )}
                   </div>
                 );
               }
 
               return (
-                <div key={key}>
+                <div key={field.key}>
                   <Input
-                    label={label}
-                    type={isSecretKey(key) ? 'password' : 'text'}
-                    value={value != null ? String(value) : ''}
-                    onChange={(e) => setConfigValues({ ...configValues, [key]: (e.target as HTMLInputElement).value })}
-                    helperText={description}
-                    placeholder={schemaDef?.default != null ? String(schemaDef.default) : undefined}
+                    label={field.label}
+                    type={inputTypeForField(field.type)}
+                    value={isMasked ? '' : (value != null ? String(value) : '')}
+                    onChange={(e) => setConfigValues({ ...configValues, [field.key]: (e.target as HTMLInputElement).value })}
+                    helperText={field.helpText}
+                    placeholder={isMasked ? '••••••••  (saved, enter new value to change)' : (field.placeholder ?? (field.default != null ? String(field.default) : undefined))}
                   />
                 </div>
               );

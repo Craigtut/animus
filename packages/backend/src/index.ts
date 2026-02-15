@@ -31,6 +31,10 @@ async function main() {
   log.info('Initializing databases...');
   await initializeDatabases();
 
+  // Verify encryption key matches what was used to encrypt existing data
+  const { verifyEncryptionKey } = await import('./lib/encryption-service.js');
+  verifyEncryptionKey(getSystemDb());
+
   // Load log category settings into logger cache
   const logCategories = systemStore.getLogCategories(getSystemDb());
   updateCategoryCache(logCategories);

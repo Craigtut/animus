@@ -128,6 +128,26 @@ export const messagesRouter = router({
     }),
 
   /**
+   * Get messages for a specific contact with optional channel filter and cursor pagination.
+   */
+  getByContact: protectedProcedure
+    .input(z.object({
+      contactId: z.string().uuid(),
+      limit: z.number().int().positive().max(200).default(50),
+      channel: z.string().min(1).optional(),
+      before: z.string().optional(),
+    }))
+    .query(({ input }) => {
+      const db = getMessagesDb();
+      const opts: { limit?: number; channel?: string; before?: string } = {
+        limit: input.limit,
+      };
+      if (input.channel) opts.channel = input.channel;
+      if (input.before) opts.before = input.before;
+      return messageStore.getMessagesByContact(db, input.contactId, opts);
+    }),
+
+  /**
    * Subscribe to new messages (real-time).
    */
   onMessage: protectedProcedure.subscription(() => {

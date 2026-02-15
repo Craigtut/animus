@@ -24,12 +24,26 @@ export const pluginsRouter = router({
     return plugins.map((p) => {
       const loaded = pm.getPlugin(p.name);
       const comps = p.manifest.components;
+
+      // Compute status dynamically (mirrors channel pattern)
+      let status: 'active' | 'unconfigured' | 'disabled';
+      if (p.enabled) {
+        status = 'active';
+      } else if (!pm.hasRequiredConfig(p.name)) {
+        status = 'unconfigured';
+      } else {
+        status = 'disabled';
+      }
+
       return {
         name: p.name,
+        displayName: p.manifest.displayName,
         version: p.manifest.version,
         description: p.manifest.description,
+        iconSvg: loaded?.iconSvg ?? null,
         source: p.source,
         enabled: p.enabled,
+        status,
         components: {
           skills: loaded?.skills.length ?? 0,
           tools: loaded ? Object.keys(loaded.mcpServers).length : 0,
@@ -39,7 +53,7 @@ export const pluginsRouter = router({
           triggers: loaded?.triggers.length ?? 0,
           agents: loaded?.agents.length ?? 0,
         },
-        hasConfig: comps.tools !== undefined || p.manifest.configSchema !== undefined,
+        hasConfig: comps.tools !== undefined || pm.getPluginConfigSchema(p.name) !== null,
       };
     });
   }),
@@ -61,8 +75,10 @@ export const pluginsRouter = router({
 
       return {
         name: loaded.manifest.name,
+        displayName: loaded.manifest.displayName,
         version: loaded.manifest.version,
         description: loaded.manifest.description,
+        iconSvg: loaded.iconSvg,
         author: loaded.manifest.author,
         license: loaded.manifest.license,
         source: loaded.source,
@@ -158,7 +174,7 @@ export const pluginsRouter = router({
     }),
 
   /**
-   * Get plugin config (decrypted).
+   * Get plugin config (secret fields masked) and config schema for form rendering.
    */
   getConfig: protectedProcedure
     .input(z.object({ name: z.string() }))
@@ -171,7 +187,10 @@ export const pluginsRouter = router({
           message: `Plugin "${input.name}" not found`,
         });
       }
-      return pm.getPluginConfig(input.name);
+      return {
+        values: pm.getPluginConfigMasked(input.name),
+        schema: pm.getPluginConfigSchema(input.name),
+      };
     }),
 
   /**

@@ -17,10 +17,11 @@ import {
   recompilePersona,
 } from '../../heartbeat/index.js';
 import { getEventBus } from '../../lib/event-bus.js';
-import type { HeartbeatState, EmotionState, Thought, Experience, TickDecision, EnergyBand, EnergyHistoryEntry } from '@animus/shared';
+import type { HeartbeatState, EmotionState, Thought, Experience, TickDecision, EnergyBand, EnergyHistoryEntry, AgentEventType } from '@animus/shared';
 import * as systemStore from '../../db/stores/system-store.js';
 import { getSystemDb } from '../../db/index.js';
 import { getEnergyBand, computeCircadianBaseline } from '../../heartbeat/energy-engine.js';
+import { snakeToCamel } from '../../db/utils.js';
 
 export const heartbeatRouter = router({
   /**
@@ -548,6 +549,22 @@ export const heartbeatRouter = router({
     }),
 
   /**
+   * Subscribe to tick input stored events (fires early, before LLM prompting).
+   */
+  onTickInputStored: protectedProcedure.subscription(() => {
+    return observable<{ tickNumber: number; triggerType: string; sessionState: string }>((emit) => {
+      const eventBus = getEventBus();
+      const handler = (data: { tickNumber: number; triggerType: string; sessionState: string }) => {
+        emit.next(data);
+      };
+      eventBus.on('tick:input_stored', handler);
+      return () => {
+        eventBus.off('tick:input_stored', handler);
+      };
+    });
+  }),
+
+  /**
    * Subscribe to tick context stored events (real-time).
    */
   onTickStored: protectedProcedure.subscription(() => {
@@ -567,6 +584,111 @@ export const heartbeatRouter = router({
       eventBus.on('tick:context_stored', handler);
       return () => {
         eventBus.off('tick:context_stored', handler);
+      };
+    });
+  }),
+
+  // ========================================================================
+  // Agent Timeline
+  // ========================================================================
+
+  /**
+   * Get full timeline for a specific tick: events, results, and usage.
+   */
+  getTickTimeline: protectedProcedure
+    .input(z.object({ tickNumber: z.number().int().positive() }))
+    .query(({ input }) => {
+      const agentLogsDb = getAgentLogsDb();
+      const hbDb = getHeartbeatDb();
+      const { tickNumber } = input;
+
+      // Get timeline events from agent_logs.db
+      const events = agentLogStore.getTimelineForTick(agentLogsDb, tickNumber);
+      if (!events) return null;
+
+      // Extract triggerType and sessionState from tick_input event data
+      const tickInputEvent = events.find((e) => e.eventType === 'tick_input');
+      const tickInputData = tickInputEvent?.data as Record<string, unknown> | undefined;
+      const triggerType = (tickInputData?.triggerType as string) ?? 'unknown';
+      const sessionState = (tickInputData?.sessionState as string) ?? 'unknown';
+      const sessionId = tickInputEvent?.sessionId ?? '';
+
+      // Check if tick is complete (has tick_output)
+      const tickOutputEvent = events.find((e) => e.eventType === 'tick_output');
+      const isComplete = !!tickOutputEvent;
+      const tickOutputData = tickOutputEvent?.data as Record<string, unknown> | undefined;
+      const durationMs = (tickOutputData?.durationMs as number) ?? null;
+
+      // Get tick results from heartbeat.db
+      const thoughts = (hbDb
+        .prepare('SELECT * FROM thoughts WHERE tick_number = ? ORDER BY created_at')
+        .all(tickNumber) as Array<Record<string, unknown>>)
+        .map((row) => snakeToCamel<Thought>(row));
+
+      const experiences = (hbDb
+        .prepare('SELECT * FROM experiences WHERE tick_number = ? ORDER BY created_at')
+        .all(tickNumber) as Array<Record<string, unknown>>)
+        .map((row) => snakeToCamel<Experience>(row));
+
+      const emotionHistory = (hbDb
+        .prepare('SELECT * FROM emotion_history WHERE tick_number = ? ORDER BY created_at')
+        .all(tickNumber) as Array<Record<string, unknown>>)
+        .map((row) => snakeToCamel<Record<string, unknown>>(row));
+
+      const decisions = heartbeatStore.getTickDecisions(hbDb, tickNumber);
+
+      // Get usage from agent_usage for this session
+      let usage = null;
+      if (sessionId) {
+        const usages = agentLogStore.getSessionUsage(agentLogsDb, sessionId);
+        if (usages.length > 0) {
+          usage = usages[usages.length - 1]!;
+        }
+      }
+
+      return {
+        tickNumber,
+        sessionId,
+        triggerType,
+        sessionState,
+        isComplete,
+        durationMs,
+        createdAt: tickInputEvent?.createdAt ?? '',
+        events,
+        results: {
+          thoughts,
+          experiences,
+          emotionHistory,
+          decisions,
+        },
+        usage,
+      };
+    }),
+
+  /**
+   * Subscribe to agent events in real-time (for live timeline updates).
+   */
+  onAgentEvent: protectedProcedure.subscription(() => {
+    return observable<{
+      id: string;
+      sessionId: string;
+      eventType: AgentEventType;
+      data: Record<string, unknown>;
+      createdAt: string;
+    }>((emit) => {
+      const eventBus = getEventBus();
+      const handler = (data: {
+        id: string;
+        sessionId: string;
+        eventType: AgentEventType;
+        data: Record<string, unknown>;
+        createdAt: string;
+      }) => {
+        emit.next(data);
+      };
+      eventBus.on('agent:event:logged', handler);
+      return () => {
+        eventBus.off('agent:event:logged', handler);
       };
     });
   }),

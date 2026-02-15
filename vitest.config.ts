@@ -5,6 +5,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    env: {
+      ANIMUS_ENCRYPTION_KEY: 'test-encryption-key-not-for-production',
+    },
     include: ['packages/*/tests/**/*.test.ts', 'packages/*/src/**/*.test.ts'],
     exclude: ['node_modules', 'dist'],
     coverage: {

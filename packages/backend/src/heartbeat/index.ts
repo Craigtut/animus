@@ -12,9 +12,10 @@ import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import * as agentLogStore from '../db/stores/agent-log-store.js';
 import * as systemStore from '../db/stores/system-store.js';
 import * as messageStore from '../db/stores/message-store.js';
+import * as memoryDbStore from '../db/stores/memory-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
-import { PROJECT_ROOT } from '../utils/env.js';
+import { env, PROJECT_ROOT } from '../utils/env.js';
 import { DecayEngine, expiresIn, now, clamp } from '@animus/shared';
 import { mindOutputSchema } from '@animus/shared';
 import type {
@@ -27,6 +28,8 @@ import type {
 
 import { MemoryManager, buildMemoryContext, LocalEmbeddingProvider, VectorStore } from '../memory/index.js';
 import type { MemoryContext } from '../memory/index.js';
+import { loadStreamContext, processAllStreams, type StreamContext } from '../memory/observational-memory/index.js';
+import { OBSERVATIONAL_MEMORY_CONFIG } from '../config/observational-memory.config.js';
 import { SeedManager, GoalManager, buildGoalContext } from '../goals/index.js';
 import type { GoalContext } from '../goals/index.js';
 
@@ -182,6 +185,10 @@ interface GatherResult {
   energySystemEnabled: boolean;
   pluginDecisionDescriptions: string;
   pluginContextSources: string;
+  /** Observational memory stream contexts (observation + raw items per stream) */
+  thoughtContext: StreamContext;
+  experienceContext: StreamContext;
+  messageContext: StreamContext | null;
 }
 
 async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
@@ -257,13 +264,48 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
   const rawEmotions = heartbeatStore.getEmotionStates(hbDb);
   const emotions = applyDecay(rawEmotions, Date.now(), emotionDecayMultiplier);
 
-  // Load recent thoughts & experiences (last 10)
-  const recentThoughts = heartbeatStore.getRecentThoughts(hbDb, 10);
-  const recentExperiences = heartbeatStore.getRecentExperiences(hbDb, 10);
+  // Load recent thoughts & experiences with observation context.
+  // We load items since the observation watermark so the observation pipeline
+  // sees ALL unsummarized items (not just the most recent 50). Without this,
+  // items from previous days would never be observed and compressed.
+  const memDb = getMemoryDb();
+
+  const thoughtWatermark = memoryDbStore.getObservation(memDb, 'thoughts', null)?.lastRawTimestamp;
+  const experienceWatermark = memoryDbStore.getObservation(memDb, 'experiences', null)?.lastRawTimestamp;
+
+  const allRecentThoughts = thoughtWatermark
+    ? heartbeatStore.getThoughtsSince(hbDb, thoughtWatermark)
+    : heartbeatStore.getRecentThoughts(hbDb, 500);
+  const allRecentExperiences = experienceWatermark
+    ? heartbeatStore.getExperiencesSince(hbDb, experienceWatermark)
+    : heartbeatStore.getRecentExperiences(hbDb, 500);
+
+  const thoughtContext = loadStreamContext({
+    stream: 'thoughts',
+    contactId: null,
+    memoryDb: memDb,
+    rawItems: allRecentThoughts.map(t => ({ id: t.id, content: t.content, createdAt: t.createdAt })),
+    rawTokenBudget: OBSERVATIONAL_MEMORY_CONFIG.streams.thoughts.rawTokens,
+  });
+
+  const experienceContext = loadStreamContext({
+    stream: 'experiences',
+    contactId: null,
+    memoryDb: memDb,
+    rawItems: allRecentExperiences.map(e => ({ id: e.id, content: e.content, createdAt: e.createdAt })),
+    rawTokenBudget: OBSERVATIONAL_MEMORY_CONFIG.streams.experiences.rawTokens,
+  });
+
+  // Map back to full typed arrays for downstream compatibility
+  const thoughtIds = new Set(thoughtContext.rawItems.map(r => r.id));
+  const recentThoughts = allRecentThoughts.filter(t => thoughtIds.has(t.id));
+  const experienceIds = new Set(experienceContext.rawItems.map(r => r.id));
+  const recentExperiences = allRecentExperiences.filter(e => experienceIds.has(e.id));
 
   // Load recent messages for the triggering contact
   let recentMessages: ReturnType<typeof messageStore.getRecentMessages> = [];
   let contact: Contact | null = null;
+  let messageContext: StreamContext | null = null;
 
   if (trigger.type === 'message' && trigger.contactId) {
     contact = systemStore.getContact(sysDb, trigger.contactId);
@@ -273,7 +315,19 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
       msgDb, trigger.contactId, channel
     );
     if (conv) {
-      recentMessages = messageStore.getRecentMessages(msgDb, conv.id, 10);
+      const messageWatermark = memoryDbStore.getObservation(memDb, 'messages', trigger.contactId)?.lastRawTimestamp;
+      const allRecentMessages = messageWatermark
+        ? messageStore.getMessagesSince(msgDb, conv.id, messageWatermark)
+        : messageStore.getRecentMessages(msgDb, conv.id, 500);
+      messageContext = loadStreamContext({
+        stream: 'messages',
+        contactId: trigger.contactId,
+        memoryDb: memDb,
+        rawItems: allRecentMessages.map(m => ({ id: m.id, content: m.content, createdAt: m.createdAt })),
+        rawTokenBudget: OBSERVATIONAL_MEMORY_CONFIG.streams.messages.rawTokens,
+      });
+      const messageIds = new Set(messageContext.rawItems.map(r => r.id));
+      recentMessages = allRecentMessages.filter(m => messageIds.has(m.id));
     }
   }
 
@@ -370,6 +424,9 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
     energySystemEnabled: settings.energySystemEnabled,
     pluginDecisionDescriptions,
     pluginContextSources,
+    thoughtContext,
+    experienceContext,
+    messageContext,
   };
 }
 
@@ -522,7 +579,7 @@ async function getOrCreateMindSession(
     },
     // Attach in-process MCP server for mind tools (Claude only)
     ...(mindMcpServer ? {
-      mcpServers: { animus: mindMcpServer.serverConfig },
+      mcpServers: { tools: mindMcpServer.serverConfig },
       allowedTools: mindMcpServer.allowedTools,
     } : {}),
   });
@@ -542,6 +599,8 @@ async function getOrCreateMindSession(
 interface MindQueryResult {
   output: MindOutput;
   compiledContext: CompiledContext;
+  replySentEarly: boolean;
+  tickInputLogged: boolean;
 }
 
 /**
@@ -606,12 +665,15 @@ async function mindQuery(
     mindToolsEnabled: !!mindMcpServer,
     ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
     ...(gathered.pluginContextSources ? { pluginContextSources: gathered.pluginContextSources } : {}),
+    thoughtContext: gathered.thoughtContext,
+    experienceContext: gathered.experienceContext,
+    ...(gathered.messageContext ? { messageContext: gathered.messageContext } : {}),
   });
 
   // If no agent manager configured, fall back to safe output
   if (!agentManager || agentManager.getConfiguredProviders().length === 0) {
     log.warn('No agent provider configured, using safe output');
-    return { output: safeMindOutput(gathered), compiledContext: context };
+    return { output: safeMindOutput(gathered), compiledContext: context, replySentEarly: false, tickInputLogged: false };
   }
 
   try {
@@ -627,6 +689,45 @@ async function mindQuery(
 
     const eventBus = getEventBus();
 
+    // Log tick_input BEFORE prompting so the DB entry exists while LLM processes.
+    // This enables getTickTimeline to work for in-progress ticks.
+    let tickInputLogged = false;
+    const logSessionId = mindLogSessionId?.() ?? null;
+    if (logSessionId) {
+      try {
+        const agentLogsDb = getAgentLogsDb();
+        const tickInputEvent = agentLogStore.insertEvent(agentLogsDb, {
+          sessionId: logSessionId,
+          eventType: 'tick_input',
+          data: {
+            tickNumber,
+            triggerType: gathered.trigger.type,
+            triggerContext: gathered.trigger,
+            sessionState: gathered.sessionState,
+            systemPrompt: context.systemPrompt,
+            userMessage: context.userMessage,
+            tokenBreakdown: context.tokenBreakdown,
+          },
+        });
+        eventBus.emit('agent:event:logged', {
+          id: tickInputEvent.id,
+          sessionId: tickInputEvent.sessionId,
+          eventType: tickInputEvent.eventType,
+          data: tickInputEvent.data,
+          createdAt: tickInputEvent.createdAt,
+        });
+        eventBus.emit('tick:input_stored', {
+          tickNumber,
+          triggerType: gathered.trigger.type,
+          sessionState: gathered.sessionState,
+        });
+        tickInputLogged = true;
+        log.info(`tick_input logged early for tick #${tickNumber}`);
+      } catch (err) {
+        log.warn('Failed to log early tick_input event:', err);
+      }
+    }
+
     // Set up streaming: bridge push-based adapter to pull-based AsyncIterable
     const channel = createChunkChannel();
     let fullJson = '';
@@ -634,19 +735,43 @@ async function mindQuery(
     // Create streaming JSON parser to extract reply.content incrementally
     const parser = JsonStream.parse(channel.iterable);
     const replyContentStream = parser.get<string>('reply.content');
+    const replyChannelStream = parser.get<string>('reply.channel');
 
     // Catch the internal promise rejection that fires when reply is null
     // (property path not found). Without this, Node emits an unhandled rejection.
     (replyContentStream as Promise<string>).catch(() => {});
+    (replyChannelStream as Promise<string>).catch(() => {});
 
     // Consume reply chunks in parallel — emits to frontend in real-time
     let replyAccumulated = '';
     let streamingFailed = false;
+    let replySentEarly = false;
     const replyPromise = (async () => {
       try {
         for await (const chunk of replyContentStream) {
           replyAccumulated += chunk;
           eventBus.emit('reply:chunk', { content: chunk, accumulated: replyAccumulated });
+        }
+        // Content finished — await channel (short string, finishes ms after content)
+        if (replyAccumulated && gathered.contact) {
+          try {
+            const replyChannel = await replyChannelStream;
+            if (replyChannel) {
+              const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
+              const { getChannelRouter } = await import('../channels/channel-router.js');
+              const router = getChannelRouter();
+              await router.sendOutbound({
+                contactId: gathered.contact.id,
+                channel: replyChannel,
+                content: replyAccumulated,
+                ...(triggerMetadata ? { metadata: triggerMetadata } : {}),
+              });
+              replySentEarly = true;
+              log.info(`Early reply sent on "${replyChannel}" for tick #${tickNumber}`);
+            }
+          } catch (channelErr) {
+            log.debug('Early reply send skipped:', channelErr);
+          }
         }
       } catch (err) {
         // Parser failure (e.g. reply is null / malformed JSON mid-stream)
@@ -684,7 +809,7 @@ async function mindQuery(
       } catch (parseErr) {
         log.error('Failed to parse MindOutput JSON:', parseErr);
         log.error('Raw output:', fullJson.slice(0, 500));
-        return { output: safeMindOutput(gathered), compiledContext: context };
+        return { output: safeMindOutput(gathered), compiledContext: context, replySentEarly: false, tickInputLogged };
       }
     }
 
@@ -713,9 +838,9 @@ async function mindQuery(
           coreSelfUpdate: (parsed as any)?.coreSelfUpdate ?? null,
           memoryCandidate: Array.isArray((parsed as any)?.memoryCandidate) ? (parsed as any).memoryCandidate : [],
         };
-        return { output: lenient as MindOutput, compiledContext: context };
+        return { output: lenient as MindOutput, compiledContext: context, replySentEarly, tickInputLogged };
       } catch {
-        return { output: safeMindOutput(gathered), compiledContext: context };
+        return { output: safeMindOutput(gathered), compiledContext: context, replySentEarly: false, tickInputLogged };
       }
     }
 
@@ -746,7 +871,7 @@ async function mindQuery(
       });
     }
 
-    return { output: validated, compiledContext: context };
+    return { output: validated, compiledContext: context, replySentEarly, tickInputLogged };
   } catch (err) {
     log.error('Mind query failed:', err);
     mindToolContext.current = null;
@@ -766,7 +891,7 @@ async function mindQuery(
     mindSessionId = null;
     mindLogSessionId = null;
 
-    return { output: safeMindOutput(gathered), compiledContext: context };
+    return { output: safeMindOutput(gathered), compiledContext: context, replySentEarly: false, tickInputLogged: false };
   }
 }
 
@@ -777,7 +902,8 @@ async function mindQuery(
 async function executeOutput(
   output: MindOutput,
   tickNumber: number,
-  gathered: GatherResult
+  gathered: GatherResult,
+  replySentEarly = false
 ): Promise<void> {
   const hbDb = getHeartbeatDb();
   const msgDb = getMessagesDb();
@@ -972,7 +1098,7 @@ async function executeOutput(
   // 5. Handle reply (outside transaction — message goes to messages.db)
   // Per docs: "Channel send failure → log error with full context, do NOT auto-retry.
   // Other EXECUTE operations continue."
-  if (output.reply && output.reply.content && gathered.contact) {
+  if (output.reply && output.reply.content && gathered.contact && !replySentEarly) {
     try {
       const channel = output.reply.channel;
       const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
@@ -1038,7 +1164,33 @@ async function executeOutput(
     }
   }
 
-  // 8. Cleanup expired entries
+  // 8. Observational memory processing (async, non-blocking)
+  // Requires both agentManager and compiledPersona — persona may be null on first boot
+  if (agentManager && compiledPersona) {
+    try {
+      const eventBus = getEventBus();
+      // Fire-and-forget — don't await, don't block next tick
+      processAllStreams({
+        deps: {
+          agentManager,
+          memoryDb: getMemoryDb(),
+          compiledPersona: compiledPersona.compiledText,
+          eventBus,
+        },
+        thoughts: gathered.thoughtContext.allFilteredItems,
+        experiences: gathered.experienceContext.allFilteredItems,
+        messages: gathered.messageContext?.allFilteredItems ?? [],
+        contactId: gathered.contact?.id ?? null,
+        config: OBSERVATIONAL_MEMORY_CONFIG,
+      }).catch(err => {
+        log.warn('Observation processing failed (non-fatal):', err);
+      });
+    } catch (err) {
+      log.warn('Observation processing setup failed (non-fatal):', err);
+    }
+  }
+
+  // 9. Cleanup expired entries
   heartbeatStore.cleanupExpiredEntries(hbDb);
   heartbeatStore.cleanupEnergyHistory(hbDb, settings.emotionHistoryRetentionDays);
 }
@@ -1082,15 +1234,14 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     eventBus.emit('heartbeat:stage_change', { stage: 'mind' });
 
     // Stage 2: MIND QUERY
-    const { output, compiledContext } = await mindQuery(gathered, tickNumber);
+    const { output, compiledContext, replySentEarly, tickInputLogged } = await mindQuery(gathered, tickNumber);
 
-    // Log tick input to agent_logs.db
-    // Use the logging hook's session ID (DB UUID), not the SDK session ID
+    // Log tick input to agent_logs.db (only if mindQuery didn't already log it)
     const logSessionId = mindLogSessionId?.() ?? null;
-    if (logSessionId) {
+    if (logSessionId && !tickInputLogged) {
       try {
         const agentLogsDb = getAgentLogsDb();
-        agentLogStore.insertEvent(agentLogsDb, {
+        const tickInputEvent = agentLogStore.insertEvent(agentLogsDb, {
           sessionId: logSessionId,
           eventType: 'tick_input',
           data: {
@@ -1103,6 +1254,18 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
             tokenBreakdown: compiledContext.tokenBreakdown,
           },
         });
+        eventBus.emit('agent:event:logged', {
+          id: tickInputEvent.id,
+          sessionId: tickInputEvent.sessionId,
+          eventType: tickInputEvent.eventType,
+          data: tickInputEvent.data,
+          createdAt: tickInputEvent.createdAt,
+        });
+        eventBus.emit('tick:input_stored', {
+          tickNumber,
+          triggerType: queuedTick.trigger.type,
+          sessionState: gathered.sessionState,
+        });
       } catch (err) {
         log.warn('Failed to log tick_input event:', err);
       }
@@ -1113,14 +1276,14 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     eventBus.emit('heartbeat:stage_change', { stage: 'execute' });
 
     // Stage 3: EXECUTE
-    await executeOutput(output, tickNumber, gathered);
+    await executeOutput(output, tickNumber, gathered, replySentEarly);
 
     // Log tick output to agent_logs.db
     const durationMs = Date.now() - tickStart;
     if (logSessionId) {
       try {
         const agentLogsDb = getAgentLogsDb();
-        agentLogStore.insertEvent(agentLogsDb, {
+        const tickOutputEvent = agentLogStore.insertEvent(agentLogsDb, {
           sessionId: logSessionId,
           eventType: 'tick_output',
           data: {
@@ -1128,6 +1291,13 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
             rawOutput: output,
             durationMs,
           },
+        });
+        eventBus.emit('agent:event:logged', {
+          id: tickOutputEvent.id,
+          sessionId: tickOutputEvent.sessionId,
+          eventType: tickOutputEvent.eventType,
+          data: tickOutputEvent.data,
+          createdAt: tickOutputEvent.createdAt,
         });
       } catch (err) {
         log.warn('Failed to log tick_output event:', err);
@@ -1293,7 +1463,7 @@ export async function initializeHeartbeat(): Promise<void> {
   try {
     const memDb = getMemoryDb();
     embeddingProvider = new LocalEmbeddingProvider();
-    vectorStore = new VectorStore('./data/lancedb', embeddingProvider.dimensions);
+    vectorStore = new VectorStore(env.LANCEDB_PATH, embeddingProvider.dimensions);
     await vectorStore.initialize();
     memoryManager = new MemoryManager(memDb, vectorStore, embeddingProvider);
     log.info('Memory system initialized');
