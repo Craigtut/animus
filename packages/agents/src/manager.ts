@@ -302,7 +302,14 @@ export class AgentManager {
     }
 
     // 5. Create session
-    this.logger.info('Creating session', { provider: validated.provider });
+    this.logger.info('Creating session', {
+      provider: validated.provider,
+      model: validated.model ?? 'default',
+      verbose: validated.verbose ?? false,
+      hasSystemPrompt: !!validated.systemPrompt,
+      hasMcpServers: !!validated.mcpServers && Object.keys(validated.mcpServers).length > 0,
+      resume: validated.resume ?? null,
+    });
     const session = await adapter.createSession(validated);
 
     // 6. Track session with warmth state

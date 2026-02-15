@@ -296,6 +296,7 @@ export function updateSystemSettings(
     experienceRetentionDays: 'experience_retention_days',
     emotionHistoryRetentionDays: 'emotion_history_retention_days',
     agentLogRetentionDays: 'agent_log_retention_days',
+    taskRunRetentionDays: 'task_run_retention_days',
     defaultAgentProvider: 'default_agent_provider',
     goalApprovalMode: 'goal_approval_mode',
     timezone: 'timezone',

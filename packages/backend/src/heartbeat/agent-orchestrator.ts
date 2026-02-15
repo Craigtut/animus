@@ -23,7 +23,7 @@ import * as systemStore from '../db/stores/system-store.js';
 import * as messageStore from '../db/stores/message-store.js';
 import { getMessagesDb, getMemoryDb } from '../db/index.js';
 import { createLogger } from '../lib/logger.js';
-import { PROJECT_ROOT } from '../utils/env.js';
+import { env, PROJECT_ROOT } from '../utils/env.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -294,6 +294,7 @@ export class AgentOrchestrator {
       ];
 
       // Create the agent session
+      const verboseAgent = env.LOG_LEVEL === 'debug' || env.LOG_LEVEL === 'trace';
       const session = await this.manager.createSession({
         provider,
         cwd: PROJECT_ROOT,
@@ -307,6 +308,7 @@ export class AgentOrchestrator {
           mcpServers: mergedMcpServers,
           allowedTools: mergedAllowedTools,
         } : {}),
+        verbose: verboseAgent,
       });
 
       // Attach logging

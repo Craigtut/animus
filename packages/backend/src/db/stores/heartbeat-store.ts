@@ -824,6 +824,14 @@ export function cleanupEnergyHistory(db: Database.Database, retentionDays: numbe
   return result.changes;
 }
 
+export function cleanupOldEmotionHistory(db: Database.Database, retentionDays: number): number {
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+  const result = db
+    .prepare('DELETE FROM emotion_history WHERE created_at < ?')
+    .run(cutoff);
+  return result.changes;
+}
+
 // ============================================================================
 // Cleanup
 // ============================================================================

@@ -1,0 +1,15 @@
+{
+  "name": "agent-browser",
+  "displayName": "Agent Browser",
+  "version": "1.0.0",
+  "description": "Browser automation for AI agents — navigate, interact, screenshot, and extract data from web pages using the agent-browser CLI",
+  "author": { "name": "animus-community" },
+  "license": "MIT",
+  "icon": "./icon.svg",
+  "components": {
+    "skills": "./skills/"
+  },
+  "permissions": {
+    "network": true
+  }
+}

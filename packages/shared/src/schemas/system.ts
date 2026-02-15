@@ -76,10 +76,11 @@ export const systemSettingsSchema = z.object({
   heartbeatIntervalMs: z.number().int().positive().default(300000),
   sessionWarmthMs: z.number().int().positive().default(900000),
   sessionContextBudget: z.number().positive().max(1).default(0.7),
-  thoughtRetentionDays: z.number().int().positive().default(30),
-  experienceRetentionDays: z.number().int().positive().default(30),
-  emotionHistoryRetentionDays: z.number().int().positive().default(30),
-  agentLogRetentionDays: z.number().int().positive().default(14),
+  thoughtRetentionDays: z.number().int().positive().default(14),
+  experienceRetentionDays: z.number().int().positive().default(14),
+  emotionHistoryRetentionDays: z.number().int().positive().default(14),
+  agentLogRetentionDays: z.number().int().positive().default(7),
+  taskRunRetentionDays: z.number().int().positive().default(7),
   defaultAgentProvider: agentProviderSchema.default('claude'),
   goalApprovalMode: z
     .enum(['always_approve', 'auto_approve', 'full_autonomy'])

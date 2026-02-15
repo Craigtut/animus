@@ -1,7 +1,7 @@
 # Animus Plugin System Architecture
 
-> **Status**: Architecture finalized (v2)
-> **Date**: 2026-02-13, updated 2026-02-14
+> **Status**: Implemented
+> **Date**: 2026-02-13, updated 2026-02-15
 > **Supersedes**: `docs/agents/plugin-extension-systems.md` (research doc, retained for reference)
 
 ## Executive Summary
@@ -23,6 +23,40 @@ An Animus plugin is a **directory with a manifest** that bundles up to seven com
 5. **Built-in plugins ship the same way.** Internal plugins that come with the engine use the exact same format as third-party plugins. No special paths or exceptions.
 
 6. **Custom decision types and triggers are first-class.** Plugins can extend the mind's vocabulary of actions (new decision types with custom EXECUTE handlers) and create new reasons for the heartbeat to tick (custom triggers from external events).
+
+### The Skills-First Philosophy
+
+Animus plugins take a deliberately opinionated stance: **teach agents to use tools, don't wrap tools for agents.**
+
+The instinct when building agent integrations is to create structured APIs — MCP servers with typed schemas, request/response protocols, managed transport. This is the "build a bridge" approach. But agents already know how to use Bash. They understand CLI tools, stdout, pipes, file I/O, and exit codes. The most natural way to give an agent a new capability is often the simplest: write a script, document it in a SKILL.md, and let the agent run it.
+
+This isn't laziness — it's a deliberate architectural choice rooted in three principles:
+
+**1. Token efficiency is capability.** Every token consumed by tool schemas, JSON-RPC framing, and MCP server descriptions is a token that can't be used for reasoning, memory, or persona. A typical MCP server contributes 13,000-18,000 tokens to the context just from its tool definitions. A SKILL.md that teaches the same capability might use 500 tokens of instructions and produce only the output the agent actually needs. When you're running a mind with persona, emotions, memories, goals, and working context — every token matters.
+
+**2. Composability beats structure.** MCP tool results pass through the agent's context window as structured JSON responses — one tool at a time, one result at a time. CLI scripts can pipe output to files, chain with other tools, redirect to streams, and compose naturally through the shell. The agent can run a script that produces output, decide what to do with it, and run another script — all within the same Bash session. This is how experienced developers work, and it's how agents work most naturally.
+
+**3. Agents should build their own tools.** Animus's vision includes eventual self-modification. An agent that knows how to write and run Bash scripts can create new tools for itself. An agent that depends on MCP servers cannot meaningfully extend its own capabilities — it would need to write a JSON-RPC server, manage transport, register tool schemas. The skills+CLI pattern means the agent is always one SKILL.md away from a new capability.
+
+**When MCP is the right choice:**
+
+MCP isn't wrong — it's the right tool for specific problems:
+
+- **Credential isolation**: When secrets must never appear in shell history or process lists. MCP servers receive credentials through environment variables at spawn time, invisible to the agent.
+- **Persistent connections**: WebSocket connections, database pools, long-lived sessions. Scripts start and stop; MCP servers maintain state across calls.
+- **Structured access control**: When you need fine-grained permission filtering on which tools are available to which contacts at which permission tiers.
+- **Complex state machines**: Multi-step protocols where the server must maintain internal state between calls (OAuth flows, transaction sequences).
+- **Third-party servers**: When an external service already publishes an MCP server (Home Assistant, databases), use it directly rather than reimplementing.
+
+The rule of thumb: **start with a skill and a script. Reach for MCP when the script can't solve the problem.**
+
+Our own plugins demonstrate this hierarchy:
+- **Weather**: Pure skill — teaches `curl` commands against free APIs. Zero infrastructure.
+- **Agent Browser**: Pure skill — teaches CLI commands against an external tool. The agent runs `agent-browser open`, `agent-browser snapshot`, etc.
+- **Nano Banana Pro**: Skill + bundled script — teaches the agent to invoke a Node.js script through `run_with_credentials` for credential isolation.
+- **Home Assistant**: Skill + MCP — uses Home Assistant's own MCP server over HTTP because HA exposes hundreds of entities that benefit from structured tool access and persistent connection.
+
+This gradient — from pure documentation to bundled scripts to MCP servers — is intentional. Plugin authors should use the lightest approach that solves their problem.
 
 ---
 
@@ -1484,66 +1518,157 @@ export type PluginMcpServer = z.infer<typeof PluginMcpServerSchema>;
 
 ---
 
-## Implementation Plan
+## Implementation Status
 
-### Phase 1: Plugin Manager Core + Skills + Decisions + Triggers
+### Implemented
 
-**Goal**: Plugins can be loaded from directories. Skills deploy to SDK discovery paths. Custom decision types and triggers work.
+| Component | Status | Key Files |
+|-----------|--------|-----------|
+| **Plugin Manager** | Complete (~1,500 lines) | `packages/backend/src/services/plugin-manager.ts` |
+| **Zod Schemas** | Complete | `packages/shared/src/schemas/plugin.ts` |
+| **Database (plugins table)** | Complete | `packages/backend/src/db/migrations/system/006_plugins.sql` |
+| **Plugin Store (DB)** | Complete | `packages/backend/src/db/stores/plugin-store.ts` |
+| **tRPC API** | Complete (list, get, install, uninstall, enable, disable, getConfig, setConfig, validatePath) | `packages/backend/src/api/routers/plugins.ts` |
+| **Frontend UI** | Complete (list, detail, configure, install, enable/disable) | `packages/frontend/src/pages/SettingsPage.tsx` |
+| **Skills** | Complete (symlink deployment, collision detection, provider switching) | Plugin Manager |
+| **MCP Tools** | Complete (namespacing, `${config.*}` resolution, SDK merge) | Plugin Manager |
+| **Context Sources** | Complete (static + retrieval) | Plugin Manager |
+| **Hooks** | Complete (10 events, blocking/non-blocking, timeout management) | Plugin Manager |
+| **Decision Types** | Complete (registration, schema validation, contact tier enforcement, handler execution) | Plugin Manager |
+| **Triggers** | Complete (HTTP routes, watcher processes) | Plugin Manager |
+| **Agents** | Complete (template loading, catalog) | Plugin Manager |
+| **Configuration** | Complete (AES-256-GCM encryption, dynamic forms, masked frontend display) | Plugin Manager + Encryption Service |
+| **Credential Manifest** | Complete (injected into mind context) | Plugin Manager |
+| **Hot-swap** | Complete (EventBus `plugin:changed`, session invalidation) | Plugin Manager + Heartbeat |
+| **`run_with_credentials`** | Complete (subprocess credential injection, provider key stripping) | `packages/backend/src/tools/handlers/run-with-credentials.ts` |
 
-1. Define Zod schemas in `@animus/shared` (manifest, context sources, hooks, decisions, triggers, MCP config)
-2. Build Plugin Manager service in `@animus/backend`
-   - Directory scanning, manifest validation
-   - Skill deployment to active provider's discovery directory (symlink management)
-   - Custom decision type registration and handler execution
-   - Custom trigger registration (HTTP routes + watcher process management)
-3. Integrate with heartbeat pipeline
-   - Context Builder includes custom decision type descriptions in operational instructions
-   - EXECUTE stage routes plugin decision types to registered handlers
-   - Tick queue accepts plugin trigger events
-4. Create first built-in plugin as proof-of-concept (e.g., a simple home-assistant plugin with a decision type and webhook trigger)
-5. Tests for Plugin Manager, decision execution, trigger events
+### First-Party Plugins Shipped
 
-### Phase 2: Tools + Agents
+Four reference plugins demonstrate the full spectrum of plugin patterns:
 
-**Goal**: Plugin MCP servers and agent templates work.
+| Plugin | Pattern | Components | Requires Config |
+|--------|---------|------------|-----------------|
+| **Weather** | Pure skill (CLI docs) | 1 skill | No |
+| **Agent Browser** | Pure skill (CLI docs) | 1 skill | No |
+| **Nano Banana Pro** | Skill + bundled script + credentials | 1 skill, 1 script | Yes (API key) |
+| **Home Assistant** | Skill + MCP + credentials | 1 skill, 1 MCP server | Yes (URL + token) |
 
-1. Plugin Manager collects MCP configs from plugins (stdio transport, `${PLUGIN_ROOT}` substitution)
-2. Orchestrator merges plugin MCP configs with built-in tools
-3. MCP config translation per SDK (Claude/Codex identical, OpenCode needs `type: "local"` + array command)
-4. Agent template loading and personality merging
-5. Agent catalog shown to mind for delegation decisions
-6. Tests for MCP integration, agent spawning
+### Not Yet Implemented
 
-### Phase 3: Hooks + Context Sources
+| Feature | Priority | Notes |
+|---------|----------|-------|
+| **Plugin store API** | Future | Browse/install from remote marketplace |
+| **AI self-installation** | Future | `browse_plugins` / `install_plugin` MCP tools |
+| **Git/npm source install** | Low | Local path registration works; git/npm is convenience |
+| **Watcher tick enqueue** | Low | Watcher processes spawn but don't enqueue heartbeat ticks yet (TODO in code) |
+| **Container isolation** | Future | Docker-based sandbox for untrusted plugins |
+| **Dependency resolution** | Future | Check `dependencies.plugins` at install time |
 
-**Goal**: Full lifecycle hooks and dynamic context.
+## Plugin Gallery: Real-World Examples
 
-1. Hook registration and firing in EXECUTE stage
-2. Blocking hooks (preDecision, preTick, preSubAgent, preMessage) with veto capability
-3. Context source providers (static + retrieval)
-4. Context Builder integration for dynamic sources with token budgets
-5. Tests for hooks (blocking, modification) and context sources
+These four plugins ship in the `/plugins/` directory as reference implementations. They demonstrate the skills-first philosophy in practice — ordered from simplest to most complex.
 
-### Phase 4: Distribution + Installation UI
+### Weather (Pure Skill — Zero Infrastructure)
 
-**Goal**: Full plugin management in the frontend. Install from local paths, git, and npm.
+The simplest possible plugin. A single SKILL.md that teaches the agent to use `curl` against free weather APIs.
 
-1. tRPC endpoints for plugin management (list, install, enable, disable, uninstall)
-2. Frontend Settings > Plugins page with plugin list (enable/disable toggles, uninstall)
-3. "Add Local Plugin" — path input, manifest validation, path registration in system.db
-4. "Add from Git" — git clone to `~/.animus/plugins/`, validate, load
-5. "Add from npm" — npm install to `~/.animus/plugins/`, validate, load
-6. Plugin enable/disable/uninstall lifecycle (including skill cleanup, hot-swap)
+```
+plugins/weather/
+├── plugin.json          # Manifest: just a skill, no config needed
+├── icon.svg
+└── skills/
+    └── weather/
+        └── SKILL.md     # Teaches curl commands for wttr.in and Open-Meteo
+```
 
-### Phase 5: AI Self-Installation + Store API
+**Why it works as a skill**: Weather data is a simple HTTP GET. The agent already knows `curl`. The SKILL.md documents the URL patterns and format codes — that's all the agent needs. An MCP server for this would add thousands of tokens of tool schema for the same result.
 
-**Goal**: Mind can browse and install plugins. Store API defined.
+**Token cost**: ~200 tokens for the skill metadata + full instructions. An equivalent MCP server would consume ~3,000+ tokens for tool definitions.
 
-1. `browse_plugins` and `install_plugin` MCP tools
-2. User approval flow for AI-initiated installations
-3. Store API specification (OpenAPI)
-4. Store client in Plugin Manager
-5. Store browsing UI in frontend
+### Agent Browser (Pure Skill — External CLI Docs)
+
+Teaches the agent to use the `agent-browser` CLI tool for browser automation. The tool is installed globally (`npm install -g agent-browser`), and the skill is pure documentation.
+
+```
+plugins/agent-browser/
+├── plugin.json
+├── icon.svg
+└── skills/
+    └── agent-browser/
+        ├── SKILL.md          # Core workflow: open → snapshot → interact → re-snapshot
+        ├── references/       # Deep-dive docs loaded on demand
+        │   ├── commands.md
+        │   ├── snapshot-refs.md
+        │   ├── session-management.md
+        │   └── ...
+        └── templates/        # Ready-to-use shell scripts
+            ├── form-automation.sh
+            └── ...
+```
+
+**Why it works as a skill**: This is the blog-post pattern in action. Instead of an MCP server with tools like `browser_navigate`, `browser_click`, `browser_screenshot` (each consuming context tokens for schemas), the skill teaches the agent shell commands: `agent-browser open <url>`, `agent-browser click @e1`. The agent composes commands naturally through Bash, and only the output enters the context window.
+
+**Contrast with Playwright MCP**: Playwright's MCP server defines 20+ tools consuming ~14,000 tokens. The agent-browser skill achieves equivalent capability with ~800 tokens of instructions. The `references/` directory provides deep-dive docs that the SDK loads on-demand only when needed — progressive disclosure in action.
+
+### Nano Banana Pro (Skill + Script + Credentials)
+
+Image generation using Google's Gemini 3 Pro. A skill teaches the agent how to invoke a bundled Node.js script, and credentials are handled through `run_with_credentials`.
+
+```
+plugins/nano-banana-pro/
+├── plugin.json
+├── config.schema.json        # Declares GEMINI_API_KEY (secret, required)
+├── icon.svg
+└── skills/
+    └── nano-banana-pro/
+        ├── SKILL.md           # Documents run_with_credentials usage
+        └── scripts/
+            └── generate-image.js  # Self-contained Node.js script
+```
+
+**Key pattern — `run_with_credentials`**: The SKILL.md teaches the agent to call the built-in `run_with_credentials` tool, which injects the API key as an environment variable into the script's subprocess. The agent never sees the raw API key — it only knows the credential reference (`nano-banana-pro.GEMINI_API_KEY`).
+
+```
+run_with_credentials({
+  command: "node plugins/nano-banana-pro/scripts/generate-image.js --prompt \"...\"",
+  credentialRef: "nano-banana-pro.GEMINI_API_KEY",
+  envVar: "GEMINI_API_KEY"
+})
+```
+
+**Why not MCP**: A single script with a few CLI flags is simpler than an MCP server. The credential isolation comes from `run_with_credentials`, not MCP transport. MCP would be warranted if the image generation needed persistent state (batch queues, progress tracking) — it doesn't.
+
+### Home Assistant (Skill + MCP + Credentials)
+
+Smart home control using Home Assistant's own MCP server. This is the one case where MCP is the right choice — HA exposes hundreds of entities through a structured API with persistent HTTP connection.
+
+```
+plugins/home-assistant/
+├── plugin.json
+├── config.schema.json         # HA_URL (text) + HA_ACCESS_TOKEN (secret)
+├── icon.svg
+├── skills/
+│   └── home-assistant/
+│       └── SKILL.md           # Teaches device control patterns
+└── tools.json                 # MCP server definition with ${config.*}
+```
+
+**MCP config with credential resolution**:
+```json
+{
+  "ha": {
+    "type": "http",
+    "url": "${config.HA_URL}/api/mcp",
+    "headers": {
+      "Authorization": "Bearer ${config.HA_ACCESS_TOKEN}"
+    }
+  }
+}
+```
+
+**Why MCP here**: Home Assistant exposes 100+ device entities, each with different capabilities (lights, switches, sensors, climate, media). The HA team already built and maintains an MCP server. The persistent HTTP connection means the agent doesn't re-authenticate on every call. And the structured tool definitions let the agent discover available devices without the skill needing to enumerate them.
+
+**The skill still matters**: Even with MCP providing the tools, the SKILL.md teaches the agent *how to think about* home automation — common patterns, device naming conventions, safety considerations. The MCP gives capability; the skill gives judgment.
 
 ---
 
@@ -1663,3 +1788,5 @@ System prompt injection was the previous approach but has critical flaws:
 ---
 
 *Architecture v3: 2026-02-14 — Added hot-swap lifecycle, session invalidation, plugin sources & installation, monorepo layout, dynamic configuration (channels pattern), provider switching, handler timeouts, script dependencies, decision name collisions*
+
+*Architecture v4: 2026-02-15 — Marked as implemented. Added Skills-First Philosophy section (token efficiency, composability, self-modification principles). Replaced implementation plan with implementation status table. Added Plugin Gallery with real-world examples (weather, agent-browser, nano-banana-pro, home-assistant) demonstrating the skills-first gradient. See also: `.claude/skills/build-plugin/` for a practical plugin-building skill.*

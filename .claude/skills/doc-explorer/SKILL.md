@@ -63,7 +63,8 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/architecture/sleep-energy.md` | 16 KB | Sleep & energy system - circadian rhythm, energy level (0-1), 6 energy bands (peak/alert/tired/drowsy/very drowsy/sleeping), experience-driven energy deltas, exponential decay toward circadian baseline, wake-up mechanics (natural + triggered), accelerated emotional decay during sleep, tick interval switching, settings configuration |
 | `docs/architecture/observational-memory.md` | 22 KB | Observational memory — three-stream compression (messages/thoughts/experiences), Observer and Reflector agents, token-based thresholds replacing hard item limits, batch threshold mechanism, async processing in EXECUTE phase, memory.db schema, configuration file, context presentation (temporal annotations, gap markers, continuation hint, read-time optimization), observability/event emission, prompt caching benefits |
 | `docs/architecture/reflex-system.md` | 16 KB | Reflex fast-response system — dual-path voice architecture (reflex + heartbeat), Vercel AI SDK abstraction, lightweight context assembly using observational memory, heartbeat integration & correction path, provider configuration (Anthropic/OpenAI/Google/Ollama), subscription vs API cost model, fallback behavior, streaming pipeline |
-| `docs/architecture/credential-passing.md` | 18 KB | Credential passing architecture — agent-blind credential model (informed by OpenClaw RFC), how API keys flow from encrypted storage to skill/plugin execution, credential manifest for the mind (metadata only, no raw values), EXECUTE-phase injection, plugin MCP server `${config.*}` env resolution, credential lifecycle (creation → context → reference → resolve → inject), security boundaries, threat model, implementation priority order, comparison with OpenClaw |
+| `docs/architecture/plugin-system.md` | 52 KB | Plugin system architecture — skills-first philosophy (token efficiency, composability, self-modification), 7 component types (skills, MCP tools, context sources, hooks, decision types, triggers, agents), plugin manifest format, config schemas, credential handling (${config.*}, run_with_credentials), hot-swap lifecycle, security model, plugin gallery (weather, agent-browser, nano-banana-pro, home-assistant), implementation status, store architecture |
+| `docs/architecture/credential-passing.md` | 22 KB | Secrets & credential architecture — AES-256-GCM encryption at rest (PBKDF2 key derivation, sentinel verification, ciphertext format), three credential storage locations (credentials table, plugins.config_encrypted, channel_packages.config), agent provider keys (env mapping, startup flow, validation, detection), plugin credentials (three injection paths: MCP `${config.*}` resolution, stdin for decision/hook handlers, `run_with_credentials` subprocess env injection with stripped provider keys), channel credentials (IPC init message injection, child process isolation), agent-blind pattern (credential manifest, context injection, tool definition), frontend credential UI (password masking, masked-value preservation, validation), security boundaries & threat model, trust assumptions |
 
 ### Frontend
 
@@ -116,11 +117,13 @@ When you need context for a task, follow this approach:
 7c. **For context assembly/prompt building**: Read `docs/architecture/context-builder.md`
 7d. **For shared abstractions (embedding, decay, encryption, event bus)**: Read `docs/architecture/tech-stack.md` (Shared Abstractions section)
 7e. **For MCP tools/custom tools**: Read `docs/architecture/mcp-tools.md` and `docs/architecture/agent-orchestration.md`
+7f. **For plugin system/plugin architecture**: Read `docs/architecture/plugin-system.md` (full architecture). For practical plugin building, the `build-plugin` skill is loaded automatically.
 8. **For new contributors**: Read `docs/guides/getting-started.md`
 9. **For channels/messaging/SMS/Discord/API**: Read `docs/architecture/channel-packages.md` and `docs/architecture/contacts.md`
 10. **For Codex OAuth/authentication**: Read `docs/agents/codex/oauth.md`
 11. **For voice/speech/STT/TTS/audio**: Read `docs/architecture/voice-channel.md`, `docs/frontend/voice-mode.md`, and `docs/architecture/channel-packages.md`
 12. **For reflex/fast-response/voice-latency**: Read `docs/architecture/reflex-system.md`, `docs/architecture/voice-channel.md`, and `docs/architecture/heartbeat.md`
+13. **For secrets/credentials/encryption/API keys**: Read `docs/architecture/credential-passing.md`
 
 ## Topic Keyword Guide
 
@@ -133,12 +136,14 @@ Use this to quickly map user questions to the right docs:
 - **brand, visual identity, logo, voice** -> `docs/brand-vision.md`
 - **vision, concept, what is animus, autonomous, self-building** -> `docs/project-vision.md`
 - **setup, install, environment, dev workflow, troubleshooting** -> `docs/guides/getting-started.md`
+- **build plugin, create plugin, plugin development, plugin guide, plugin tutorial, writing plugins, SKILL.md, plugin best practices** -> use the `build-plugin` skill (loaded automatically); for architecture: `docs/architecture/plugin-system.md`
 - **claude sdk, agent sdk, anthropic, query, async generator** -> `docs/agents/claude/sdk-research.md`
 - **codex, openai, thread, codex sdk** -> `docs/agents/codex/sdk-research.md`
 - **codex oauth, chatgpt auth, device code** -> `docs/agents/codex/oauth.md`
 - **opencode, provider-agnostic, client-server** -> `docs/agents/opencode/sdk-research.md`
 - **abstraction layer, unified, event normalization, sdk comparison** -> `docs/agents/architecture-overview.md`
-- **plugin, extension, hook system** -> `docs/agents/plugin-extension-systems.md`
+- **plugin, extension, hook system, plugin architecture, plugin manager, skills-first, SKILL.md standard** -> `docs/architecture/plugin-system.md`
+- **plugin SDK comparison, plugin research, cross-SDK plugins** -> `docs/agents/plugin-extension-systems.md`
 - **agent overview, implementation priority, sdk comparison quick ref** -> `docs/agents/README.md`
 - **sub-agent, delegation, orchestration, spawn agent, agent lifecycle** -> `docs/architecture/agent-orchestration.md`
 - **MCP, tools, custom tools, tool definitions, tool registry, send_message, read_memory, update_progress** -> `docs/architecture/mcp-tools.md`
@@ -161,4 +166,4 @@ Use this to quickly map user questions to the right docs:
 - **onboarding, auth, signup, login, first time, birth animation, persona creation UI** -> `docs/frontend/onboarding.md`
 - **voice mode UI, voice UX, voice surface, listening, speaking, barge-in, continuous conversation, voice visualization, transcription** -> `docs/frontend/voice-mode.md`
 - **reflex, fast response, voice latency, TTFT, dual path, Vercel AI SDK, direct LLM, reflex context, reflex provider, fast path, slow path** -> `docs/architecture/reflex-system.md`
-- **credential, API key, secret, encryption, credential passing, agent-blind, credential manifest, credential injection, plugin credentials, MCP env vars, sensitive config** -> `docs/architecture/credential-passing.md`
+- **credential, API key, secret, encryption, credential passing, agent-blind, credential manifest, credential injection, plugin credentials, MCP env vars, sensitive config, AES-256-GCM, ANIMUS_ENCRYPTION_KEY, run_with_credentials, channel credentials, IPC credentials, encrypted storage, PBKDF2** -> `docs/architecture/credential-passing.md`

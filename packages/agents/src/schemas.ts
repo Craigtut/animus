@@ -115,6 +115,12 @@ export const baseSessionConfigSchema = z.object({
    */
   mcpServers: z.record(z.record(z.unknown())).optional(),
 
+  /**
+   * Enable verbose logging for debugging session lifecycle.
+   * Logs SDK message flow, time-to-first-message, periodic heartbeats.
+   */
+  verbose: z.boolean().optional(),
+
   // Note: hooks are not validated with Zod since they contain functions
 });
 

@@ -2,9 +2,9 @@
  * Save Service
  *
  * Creates, lists, exports, imports, and deletes save snapshots of Animus's
- * AI-related databases (persona, heartbeat, memory, messages) and LanceDB
- * vector store. System.db and agent_logs.db are excluded — they contain
- * user credentials and ephemeral logs, not AI state.
+ * AI-related databases (persona, heartbeat, memory, messages, agent_logs)
+ * and LanceDB vector store. System.db is excluded — it contains user
+ * credentials and engine infrastructure, not AI state.
  *
  * Each save is stored in `data/saves/` as:
  *   {uuid}.animus  — zip archive (DBs + lancedb/ + manifest.json)
@@ -22,7 +22,7 @@ import extractZip from 'extract-zip';
 import { saveManifestSchema } from '@animus/shared';
 import type { SaveManifest, SaveInfo } from '@animus/shared';
 import { env } from '../utils/env.js';
-import { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb } from '../db/index.js';
+import { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb, getAgentLogsDb } from '../db/index.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('SaveService', 'saves');
@@ -33,7 +33,7 @@ const log = createLogger('SaveService', 'saves');
 
 const SAVES_DIR = path.join(path.dirname(env.DB_SYSTEM_PATH), 'saves');
 
-const DB_NAMES = ['persona', 'heartbeat', 'memory', 'messages'] as const;
+const DB_NAMES = ['persona', 'heartbeat', 'memory', 'messages', 'agent_logs'] as const;
 type DbName = (typeof DB_NAMES)[number];
 
 /** Read root package.json version. */
@@ -102,6 +102,7 @@ function getLiveDb(name: DbName): Database.Database {
     case 'heartbeat': return getHeartbeatDb();
     case 'memory': return getMemoryDb();
     case 'messages': return getMessagesDb();
+    case 'agent_logs': return getAgentLogsDb();
   }
 }
 

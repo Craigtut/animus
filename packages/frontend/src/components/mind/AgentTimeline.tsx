@@ -179,7 +179,7 @@ function getEventIcon(eventType: string) {
 // Event label mapping
 // ============================================================================
 
-function getEventLabel(eventType: string): string {
+function getEventLabel(eventType: string, data?: Record<string, unknown>): string {
   switch (eventType) {
     case 'session_start':  return 'Session Started';
     case 'session_end':    return 'Session Ended';
@@ -189,7 +189,7 @@ function getEventLabel(eventType: string): string {
     case 'thinking_start': return 'Thinking...';
     case 'thinking_end':   return 'Thinking Complete';
     case 'tool_call_start':return 'Tool Call';
-    case 'tool_call_end':  return 'Tool Complete';
+    case 'tool_call_end':  return 'Tool Done';
     case 'tool_error':     return 'Tool Error';
     case 'response_start': return 'Response Started';
     case 'response_end':   return 'Response Complete';
@@ -203,6 +203,136 @@ function getEventLabel(eventType: string): string {
     case 'execute_complete':             return 'Execute Complete';
     default:               return eventType;
   }
+}
+
+// ============================================================================
+// Tool call summaries — smart previews per tool type
+// ============================================================================
+
+function getToolCallSummary(toolName: string, input: Record<string, unknown> | undefined): string {
+  if (!input) return '';
+
+  const s = (key: string) => typeof input[key] === 'string' ? input[key] as string : '';
+
+  // Normalize tool name for matching (case-insensitive, strip mcp__ prefixes)
+  const name = toolName.toLowerCase().replace(/^mcp__\w+__/, '');
+
+  switch (name) {
+    case 'bash': {
+      const cmd = s('command');
+      return cmd ? truncate(cmd, 80) : '';
+    }
+    case 'read': {
+      const fp = s('file_path');
+      const offset = input['offset'] as number | undefined;
+      const limit = input['limit'] as number | undefined;
+      const range = offset != null || limit != null
+        ? ` [${offset ?? 1}:${limit ? `+${limit}` : ''}]`
+        : '';
+      return fp ? `${shortenPath(fp)}${range}` : '';
+    }
+    case 'write': {
+      const fp = s('file_path');
+      const content = s('content');
+      const lines = content ? content.split('\n').length : 0;
+      return fp ? `${shortenPath(fp)}${lines > 0 ? ` (${lines} lines)` : ''}` : '';
+    }
+    case 'edit': {
+      const fp = s('file_path');
+      const old = s('old_string');
+      const replaceAll = input['replace_all'];
+      const parts = [shortenPath(fp)];
+      if (replaceAll) parts.push('(all)');
+      if (old) parts.push(`"${truncate(old.split('\n')[0]!, 40)}"`);
+      return fp ? parts.join(' ') : '';
+    }
+    case 'glob': {
+      const pattern = s('pattern');
+      const path = s('path');
+      return pattern
+        ? `${pattern}${path ? ` in ${shortenPath(path)}` : ''}`
+        : '';
+    }
+    case 'grep': {
+      const pattern = s('pattern');
+      const path = s('path');
+      const glob = s('glob');
+      const parts = [pattern ? `/${pattern}/` : ''];
+      if (glob) parts.push(`(${glob})`);
+      if (path) parts.push(`in ${shortenPath(path)}`);
+      return parts.filter(Boolean).join(' ');
+    }
+    case 'webfetch': {
+      const url = s('url');
+      try {
+        const u = new URL(url);
+        return `${u.hostname}${u.pathname === '/' ? '' : u.pathname}`;
+      } catch {
+        return url ? truncate(url, 60) : '';
+      }
+    }
+    case 'websearch': {
+      return s('query') ? `"${truncate(s('query'), 60)}"` : '';
+    }
+    case 'task': {
+      const desc = s('description');
+      const agent = s('subagent_type');
+      return [agent, desc].filter(Boolean).join(': ') || '';
+    }
+    case 'notebookedit': {
+      const nb = s('notebook_path');
+      const mode = s('edit_mode');
+      return nb ? `${shortenPath(nb)}${mode ? ` (${mode})` : ''}` : '';
+    }
+    default: {
+      // Generic fallback: show first string param value
+      const keys = Object.keys(input);
+      for (const key of keys) {
+        const val = input[key];
+        if (typeof val === 'string' && val.length > 0) {
+          return `${key}: ${truncate(val, 50)}`;
+        }
+      }
+      return keys.length > 0 ? `${keys.length} param${keys.length > 1 ? 's' : ''}` : '';
+    }
+  }
+}
+
+function getToolOutputSummary(toolName: string, output: unknown): string {
+  if (output == null) return '';
+
+  const name = toolName.toLowerCase().replace(/^mcp__\w+__/, '');
+  const outputStr = typeof output === 'string' ? output : '';
+
+  switch (name) {
+    case 'bash': {
+      // Show first line of output or exit status
+      if (!outputStr) return '';
+      const firstLine = outputStr.split('\n')[0]!;
+      return truncate(firstLine, 60);
+    }
+    case 'grep': {
+      // Show match count if parseable
+      if (!outputStr) return '';
+      const lines = outputStr.trim().split('\n').filter(Boolean);
+      return `${lines.length} match${lines.length !== 1 ? 'es' : ''}`;
+    }
+    case 'glob': {
+      if (!outputStr) return 'no matches';
+      const lines = outputStr.trim().split('\n').filter(Boolean);
+      return `${lines.length} file${lines.length !== 1 ? 's' : ''}`;
+    }
+    default:
+      return '';
+  }
+}
+
+/** Shorten a file path for display — keep filename and parent dir */
+function shortenPath(fullPath: string): string {
+  const parts = fullPath.split('/').filter(Boolean);
+  if (parts.length <= 2) return fullPath;
+  // Show last 2 segments: "dir/file.ts"
+  return `.../${parts.slice(-2).join('/')}`;
 }
 
 // ============================================================================
@@ -243,22 +373,23 @@ function getPreviewContent(event: TimelineEvent): string {
       return truncate(str(d['content']), 80);
     case 'tool_call_start': {
       const toolName = str(d['toolName']);
-      const input = d['input'] as Record<string, unknown> | undefined;
-      if (input) {
-        const firstKey = Object.keys(input)[0];
-        if (firstKey) {
-          const val = typeof input[firstKey] === 'string'
-            ? `'${truncate(input[firstKey] as string, 30)}'`
-            : JSON.stringify(input[firstKey]);
-          return `${toolName} - ${firstKey}: ${val}`;
-        }
-      }
-      return toolName;
+      const input = (d['toolInput'] ?? d['input']) as Record<string, unknown> | undefined;
+      const summary = getToolCallSummary(toolName, input);
+      return summary ? `${toolName} — ${summary}` : toolName;
     }
-    case 'tool_call_end':
-      return `${str(d['toolName'])} - success`;
+    case 'tool_call_end': {
+      const toolName = str(d['toolName']);
+      const output = d['output'];
+      const durationMs = d['durationMs'] as number | undefined;
+      const durStr = durationMs != null ? ` (${formatDuration(durationMs)})` : '';
+      // For some tools, show a brief output summary
+      const outputSummary = getToolOutputSummary(toolName, output);
+      return outputSummary
+        ? `${toolName} — ${outputSummary}${durStr}`
+        : `${toolName} — done${durStr}`;
+    }
     case 'tool_error':
-      return `${str(d['toolName'])} - ${truncate(str(d['error']), 60)}`;
+      return `${str(d['toolName'])} — ${truncate(str(d['error']) || str(d['message']), 60)}`;
     case 'response_start':
       return '';
     case 'response_end': {
@@ -270,16 +401,23 @@ function getPreviewContent(event: TimelineEvent): string {
       return `${str(d['code'])} - ${truncate(str(d['message']), 60)}`;
     case 'tick_output':
       return event.relativeMs > 0 ? `completed in ${formatDuration(event.relativeMs)}` : 'completed';
-    case 'execute_start':
-      return `tick #${d['tickNumber'] ?? '?'}`;
+    case 'execute_start': {
+      const contact = str(d['contactName']);
+      const trigger = str(d['triggerType']);
+      return contact ? `${trigger} from ${contact}` : trigger || `tick #${d['tickNumber'] ?? '?'}`;
+    }
     case 'execute_reply_sent': {
       const path = str(d['path']);
       const hasReply = d['hasReply'];
+      const ch = str(d['channel']);
+      const contact = str(d['contactName']);
       if (!hasReply) return 'no reply needed';
-      return path === 'early' ? 'sent via streaming (early)'
-           : path === 'follow-up' ? 'follow-up sent (content differed)'
-           : path === 'fallback' ? 'sent via fallback path'
-           : 'no send needed';
+      const target = [contact, ch].filter(Boolean).join(' via ');
+      const pathLabel = path === 'early' ? 'streaming'
+           : path === 'follow-up' ? 'follow-up'
+           : path === 'fallback' ? 'fallback'
+           : '';
+      return [target, pathLabel ? `(${pathLabel})` : ''].filter(Boolean).join(' ');
     }
     case 'execute_transaction_complete':
       return d['durationMs'] != null ? `completed in ${formatDuration(d['durationMs'] as number)}` : 'completed';
@@ -639,6 +777,152 @@ function DetailCollapsible({ title, children }: { title: string; children: React
 }
 
 // ============================================================================
+// Tool Input Detail — structured display per tool type
+// ============================================================================
+
+function ToolInputDetail({ toolName, input }: { toolName: string; input: Record<string, unknown> }) {
+  const name = toolName.toLowerCase().replace(/^mcp__\w+__/, '');
+  const s = (key: string) => typeof input[key] === 'string' ? input[key] as string : '';
+
+  switch (name) {
+    case 'bash': {
+      const cmd = s('command');
+      const desc = s('description');
+      return (
+        <div>
+          {desc && <DetailField label="DESCRIPTION">{desc}</DetailField>}
+          {cmd && (
+            <DetailField label="COMMAND">
+              <CodeBlock content={cmd} maxHeight={200} />
+            </DetailField>
+          )}
+        </div>
+      );
+    }
+    case 'read': {
+      const fp = s('file_path');
+      const offset = input['offset'] as number | undefined;
+      const limit = input['limit'] as number | undefined;
+      return (
+        <div>
+          <DetailField label="FILE" mono>{fp}</DetailField>
+          {(offset != null || limit != null) && (
+            <DetailField label="RANGE" mono>
+              {offset != null ? `offset: ${offset}` : ''}
+              {offset != null && limit != null ? ', ' : ''}
+              {limit != null ? `limit: ${limit}` : ''}
+            </DetailField>
+          )}
+        </div>
+      );
+    }
+    case 'write': {
+      const fp = s('file_path');
+      const content = s('content');
+      return (
+        <div>
+          <DetailField label="FILE" mono>{fp}</DetailField>
+          {content && (
+            <DetailField label="CONTENT">
+              <CodeBlock content={content} maxHeight={300} />
+            </DetailField>
+          )}
+        </div>
+      );
+    }
+    case 'edit': {
+      const fp = s('file_path');
+      const old = s('old_string');
+      const newStr = s('new_string');
+      const replaceAll = Boolean(input['replace_all']);
+      return (
+        <div>
+          <DetailField label="FILE" mono>{fp}</DetailField>
+          {replaceAll && <DetailField label="MODE">Replace all occurrences</DetailField>}
+          {old && (
+            <DetailField label="FIND">
+              <CodeBlock content={old} maxHeight={150} />
+            </DetailField>
+          )}
+          {newStr && (
+            <DetailField label="REPLACE">
+              <CodeBlock content={newStr} maxHeight={150} />
+            </DetailField>
+          )}
+        </div>
+      );
+    }
+    case 'grep': {
+      const pattern = s('pattern');
+      const path = s('path');
+      const glob = s('glob');
+      const type = s('type');
+      const mode = s('output_mode');
+      return (
+        <div>
+          <DetailField label="PATTERN" mono>{pattern}</DetailField>
+          {path && <DetailField label="PATH" mono>{path}</DetailField>}
+          {glob && <DetailField label="GLOB" mono>{glob}</DetailField>}
+          {type && <DetailField label="TYPE">{type}</DetailField>}
+          {mode && <DetailField label="MODE">{mode}</DetailField>}
+        </div>
+      );
+    }
+    case 'glob': {
+      const pattern = s('pattern');
+      const path = s('path');
+      return (
+        <div>
+          <DetailField label="PATTERN" mono>{pattern}</DetailField>
+          {path && <DetailField label="PATH" mono>{path}</DetailField>}
+        </div>
+      );
+    }
+    case 'webfetch': {
+      const url = s('url');
+      const prompt = s('prompt');
+      return (
+        <div>
+          <DetailField label="URL" mono>{url}</DetailField>
+          {prompt && <DetailField label="PROMPT">{prompt}</DetailField>}
+        </div>
+      );
+    }
+    case 'websearch': {
+      const query = s('query');
+      return (
+        <div>
+          <DetailField label="QUERY">{query}</DetailField>
+        </div>
+      );
+    }
+    case 'task': {
+      const desc = s('description');
+      const prompt = s('prompt');
+      const agent = s('subagent_type');
+      return (
+        <div>
+          {agent && <DetailField label="AGENT TYPE">{agent}</DetailField>}
+          {desc && <DetailField label="DESCRIPTION">{desc}</DetailField>}
+          {prompt && (
+            <DetailField label="PROMPT">
+              <CodeBlock content={prompt} maxHeight={300} />
+            </DetailField>
+          )}
+        </div>
+      );
+    }
+    default:
+      // Fallback: show raw JSON
+      return (
+        <DetailField label="INPUT">
+          <CodeBlock content={JSON.stringify(input, null, 2)} maxHeight={300} />
+        </DetailField>
+      );
+  }
+}
+
+// ============================================================================
 // Event Detail Content
 // ============================================================================
 
@@ -753,7 +1037,8 @@ function EventDetail({ event, allEvents }: { event: TimelineEvent; allEvents: Ti
       );
     }
 
-    case 'tool_call_start':
+    case 'tool_call_start': {
+      const toolInput = (d['toolInput'] ?? d['input']) as Record<string, unknown> | undefined;
       return (
         <div>
           <DetailField label="TOOL">
@@ -761,16 +1046,15 @@ function EventDetail({ event, allEvents }: { event: TimelineEvent; allEvents: Ti
               {str(d['toolName'])}
             </span>
           </DetailField>
-          {d['input'] != null ? (
-            <DetailField label="INPUT">
-              <CodeBlock content={JSON.stringify(d['input'], null, 2)} maxHeight={300} />
-            </DetailField>
+          {toolInput != null ? (
+            <ToolInputDetail toolName={str(d['toolName'])} input={toolInput} />
           ) : null}
         </div>
       );
+    }
 
     case 'tool_call_end': {
-      const duration = computeEventDuration(event, allEvents);
+      const duration = (d['durationMs'] as number | undefined) ?? computeEventDuration(event, allEvents);
       const output = d['output'];
       return (
         <div>
@@ -850,17 +1134,36 @@ function EventDetail({ event, allEvents }: { event: TimelineEvent; allEvents: Ti
         </div>
       );
 
-    case 'execute_start':
+    case 'execute_start': {
+      const trigger = str(d['triggerType']);
+      const contact = str(d['contactName']);
+      const ch = str(d['channel']);
       return (
         <div>
           <DetailField label="TICK" mono>{String(d['tickNumber'] ?? '')}</DetailField>
-          <DetailField label="PHASE">Execute</DetailField>
+          <DetailField label="TRIGGER">
+            <Badge label={trigger || 'unknown'} color={triggerColor(trigger, theme)} />
+          </DetailField>
+          {contact && <DetailField label="CONTACT">{contact}</DetailField>}
+          {ch && <DetailField label="CHANNEL"><Badge label={ch} color={theme.colors.text.hint} /></DetailField>}
+          <DetailField label="PENDING">
+            {[
+              d['hasReply'] ? 'reply' : null,
+              (d['decisionCount'] as number) > 0 ? `${d['decisionCount']} decision(s)` : null,
+              (d['memoryCandidateCount'] as number) > 0 ? `${d['memoryCandidateCount']} memory candidate(s)` : null,
+            ].filter(Boolean).join(', ') || 'none'}
+          </DetailField>
         </div>
       );
+    }
 
     case 'execute_reply_sent': {
       const path = str(d['path']);
       const hasReply = d['hasReply'];
+      const ch = str(d['channel']);
+      const contact = str(d['contactName']);
+      const contentLen = d['contentLength'] as number ?? 0;
+      const hasMedia = d['hasMedia'];
       const duration = computeEventDuration(event, allEvents);
       return (
         <div>
@@ -873,7 +1176,10 @@ function EventDetail({ event, allEvents }: { event: TimelineEvent; allEvents: Ti
                    : theme.colors.text.hint}
             />
           </DetailField>
-          <DetailField label="HAS REPLY">{hasReply ? 'Yes' : 'No'}</DetailField>
+          {contact && <DetailField label="TO">{contact}</DetailField>}
+          {ch && <DetailField label="CHANNEL"><Badge label={ch} color={theme.colors.text.hint} /></DetailField>}
+          {hasReply && contentLen > 0 && <DetailField label="LENGTH">{contentLen.toLocaleString()} chars</DetailField>}
+          {Boolean(hasMedia) && <DetailField label="MEDIA">Attached</DetailField>}
           {duration != null && <DetailField label="DURATION">{formatDuration(duration)}</DetailField>}
         </div>
       );
@@ -881,10 +1187,16 @@ function EventDetail({ event, allEvents }: { event: TimelineEvent; allEvents: Ti
 
     case 'execute_transaction_complete': {
       const duration = computeEventDuration(event, allEvents);
+      const persisted: string[] = [];
+      if (d['hadThought']) persisted.push('thought');
+      if (d['hadExperience']) persisted.push('experience');
+      if ((d['emotionDeltaCount'] as number) > 0) persisted.push(`${d['emotionDeltaCount']} emotion delta(s)`);
+      if (d['hadEnergyDelta']) persisted.push('energy delta');
+      if ((d['decisionCount'] as number) > 0) persisted.push(`${d['decisionCount']} decision(s)`);
       return (
         <div>
           {duration != null && <DetailField label="DURATION">{formatDuration(duration)}</DetailField>}
-          <DetailField label="PHASE">Thoughts, emotions, decisions, energy persisted to heartbeat.db</DetailField>
+          <DetailField label="PERSISTED">{persisted.length > 0 ? persisted.join(', ') : 'nothing'}</DetailField>
         </div>
       );
     }
@@ -892,23 +1204,44 @@ function EventDetail({ event, allEvents }: { event: TimelineEvent; allEvents: Ti
     case 'execute_decisions_complete': {
       const agentD = d['agentDecisions'] as number ?? 0;
       const pluginD = d['pluginDecisions'] as number ?? 0;
+      const totalD = d['totalDecisions'] as number ?? 0;
+      const types = d['decisionTypes'] as string[] ?? [];
       const duration = computeEventDuration(event, allEvents);
       return (
         <div>
           {duration != null && <DetailField label="DURATION">{formatDuration(duration)}</DetailField>}
-          <DetailField label="AGENT DECISIONS">{agentD}</DetailField>
-          <DetailField label="PLUGIN DECISIONS">{pluginD}</DetailField>
+          <DetailField label="TOTAL">{totalD}</DetailField>
+          {agentD > 0 && <DetailField label="AGENT DECISIONS">{agentD}</DetailField>}
+          {pluginD > 0 && <DetailField label="PLUGIN DECISIONS">{pluginD}</DetailField>}
+          {types.length > 0 && (
+            <DetailField label="TYPES">
+              <div css={css`display: flex; flex-wrap: wrap; gap: 4px;`}>
+                {types.map((t, i) => <Badge key={i} label={t} color={theme.colors.text.hint} />)}
+              </div>
+            </DetailField>
+          )}
         </div>
       );
     }
 
     case 'execute_memory_complete': {
       const duration = computeEventDuration(event, allEvents);
+      const candidateTypes = d['candidateTypes'] as string[] ?? [];
+      const wmContactId = str(d['workingMemoryContactId']);
       return (
         <div>
           {duration != null && <DetailField label="DURATION">{formatDuration(duration)}</DetailField>}
           <DetailField label="CANDIDATES">{String(d['candidateCount'] ?? 0)}</DetailField>
-          {Boolean(d['hadWorkingMemoryUpdate']) && <DetailField label="WORKING MEMORY">Updated</DetailField>}
+          {candidateTypes.length > 0 && (
+            <DetailField label="TYPES">
+              <div css={css`display: flex; flex-wrap: wrap; gap: 4px;`}>
+                {candidateTypes.map((t, i) => <Badge key={i} label={t} color={theme.colors.text.hint} />)}
+              </div>
+            </DetailField>
+          )}
+          {Boolean(d['hadWorkingMemoryUpdate']) && (
+            <DetailField label="WORKING MEMORY">Updated{wmContactId ? ` (${wmContactId.slice(0, 8)}...)` : ''}</DetailField>
+          )}
           {Boolean(d['hadCoreSelfUpdate']) && <DetailField label="CORE SELF">Updated</DetailField>}
           {Boolean(d['hadSeedResonance']) && <DetailField label="SEED RESONANCE">Checked</DetailField>}
         </div>
@@ -949,7 +1282,7 @@ function TimelineEventRow({
   const category = getEventCategory(event.eventType);
   const color = getCategoryColor(category, theme);
   const Icon = getEventIcon(event.eventType);
-  const label = getEventLabel(event.eventType);
+  const label = getEventLabel(event.eventType, event.data);
   const preview = getPreviewContent(event);
   const expandable = hasExpandableDetail(event.eventType) && event.eventType !== 'tick_output';
   const duration = shouldShowDuration(event.eventType) ? computeEventDuration(event, allEvents) : null;

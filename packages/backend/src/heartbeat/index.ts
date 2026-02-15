@@ -14,6 +14,7 @@ import * as systemStore from '../db/stores/system-store.js';
 import * as personaStore from '../db/stores/persona-store.js';
 import * as messageStore from '../db/stores/message-store.js';
 import * as memoryDbStore from '../db/stores/memory-store.js';
+import * as taskStore from '../db/stores/task-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
 import { env, PROJECT_ROOT } from '../utils/env.js';
@@ -588,6 +589,9 @@ async function getOrCreateMindSession(
     ...pluginMcp.allowedTools,
   ];
 
+  // Enable verbose agent logging when LOG_LEVEL is debug or trace
+  const verboseAgent = env.LOG_LEVEL === 'debug' || env.LOG_LEVEL === 'trace';
+
   const session = await agentManager.createSession({
     provider,
     cwd: PROJECT_ROOT,
@@ -605,6 +609,7 @@ async function getOrCreateMindSession(
       mcpServers: mergedMcpServers,
       allowedTools: mergedAllowedTools,
     } : {}),
+    verbose: verboseAgent,
   });
 
   // Attach logging
@@ -1042,7 +1047,15 @@ async function executeOutput(
   };
 
   // Step 0: Mark execute start
-  logExecuteEvent('execute_start');
+  logExecuteEvent('execute_start', {
+    triggerType: gathered.trigger.type,
+    contactId: gathered.contact?.id ?? null,
+    contactName: gathered.contact?.fullName ?? null,
+    channel: gathered.trigger.channel ?? null,
+    hasReply: !!output.reply?.content,
+    decisionCount: output.decisions.length,
+    memoryCandidateCount: output.memoryCandidate?.length ?? 0,
+  });
 
   // Step 1: Handle reply (outside transaction — message goes to messages.db)
   // Per docs: "Channel send failure → log error with full context, do NOT auto-retry.
@@ -1101,6 +1114,11 @@ async function executeOutput(
   logExecuteEvent('execute_reply_sent', {
     path: replySentEarly ? (finalReplyDiffers ? 'follow-up' : 'early') : (shouldSendReply ? 'fallback' : 'none'),
     hasReply: !!output.reply?.content,
+    channel: output.reply?.channel ?? null,
+    contactId: gathered.contact?.id ?? null,
+    contactName: gathered.contact?.fullName ?? null,
+    contentLength: finalReplyContent.length,
+    hasMedia: !!(output.reply as any)?.media?.length,
   });
 
   // Wrap all DB writes in a transaction for atomicity
@@ -1218,7 +1236,13 @@ async function executeOutput(
   // Execute the transaction
   runTransaction();
 
-  logExecuteEvent('execute_transaction_complete');
+  logExecuteEvent('execute_transaction_complete', {
+    hadThought: !!output.thought?.content,
+    hadExperience: !!output.experience?.content,
+    emotionDeltaCount: output.emotionDeltas.length,
+    hadEnergyDelta: !!(settings.energySystemEnabled && output.energyDelta),
+    decisionCount: output.decisions.length,
+  });
 
   // 4b. Handle agent decisions (outside transaction — involves async operations)
   if (agentOrchestrator) {
@@ -1293,6 +1317,8 @@ async function executeOutput(
   logExecuteEvent('execute_decisions_complete', {
     agentDecisions: output.decisions.filter(d => ['spawn_agent', 'update_agent', 'cancel_agent'].includes(d.type)).length,
     pluginDecisions: output.decisions.filter(d => !builtInDecisionTypeSchema.safeParse(d.type).success).length,
+    totalDecisions: output.decisions.length,
+    decisionTypes: output.decisions.map(d => d.type),
   });
 
   // 6+7. Memory candidates + seed resonance (parallelized)
@@ -1342,7 +1368,9 @@ async function executeOutput(
 
   logExecuteEvent('execute_memory_complete', {
     candidateCount: output.memoryCandidate?.length ?? 0,
+    candidateTypes: output.memoryCandidate?.map(c => c.type) ?? [],
     hadWorkingMemoryUpdate: !!output.workingMemoryUpdate,
+    workingMemoryContactId: output.workingMemoryUpdate && gathered.contact ? gathered.contact.id : null,
     hadCoreSelfUpdate: !!output.coreSelfUpdate,
     hadSeedResonance: !!(seedManager && output.thought?.content && output.thought.importance >= 0.3),
   });
@@ -1377,6 +1405,9 @@ async function executeOutput(
   // 9. Cleanup expired entries
   heartbeatStore.cleanupExpiredEntries(hbDb);
   heartbeatStore.cleanupEnergyHistory(hbDb, settings.emotionHistoryRetentionDays);
+  heartbeatStore.cleanupOldEmotionHistory(hbDb, settings.emotionHistoryRetentionDays);
+  agentLogStore.cleanupOldSessions(getAgentLogsDb(), settings.agentLogRetentionDays);
+  taskStore.cleanupOldTaskRuns(hbDb, settings.taskRunRetentionDays);
 
   logExecuteEvent('execute_complete', { totalDurationMs: Date.now() - executeStartTime });
 }

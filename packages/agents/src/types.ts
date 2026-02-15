@@ -268,6 +268,18 @@ export interface AgentSessionConfig {
     type: 'json_schema';
     schema: Record<string, unknown>;
   };
+  /**
+   * Which filesystem settings the SDK should load.
+   * - 'user': ~/.claude settings
+   * - 'project': .claude/ in cwd (CLAUDE.md, skills, agents)
+   * - 'local': .claude.local settings
+   *
+   * Defaults to empty (no filesystem discovery). Pass ['project'] only
+   * for sessions that need Claude Code project context (e.g., code-working
+   * sub-agents). The mind session should NOT load project settings — its
+   * context is fully built by the context builder.
+   */
+  settingSources?: Array<'user' | 'project' | 'local'>;
 
   // Codex-specific
   workingDirectory?: string;
@@ -276,6 +288,13 @@ export interface AgentSessionConfig {
   // OpenCode-specific
   hostname?: string;
   port?: number;
+
+  /**
+   * Enable verbose logging for debugging session lifecycle.
+   * When true, logs detailed SDK message flow, time-to-first-message,
+   * periodic "still waiting" heartbeats, and elevated stderr output.
+   */
+  verbose?: boolean;
 }
 
 /**

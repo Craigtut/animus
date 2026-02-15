@@ -126,6 +126,13 @@ interface SDKUserMessage {
  * at any point. The stream is ended explicitly by calling `end()` when
  * the `result` message is received on the output side (see promptStreaming).
  *
+ * **Why end() on result is safe for injected messages**: Messages pushed
+ * before the result are already in the CLI's stdin buffer (stream_input
+ * consumed them eagerly). The iterator also delivers any remaining queued
+ * items before signaling done (queue check precedes done check in next()).
+ * So calling end() after the result doesn't lose buffered messages — the
+ * CLI reads all stdin data before seeing EOF.
+ *
  * This avoids the known issue (GitHub #9705) where premature stdin closure
  * breaks the bidirectional hook/control protocol.
  */
@@ -424,11 +431,56 @@ class ClaudeSession extends BaseSession {
   private resolvedModel: string | null = null;
   /** Active message stream for AsyncIterable prompt injection */
   private activeMessageStream: MessageStream | null = null;
+  /** Whether verbose lifecycle logging is enabled */
+  private verbose: boolean;
+  /** Timer for periodic "still waiting" logs */
+  private waitingTimer: ReturnType<typeof setInterval> | null = null;
+  /** Count of SDK messages received in current prompt */
+  private sdkMessageCount = 0;
 
   constructor(sdk: ClaudeSDK, config: AgentSessionConfig, logger: Logger) {
     super(config, logger);
     this.sdk = sdk;
     this.pendingId = createPendingSessionId('claude');
+    this.verbose = config.verbose ?? false;
+  }
+
+  /**
+   * Log at info level when verbose, debug level otherwise.
+   */
+  private vlog(message: string, context?: Record<string, unknown>): void {
+    if (this.verbose) {
+      this.logger.info(message, context);
+    } else {
+      this.logger.debug(message, context);
+    }
+  }
+
+  /**
+   * Start a periodic timer that logs "still waiting" every 10 seconds.
+   * Helps diagnose hangs where no SDK messages are being received.
+   */
+  private startWaitingTimer(label: string): void {
+    if (this.waitingTimer) return;
+    const startTime = Date.now();
+    this.waitingTimer = setInterval(() => {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      this.logger.info(`[${label}] Still waiting for SDK response...`, {
+        elapsedSec: elapsed,
+        sdkMessagesReceived: this.sdkMessageCount,
+        sessionId: this.id,
+      });
+    }, 10_000);
+  }
+
+  /**
+   * Stop the periodic waiting timer.
+   */
+  private stopWaitingTimer(): void {
+    if (this.waitingTimer) {
+      clearInterval(this.waitingTimer);
+      this.waitingTimer = null;
+    }
   }
 
   /**
@@ -462,9 +514,25 @@ class ClaudeSession extends BaseSession {
     let response = '';
     let structuredOutput: unknown;
     let finishReason: AgentResponse['finishReason'] = 'complete';
+    let gotSuccessResult = false;
 
     try {
       const sdkOptions = this.buildSdkOptions();
+
+      this.vlog('Starting SDK query (non-streaming)', {
+        sessionId: this.id,
+        promptLength: input.length,
+        promptPreview: input.substring(0, 120),
+        model: sdkOptions.model ?? 'default',
+        timeoutMs: timeout,
+        hasOutputFormat: !!sdkOptions.outputFormat,
+        hasMcpServers: !!sdkOptions.mcpServers,
+      });
+
+      this.sdkMessageCount = 0;
+      const queryStartTime = Date.now();
+      this.startWaitingTimer('prompt');
+
       this.queryInstance = this.sdk.query({
         prompt: input,
         options: sdkOptions,
@@ -479,12 +547,35 @@ class ClaudeSession extends BaseSession {
       );
 
       // Process messages from the SDK
+      let firstMessageLogged = false;
       for await (const message of this.queryInstance) {
+        this.sdkMessageCount++;
+
+        // Log time-to-first-message
+        if (!firstMessageLogged) {
+          const ttfm = Date.now() - queryStartTime;
+          this.vlog('First SDK message received', {
+            timeToFirstMessageMs: ttfm,
+            messageType: message.type,
+            messageSubtype: (message as SystemMessage).subtype,
+          });
+          firstMessageLogged = true;
+          this.stopWaitingTimer();
+        }
+
+        // Log every SDK message type
+        this.vlog('SDK message', {
+          type: message.type,
+          subtype: (message as SystemMessage).subtype,
+          msgIndex: this.sdkMessageCount,
+        });
+
         await this.processMessage(message);
 
         // Extract session ID from init message
         if (message.type === 'system' && message.subtype === 'init') {
           this.nativeSessionId = message.session_id;
+          this.vlog('Session ID resolved', { nativeSessionId: message.session_id });
         }
 
         // Extract response from assistant message
@@ -494,25 +585,72 @@ class ClaudeSession extends BaseSession {
 
         // Extract result info
         if (message.type === 'result') {
+          // Guard: don't let a spurious error result overwrite a prior success
+          if (gotSuccessResult) {
+            this.logger.warn('Ignoring duplicate result message after success', {
+              subtype: message.subtype,
+              sessionId: this.id,
+            });
+            continue;
+          }
+
           this.updateUsageFromResult(message);
           finishReason = this.mapFinishReason(message.subtype);
           response = message.result || response;
           if (message.structured_output !== undefined) {
             structuredOutput = message.structured_output;
           }
+
+          if (message.subtype === 'success') {
+            gotSuccessResult = true;
+          }
         }
       }
+
+      const totalMs = Date.now() - startTime;
+      this.vlog('Prompt completed', {
+        sessionId: this.id,
+        totalMs,
+        sdkMessages: this.sdkMessageCount,
+        finishReason,
+        responseLength: response.length,
+        hasStructuredOutput: structuredOutput !== undefined,
+      });
 
       return {
         content: response,
         finishReason,
         usage: this.getUsage(),
         cost: this.getCost() ?? undefined,
-        durationMs: Date.now() - startTime,
+        durationMs: totalMs,
         model: this.getModelName(),
         structuredOutput,
       };
     } catch (error) {
+      this.stopWaitingTimer();
+
+      // If we already captured a successful result before the error was thrown,
+      // return the good response instead of throwing.
+      if (gotSuccessResult) {
+        const totalMs = Date.now() - startTime;
+        this.logger.warn('CLI process errored after successful result, returning success', {
+          sessionId: this.id,
+          error: error instanceof Error ? error.message : String(error),
+          finishReason,
+          totalMs,
+        });
+
+        return {
+          content: response,
+          finishReason,
+          usage: this.getUsage(),
+          cost: this.getCost() ?? undefined,
+          durationMs: totalMs,
+          model: this.getModelName(),
+          structuredOutput,
+        };
+      }
+
       // Check if it was an abort
       if (this.abortController?.signal.aborted) {
         throw new AgentError({
@@ -538,6 +676,7 @@ class ClaudeSession extends BaseSession {
       throw wrapError(enrichedError, 'claude', this.id);
     } finally {
       clearTimeout(timer);
+      this.stopWaitingTimer();
       this.abortController = null;
       this.queryInstance = null;
     }
@@ -568,11 +707,29 @@ class ClaudeSession extends BaseSession {
     let accumulated = '';
     let structuredOutput: unknown;
     let finishReason: AgentResponse['finishReason'] = 'complete';
+    let gotSuccessResult = false;
 
     try {
       const sdkOptions = this.buildSdkOptions();
       // Enable partial messages for streaming
       sdkOptions.includePartialMessages = true;
+
+      this.vlog('Starting SDK query (streaming)', {
+        sessionId: this.id,
+        promptLength: input.length,
+        promptPreview: input.substring(0, 120),
+        model: sdkOptions.model ?? 'default',
+        timeoutMs: timeout,
+        hasOutputFormat: !!sdkOptions.outputFormat,
+        hasMcpServers: !!sdkOptions.mcpServers,
+        mcpServerNames: sdkOptions.mcpServers ? Object.keys(sdkOptions.mcpServers) : [],
+        allowedToolCount: sdkOptions.allowedTools?.length ?? 0,
+        permissionMode: sdkOptions.permissionMode,
+      });
+
+      this.sdkMessageCount = 0;
+      const queryStartTime = Date.now();
+      this.startWaitingTimer('promptStreaming');
 
       // Create message stream for AsyncIterable prompt pattern.
       // This enables injectMessage() to push additional user messages
@@ -585,10 +742,14 @@ class ClaudeSession extends BaseSession {
         message: { role: 'user', content: input },
       });
 
+      this.vlog('Message stream created, calling sdk.query()');
+
       this.queryInstance = this.sdk.query({
         prompt: this.activeMessageStream.iterable,
         options: sdkOptions,
       });
+
+      this.vlog('sdk.query() returned, entering message loop');
 
       // Emit input received event
       await this.emit(
@@ -602,12 +763,42 @@ class ClaudeSession extends BaseSession {
       await this.emit(this.createEvent('response_start', {}));
 
       // Process messages from the SDK
+      let firstMessageLogged = false;
+      let lastMessageType = '';
       for await (const message of this.queryInstance) {
+        this.sdkMessageCount++;
+
+        // Log time-to-first-message
+        if (!firstMessageLogged) {
+          const ttfm = Date.now() - queryStartTime;
+          this.vlog('First SDK message received', {
+            timeToFirstMessageMs: ttfm,
+            messageType: message.type,
+            messageSubtype: (message as SystemMessage).subtype,
+          });
+          firstMessageLogged = true;
+          this.stopWaitingTimer();
+        }
+
+        // Log non-stream_event messages (stream_events are too noisy even for verbose)
+        if (message.type !== 'stream_event' && message.type !== 'partial') {
+          this.vlog('SDK message', {
+            type: message.type,
+            subtype: (message as SystemMessage).subtype,
+            msgIndex: this.sdkMessageCount,
+          });
+        }
+        lastMessageType = message.type;
+
         await this.processMessage(message);
 
         // Extract session ID from init message
         if (message.type === 'system' && message.subtype === 'init') {
           this.nativeSessionId = message.session_id;
+          this.vlog('Session ID resolved', {
+            nativeSessionId: message.session_id,
+            resolvedModel: message.model,
+          });
         }
 
         // Handle streaming events
@@ -631,25 +822,66 @@ class ClaudeSession extends BaseSession {
         // Extract final response from assistant message
         if (message.type === 'assistant') {
           response = this.extractContent(message);
+          this.vlog('Assistant message received', {
+            contentBlocks: (message as AssistantMessage).message.content.length,
+            textLength: response.length,
+            toolCalls: (message as AssistantMessage).message.content
+              .filter(b => b.type === 'tool_use')
+              .map(b => b.name),
+          });
         }
 
         // Extract result info
         if (message.type === 'result') {
+          const resultMsg = message as ResultMessage;
+          this.vlog('Result message received', {
+            subtype: resultMsg.subtype,
+            durationMs: resultMsg.duration_ms,
+            numTurns: resultMsg.num_turns,
+            totalCostUsd: resultMsg.total_cost_usd,
+            inputTokens: resultMsg.usage.input_tokens,
+            outputTokens: resultMsg.usage.output_tokens,
+            cacheReadTokens: resultMsg.usage.cache_read_input_tokens,
+            hasStructuredOutput: resultMsg.structured_output !== undefined,
+          });
+
           // End the message stream now that the CLI has produced its result.
-          // This unblocks the SDK's stream_input task, which then calls
-          // end_input() to close stdin. Doing this on `result` (rather than
-          // an idle timer) keeps the injection window open for the entire
-          // query duration and avoids the GitHub #9705 stdin-closure bug.
           this.activeMessageStream?.end();
 
-          this.updateUsageFromResult(message);
-          finishReason = this.mapFinishReason(message.subtype);
-          response = message.result || response;
-          if (message.structured_output !== undefined) {
-            structuredOutput = message.structured_output;
+          // Guard: if we already captured a successful result, don't let a
+          // subsequent spurious error result (e.g., CLI exit code 1 after
+          // stdin closure) overwrite the good data.
+          if (gotSuccessResult) {
+            this.logger.warn('Ignoring duplicate result message after success', {
+              subtype: resultMsg.subtype,
+              sessionId: this.id,
+            });
+            continue;
+          }
+
+          this.updateUsageFromResult(resultMsg);
+          finishReason = this.mapFinishReason(resultMsg.subtype);
+          response = resultMsg.result || response;
+          if (resultMsg.structured_output !== undefined) {
+            structuredOutput = resultMsg.structured_output;
+          }
+
+          if (resultMsg.subtype === 'success') {
+            gotSuccessResult = true;
           }
         }
       }
+
+      const totalMs = Date.now() - startTime;
+      this.vlog('Streaming prompt completed', {
+        sessionId: this.id,
+        totalMs,
+        sdkMessages: this.sdkMessageCount,
+        finishReason,
+        responseLength: response.length,
+        accumulatedStreamLength: accumulated.length,
+        lastMessageType,
+      });
 
       // Emit response end
       await this.emit(
@@ -664,11 +896,43 @@ class ClaudeSession extends BaseSession {
         finishReason,
         usage: this.getUsage(),
         cost: this.getCost() ?? undefined,
-        durationMs: Date.now() - startTime,
+        durationMs: totalMs,
         model: this.getModelName(),
         structuredOutput,
       };
     } catch (error) {
+      this.stopWaitingTimer();
+
+      // If we already captured a successful result before the error was thrown
+      // (e.g., CLI process exited with code 1 after sending a success result),
+      // return the good response instead of throwing.
+      if (gotSuccessResult) {
+        const totalMs = Date.now() - startTime;
+        this.logger.warn('CLI process errored after successful result, returning success', {
+          sessionId: this.id,
+          error: error instanceof Error ? error.message : String(error),
+          finishReason,
+          totalMs,
+        });
+
+        await this.emit(
+          this.createEvent('response_end', {
+            content: response,
+            finishReason,
+          }),
+        );
+
+        return {
+          content: response,
+          finishReason,
+          usage: this.getUsage(),
+          cost: this.getCost() ?? undefined,
+          durationMs: totalMs,
+          model: this.getModelName(),
+          structuredOutput,
+        };
+      }
+
       if (this.abortController?.signal.aborted) {
         throw new AgentError({
           code: 'TIMEOUT',
@@ -693,6 +957,7 @@ class ClaudeSession extends BaseSession {
       throw wrapError(enrichedError, 'claude', this.id);
     } finally {
       clearTimeout(timer);
+      this.stopWaitingTimer();
       this.abortController = null;
       this.queryInstance = null;
       // Clean up message stream
@@ -795,11 +1060,21 @@ class ClaudeSession extends BaseSession {
       hooks: this.buildSdkHooks(),
       env: this.config.env,
       outputFormat: this.config.outputFormat,
-      // Load project settings so the SDK discovers .claude/skills/ and CLAUDE.md
-      settingSources: ['project'],
-      // Capture stderr from the Claude CLI subprocess for diagnostics
+      // Only load filesystem settings when explicitly requested.
+      // Most sessions (mind, sub-agents) build their own context and don't
+      // need CLAUDE.md, skills, or agent definitions from the project.
+      settingSources: this.config.settingSources,
+      // Capture stderr from the Claude CLI subprocess for diagnostics.
+      // When verbose, log at info level so stderr is visible in real-time.
       stderr: (message: string) => {
-        this.logger.debug('Claude CLI stderr:', { stderr: message.trim() });
+        const trimmed = message.trim();
+        if (trimmed) {
+          if (this.verbose) {
+            this.logger.info('Claude CLI stderr:', { stderr: trimmed });
+          } else {
+            this.logger.debug('Claude CLI stderr:', { stderr: trimmed });
+          }
+        }
         // Accumulate stderr for error reporting
         this.stderrBuffer += message;
         // Keep buffer bounded (last 4KB)

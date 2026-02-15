@@ -289,6 +289,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - **Architecture**: `docs/architecture/mcp-tools.md` (cross-provider MCP tool architecture, tool definitions, handlers, registry, permission filtering)
 - **Architecture**: `docs/architecture/voice-channel.md` (voice channel — Parakeet TDT v3 STT + Kokoro TTS, both via sherpa-onnx, frontend voice mode, audio pipeline)
 - **Architecture**: `docs/architecture/sleep-energy.md` (sleep & energy system, circadian rhythm, energy bands, wake-up mechanics, accelerated emotional decay)
+- **Architecture**: `docs/architecture/plugin-system.md` (plugin system — skills-first philosophy, 7 component types, manifest format, config schemas, credential handling, MCP tools, hooks, decision types, triggers, hot-swap lifecycle, security model, plugin gallery)
 - **Architecture**: `docs/architecture/credential-passing.md` (secrets & credentials — AES-256-GCM encryption at rest, agent-blind model, three storage locations, credential manifest, plugin `${config.*}` resolution, `run_with_credentials` tool, channel IPC injection, frontend masking, threat model)
 - **Architecture**: `docs/architecture/observational-memory.md` (observational memory — three-stream compression, Observer/Reflector agents, token-based thresholds, async processing, memory.db schema)
 - **Architecture**: `docs/architecture/reflex-system.md` (reflex fast-response layer — Vercel AI SDK, dual-path voice architecture, lightweight context, heartbeat integration, provider configuration)
@@ -297,6 +298,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - **Frontend Design**: `docs/frontend/design-principles.md`, `docs/frontend/onboarding.md`
 - **Frontend Specs**: `docs/frontend/app-shell.md` (navigation, transitions, routes), `docs/frontend/presence.md` (main space), `docs/frontend/mind.md` (inner life detail), `docs/frontend/people.md` (contacts), `docs/frontend/settings.md` (configuration), `docs/frontend/voice-mode.md` (voice interaction)
 - **Guides**: `docs/guides/getting-started.md`
+- **Skills**: `.claude/skills/build-plugin/` (plugin development guide, invoked automatically when building plugins)
 - **Agent SDKs**: `docs/agents/` (per-provider folders: claude/, codex/, opencode/ + architecture overview + plugin/extension systems)
 
 **When to use `/doc-explorer`:**
@@ -317,6 +319,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on reflex/fast-response/voice-latency → `/doc-explorer reflex`
 - Working on sleep/energy/circadian rhythm → `/doc-explorer sleep-energy`
 - Working on agent SDKs → `/doc-explorer agents`
+- Building a new plugin → the `build-plugin` skill is loaded automatically; for architecture context use `/doc-explorer plugin-system`
 - Working on backend/API → `/doc-explorer architecture`
 - Unsure about project conventions → `/doc-explorer` (no args, see everything)
 

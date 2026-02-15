@@ -41,6 +41,7 @@ const AI_DB_FILES = [
   { name: 'heartbeat.db', envPath: env.DB_HEARTBEAT_PATH },
   { name: 'memory.db', envPath: env.DB_MEMORY_PATH },
   { name: 'messages.db', envPath: env.DB_MESSAGES_PATH },
+  { name: 'agent_logs.db', envPath: env.DB_AGENT_LOGS_PATH },
 ];
 
 // ---------------------------------------------------------------------------
@@ -200,8 +201,8 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     log.info('Observational memory operations complete');
 
     // 8. Checkpoint all AI databases (flush WAL into main file)
-    const { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb } = await import('../db/index.js');
-    const dbs = [getPersonaDb(), getHeartbeatDb(), getMemoryDb(), getMessagesDb()];
+    const { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb, getAgentLogsDb } = await import('../db/index.js');
+    const dbs = [getPersonaDb(), getHeartbeatDb(), getMemoryDb(), getMessagesDb(), getAgentLogsDb()];
     for (const db of dbs) {
       try {
         db.pragma('wal_checkpoint(TRUNCATE)');
