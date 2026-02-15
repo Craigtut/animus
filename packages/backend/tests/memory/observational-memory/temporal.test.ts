@@ -6,6 +6,7 @@ import {
   annotateRelativeTime,
   insertGapMarkers,
   reverseObservationGroups,
+  mergeSameDateGroups,
   annotateObservations,
 } from '../../../src/memory/observational-memory/temporal.js';
 
@@ -241,6 +242,100 @@ Date: Jan 1, 2026
     });
   });
 
+  describe('mergeSameDateGroups', () => {
+    it('merges duplicate date headers into one group', () => {
+      const input = `Date: Feb 14, 2026
+* 🔴 (10:00) First observation
+Date: Feb 14, 2026
+* 🟡 (14:00) Second observation`;
+
+      const result = mergeSameDateGroups(input);
+      const dateHeaders = result.split('\n').filter(l => /^Date:/.test(l));
+      expect(dateHeaders).toHaveLength(1);
+      expect(result).toContain('First observation');
+      expect(result).toContain('Second observation');
+    });
+
+    it('sorts entries by timestamp descending within each group', () => {
+      const input = `Date: Feb 14, 2026
+* 🟡 (09:00) Morning observation
+* 🔴 (16:00) Afternoon observation
+* 🟢 (12:00) Noon observation`;
+
+      const result = mergeSameDateGroups(input);
+      expect(result.indexOf('16:00')).toBeLessThan(result.indexOf('12:00'));
+      expect(result.indexOf('12:00')).toBeLessThan(result.indexOf('09:00'));
+    });
+
+    it('keeps sub-bullets attached to their parent entry', () => {
+      const input = `Date: Feb 14, 2026
+* 🔴 (10:00) Main observation
+  * -> Sub-detail about this
+* 🟡 (14:00) Another observation`;
+
+      const result = mergeSameDateGroups(input);
+      const lines = result.split('\n');
+      const mainIdx = lines.findIndex(l => l.includes('Main observation'));
+      const subIdx = lines.findIndex(l => l.includes('Sub-detail'));
+      // After sort: 14:00 first, then 10:00 + sub-bullet
+      expect(result.indexOf('14:00')).toBeLessThan(result.indexOf('10:00'));
+      expect(subIdx).toBe(mainIdx + 1);
+    });
+
+    it('handles input with no duplicate dates (preserves order)', () => {
+      const input = `Date: Feb 13, 2026
+* 🔴 (10:00) Yesterday observation
+Date: Feb 14, 2026
+* 🟡 (09:00) Today observation`;
+
+      const result = mergeSameDateGroups(input);
+      expect(result).toContain('Date: Feb 13, 2026');
+      expect(result).toContain('Date: Feb 14, 2026');
+      expect(result).toContain('Yesterday observation');
+      expect(result).toContain('Today observation');
+    });
+
+    it('handles empty input', () => {
+      expect(mergeSameDateGroups('')).toBe('');
+    });
+
+    it('merges three duplicate headers for the same date', () => {
+      const input = `Date: Feb 14, 2026
+* 🔴 (08:00) First batch
+Date: Feb 14, 2026
+* 🟡 (12:00) Second batch
+Date: Feb 14, 2026
+* 🟢 (16:00) Third batch`;
+
+      const result = mergeSameDateGroups(input);
+      const dateHeaders = result.split('\n').filter(l => /^Date:/.test(l));
+      expect(dateHeaders).toHaveLength(1);
+      // Sorted newest first: 16:00 → 12:00 → 08:00
+      expect(result.indexOf('16:00')).toBeLessThan(result.indexOf('12:00'));
+      expect(result.indexOf('12:00')).toBeLessThan(result.indexOf('08:00'));
+    });
+
+    it('merges duplicates while keeping different dates separate', () => {
+      const input = `Date: Feb 13, 2026
+* 🔴 (10:00) Yesterday first
+Date: Feb 14, 2026
+* 🟡 (09:00) Today first
+Date: Feb 13, 2026
+* 🟢 (15:00) Yesterday second
+Date: Feb 14, 2026
+* 🔴 (14:00) Today second`;
+
+      const result = mergeSameDateGroups(input);
+      const dateHeaders = result.split('\n').filter(l => /^Date:/.test(l));
+      expect(dateHeaders).toHaveLength(2);
+      // Feb 13 entries sorted: 15:00 → 10:00
+      const feb13Block = result.split('Date: Feb 14')[0]!;
+      expect(feb13Block.indexOf('15:00')).toBeLessThan(feb13Block.indexOf('10:00'));
+      // Feb 14 entries sorted: 14:00 → 09:00
+      expect(result.indexOf('Today second')).toBeLessThan(result.indexOf('Today first'));
+    });
+  });
+
   describe('annotateObservations', () => {
     it('applies all transformations: reverse, gaps, relative time', () => {
       // Input stored chronologically (oldest first)
@@ -304,6 +399,57 @@ Date: Feb 14, 2026
       // Order: Feb 14 → Jan 30 → Jan 15
       expect(result.indexOf('Feb 14')).toBeLessThan(result.indexOf('Jan 30'));
       expect(result.indexOf('Jan 30')).toBeLessThan(result.indexOf('Jan 15'));
+    });
+
+    it('merges duplicate date headers and applies all transformations', () => {
+      // Simulates multiple observer batches on the same day
+      const input = `Date: Feb 14, 2026
+* 🟡 (09:00) First batch observation
+Date: Feb 14, 2026
+* 🔴 (15:00) Second batch observation`;
+
+      const result = annotateObservations(input, now);
+
+      // Should have only one date header
+      const dateHeaders = result.split('\n').filter(l => /^Date:/.test(l));
+      expect(dateHeaders).toHaveLength(1);
+      expect(result).toContain('Date: Feb 14, 2026 (today)');
+
+      // Both observations present, sorted newest first
+      expect(result.indexOf('15:00')).toBeLessThan(result.indexOf('09:00'));
+
+      // No gap markers (same date)
+      expect(result).not.toContain('[');
+    });
+
+    it('merges duplicates across multiple dates with full pipeline', () => {
+      // Stored chronologically, multiple batches per day
+      const input = `Date: Jan 30, 2026
+* 🟡 (10:00) Obs A
+Date: Feb 14, 2026
+* 🟢 (08:00) Obs B
+Date: Jan 30, 2026
+* 🔴 (16:00) Obs C
+Date: Feb 14, 2026
+* 🟡 (14:00) Obs D`;
+
+      const result = annotateObservations(input, now);
+
+      // Two unique dates
+      const dateHeaders = result.split('\n').filter(l => /^Date:/.test(l));
+      expect(dateHeaders).toHaveLength(2);
+
+      // Reversed: Feb 14 before Jan 30
+      expect(result.indexOf('Feb 14')).toBeLessThan(result.indexOf('Jan 30'));
+
+      // Feb 14 entries sorted: 14:00 → 08:00
+      expect(result.indexOf('Obs D')).toBeLessThan(result.indexOf('Obs B'));
+
+      // Jan 30 entries sorted: 16:00 → 10:00
+      expect(result.indexOf('Obs C')).toBeLessThan(result.indexOf('Obs A'));
+
+      // Gap marker between Feb 14 and Jan 30 (2 weeks)
+      expect(result).toContain('[2 weeks earlier]');
     });
   });
 });

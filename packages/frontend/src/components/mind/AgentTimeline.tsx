@@ -15,6 +15,10 @@ import {
   XCircle,
   CheckCircle,
   Star,
+  Lightning,
+  PaperPlaneRight,
+  Database,
+  Gear,
 } from '@phosphor-icons/react';
 import { trpc } from '../../utils/trpc';
 import { useHeartbeatStore } from '../../store/heartbeat-store';
@@ -82,7 +86,7 @@ interface AgentTimelineProps {
 // Event category mapping
 // ============================================================================
 
-type EventCategory = 'session' | 'input' | 'thinking' | 'tool' | 'response' | 'error' | 'complete';
+type EventCategory = 'session' | 'input' | 'thinking' | 'tool' | 'response' | 'error' | 'complete' | 'execute';
 
 function getEventCategory(eventType: string): EventCategory {
   switch (eventType) {
@@ -91,6 +95,7 @@ function getEventCategory(eventType: string): EventCategory {
       return 'session';
     case 'input_received':
     case 'tick_input':
+    case 'message_injected':
       return 'input';
     case 'thinking_start':
     case 'thinking_end':
@@ -106,6 +111,13 @@ function getEventCategory(eventType: string): EventCategory {
       return 'error';
     case 'tick_output':
       return 'complete';
+    case 'execute_start':
+    case 'execute_reply_sent':
+    case 'execute_transaction_complete':
+    case 'execute_decisions_complete':
+    case 'execute_memory_complete':
+    case 'execute_complete':
+      return 'execute';
     default:
       return 'session';
   }
@@ -128,6 +140,8 @@ function getCategoryColor(category: EventCategory, theme: ReturnType<typeof useT
       return isLight ? '#C75050' : '#D96060';
     case 'complete':
       return theme.colors.accent;
+    case 'execute':
+      return isLight ? '#2D8A6E' : '#4ECBA0';
   }
 }
 
@@ -141,6 +155,7 @@ function getEventIcon(eventType: string) {
     case 'session_end':   return Stop;
     case 'input_received':
     case 'tick_input':    return ArrowFatLineDown;
+    case 'message_injected': return ChatText;
     case 'thinking_start':
     case 'thinking_end':  return Brain;
     case 'tool_call_start':
@@ -150,6 +165,12 @@ function getEventIcon(eventType: string) {
     case 'response_end':  return ChatText;
     case 'error':         return XCircle;
     case 'tick_output':   return CheckCircle;
+    case 'execute_start':       return Lightning;
+    case 'execute_reply_sent':  return PaperPlaneRight;
+    case 'execute_transaction_complete': return Database;
+    case 'execute_decisions_complete':   return Gear;
+    case 'execute_memory_complete':      return Brain;
+    case 'execute_complete':             return CheckCircle;
     default:              return Play;
   }
 }
@@ -164,6 +185,7 @@ function getEventLabel(eventType: string): string {
     case 'session_end':    return 'Session Ended';
     case 'input_received': return 'Input Received';
     case 'tick_input':     return 'Tick Input';
+    case 'message_injected': return 'Message Injected';
     case 'thinking_start': return 'Thinking...';
     case 'thinking_end':   return 'Thinking Complete';
     case 'tool_call_start':return 'Tool Call';
@@ -173,6 +195,12 @@ function getEventLabel(eventType: string): string {
     case 'response_end':   return 'Response Complete';
     case 'error':          return 'Error';
     case 'tick_output':    return 'Tick Complete';
+    case 'execute_start':       return 'Execute Started';
+    case 'execute_reply_sent':  return 'Reply Sent';
+    case 'execute_transaction_complete': return 'DB Transaction';
+    case 'execute_decisions_complete':   return 'Decisions Complete';
+    case 'execute_memory_complete':      return 'Memory Complete';
+    case 'execute_complete':             return 'Execute Complete';
     default:               return eventType;
   }
 }
@@ -198,6 +226,12 @@ function getPreviewContent(event: TimelineEvent): string {
     }
     case 'input_received':
       return truncate(str(d['content']) || str(d['text']), 80);
+    case 'message_injected': {
+      const name = str(d['contactName']);
+      const ch = str(d['channel']);
+      const preview = truncate(str(d['content']), 60);
+      return `${name}${ch ? ` via ${ch}` : ''}: ${preview}`;
+    }
     case 'tick_input': {
       const trigger = str(d['triggerType']);
       const session = str(d['sessionState']);
@@ -236,6 +270,40 @@ function getPreviewContent(event: TimelineEvent): string {
       return `${str(d['code'])} - ${truncate(str(d['message']), 60)}`;
     case 'tick_output':
       return event.relativeMs > 0 ? `completed in ${formatDuration(event.relativeMs)}` : 'completed';
+    case 'execute_start':
+      return `tick #${d['tickNumber'] ?? '?'}`;
+    case 'execute_reply_sent': {
+      const path = str(d['path']);
+      const hasReply = d['hasReply'];
+      if (!hasReply) return 'no reply needed';
+      return path === 'early' ? 'sent via streaming (early)'
+           : path === 'follow-up' ? 'follow-up sent (content differed)'
+           : path === 'fallback' ? 'sent via fallback path'
+           : 'no send needed';
+    }
+    case 'execute_transaction_complete':
+      return d['durationMs'] != null ? `completed in ${formatDuration(d['durationMs'] as number)}` : 'completed';
+    case 'execute_decisions_complete': {
+      const agentD = d['agentDecisions'] as number ?? 0;
+      const pluginD = d['pluginDecisions'] as number ?? 0;
+      const parts: string[] = [];
+      if (agentD > 0) parts.push(`${agentD} agent`);
+      if (pluginD > 0) parts.push(`${pluginD} plugin`);
+      return parts.length > 0 ? parts.join(', ') : 'no decisions executed';
+    }
+    case 'execute_memory_complete': {
+      const count = d['candidateCount'] as number ?? 0;
+      const parts: string[] = [];
+      if (count > 0) parts.push(`${count} candidate${count > 1 ? 's' : ''}`);
+      if (d['hadWorkingMemoryUpdate']) parts.push('working memory');
+      if (d['hadCoreSelfUpdate']) parts.push('core self');
+      if (d['hadSeedResonance']) parts.push('seed resonance');
+      return parts.length > 0 ? parts.join(', ') : 'no memory operations';
+    }
+    case 'execute_complete': {
+      const totalMs = d['totalDurationMs'] as number;
+      return totalMs != null ? `completed in ${formatDuration(totalMs)}` : 'completed';
+    }
     default:
       return '';
   }
@@ -288,7 +356,16 @@ function normalizeTimeline(raw: any): TickTimeline | null {
       outcome: String(d.outcome ?? 'executed'),
       outcomeDetail: d.outcomeDetail ?? d.outcome_detail ?? null,
     }));
-    results = { thoughts, experiences, emotionDeltas, decisions };
+    const base: TickResults = { thoughts, experiences, emotionDeltas, decisions };
+    if (r.reply) {
+      const replyObj: { content: string; channel: string; contactId?: string } = {
+        content: String(r.reply.content ?? ''),
+        channel: String(r.reply.channel ?? ''),
+      };
+      if (r.reply.contactId) replyObj.contactId = String(r.reply.contactId);
+      base.reply = replyObj;
+    }
+    results = base;
   }
 
   let usage: TickUsage | null = null;
@@ -323,7 +400,11 @@ function getDurationBadgeColor(ms: number, theme: Theme) {
 }
 
 function shouldShowDuration(eventType: string): boolean {
-  return ['thinking_end', 'tool_call_end', 'session_end', 'tick_output'].includes(eventType);
+  return [
+    'thinking_end', 'tool_call_end', 'session_end', 'tick_output',
+    'execute_reply_sent', 'execute_transaction_complete', 'execute_decisions_complete',
+    'execute_memory_complete', 'execute_complete',
+  ].includes(eventType);
 }
 
 function computeEventDuration(event: TimelineEvent, allEvents: TimelineEvent[]): number | null {
@@ -337,6 +418,13 @@ function computeEventDuration(event: TimelineEvent, allEvents: TimelineEvent[]):
   if (event.eventType === 'tick_output') {
     const first = allEvents[0];
     if (first) return event.relativeMs - first.relativeMs;
+    return null;
+  }
+
+  // Execute events: duration relative to execute_start
+  if (event.eventType.startsWith('execute_') && event.eventType !== 'execute_start') {
+    const execStart = allEvents.find(e => e.eventType === 'execute_start');
+    if (execStart) return event.relativeMs - execStart.relativeMs;
     return null;
   }
 
@@ -589,6 +677,14 @@ function EventDetail({ event, allEvents }: { event: TimelineEvent; allEvents: Ti
     case 'input_received':
       return <CodeBlock content={str(d['content']) || str(d['text'])} />;
 
+    case 'message_injected':
+      return (
+        <div>
+          <DetailField label="FROM">{str(d['contactName'])} via {str(d['channel'])}</DetailField>
+          <DetailField label="MESSAGE">{str(d['content'])}</DetailField>
+        </div>
+      );
+
     case 'tick_input': {
       const trigger = str(d['triggerType']);
       const session = str(d['sessionState']);
@@ -753,6 +849,80 @@ function EventDetail({ event, allEvents }: { event: TimelineEvent; allEvents: Ti
           ) : null}
         </div>
       );
+
+    case 'execute_start':
+      return (
+        <div>
+          <DetailField label="TICK" mono>{String(d['tickNumber'] ?? '')}</DetailField>
+          <DetailField label="PHASE">Execute</DetailField>
+        </div>
+      );
+
+    case 'execute_reply_sent': {
+      const path = str(d['path']);
+      const hasReply = d['hasReply'];
+      const duration = computeEventDuration(event, allEvents);
+      return (
+        <div>
+          <DetailField label="REPLY PATH">
+            <Badge
+              label={path || 'none'}
+              color={path === 'early' ? theme.colors.success.main
+                   : path === 'follow-up' ? theme.colors.warning.main
+                   : path === 'fallback' ? theme.colors.accent
+                   : theme.colors.text.hint}
+            />
+          </DetailField>
+          <DetailField label="HAS REPLY">{hasReply ? 'Yes' : 'No'}</DetailField>
+          {duration != null && <DetailField label="DURATION">{formatDuration(duration)}</DetailField>}
+        </div>
+      );
+    }
+
+    case 'execute_transaction_complete': {
+      const duration = computeEventDuration(event, allEvents);
+      return (
+        <div>
+          {duration != null && <DetailField label="DURATION">{formatDuration(duration)}</DetailField>}
+          <DetailField label="PHASE">Thoughts, emotions, decisions, energy persisted to heartbeat.db</DetailField>
+        </div>
+      );
+    }
+
+    case 'execute_decisions_complete': {
+      const agentD = d['agentDecisions'] as number ?? 0;
+      const pluginD = d['pluginDecisions'] as number ?? 0;
+      const duration = computeEventDuration(event, allEvents);
+      return (
+        <div>
+          {duration != null && <DetailField label="DURATION">{formatDuration(duration)}</DetailField>}
+          <DetailField label="AGENT DECISIONS">{agentD}</DetailField>
+          <DetailField label="PLUGIN DECISIONS">{pluginD}</DetailField>
+        </div>
+      );
+    }
+
+    case 'execute_memory_complete': {
+      const duration = computeEventDuration(event, allEvents);
+      return (
+        <div>
+          {duration != null && <DetailField label="DURATION">{formatDuration(duration)}</DetailField>}
+          <DetailField label="CANDIDATES">{String(d['candidateCount'] ?? 0)}</DetailField>
+          {Boolean(d['hadWorkingMemoryUpdate']) && <DetailField label="WORKING MEMORY">Updated</DetailField>}
+          {Boolean(d['hadCoreSelfUpdate']) && <DetailField label="CORE SELF">Updated</DetailField>}
+          {Boolean(d['hadSeedResonance']) && <DetailField label="SEED RESONANCE">Checked</DetailField>}
+        </div>
+      );
+    }
+
+    case 'execute_complete': {
+      const totalMs = d['totalDurationMs'] as number;
+      return (
+        <div>
+          {totalMs != null && <DetailField label="TOTAL DURATION">{formatDuration(totalMs)}</DetailField>}
+        </div>
+      );
+    }
 
     default:
       return d ? <CodeBlock content={JSON.stringify(d, null, 2)} maxHeight={200} /> : null;

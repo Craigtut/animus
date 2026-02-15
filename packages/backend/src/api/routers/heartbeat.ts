@@ -637,6 +637,10 @@ export const heartbeatRouter = router({
 
       const decisions = heartbeatStore.getTickDecisions(hbDb, tickNumber);
 
+      // Extract reply from the tick_output rawOutput (the full MindOutput)
+      const rawOutput = tickOutputData?.['rawOutput'] as Record<string, unknown> | undefined;
+      const reply = (rawOutput?.['reply'] as { content: string; contactId: string; channel: string; replyToMessageId?: string; tone?: string } | null) ?? null;
+
       // Get usage from agent_usage for this session
       let usage = null;
       if (sessionId) {
@@ -660,6 +664,7 @@ export const heartbeatRouter = router({
           experiences,
           emotionHistory,
           decisions,
+          reply,
         },
         usage,
       };

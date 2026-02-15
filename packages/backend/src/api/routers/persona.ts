@@ -6,8 +6,9 @@
  */
 
 import { router, protectedProcedure } from '../trpc.js';
-import { getSystemDb } from '../../db/index.js';
+import { getSystemDb, getPersonaDb } from '../../db/index.js';
 import * as systemStore from '../../db/stores/system-store.js';
+import * as personaStore from '../../db/stores/persona-store.js';
 import {
   startHeartbeat,
   recompilePersona,
@@ -58,7 +59,7 @@ export const personaRouter = router({
    * Get full persona data.
    */
   get: protectedProcedure.query(() => {
-    return systemStore.getPersona(getSystemDb());
+    return personaStore.getPersona(getPersonaDb());
   }),
 
   /**
@@ -68,9 +69,9 @@ export const personaRouter = router({
   saveDraft: protectedProcedure
     .input(personaDraftInputSchema)
     .mutation(({ input }) => {
-      const db = getSystemDb();
-      systemStore.savePersonaDraft(db, buildDraft(input));
-      return systemStore.getPersona(db);
+      const db = getPersonaDb();
+      personaStore.savePersonaDraft(db, buildDraft(input));
+      return personaStore.getPersona(db);
     }),
 
   /**
@@ -78,19 +79,19 @@ export const personaRouter = router({
    * marks onboarding complete, and starts the heartbeat.
    */
   finalize: protectedProcedure.mutation(() => {
-    const db = getSystemDb();
+    const db = getPersonaDb();
 
     // Mark persona as finalized
-    systemStore.finalizePersona(db);
+    personaStore.finalizePersona(db);
 
     // Mark onboarding as complete
-    systemStore.updateOnboardingState(db, { isComplete: true, currentStep: 8 });
+    systemStore.updateOnboardingState(getSystemDb(), { isComplete: true, currentStep: 8 });
 
     // Recompile persona prompt
     recompilePersona();
 
     // Compute emotion baselines from personality dimensions
-    const persona = systemStore.getPersona(db);
+    const persona = personaStore.getPersona(db);
     recomputeEmotionBaselines(toEmotionDimensions(persona.personalityDimensions));
 
     // Start the heartbeat — the moment of "birth"
@@ -106,18 +107,18 @@ export const personaRouter = router({
   update: protectedProcedure
     .input(personaUpdateInputSchema)
     .mutation(({ input }) => {
-      const db = getSystemDb();
-      systemStore.savePersonaDraft(db, buildDraft(input));
+      const db = getPersonaDb();
+      personaStore.savePersonaDraft(db, buildDraft(input));
 
       // Recompile persona prompt
       recompilePersona();
 
       // Recompute emotion baselines if dimensions changed
       if (input.personalityDimensions) {
-        const persona = systemStore.getPersona(db);
+        const persona = personaStore.getPersona(db);
         recomputeEmotionBaselines(toEmotionDimensions(persona.personalityDimensions));
       }
 
-      return systemStore.getPersona(db);
+      return personaStore.getPersona(db);
     }),
 });

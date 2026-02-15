@@ -289,6 +289,22 @@ function Conversation() {
     }
   }, [replyStream.isStreaming, messages.length]);
 
+  // Hide the streaming bubble if the early-reply message already arrived in the DB.
+  // This happens because the backend persists the reply to messages.db (triggering
+  // onMessage → cache invalidation) before the rest of the structured output finishes
+  // parsing (which is when reply:complete fires to set isStreaming=false).
+  const replyAlreadyPersisted = replyStream.isStreaming && replyStream.accumulated
+    && sorted.some(
+      (m) => m.role === 'assistant' && m.content === replyStream.accumulated
+    );
+
+  // If early reply is already in the DB, clear the stream state immediately
+  useEffect(() => {
+    if (replyAlreadyPersisted) {
+      useHeartbeatStore.getState().clearReplyStream();
+    }
+  }, [replyAlreadyPersisted]);
+
   const isThinking = heartbeatState?.currentStage === 'mind' && !replyStream.isStreaming;
 
   return (
@@ -377,7 +393,7 @@ function Conversation() {
             )}
 
             {/* Streaming reply bubble — shows reply text as it arrives */}
-            {replyStream.isStreaming && replyStream.accumulated && (
+            {replyStream.isStreaming && replyStream.accumulated && !replyAlreadyPersisted && (
               <div css={css`display: flex; justify-content: flex-start;`}>
                 <Typography.Body
                   as="div"

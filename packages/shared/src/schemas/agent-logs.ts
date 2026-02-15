@@ -46,6 +46,14 @@ export const agentEventTypeSchema = z.enum([
   'error',
   'tick_input',
   'tick_output',
+  'message_injected',
+  // Execute phase observability events
+  'execute_start',
+  'execute_reply_sent',
+  'execute_transaction_complete',
+  'execute_decisions_complete',
+  'execute_memory_complete',
+  'execute_complete',
 ]);
 
 export const agentEventSchema = z.object({

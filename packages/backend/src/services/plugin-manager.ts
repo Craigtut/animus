@@ -705,10 +705,106 @@ class PluginManager {
       if (!loaded.enabled) continue;
       for (const [serverName, serverConfig] of Object.entries(loaded.mcpServers)) {
         const namespacedKey = `${loaded.manifest.name}__${serverName}`;
-        configs[namespacedKey] = serverConfig;
+        const pluginConfig = this.getDecryptedConfig(loaded.manifest.name);
+
+        const resolveConfigVars = (str: string): string => {
+          if (!pluginConfig) return str;
+          return str.replace(
+            /\$\{config\.([^}]+)\}/g,
+            (_, configKey: string) => {
+              const val = pluginConfig[configKey];
+              return typeof val === 'string' ? val : '';
+            },
+          );
+        };
+
+        // Resolve ${config.*} placeholders in env, url, and header values
+        const resolvedEnv = Object.fromEntries(
+          Object.entries(serverConfig.env).map(([k, v]) => [k, resolveConfigVars(v)])
+        );
+        const resolvedUrl = serverConfig.url ? resolveConfigVars(serverConfig.url) : undefined;
+        const resolvedHeaders = Object.fromEntries(
+          Object.entries(serverConfig.headers).map(([k, v]) => [k, resolveConfigVars(v)])
+        );
+
+        configs[namespacedKey] = {
+          ...serverConfig,
+          env: resolvedEnv,
+          ...(resolvedUrl !== undefined ? { url: resolvedUrl } : {}),
+          headers: resolvedHeaders,
+        };
       }
     }
     return configs;
+  }
+
+  /**
+   * Convert resolved plugin MCP configs into the format the Claude SDK expects.
+   * Returns mcpServers config objects and wildcard allowedTools patterns.
+   */
+  getPluginMcpServersForSdk(): {
+    mcpServers: Record<string, Record<string, unknown>>;
+    allowedTools: string[];
+  } {
+    const resolved = this.getMcpConfigs();
+    const mcpServers: Record<string, Record<string, unknown>> = {};
+    const allowedTools: string[] = [];
+
+    for (const [key, config] of Object.entries(resolved)) {
+      if (config.url) {
+        mcpServers[key] = { type: 'http', url: config.url, headers: config.headers };
+      } else if (config.command) {
+        mcpServers[key] = { command: config.command, args: config.args, env: config.env };
+      }
+      allowedTools.push(`mcp__${key}__*`);
+    }
+
+    return { mcpServers, allowedTools };
+  }
+
+  /**
+   * Build a credential manifest listing all secret config fields across
+   * enabled plugins. Used to inform the mind what credentials are available
+   * for `run_with_credentials` without exposing raw values.
+   */
+  getCredentialManifest(): Array<{
+    ref: string;       // "nano-banana-pro.GEMINI_API_KEY"
+    label: string;     // "Gemini API Key"
+    plugin: string;    // "nano-banana-pro"
+    envVar: string;    // "GEMINI_API_KEY"
+    hint: string;      // "...a1b2" or "(not set)"
+  }> {
+    const manifest: Array<{
+      ref: string;
+      label: string;
+      plugin: string;
+      envVar: string;
+      hint: string;
+    }> = [];
+
+    for (const loaded of this.plugins.values()) {
+      if (!loaded.enabled || !loaded.configSchema) continue;
+      const config = this.getDecryptedConfig(loaded.manifest.name);
+
+      for (const field of loaded.configSchema.fields) {
+        if (field.type !== 'secret') continue;
+
+        const value = config?.[field.key];
+        const hint = typeof value === 'string' && value.length >= 4
+          ? `...${value.slice(-4)}`
+          : '(not set)';
+
+        manifest.push({
+          ref: `${loaded.manifest.name}.${field.key}`,
+          label: field.label,
+          plugin: loaded.manifest.name,
+          envVar: field.key,
+          hint,
+        });
+      }
+    }
+
+    return manifest;
   }
 
   // -------------------------------------------------------------------------
@@ -1083,15 +1179,26 @@ class PluginManager {
 
       for (const [name, config] of Object.entries(json)) {
         const parsed = PluginMcpServerSchema.parse(config);
-        // Substitute ${PLUGIN_ROOT}
-        servers[name] = {
-          command: this.substitutePluginRoot(parsed.command, pluginDir),
-          args: parsed.args.map(a => this.substitutePluginRoot(a, pluginDir)),
-          env: Object.fromEntries(
-            Object.entries(parsed.env).map(([k, v]) => [k, this.substitutePluginRoot(v, pluginDir)])
-          ),
-          description: parsed.description,
-        };
+        if (parsed.url) {
+          // HTTP transport
+          servers[name] = {
+            ...parsed,
+            url: this.substitutePluginRoot(parsed.url, pluginDir),
+            headers: Object.fromEntries(
+              Object.entries(parsed.headers).map(([k, v]) => [k, this.substitutePluginRoot(v, pluginDir)])
+            ),
+          };
+        } else if (parsed.command) {
+          // Stdio transport
+          servers[name] = {
+            ...parsed,
+            command: this.substitutePluginRoot(parsed.command, pluginDir),
+            args: parsed.args.map(a => this.substitutePluginRoot(a, pluginDir)),
+            env: Object.fromEntries(
+              Object.entries(parsed.env).map(([k, v]) => [k, this.substitutePluginRoot(v, pluginDir)])
+            ),
+          };
+        }
       }
 
       return servers;

@@ -18,8 +18,8 @@ import { ANIMUS_TOOL_DEFS, MIND_TOOL_NAMES } from './definitions.js';
  * - standard: Can message and get replies. No sub-agents, tasks, goals, or personal tools.
  */
 export const TOOL_PERMISSIONS: Record<PermissionTier, readonly AnimusToolName[]> = {
-  primary: ['send_message', 'update_progress', 'read_memory'],
-  standard: ['send_message', 'read_memory'],
+  primary: ['send_message', 'update_progress', 'read_memory', 'run_with_credentials'],
+  standard: ['send_message', 'read_memory', 'run_with_credentials'],
 } as const;
 
 /**

@@ -108,6 +108,9 @@ import type {
   reflectionStartedEventSchema,
   reflectionCompletedEventSchema,
   reflectionFailedEventSchema,
+  // Saves
+  saveManifestSchema,
+  saveInfoSchema,
 } from '../schemas/index.js';
 
 // ============================================================================
@@ -266,6 +269,13 @@ export type ObservationFailedEvent = z.infer<typeof observationFailedEventSchema
 export type ReflectionStartedEvent = z.infer<typeof reflectionStartedEventSchema>;
 export type ReflectionCompletedEvent = z.infer<typeof reflectionCompletedEventSchema>;
 export type ReflectionFailedEvent = z.infer<typeof reflectionFailedEventSchema>;
+
+// ============================================================================
+// Saves
+// ============================================================================
+
+export type SaveManifest = z.infer<typeof saveManifestSchema>;
+export type SaveInfo = z.infer<typeof saveInfoSchema>;
 
 // ============================================================================
 // Channel Packages

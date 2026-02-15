@@ -17,8 +17,8 @@ import type { ToolHandlerContext } from '../../src/tools/types.js';
 // ============================================================================
 
 describe('Tool Definitions', () => {
-  it('should have 5 tool definitions', () => {
-    expect(Object.keys(ANIMUS_TOOL_DEFS)).toHaveLength(5);
+  it('should have 6 tool definitions', () => {
+    expect(Object.keys(ANIMUS_TOOL_DEFS)).toHaveLength(6);
   });
 
   it('should define send_message', () => {
@@ -45,6 +45,11 @@ describe('Tool Definitions', () => {
     expect(ANIMUS_TOOL_DEFS.send_proactive_message.name).toBe('send_proactive_message');
     expect(ANIMUS_TOOL_DEFS.send_proactive_message.category).toBe('messaging');
   });
+
+  it('should define run_with_credentials', () => {
+    expect(ANIMUS_TOOL_DEFS.run_with_credentials.name).toBe('run_with_credentials');
+    expect(ANIMUS_TOOL_DEFS.run_with_credentials.category).toBe('system');
+  });
 });
 
 // ============================================================================
@@ -57,15 +62,17 @@ describe('Tool Permissions', () => {
     expect(allowed).toContain('send_message');
     expect(allowed).toContain('update_progress');
     expect(allowed).toContain('read_memory');
-    expect(allowed).toHaveLength(3);
+    expect(allowed).toContain('run_with_credentials');
+    expect(allowed).toHaveLength(4);
   });
 
   it('should restrict tools for standard tier', () => {
     const allowed = getAllowedTools('standard');
     expect(allowed).toContain('send_message');
     expect(allowed).toContain('read_memory');
+    expect(allowed).toContain('run_with_credentials');
     expect(allowed).not.toContain('update_progress');
-    expect(allowed).toHaveLength(2);
+    expect(allowed).toHaveLength(3);
   });
 
   it('isToolAllowed should work correctly', () => {
@@ -83,7 +90,7 @@ describe('Tool Permissions', () => {
 describe('Tool Registry', () => {
   it('should return all tool names', () => {
     const names = getToolNames();
-    expect(names).toEqual(['send_message', 'update_progress', 'read_memory', 'lookup_contacts', 'send_proactive_message']);
+    expect(names).toEqual(['send_message', 'update_progress', 'read_memory', 'lookup_contacts', 'send_proactive_message', 'run_with_credentials']);
   });
 
   it('should get a tool by name', () => {
@@ -100,10 +107,10 @@ describe('Tool Registry', () => {
 
   it('should filter tools by tier', () => {
     const primaryTools = getToolsForTier('primary');
-    expect(primaryTools).toHaveLength(3);
+    expect(primaryTools).toHaveLength(4);
 
     const standardTools = getToolsForTier('standard');
-    expect(standardTools).toHaveLength(2);
+    expect(standardTools).toHaveLength(3);
     expect(standardTools.map((t) => t.name)).not.toContain('update_progress');
   });
 });

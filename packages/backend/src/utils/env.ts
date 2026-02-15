@@ -20,6 +20,7 @@ const envSchema = z.object({
   DB_MEMORY_PATH: z.string().default('./data/memory.db'),
   DB_MESSAGES_PATH: z.string().default('./data/messages.db'),
   DB_AGENT_LOGS_PATH: z.string().default('./data/agent_logs.db'),
+  DB_PERSONA_PATH: z.string().default('./data/persona.db'),
   LANCEDB_PATH: z.string().default('./data/lancedb'),
 
   // Auth

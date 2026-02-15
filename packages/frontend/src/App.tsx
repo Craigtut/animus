@@ -44,6 +44,7 @@ import { MindPage } from './pages/MindPage';
 import { PeoplePage } from './pages/PeoplePage';
 import { SettingsPage } from './pages/SettingsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { MaintenanceOverlay } from './components/MaintenanceOverlay';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -194,6 +195,7 @@ export function App() {
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </BrowserRouter>
+          <MaintenanceOverlay />
         </ThemeSelector>
       </QueryClientProvider>
     </trpc.Provider>

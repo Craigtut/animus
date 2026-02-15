@@ -8,7 +8,7 @@
  * See docs/architecture/agent-orchestration.md for the full design.
  */
 
-import type { AgentProvider } from '@animus/shared';
+import type { AgentProvider, PermissionTier } from '@animus/shared';
 import { generateUUID, now } from '@animus/shared';
 import type {
   AgentManager,
@@ -19,11 +19,17 @@ import { attachSessionLogging, type AgentLogStore } from '@animus/agents';
 import type { IEventBus } from '@animus/shared';
 import { prepareCodexSessionAuth } from '../services/codex-oauth.js';
 import { getSystemDb } from '../db/index.js';
+import * as systemStore from '../db/stores/system-store.js';
+import * as messageStore from '../db/stores/message-store.js';
+import { getMessagesDb, getMemoryDb } from '../db/index.js';
 import { createLogger } from '../lib/logger.js';
 import { PROJECT_ROOT } from '../utils/env.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { buildSubAgentMcpServer, type MutableToolContext } from '../tools/servers/claude-mcp.js';
+import type { ToolHandlerContext } from '../tools/types.js';
+import { getPluginManager } from '../services/plugin-manager.js';
 
 const log = createLogger('AgentOrchestrator', 'agents');
 
@@ -132,6 +138,10 @@ export class AgentOrchestrator {
   private spawnTimestamps: number[] = [];
   private spawnBudgetPerHour: number;
   private getPreferredProvider: (() => AgentProvider | null) | null;
+  /** Cached sub-agent MCP server (built lazily, once per process) */
+  private subAgentMcpServer: { serverConfig: Record<string, unknown>; allowedTools: string[] } | null = null;
+  /** Per-task mutable tool contexts for sub-agent MCP handlers */
+  private subAgentToolContexts = new Map<string, MutableToolContext>();
   private onAgentComplete: (params: {
     agentId: string;
     taskDescription: string;
@@ -257,6 +267,32 @@ export class AgentOrchestrator {
         }
       }
 
+      // Build sub-agent MCP server lazily (once per process, Claude only)
+      // Determine contact tier for tool filtering
+      const contactTier = this.resolveContactTier(params.contactId);
+      const subAgentContext: MutableToolContext = { current: null };
+      this.subAgentToolContexts.set(taskId, subAgentContext);
+
+      if (!this.subAgentMcpServer && provider === 'claude') {
+        try {
+          this.subAgentMcpServer = await buildSubAgentMcpServer(contactTier, subAgentContext);
+          log.info(`Sub-agent MCP server built with tools: ${this.subAgentMcpServer.allowedTools.join(', ')}`);
+        } catch (err) {
+          log.warn('Failed to build sub-agent MCP server:', err);
+        }
+      }
+
+      // Merge built-in sub-agent MCP tools with plugin MCP servers
+      const pluginMcp = getPluginManager().getPluginMcpServersForSdk();
+      const mergedMcpServers: Record<string, Record<string, unknown>> = {
+        ...(this.subAgentMcpServer ? { animus: this.subAgentMcpServer.serverConfig } : {}),
+        ...pluginMcp.mcpServers,
+      };
+      const mergedAllowedTools: string[] = [
+        ...(this.subAgentMcpServer ? this.subAgentMcpServer.allowedTools : []),
+        ...pluginMcp.allowedTools,
+      ];
+
       // Create the agent session
       const session = await this.manager.createSession({
         provider,
@@ -267,6 +303,10 @@ export class AgentOrchestrator {
           approvalLevel: 'none',
         },
         ...(sessionEnv ? { env: sessionEnv } : {}),
+        ...(Object.keys(mergedMcpServers).length > 0 ? {
+          mcpServers: mergedMcpServers,
+          allowedTools: mergedAllowedTools,
+        } : {}),
       });
 
       // Attach logging
@@ -291,6 +331,9 @@ export class AgentOrchestrator {
         this.handleTimeout(taskId);
       }, timeoutMs);
       this.timeoutTimers.set(taskId, timer);
+
+      // Set the sub-agent tool context for this task
+      subAgentContext.current = this.buildSubAgentToolContext(taskId, params);
 
       // Run asynchronously (non-blocking)
       this.runAgent(taskId, session, params.instructions, logging)
@@ -426,6 +469,67 @@ export class AgentOrchestrator {
   // --------------------------------------------------------------------------
 
   /**
+   * Resolve the contact permission tier, defaulting to 'primary'.
+   */
+  private resolveContactTier(contactId: string): PermissionTier {
+    if (!contactId) return 'primary';
+    try {
+      const sysDb = getSystemDb();
+      const contact = systemStore.getContact(sysDb, contactId);
+      return (contact?.permissionTier ?? 'primary') as PermissionTier;
+    } catch {
+      return 'primary';
+    }
+  }
+
+  /**
+   * Build a ToolHandlerContext for a sub-agent task.
+   */
+  private buildSubAgentToolContext(
+    taskId: string,
+    params: SpawnAgentParams,
+  ): ToolHandlerContext {
+    const msgDb = getMessagesDb();
+    const memDb = getMemoryDb();
+
+    // Resolve conversation for the contact + channel
+    let conversationId = '';
+    if (params.contactId && params.channel) {
+      try {
+        const conv = messageStore.getConversationByContactAndChannel(
+          msgDb, params.contactId, params.channel as any,
+        );
+        if (conv) conversationId = conv.id;
+      } catch {
+        // No conversation yet — fine
+      }
+    }
+
+    return {
+      agentTaskId: taskId,
+      contactId: params.contactId,
+      sourceChannel: params.channel,
+      conversationId,
+      stores: {
+        messages: {
+          createMessage: (data) => messageStore.createMessage(msgDb, data),
+        },
+        heartbeat: {
+          updateAgentTaskProgress: (agentTaskId, activity, percentComplete) => {
+            this.taskStore.updateAgentTask(agentTaskId, {
+              currentActivity: activity + (percentComplete != null ? ` (${percentComplete}%)` : ''),
+            });
+          },
+        },
+        memory: {
+          retrieveRelevant: async () => [],
+        },
+      },
+      eventBus: this.eventBus,
+    };
+  }
+
+  /**
    * Run an agent session asynchronously.
    * This is fire-and-forget from the caller's perspective.
    */
@@ -452,8 +556,9 @@ export class AgentOrchestrator {
         this.timeoutTimers.delete(taskId);
       }
 
-      // Clean up session
+      // Clean up session and tool context
       this.activeSessions.delete(taskId);
+      this.subAgentToolContexts.delete(taskId);
       await session.end();
 
       // Check for empty result
@@ -506,6 +611,7 @@ export class AgentOrchestrator {
       }
 
       this.activeSessions.delete(taskId);
+      this.subAgentToolContexts.delete(taskId);
 
       const errorMsg = err instanceof Error ? err.message : String(err);
       const task = this.taskStore.getAgentTask(taskId);
@@ -548,6 +654,7 @@ export class AgentOrchestrator {
       }
       this.activeSessions.delete(taskId);
     }
+    this.subAgentToolContexts.delete(taskId);
 
     const task = this.taskStore.getAgentTask(taskId);
 

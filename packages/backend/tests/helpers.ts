@@ -48,6 +48,13 @@ export function createTestMessagesDb(): Database.Database {
   return db;
 }
 
+export function createTestPersonaDb(): Database.Database {
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  applySql(db, path.join(MIGRATIONS_DIR, 'persona', '001_initial.sql'));
+  return db;
+}
+
 export function createTestAgentLogsDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');

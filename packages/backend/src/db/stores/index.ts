@@ -3,6 +3,7 @@
  */
 
 export * as systemStore from './system-store.js';
+export * as personaStore from './persona-store.js';
 export * as heartbeatStore from './heartbeat-store.js';
 export * as memoryStore from './memory-store.js';
 export * as messageStore from './message-store.js';

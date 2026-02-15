@@ -2,20 +2,23 @@
  * Tests for expanded system store functions:
  * - deleteContact, deleteContactChannel
  * - onboarding state
- * - persona (expanded personality_settings)
+ * - persona (expanded personality_settings — now in persona.db)
  * - channel configs
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import type Database from 'better-sqlite3';
-import { createTestSystemDb } from '../../helpers.js';
+import { createTestSystemDb, createTestPersonaDb } from '../../helpers.js';
 import * as systemStore from '../../../src/db/stores/system-store.js';
+import * as personaStore from '../../../src/db/stores/persona-store.js';
 
 describe('system-store (expanded)', () => {
   let db: Database.Database;
+  let personaDb: Database.Database;
 
   beforeEach(() => {
     db = createTestSystemDb();
+    personaDb = createTestPersonaDb();
   });
 
   // ========================================================================
@@ -108,9 +111,9 @@ describe('system-store (expanded)', () => {
   // Persona (expanded personality_settings)
   // ========================================================================
 
-  describe('persona', () => {
+  describe('persona (persona.db)', () => {
     it('returns default persona', () => {
-      const persona = systemStore.getPersona(db);
+      const persona = personaStore.getPersona(personaDb);
       expect(persona.name).toBe('Animus');
       expect(persona.existenceParadigm).toBe('digital_consciousness');
       expect(persona.isFinalized).toBe(false);
@@ -120,14 +123,14 @@ describe('system-store (expanded)', () => {
     });
 
     it('saves a draft with basic fields', () => {
-      systemStore.savePersonaDraft(db, {
+      personaStore.savePersonaDraft(personaDb, {
         name: 'Atlas',
         existenceParadigm: 'simulated_life',
         location: 'Portland, Oregon',
         gender: 'Male',
         age: 32,
       });
-      const persona = systemStore.getPersona(db);
+      const persona = personaStore.getPersona(personaDb);
       expect(persona.name).toBe('Atlas');
       expect(persona.existenceParadigm).toBe('simulated_life');
       expect(persona.location).toBe('Portland, Oregon');
@@ -148,52 +151,52 @@ describe('system-store (expanded)', () => {
         orderly: 0.4,
         altruism: 0.65,
       };
-      systemStore.savePersonaDraft(db, { personalityDimensions: dims });
-      const persona = systemStore.getPersona(db);
+      personaStore.savePersonaDraft(personaDb, { personalityDimensions: dims });
+      const persona = personaStore.getPersona(personaDb);
       expect(persona.personalityDimensions.extroversion).toBe(0.8);
       expect(persona.personalityDimensions.optimism).toBe(0.9);
     });
 
     it('saves traits and values as JSON', () => {
-      systemStore.savePersonaDraft(db, {
+      personaStore.savePersonaDraft(personaDb, {
         traits: ['witty', 'analytical', 'nurturing'],
         values: ['Knowledge & Truth', 'Growth & Self-improvement'],
       });
-      const persona = systemStore.getPersona(db);
+      const persona = personaStore.getPersona(personaDb);
       expect(persona.traits).toEqual(['witty', 'analytical', 'nurturing']);
       expect(persona.values).toEqual(['Knowledge & Truth', 'Growth & Self-improvement']);
     });
 
     it('saves background and personality notes', () => {
-      systemStore.savePersonaDraft(db, {
+      personaStore.savePersonaDraft(personaDb, {
         background: 'A curious mind born from code.',
         personalityNotes: 'Uses cooking metaphors.',
       });
-      const persona = systemStore.getPersona(db);
+      const persona = personaStore.getPersona(personaDb);
       expect(persona.background).toBe('A curious mind born from code.');
       expect(persona.personalityNotes).toBe('Uses cooking metaphors.');
     });
 
     it('saves archetype', () => {
-      systemStore.savePersonaDraft(db, { archetype: 'scholar' });
-      const persona = systemStore.getPersona(db);
+      personaStore.savePersonaDraft(personaDb, { archetype: 'scholar' });
+      const persona = personaStore.getPersona(personaDb);
       expect(persona.archetype).toBe('scholar');
     });
 
     it('finalizes persona', () => {
-      systemStore.savePersonaDraft(db, { name: 'Atlas' });
-      systemStore.finalizePersona(db);
-      const persona = systemStore.getPersona(db);
+      personaStore.savePersonaDraft(personaDb, { name: 'Atlas' });
+      personaStore.finalizePersona(personaDb);
+      const persona = personaStore.getPersona(personaDb);
       expect(persona.isFinalized).toBe(true);
     });
 
     it('preserves progressive saves', () => {
       // Simulate step-by-step save
-      systemStore.savePersonaDraft(db, { name: 'Atlas', existenceParadigm: 'simulated_life' });
-      systemStore.savePersonaDraft(db, { gender: 'Female', age: 28 });
-      systemStore.savePersonaDraft(db, { traits: ['witty'] });
+      personaStore.savePersonaDraft(personaDb, { name: 'Atlas', existenceParadigm: 'simulated_life' });
+      personaStore.savePersonaDraft(personaDb, { gender: 'Female', age: 28 });
+      personaStore.savePersonaDraft(personaDb, { traits: ['witty'] });
 
-      const persona = systemStore.getPersona(db);
+      const persona = personaStore.getPersona(personaDb);
       expect(persona.name).toBe('Atlas');
       expect(persona.existenceParadigm).toBe('simulated_life');
       expect(persona.gender).toBe('Female');

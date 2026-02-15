@@ -16,22 +16,28 @@ export function ConversationHistory({ contactId }: ConversationHistoryProps) {
   const [channelFilter, setChannelFilter] = useState<string | undefined>(undefined);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Fetch messages
-  const { data: messages, isLoading } = trpc.messages.getByContact.useQuery({
+  // Fetch all messages (filter client-side to keep channel pills stable)
+  const { data: allMessages, isLoading } = trpc.messages.getByContact.useQuery({
     contactId,
     limit: 100,
-    channel: channelFilter,
   });
 
-  // Determine unique channels from messages for filter pills
+  // Determine unique channels from ALL messages for filter pills
   const messageChannels = useMemo(() => {
-    if (!messages) return [];
+    if (!allMessages) return [];
     const channels = new Set<string>();
-    for (const msg of messages) {
+    for (const msg of allMessages) {
       if (msg.channel) channels.add(msg.channel);
     }
     return Array.from(channels).sort();
-  }, [messages]);
+  }, [allMessages]);
+
+  // Apply channel filter client-side
+  const messages = useMemo(() => {
+    if (!allMessages) return allMessages;
+    if (!channelFilter) return allMessages;
+    return allMessages.filter((msg) => msg.channel === channelFilter);
+  }, [allMessages, channelFilter]);
 
   // Build channel display names
   const channelDisplayNames = useMemo(() => {

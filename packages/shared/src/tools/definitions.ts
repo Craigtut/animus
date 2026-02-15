@@ -137,6 +137,31 @@ export const sendProactiveMessageDef: AnimusToolDef = {
 };
 
 /**
+ * run_with_credentials - Execute a command with a plugin credential injected
+ * as an environment variable. The credential is resolved from encrypted
+ * storage and never exposed to the LLM.
+ */
+export const runWithCredentialsDef: AnimusToolDef = {
+  name: 'run_with_credentials',
+  description:
+    'Execute a command with a plugin credential injected as an environment variable. ' +
+    'The credential is resolved from encrypted storage and injected only into the ' +
+    'subprocess — you never see the raw value. Use this for plugin scripts that need ' +
+    'API keys.',
+  inputSchema: z.object({
+    command: z.string().describe('The full command to execute'),
+    credentialRef: z.string().describe(
+      'Credential reference from the credential manifest (e.g., "nano-banana-pro.GEMINI_API_KEY")'
+    ),
+    envVar: z.string().describe(
+      'Environment variable name to inject the credential as (e.g., "GEMINI_API_KEY")'
+    ),
+    cwd: z.string().optional().describe('Working directory. Defaults to project root.'),
+  }),
+  category: 'system',
+};
+
+/**
  * Central registry of all Animus tool definitions.
  * This is the single source of truth for what tools exist.
  * Handlers are attached separately in the backend.
@@ -147,6 +172,7 @@ export const ANIMUS_TOOL_DEFS = {
   read_memory: readMemoryDef,
   lookup_contacts: lookupContactsDef,
   send_proactive_message: sendProactiveMessageDef,
+  run_with_credentials: runWithCredentialsDef,
 } as const;
 
 export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
@@ -165,5 +191,5 @@ export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
  * Excludes send_message (sub-agent only) and update_progress (sub-agent only).
  */
 export const MIND_TOOL_NAMES: readonly AnimusToolName[] = [
-  'read_memory', 'lookup_contacts', 'send_proactive_message'
+  'read_memory', 'lookup_contacts', 'send_proactive_message', 'run_with_credentials'
 ] as const;

@@ -10,6 +10,7 @@ export {
   readMemoryDef,
   lookupContactsDef,
   sendProactiveMessageDef,
+  runWithCredentialsDef,
 } from './definitions.js';
 export type { AnimusToolDef, AnimusToolName } from './definitions.js';
 

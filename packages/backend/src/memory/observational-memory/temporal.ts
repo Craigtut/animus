@@ -90,6 +90,73 @@ export function annotateRelativeTime(observations: string, currentDate?: Date): 
 }
 
 /**
+ * Merge observation entries sharing the same date into a single group,
+ * and sort entries within each group by timestamp (newest first).
+ *
+ * Multiple observer batches on the same day each produce their own "Date:"
+ * header. This function consolidates them into one group per calendar date
+ * with entries sorted by their (HH:MM) timestamp descending.
+ */
+export function mergeSameDateGroups(observations: string): string {
+  if (!observations.trim()) return observations;
+
+  const lines = observations.split('\n');
+
+  // Map from clean date header → { date, entries[] }
+  // An "entry" is a top-level bullet plus any sub-bullets underneath it.
+  const dateGroups = new Map<string, { date: Date; entries: { timestamp: string; lines: string[] }[] }>();
+  const dateOrder: string[] = []; // preserve chronological order of first appearance
+  let currentDateKey: string | null = null;
+
+  for (const line of lines) {
+    const date = parseDateHeader(line);
+    if (date) {
+      const cleanHeader = line.replace(/\s*\(.*\)\s*$/, '');
+      currentDateKey = cleanHeader;
+      if (!dateGroups.has(cleanHeader)) {
+        dateGroups.set(cleanHeader, { date, entries: [] });
+        dateOrder.push(cleanHeader);
+      }
+      continue;
+    }
+
+    if (!currentDateKey) continue;
+    const group = dateGroups.get(currentDateKey)!;
+
+    if (/^\*\s+/.test(line)) {
+      // Top-level bullet — start a new entry, extract (HH:MM) timestamp
+      const timeMatch = line.match(/\((\d{2}:\d{2})\)/);
+      group.entries.push({
+        timestamp: timeMatch ? timeMatch[1]! : '00:00',
+        lines: [line],
+      });
+    } else if (/^\s+\*/.test(line) && group.entries.length > 0) {
+      // Sub-bullet — attach to current entry
+      group.entries[group.entries.length - 1]!.lines.push(line);
+    }
+    // Skip empty lines between groups (they get re-added when we rejoin)
+  }
+
+  if (dateGroups.size === 0) return observations;
+
+  // Build output: one date header per unique date, entries sorted newest-first
+  const result: string[] = [];
+  for (const key of dateOrder) {
+    const group = dateGroups.get(key)!;
+    if (result.length > 0) result.push('');
+    result.push(key);
+
+    // Sort entries by timestamp descending (newest first)
+    group.entries.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    for (const entry of group.entries) {
+      result.push(...entry.lines);
+    }
+  }
+
+  return result.join('\n');
+}
+
+/**
  * Reverse the order of date groups in observation text.
  * Observations are stored chronologically (oldest first) by the observer,
  * but displayed newest-first for the mind's context.
@@ -150,11 +217,17 @@ export function insertGapMarkers(observations: string): string {
 }
 
 /**
- * Apply all temporal transformations: reverse order, gap markers, relative time annotations.
+ * Apply all temporal transformations:
+ * 1. Merge duplicate date groups (from multiple observer batches)
+ * 2. Reverse date group order (newest first)
+ * 3. Insert gap markers between non-consecutive dates
+ * 4. Annotate date headers with relative time
+ *
  * This is the main entry point used by the context builder.
  */
 export function annotateObservations(observations: string, currentDate?: Date): string {
-  const reversed = reverseObservationGroups(observations);
+  const merged = mergeSameDateGroups(observations);
+  const reversed = reverseObservationGroups(merged);
   const withGaps = insertGapMarkers(reversed);
   return annotateRelativeTime(withGaps, currentDate);
 }

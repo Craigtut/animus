@@ -20,6 +20,7 @@ import { updateProgressHandler } from './handlers/update-progress.js';
 import { readMemoryHandler } from './handlers/read-memory.js';
 import { lookupContactsHandler } from './handlers/lookup-contacts.js';
 import { sendProactiveMessageHandler } from './handlers/send-proactive-message.js';
+import { runWithCredentialsHandler } from './handlers/run-with-credentials.js';
 
 /**
  * The complete tool registry: definitions + handlers.
@@ -59,6 +60,13 @@ const TOOL_REGISTRY: Record<AnimusToolName, AnimusTool> = {
     inputSchema: ANIMUS_TOOL_DEFS.send_proactive_message.inputSchema,
     category: ANIMUS_TOOL_DEFS.send_proactive_message.category,
     handler: sendProactiveMessageHandler,
+  },
+  run_with_credentials: {
+    name: 'run_with_credentials',
+    description: ANIMUS_TOOL_DEFS.run_with_credentials.description,
+    inputSchema: ANIMUS_TOOL_DEFS.run_with_credentials.inputSchema,
+    category: ANIMUS_TOOL_DEFS.run_with_credentials.category,
+    handler: runWithCredentialsHandler,
   },
 };
 

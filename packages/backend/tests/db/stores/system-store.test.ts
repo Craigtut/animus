@@ -1,13 +1,16 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type Database from 'better-sqlite3';
-import { createTestSystemDb } from '../../helpers.js';
+import { createTestSystemDb, createTestPersonaDb } from '../../helpers.js';
 import * as systemStore from '../../../src/db/stores/system-store.js';
+import * as personaStore from '../../../src/db/stores/persona-store.js';
 
 describe('system-store', () => {
   let db: Database.Database;
+  let personaDb: Database.Database;
 
   beforeEach(() => {
     db = createTestSystemDb();
+    personaDb = createTestPersonaDb();
   });
 
   // ========================================================================
@@ -165,19 +168,19 @@ describe('system-store', () => {
     });
   });
 
-  describe('personality settings', () => {
+  describe('personality settings (persona.db)', () => {
     it('returns default personality', () => {
-      const ps = systemStore.getPersonalitySettings(db);
+      const ps = personaStore.getPersonalitySettings(personaDb);
       expect(ps.name).toBe('Animus');
       expect(ps.traits).toEqual([]);
     });
 
     it('updates personality', () => {
-      systemStore.updatePersonalitySettings(db, {
+      personaStore.updatePersonalitySettings(personaDb, {
         name: 'Atlas',
         traits: ['curious', 'empathetic'],
       });
-      const ps = systemStore.getPersonalitySettings(db);
+      const ps = personaStore.getPersonalitySettings(personaDb);
       expect(ps.name).toBe('Atlas');
       expect(ps.traits).toEqual(['curious', 'empathetic']);
     });

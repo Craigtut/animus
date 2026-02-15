@@ -7,10 +7,11 @@
  * See docs/architecture/heartbeat.md for the full design.
  */
 
-import { getHeartbeatDb, getSystemDb, getMessagesDb, getAgentLogsDb, getMemoryDb } from '../db/index.js';
+import { getHeartbeatDb, getSystemDb, getPersonaDb, getMessagesDb, getAgentLogsDb, getMemoryDb } from '../db/index.js';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import * as agentLogStore from '../db/stores/agent-log-store.js';
 import * as systemStore from '../db/stores/system-store.js';
+import * as personaStore from '../db/stores/persona-store.js';
 import * as messageStore from '../db/stores/message-store.js';
 import * as memoryDbStore from '../db/stores/memory-store.js';
 import { getEventBus } from '../lib/event-bus.js';
@@ -185,6 +186,7 @@ interface GatherResult {
   energySystemEnabled: boolean;
   pluginDecisionDescriptions: string;
   pluginContextSources: string;
+  credentialManifest: string;
   /** Observational memory stream contexts (observation + raw items per stream) */
   thoughtContext: StreamContext;
   experienceContext: StreamContext;
@@ -381,9 +383,10 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
     }
   }
 
-  // Gather plugin context (decision descriptions + context sources)
+  // Gather plugin context (decision descriptions + context sources + credentials)
   let pluginDecisionDescriptions = '';
   let pluginContextSources = '';
+  let credentialManifest = '';
   try {
     const pluginManager = getPluginManager();
     pluginDecisionDescriptions = pluginManager.getDecisionDescriptions();
@@ -398,6 +401,14 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
       pluginContextSources = allSources
         .map(s => `### ${s.name}\n${s.content}`)
         .join('\n\n');
+    }
+
+    // Build credential manifest for run_with_credentials tool
+    const manifest = pluginManager.getCredentialManifest();
+    if (manifest.length > 0) {
+      credentialManifest = manifest
+        .map(m => `  ${m.ref} → ${m.envVar} (${m.label}, hint: ${m.hint})`)
+        .join('\n');
     }
   } catch (err) {
     log.warn('Plugin context gathering failed:', err);
@@ -424,6 +435,7 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
     energySystemEnabled: settings.energySystemEnabled,
     pluginDecisionDescriptions,
     pluginContextSources,
+    credentialManifest,
     thoughtContext,
     experienceContext,
     messageContext,
@@ -565,6 +577,17 @@ async function getOrCreateMindSession(
     }
   }
 
+  // Merge built-in MCP tools with plugin MCP servers
+  const pluginMcp = getPluginManager().getPluginMcpServersForSdk();
+  const mergedMcpServers: Record<string, Record<string, unknown>> = {
+    ...(mindMcpServer ? { tools: mindMcpServer.serverConfig } : {}),
+    ...pluginMcp.mcpServers,
+  };
+  const mergedAllowedTools: string[] = [
+    ...(mindMcpServer ? mindMcpServer.allowedTools : []),
+    ...pluginMcp.allowedTools,
+  ];
+
   const session = await agentManager.createSession({
     provider,
     cwd: PROJECT_ROOT,
@@ -577,10 +600,10 @@ async function getOrCreateMindSession(
       type: 'json_schema',
       schema: mindOutputJsonSchema,
     },
-    // Attach in-process MCP server for mind tools (Claude only)
-    ...(mindMcpServer ? {
-      mcpServers: { tools: mindMcpServer.serverConfig },
-      allowedTools: mindMcpServer.allowedTools,
+    // Attach MCP servers: built-in Animus tools + plugin MCP servers
+    ...(Object.keys(mergedMcpServers).length > 0 ? {
+      mcpServers: mergedMcpServers,
+      allowedTools: mergedAllowedTools,
     } : {}),
   });
 
@@ -600,6 +623,8 @@ interface MindQueryResult {
   output: MindOutput;
   compiledContext: CompiledContext;
   replySentEarly: boolean;
+  /** The content that was sent optimistically via streaming (if any). */
+  earlyReplyContent: string;
   tickInputLogged: boolean;
 }
 
@@ -616,7 +641,7 @@ async function mindQuery(
 ): Promise<MindQueryResult> {
   // Ensure persona is compiled and load full persona for existence info
   const sysDb = getSystemDb();
-  const fullPersona = systemStore.getPersona(sysDb);
+  const fullPersona = personaStore.getPersona(getPersonaDb());
   if (!compiledPersona) {
     compiledPersona = compilePersona(buildPersonaConfig(fullPersona));
   }
@@ -665,6 +690,7 @@ async function mindQuery(
     mindToolsEnabled: !!mindMcpServer,
     ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
     ...(gathered.pluginContextSources ? { pluginContextSources: gathered.pluginContextSources } : {}),
+    ...(gathered.credentialManifest ? { credentialManifest: gathered.credentialManifest } : {}),
     thoughtContext: gathered.thoughtContext,
     experienceContext: gathered.experienceContext,
     ...(gathered.messageContext ? { messageContext: gathered.messageContext } : {}),
@@ -673,7 +699,7 @@ async function mindQuery(
   // If no agent manager configured, fall back to safe output
   if (!agentManager || agentManager.getConfiguredProviders().length === 0) {
     log.warn('No agent provider configured, using safe output');
-    return { output: safeMindOutput(gathered), compiledContext: context, replySentEarly: false, tickInputLogged: false };
+    return { output: safeMindOutput(gathered), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged: false };
   }
 
   try {
@@ -781,6 +807,64 @@ async function mindQuery(
       }
     })();
 
+    // --- Mid-tick message injection ---
+    // While the mind is running, listen for new inbound messages from the
+    // same contact and inject them into the active agent session via the
+    // AsyncIterable prompt pattern. This lets the agent see and respond
+    // to follow-up messages without waiting for a new tick.
+    const injectedMessageIds = new Set<string>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const injectFn = (session as any).injectMessage?.bind(session) as ((content: string) => void) | undefined;
+    const messageInjectionHandler = (msg: { id: string; contactId: string; direction: string; content: string; channel: string }) => {
+      if (
+        injectFn &&
+        msg.direction === 'inbound' &&
+        msg.contactId === gathered.contact?.id
+      ) {
+        injectedMessageIds.add(msg.id);
+        const injectionContent = [
+          `[ADDITIONAL MESSAGE received while you were composing your response]`,
+          `From: ${gathered.contact.fullName ?? 'User'} via ${msg.channel}`,
+          `"${msg.content}"`,
+          ``,
+          `Incorporate this into your response. You may address all messages in a single reply.`,
+        ].join('\n');
+
+        injectFn(injectionContent);
+        log.info(`Injected mid-tick message into mind session: "${msg.content.substring(0, 60)}..."`);
+
+        // Log as a lifecycle event so it appears in the AgentTimeline
+        const sessionId = mindLogSessionId?.() ?? null;
+        if (sessionId) {
+          try {
+            const agentLogsDb = getAgentLogsDb();
+            const injectedEvent = agentLogStore.insertEvent(agentLogsDb, {
+              sessionId,
+              eventType: 'message_injected',
+              data: {
+                tickNumber,
+                messageId: msg.id,
+                contactId: msg.contactId,
+                channel: msg.channel,
+                content: msg.content,
+                contactName: gathered.contact?.fullName ?? 'Unknown',
+              },
+            });
+            eventBus.emit('agent:event:logged', {
+              id: injectedEvent.id,
+              sessionId: injectedEvent.sessionId,
+              eventType: injectedEvent.eventType,
+              data: injectedEvent.data,
+              createdAt: injectedEvent.createdAt,
+            });
+          } catch (err) {
+            log.warn('Failed to log message_injected event:', err);
+          }
+        }
+      }
+    };
+    eventBus.on('message:received', messageInjectionHandler);
+
     // Feed chunks from the agent adapter into both fullJson and the parser channel
     const response = await session.promptStreaming(
       context.userMessage,
@@ -790,6 +874,12 @@ async function mindQuery(
       },
     );
     channel.end();
+
+    // Stop listening for message injection now that the prompt is done
+    eventBus.off('message:received', messageInjectionHandler);
+    if (injectedMessageIds.size > 0) {
+      log.info(`Mid-tick injection summary: ${injectedMessageIds.size} message(s) injected during mind query`);
+    }
 
     // Wait for reply streaming to finish, then clean up parser
     await replyPromise;
@@ -809,7 +899,7 @@ async function mindQuery(
       } catch (parseErr) {
         log.error('Failed to parse MindOutput JSON:', parseErr);
         log.error('Raw output:', fullJson.slice(0, 500));
-        return { output: safeMindOutput(gathered), compiledContext: context, replySentEarly: false, tickInputLogged };
+        return { output: safeMindOutput(gathered), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged };
       }
     }
 
@@ -838,9 +928,9 @@ async function mindQuery(
           coreSelfUpdate: (parsed as any)?.coreSelfUpdate ?? null,
           memoryCandidate: Array.isArray((parsed as any)?.memoryCandidate) ? (parsed as any).memoryCandidate : [],
         };
-        return { output: lenient as MindOutput, compiledContext: context, replySentEarly, tickInputLogged };
+        return { output: lenient as MindOutput, compiledContext: context, replySentEarly, earlyReplyContent: replyAccumulated, tickInputLogged };
       } catch {
-        return { output: safeMindOutput(gathered), compiledContext: context, replySentEarly: false, tickInputLogged };
+        return { output: safeMindOutput(gathered), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged };
       }
     }
 
@@ -871,7 +961,7 @@ async function mindQuery(
       });
     }
 
-    return { output: validated, compiledContext: context, replySentEarly, tickInputLogged };
+    return { output: validated, compiledContext: context, replySentEarly, earlyReplyContent: replyAccumulated, tickInputLogged };
   } catch (err) {
     log.error('Mind query failed:', err);
     mindToolContext.current = null;
@@ -891,7 +981,7 @@ async function mindQuery(
     mindSessionId = null;
     mindLogSessionId = null;
 
-    return { output: safeMindOutput(gathered), compiledContext: context, replySentEarly: false, tickInputLogged: false };
+    return { output: safeMindOutput(gathered), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged: false };
   }
 }
 
@@ -903,12 +993,88 @@ async function executeOutput(
   output: MindOutput,
   tickNumber: number,
   gathered: GatherResult,
-  replySentEarly = false
+  replySentEarly = false,
+  earlyReplyContent = '',
+  logSessionId?: string | null,
 ): Promise<void> {
   const hbDb = getHeartbeatDb();
   const msgDb = getMessagesDb();
   const eventBus = getEventBus();
   const settings = systemStore.getSystemSettings(getSystemDb());
+
+  // Execute phase observability
+  const executeStartTime = Date.now();
+  const logExecuteEvent = (eventType: string, data: Record<string, unknown> = {}) => {
+    if (!logSessionId) return;
+    try {
+      const agentLogsDb = getAgentLogsDb();
+      const ev = agentLogStore.insertEvent(agentLogsDb, {
+        sessionId: logSessionId,
+        eventType: eventType as any,
+        data: { tickNumber, durationMs: Date.now() - executeStartTime, ...data },
+      });
+      eventBus.emit('agent:event:logged', {
+        id: ev.id,
+        sessionId: ev.sessionId,
+        eventType: ev.eventType,
+        data: ev.data,
+        createdAt: ev.createdAt,
+      });
+    } catch (err) {
+      log.warn(`Failed to log ${eventType} event:`, err);
+    }
+  };
+
+  // Step 0: Mark execute start
+  logExecuteEvent('execute_start');
+
+  // Step 1: Handle reply (outside transaction — message goes to messages.db)
+  // Per docs: "Channel send failure → log error with full context, do NOT auto-retry.
+  // Other EXECUTE operations continue."
+  //
+  // When messages were injected mid-tick, the structured output's reply may
+  // address the injected messages and differ from the optimistic streamed reply.
+  // In that case, send the structured reply as a follow-up message.
+  const finalReplyContent = output.reply?.content ?? '';
+  const finalReplyDiffers = replySentEarly && finalReplyContent && finalReplyContent !== earlyReplyContent;
+  const shouldSendReply = output.reply && finalReplyContent && gathered.contact && (!replySentEarly || finalReplyDiffers);
+
+  if (shouldSendReply) {
+    try {
+      const channel = output.reply!.channel;
+      const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
+
+      // Unified outbound: ChannelRouter stores the message and delivers via ChannelManager
+      const { getChannelRouter } = await import('../channels/channel-router.js');
+      const router = getChannelRouter();
+      await router.sendOutbound({
+        contactId: gathered.contact!.id,
+        channel,
+        content: finalReplyContent,
+        ...(triggerMetadata ? { metadata: triggerMetadata } : {}),
+      });
+
+      if (finalReplyDiffers) {
+        log.info(`Sent follow-up reply for tick #${tickNumber} (structured output differed from optimistic reply)`);
+      }
+    } catch (err) {
+      log.error(`Failed to send reply for tick #${tickNumber}:`, err);
+      // Log failure as a tick decision so it's visible in the UI
+      heartbeatStore.insertTickDecision(getHeartbeatDb(), {
+        tickNumber,
+        type: 'send_message',
+        description: 'Reply send failed',
+        parameters: { error: String(err), contactId: gathered.contact!.id },
+        outcome: 'failed',
+      });
+    }
+  }
+
+  // Step 2: Reply handling complete
+  logExecuteEvent('execute_reply_sent', {
+    path: replySentEarly ? (finalReplyDiffers ? 'follow-up' : 'early') : (shouldSendReply ? 'fallback' : 'none'),
+    hasReply: !!output.reply?.content,
+  });
 
   // Wrap all DB writes in a transaction for atomicity
   const runTransaction = hbDb.transaction(() => {
@@ -1025,6 +1191,8 @@ async function executeOutput(
   // Execute the transaction
   runTransaction();
 
+  logExecuteEvent('execute_transaction_complete');
+
   // 4b. Handle agent decisions (outside transaction — involves async operations)
   if (agentOrchestrator) {
     for (const decision of output.decisions) {
@@ -1095,74 +1263,62 @@ async function executeOutput(
     }
   }
 
-  // 5. Handle reply (outside transaction — message goes to messages.db)
-  // Per docs: "Channel send failure → log error with full context, do NOT auto-retry.
-  // Other EXECUTE operations continue."
-  if (output.reply && output.reply.content && gathered.contact && !replySentEarly) {
-    try {
-      const channel = output.reply.channel;
-      const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
+  logExecuteEvent('execute_decisions_complete', {
+    agentDecisions: output.decisions.filter(d => ['spawn_agent', 'update_agent', 'cancel_agent'].includes(d.type)).length,
+    pluginDecisions: output.decisions.filter(d => !builtInDecisionTypeSchema.safeParse(d.type).success).length,
+  });
 
-      // Unified outbound: ChannelRouter stores the message and delivers via ChannelManager
-      const { getChannelRouter } = await import('../channels/channel-router.js');
-      const router = getChannelRouter();
-      await router.sendOutbound({
-        contactId: gathered.contact.id,
-        channel,
-        content: output.reply.content,
-        ...(triggerMetadata ? { metadata: triggerMetadata } : {}),
-      });
-    } catch (err) {
-      log.error(`Failed to send reply for tick #${tickNumber}:`, err);
-      // Log failure as a tick decision so it's visible in the UI
-      heartbeatStore.insertTickDecision(getHeartbeatDb(), {
-        tickNumber,
-        type: 'send_message',
-        description: 'Reply send failed',
-        parameters: { error: String(err), contactId: gathered.contact.id },
-        outcome: 'failed',
-      });
-    }
-  }
+  // 6+7. Memory candidates + seed resonance (parallelized)
+  {
+    const memoryPromise = (async () => {
+      if (!memoryManager) return;
+      try {
+        // Working memory update
+        if (output.workingMemoryUpdate && gathered.contact) {
+          memoryManager.updateWorkingMemory(gathered.contact.id, output.workingMemoryUpdate);
+        }
 
-  // 6. Process memory updates (outside transaction — async operations)
-  if (memoryManager) {
-    try {
-      // Working memory update
-      if (output.workingMemoryUpdate && gathered.contact) {
-        memoryManager.updateWorkingMemory(gathered.contact.id, output.workingMemoryUpdate);
+        // Core self update
+        if (output.coreSelfUpdate) {
+          memoryManager.updateCoreSelf(output.coreSelfUpdate);
+        }
+
+        // Memory candidates → long-term memory (parallel)
+        if (output.memoryCandidate && output.memoryCandidate.length > 0) {
+          await Promise.all(output.memoryCandidate.map(candidate =>
+            memoryManager!.storeMemory({
+              content: candidate.content,
+              memoryType: candidate.type,
+              importance: candidate.importance,
+              contactId: candidate.contactId,
+              keywords: candidate.keywords,
+            })
+          ));
+        }
+      } catch (err) {
+        log.error(`Memory processing failed for tick #${tickNumber}:`, err);
       }
+    })();
 
-      // Core self update
-      if (output.coreSelfUpdate) {
-        memoryManager.updateCoreSelf(output.coreSelfUpdate);
-      }
-
-      // Memory candidates → long-term memory
-      if (output.memoryCandidate && output.memoryCandidate.length > 0) {
-        for (const candidate of output.memoryCandidate) {
-          await memoryManager.storeMemory({
-            content: candidate.content,
-            memoryType: candidate.type,
-            importance: candidate.importance,
-            contactId: candidate.contactId,
-            keywords: candidate.keywords,
-          });
+    const seedPromise = (async () => {
+      if (seedManager && output.thought?.content && output.thought.importance >= 0.3) {
+        try {
+          await seedManager.checkSeedResonance([output.thought]);
+        } catch (err) {
+          log.warn('Seed resonance check failed:', err);
         }
       }
-    } catch (err) {
-      log.error(`Memory processing failed for tick #${tickNumber}:`, err);
-    }
+    })();
+
+    await Promise.all([memoryPromise, seedPromise]);
   }
 
-  // 7. Process seed resonance (thought may reinforce seeds)
-  if (seedManager && output.thought?.content && output.thought.importance >= 0.3) {
-    try {
-      await seedManager.checkSeedResonance([output.thought]);
-    } catch (err) {
-      log.warn('Seed resonance check failed:', err);
-    }
-  }
+  logExecuteEvent('execute_memory_complete', {
+    candidateCount: output.memoryCandidate?.length ?? 0,
+    hadWorkingMemoryUpdate: !!output.workingMemoryUpdate,
+    hadCoreSelfUpdate: !!output.coreSelfUpdate,
+    hadSeedResonance: !!(seedManager && output.thought?.content && output.thought.importance >= 0.3),
+  });
 
   // 8. Observational memory processing (async, non-blocking)
   // Requires both agentManager and compiledPersona — persona may be null on first boot
@@ -1182,6 +1338,7 @@ async function executeOutput(
         messages: gathered.messageContext?.allFilteredItems ?? [],
         contactId: gathered.contact?.id ?? null,
         config: OBSERVATIONAL_MEMORY_CONFIG,
+        timezone: settings.timezone || undefined,
       }).catch(err => {
         log.warn('Observation processing failed (non-fatal):', err);
       });
@@ -1193,6 +1350,8 @@ async function executeOutput(
   // 9. Cleanup expired entries
   heartbeatStore.cleanupExpiredEntries(hbDb);
   heartbeatStore.cleanupEnergyHistory(hbDb, settings.emotionHistoryRetentionDays);
+
+  logExecuteEvent('execute_complete', { totalDurationMs: Date.now() - executeStartTime });
 }
 
 // ============================================================================
@@ -1234,7 +1393,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     eventBus.emit('heartbeat:stage_change', { stage: 'mind' });
 
     // Stage 2: MIND QUERY
-    const { output, compiledContext, replySentEarly, tickInputLogged } = await mindQuery(gathered, tickNumber);
+    const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged } = await mindQuery(gathered, tickNumber);
 
     // Log tick input to agent_logs.db (only if mindQuery didn't already log it)
     const logSessionId = mindLogSessionId?.() ?? null;
@@ -1276,7 +1435,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     eventBus.emit('heartbeat:stage_change', { stage: 'execute' });
 
     // Stage 3: EXECUTE
-    await executeOutput(output, tickNumber, gathered, replySentEarly);
+    await executeOutput(output, tickNumber, gathered, replySentEarly, earlyReplyContent, logSessionId);
 
     // Log tick output to agent_logs.db
     const durationMs = Date.now() - tickStart;
@@ -1685,8 +1844,7 @@ export function updateHeartbeatInterval(intervalMs: number): void {
  * Recompile persona (called when persona settings change).
  */
 export function recompilePersona(): void {
-  const sysDb = getSystemDb();
-  const persona = systemStore.getPersona(sysDb);
+  const persona = personaStore.getPersona(getPersonaDb());
   compiledPersona = compilePersona(buildPersonaConfig(persona));
   log.info('Persona recompiled');
 }

@@ -36,10 +36,12 @@ import {
   Package,
   ArrowClockwise,
   Plugs,
+  FloppyDisk,
 } from '@phosphor-icons/react';
 import { Card, SelectionCard, Button, Input, Modal, Badge, Toggle, Slider, Typography, CityAutocomplete, TimezoneSelect } from '../components/ui';
 import { trpc } from '../utils/trpc';
 import type { Theme } from '../styles/theme';
+import { SavesSection } from '../components/settings/SavesSection';
 
 // ============================================================================
 // Data Constants (reused from onboarding)
@@ -108,7 +110,7 @@ const allValues = [
 // Types
 // ============================================================================
 
-type SettingsSection = 'persona' | 'heartbeat' | 'provider' | 'channels' | 'plugins' | 'goals' | 'system';
+type SettingsSection = 'persona' | 'heartbeat' | 'provider' | 'channels' | 'plugins' | 'goals' | 'saves' | 'system';
 
 interface SidebarItem {
   id: SettingsSection;
@@ -123,6 +125,7 @@ const sections: SidebarItem[] = [
   { id: 'channels', label: 'Channels', icon: ChatCircle },
   { id: 'plugins', label: 'Plugins', icon: PuzzlePiece },
   { id: 'goals', label: 'Goals', icon: Target },
+  { id: 'saves', label: 'Saves', icon: FloppyDisk },
   { id: 'system', label: 'System', icon: GearSix },
 ];
 
@@ -3762,6 +3765,7 @@ export function SettingsPage() {
       case 'channels': return <ChannelsSection />;
       case 'plugins': return <PluginsSection />;
       case 'goals': return <GoalsSection />;
+      case 'saves': return <SavesSection />;
       case 'system': return <SystemSection />;
       default: return <PersonaSection />;
     }

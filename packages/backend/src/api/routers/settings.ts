@@ -9,7 +9,8 @@ import {
 } from '@animus/shared';
 import { router, protectedProcedure } from '../trpc.js';
 import * as systemStore from '../../db/stores/system-store.js';
-import { getSystemDb } from '../../db/index.js';
+import * as personaStore from '../../db/stores/persona-store.js';
+import { getSystemDb, getPersonaDb } from '../../db/index.js';
 import { updateCategoryCache } from '../../lib/logger.js';
 
 export const settingsRouter = router({
@@ -25,14 +26,14 @@ export const settingsRouter = router({
     }),
 
   getPersonalitySettings: protectedProcedure.query(() => {
-    return systemStore.getPersonalitySettings(getSystemDb());
+    return personaStore.getPersonalitySettings(getPersonaDb());
   }),
 
   updatePersonalitySettings: protectedProcedure
     .input(updatePersonalitySettingsInputSchema)
     .mutation(({ input }) => {
-      systemStore.updatePersonalitySettings(getSystemDb(), input);
-      return systemStore.getPersonalitySettings(getSystemDb());
+      personaStore.updatePersonalitySettings(getPersonaDb(), input);
+      return personaStore.getPersonalitySettings(getPersonaDb());
     }),
 
   getLogCategories: protectedProcedure.query(() => {

@@ -20,6 +20,28 @@ import { createLogger } from '../../lib/logger.js';
 
 const log = createLogger('ObservationProcessor', 'memory');
 
+/**
+ * Format an ISO timestamp in the configured timezone for observer batch items.
+ * Produces "Feb 14, 2026, 3:30 PM" style output so the observer can extract
+ * the correct local date and time.
+ */
+function formatItemTimestamp(isoString: string, timezone?: string): string {
+  if (!timezone) return isoString;
+  try {
+    return new Date(isoString).toLocaleString('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  } catch {
+    return isoString;
+  }
+}
+
 // ============================================================================
 // Concurrency Protection
 // ============================================================================
@@ -37,6 +59,22 @@ function opsKey(stream: StreamType, contactId: string | null): string {
 
 // Exported for testing
 export { activeOps };
+
+/**
+ * Wait for all active observation/reflection operations to complete.
+ * Used during graceful shutdown to avoid cutting off in-flight work.
+ */
+export async function waitForActiveOps(timeoutMs = 30_000): Promise<void> {
+  const start = Date.now();
+  while (activeOps.size > 0) {
+    if (Date.now() - start > timeoutMs) {
+      log.warn(`Timed out waiting for ${activeOps.size} active operations to complete, force-clearing`);
+      activeOps.clear();
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+}
 
 // ============================================================================
 // Types
@@ -131,8 +169,9 @@ export async function processStream(params: {
   contactId: string | null;
   rawItems: RawItem[];
   config: typeof OBSERVATIONAL_MEMORY_CONFIG;
+  timezone?: string;
 }): Promise<void> {
-  const { deps, stream, contactId, rawItems, config } = params;
+  const { deps, stream, contactId, rawItems, config, timezone } = params;
   const key = opsKey(stream, contactId);
 
   // Concurrency guard — set immediately to prevent race conditions
@@ -177,7 +216,7 @@ export async function processStream(params: {
       if (batchTokens + itemTokens > batchTokenTarget && batchItems.length > 0) {
         break;
       }
-      batchItems.push(`[${item.createdAt}] ${item.content}`);
+      batchItems.push(`[${formatItemTimestamp(item.createdAt, timezone)}] ${item.content}`);
       batchTokens += itemTokens;
       lastBatchItem = item;
     }
@@ -363,14 +402,15 @@ export async function processAllStreams(params: {
   messages: RawItem[];
   contactId: string | null;
   config: typeof OBSERVATIONAL_MEMORY_CONFIG;
+  timezone?: string;
 }): Promise<void> {
-  const { deps, thoughts, experiences, messages, contactId, config } = params;
+  const { deps, thoughts, experiences, messages, contactId, config, timezone } = params;
 
   // Process each stream sequentially
-  await processStream({ deps, stream: 'thoughts', contactId: null, rawItems: thoughts, config });
-  await processStream({ deps, stream: 'experiences', contactId: null, rawItems: experiences, config });
+  await processStream({ deps, stream: 'thoughts', contactId: null, rawItems: thoughts, config, timezone });
+  await processStream({ deps, stream: 'experiences', contactId: null, rawItems: experiences, config, timezone });
 
   if (contactId && messages.length > 0) {
-    await processStream({ deps, stream: 'messages', contactId, rawItems: messages, config });
+    await processStream({ deps, stream: 'messages', contactId, rawItems: messages, config, timezone });
   }
 }

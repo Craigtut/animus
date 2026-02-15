@@ -143,11 +143,21 @@ export const TriggerDefinitionSchema = z.object({
 // ============================================================================
 
 export const PluginMcpServerSchema = z.object({
-  command: z.string(),
+  // Transport type (inferred from fields if omitted)
+  type: z.enum(['stdio', 'http']).optional(),
+  // Stdio transport
+  command: z.string().optional(),
   args: z.array(z.string()).default([]),
   env: z.record(z.string()).default({}),
+  // HTTP transport
+  url: z.string().optional(),
+  headers: z.record(z.string()).default({}),
+  // Common
   description: z.string().optional(),
-});
+}).refine(
+  (data) => data.command || data.url,
+  { message: 'Either "command" (stdio) or "url" (http) must be provided' },
+);
 
 // ============================================================================
 // Plugin Record (DB row shape)

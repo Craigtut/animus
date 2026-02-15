@@ -20,6 +20,7 @@ import { initializeHeartbeat, stopHeartbeat } from './heartbeat/index.js';
 import { loadCredentialsIntoEnv, ensureClaudeOnboardingFile } from './services/credential-service.js';
 import { env } from './utils/env.js';
 import { createLogger, updateCategoryCache } from './lib/logger.js';
+import { isMaintenanceMode, getMaintenanceReason } from './lib/maintenance.js';
 import * as systemStore from './db/stores/system-store.js';
 
 const log = createLogger('Server', 'server');
@@ -59,6 +60,16 @@ async function main() {
   await fastify.register(websocket);
   await fastify.register(authPlugin);
 
+  // Maintenance mode guard — return 503 for all routes except health check
+  fastify.addHook('onRequest', async (request, reply) => {
+    if (isMaintenanceMode() && request.url !== '/api/health') {
+      return reply.status(503).send({
+        error: 'Service temporarily unavailable',
+        reason: getMaintenanceReason(),
+      });
+    }
+  });
+
   // Serve static frontend files in production
   if (env.NODE_ENV === 'production') {
     await fastify.register(staticPlugin, {
@@ -76,6 +87,23 @@ async function main() {
       createContext: createTRPCContext,
     },
   });
+
+  // Register binary file routes for saves (export/import)
+  const { registerSaveFileRoutes } = await import('./api/routes/saves-file.js');
+  await registerSaveFileRoutes(fastify);
+
+  // Register content type parser for binary uploads (save import)
+  fastify.addContentTypeParser(
+    'application/octet-stream',
+    { bodyLimit: 500 * 1024 * 1024 },
+    async (request, payload) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of payload) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks);
+    }
+  );
 
   // Capture raw body for channel webhook routes (needed for signature validation)
   fastify.addHook('preParsing', async (request, _reply, payload) => {

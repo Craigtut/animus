@@ -7,7 +7,7 @@ description: Generate and edit images using Google's Nano Banana Pro (Gemini 3 P
 
 Generate images from text descriptions or edit existing images using Google's Gemini 3 Pro Image model.
 
-**Requires**: `GEMINI_API_KEY` environment variable set with a valid Google Gemini API key.
+**Requires**: Credential `nano-banana-pro.GEMINI_API_KEY` (configure in Settings > Plugins)
 
 ## When to Use
 
@@ -21,14 +21,14 @@ Use this skill proactively whenever the conversation involves:
 
 ## Text-to-Image Generation
 
-Generate a new image from a text prompt:
+Generate a new image from a text prompt using `run_with_credentials`:
 
-```bash
-node plugins/nano-banana-pro/scripts/generate-image.js \
-  --prompt "A serene mountain lake at sunset with purple clouds reflecting on still water" \
-  --aspect-ratio 16:9 \
-  --resolution 2K \
-  --output ./generated-images
+```
+run_with_credentials({
+  command: "node plugins/nano-banana-pro/scripts/generate-image.js --prompt \"A serene mountain lake at sunset with purple clouds reflecting on still water\" --aspect-ratio 16:9 --resolution 2K --output ./generated-images",
+  credentialRef: "nano-banana-pro.GEMINI_API_KEY",
+  envVar: "GEMINI_API_KEY"
+})
 ```
 
 ### Required Arguments
@@ -46,11 +46,12 @@ node plugins/nano-banana-pro/scripts/generate-image.js \
 
 Edit an existing image with a text prompt:
 
-```bash
-node plugins/nano-banana-pro/scripts/generate-image.js \
-  --prompt "Make the sky a deep purple and add northern lights" \
-  --input ./photos/landscape.png \
-  --output ./edited-images
+```
+run_with_credentials({
+  command: "node plugins/nano-banana-pro/scripts/generate-image.js --prompt \"Make the sky a deep purple and add northern lights\" --input ./photos/landscape.png --output ./edited-images",
+  credentialRef: "nano-banana-pro.GEMINI_API_KEY",
+  envVar: "GEMINI_API_KEY"
+})
 ```
 
 ### Required Arguments

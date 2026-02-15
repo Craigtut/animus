@@ -597,6 +597,21 @@ export interface IAgentSession {
     options?: PromptOptions,
   ): Promise<AgentResponse>;
 
+  /**
+   * Inject a user message into a running prompt stream.
+   *
+   * Only available when `promptStreaming()` is actively running and the
+   * provider supports mid-query message injection (e.g., Claude's
+   * AsyncIterable prompt form). Call is a no-op if not supported or
+   * no prompt is in flight.
+   *
+   * The injected message will be processed by the agent as a new user
+   * turn within the same query. Behavior depends on the provider:
+   * - Claude: Queued as next turn via AsyncIterable<SDKUserMessage>
+   * - Codex/OpenCode: Not supported (method is optional)
+   */
+  injectMessage?(content: string): void;
+
   /** Cancel the current operation */
   cancel(): Promise<void>;
 

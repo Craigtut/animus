@@ -107,6 +107,8 @@ export interface MindContextParams {
   pluginDecisionDescriptions?: string;
   /** Plugin context sources formatted for user message */
   pluginContextSources?: string;
+  /** Credential manifest for run_with_credentials tool */
+  credentialManifest?: string;
   /** Observational memory stream contexts */
   thoughtContext?: StreamContext | null;
   experienceContext?: StreamContext | null;
@@ -442,6 +444,13 @@ send_proactive_message — Send a message to any contact on any channel.
   available channels.
 
   Input: { contactId: string (UUID), channel: "web" | "sms" | "discord" | "api", content: string }
+
+run_with_credentials — Execute a command with a plugin credential.
+  Use this for plugin scripts that need API keys. The credential is
+  resolved from encrypted storage and injected as an env var into the
+  subprocess. You never see the raw value.
+
+  Input: { command: string, credentialRef: string, envVar: string, cwd?: string }
 
 IMPORTANT: These tools add round-trips. Only use them when the pre-loaded
 context is insufficient. Most ticks won't need any tool calls.`;
@@ -915,6 +924,18 @@ export function buildUserMessage(params: MindContextParams): string {
   // 10. Plugin context sources
   if (params.pluginContextSources) {
     sections.push(`── PLUGIN CONTEXT ──\n${params.pluginContextSources}`);
+  }
+
+  // 10b. Credential manifest (for run_with_credentials tool)
+  if (params.credentialManifest) {
+    sections.push(`── AVAILABLE CREDENTIALS ──
+These credentials are stored securely. Use run_with_credentials to
+execute commands that need them. Reference by ref name — you never
+see the actual values.
+
+${params.credentialManifest}
+
+Usage: run_with_credentials({ command, credentialRef, envVar })`);
   }
 
   // 11. Spawn budget note

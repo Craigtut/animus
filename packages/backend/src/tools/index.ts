@@ -6,4 +6,4 @@
 
 export { getToolsForTier, getTool, getToolNames, getMindToolRegistry, executeTool } from './registry.js';
 export type { ToolHandlerContext, ToolResult, ToolHandler, AnimusTool } from './types.js';
-export { buildMindMcpServer, type MutableToolContext } from './servers/claude-mcp.js';
+export { buildMindMcpServer, buildSubAgentMcpServer, type MutableToolContext } from './servers/claude-mcp.js';

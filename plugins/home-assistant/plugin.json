@@ -1,0 +1,17 @@
+{
+  "name": "home-assistant",
+  "displayName": "Home Assistant",
+  "version": "1.0.0",
+  "description": "Connect to Home Assistant's MCP server for smart home control",
+  "author": { "name": "animus-community" },
+  "license": "MIT",
+  "icon": "./icon.svg",
+  "components": {
+    "skills": "./skills/",
+    "tools": "./tools.json"
+  },
+  "permissions": {
+    "network": true
+  },
+  "configSchema": "./config.schema.json"
+}

@@ -10,10 +10,12 @@ import {
   getMemoryDb,
   getMessagesDb,
   getSystemDb,
+  getPersonaDb,
   getAgentLogsDb,
 } from '../../db/index.js';
 import { stopHeartbeat, getVectorStore } from '../../heartbeat/index.js';
 import * as systemStore from '../../db/stores/system-store.js';
+import * as personaStore from '../../db/stores/persona-store.js';
 import * as heartbeatStore from '../../db/stores/heartbeat-store.js';
 
 export const dataRouter = router({
@@ -148,7 +150,7 @@ export const dataRouter = router({
       system: {
         contacts: systemStore.listContacts(sysDb),
         settings: systemStore.getSystemSettings(sysDb),
-        persona: systemStore.getPersona(sysDb),
+        persona: personaStore.getPersona(getPersonaDb()),
         channelPackages: systemStore.getChannelPackages(sysDb),
       },
       heartbeat: {

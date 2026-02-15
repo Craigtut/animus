@@ -108,6 +108,86 @@ interface SDKUserMessage {
   };
 }
 
+// ============================================================================
+// Message Stream for AsyncIterable Prompt
+// ============================================================================
+
+/**
+ * Creates a push-based async iterable for feeding user messages into a
+ * Claude SDK `query()` call using the `AsyncIterable<SDKUserMessage>` form.
+ *
+ * This allows injecting additional user messages while the agent is
+ * actively processing — enabling mid-tick message injection.
+ *
+ * **Lifecycle**: The stream blocks on `next()` when the queue is empty,
+ * keeping stdin open to the CLI subprocess. This is intentional — the
+ * SDK's `stream_input` task eagerly drains the iterable, so the stream
+ * must stay open for the entire query duration to allow message injection
+ * at any point. The stream is ended explicitly by calling `end()` when
+ * the `result` message is received on the output side (see promptStreaming).
+ *
+ * This avoids the known issue (GitHub #9705) where premature stdin closure
+ * breaks the bidirectional hook/control protocol.
+ */
+function createMessageStream(): MessageStream {
+  const queue: SDKUserMessage[] = [];
+  let waiting: ((result: IteratorResult<SDKUserMessage>) => void) | null = null;
+  let done = false;
+
+  const iterable: AsyncIterable<SDKUserMessage> = {
+    [Symbol.asyncIterator](): AsyncIterator<SDKUserMessage> {
+      return {
+        next(): Promise<IteratorResult<SDKUserMessage>> {
+          // If there's a queued message, return it immediately
+          if (queue.length > 0) {
+            return Promise.resolve({ value: queue.shift()!, done: false });
+          }
+          // If the stream has been ended, signal completion
+          if (done) {
+            return Promise.resolve({ value: undefined as unknown as SDKUserMessage, done: true });
+          }
+          // Queue is empty — block until a message is pushed or end() is called.
+          // The SDK's stream_input task will be blocked here, keeping stdin
+          // open to the CLI subprocess. This is the desired behavior.
+          return new Promise<IteratorResult<SDKUserMessage>>((resolve) => {
+            waiting = resolve;
+          });
+        },
+      };
+    },
+  };
+
+  return {
+    /** Push a user message into the stream */
+    push(msg: SDKUserMessage): void {
+      if (done) return;
+      if (waiting) {
+        const resolve = waiting;
+        waiting = null;
+        resolve({ value: msg, done: false });
+      } else {
+        queue.push(msg);
+      }
+    },
+    /** Signal that no more messages will be pushed */
+    end(): void {
+      done = true;
+      if (waiting) {
+        const resolve = waiting;
+        waiting = null;
+        resolve({ value: undefined as unknown as SDKUserMessage, done: true });
+      }
+    },
+    iterable,
+  };
+}
+
+interface MessageStream {
+  push(msg: SDKUserMessage): void;
+  end(): void;
+  iterable: AsyncIterable<SDKUserMessage>;
+}
+
 interface ContentPart {
   type: 'text' | 'image';
   text?: string;
@@ -342,6 +422,8 @@ class ClaudeSession extends BaseSession {
   private stderrBuffer: string = '';
   /** Model resolved from SDK init message (actual model in use) */
   private resolvedModel: string | null = null;
+  /** Active message stream for AsyncIterable prompt injection */
+  private activeMessageStream: MessageStream | null = null;
 
   constructor(sdk: ClaudeSDK, config: AgentSessionConfig, logger: Logger) {
     super(config, logger);
@@ -463,6 +545,9 @@ class ClaudeSession extends BaseSession {
 
   /**
    * Send a prompt with streaming response.
+   *
+   * Uses the AsyncIterable<SDKUserMessage> prompt form to enable
+   * mid-query message injection via `injectMessage()`.
    */
   async promptStreaming(
     input: string,
@@ -489,8 +574,19 @@ class ClaudeSession extends BaseSession {
       // Enable partial messages for streaming
       sdkOptions.includePartialMessages = true;
 
+      // Create message stream for AsyncIterable prompt pattern.
+      // This enables injectMessage() to push additional user messages
+      // into the running query.
+      this.activeMessageStream = createMessageStream();
+
+      // Push the initial user message
+      this.activeMessageStream.push({
+        type: 'user',
+        message: { role: 'user', content: input },
+      });
+
       this.queryInstance = this.sdk.query({
-        prompt: input,
+        prompt: this.activeMessageStream.iterable,
         options: sdkOptions,
       });
 
@@ -539,6 +635,13 @@ class ClaudeSession extends BaseSession {
 
         // Extract result info
         if (message.type === 'result') {
+          // End the message stream now that the CLI has produced its result.
+          // This unblocks the SDK's stream_input task, which then calls
+          // end_input() to close stdin. Doing this on `result` (rather than
+          // an idle timer) keeps the injection window open for the entire
+          // query duration and avoids the GitHub #9705 stdin-closure bug.
+          this.activeMessageStream?.end();
+
           this.updateUsageFromResult(message);
           finishReason = this.mapFinishReason(message.subtype);
           response = message.result || response;
@@ -592,7 +695,33 @@ class ClaudeSession extends BaseSession {
       clearTimeout(timer);
       this.abortController = null;
       this.queryInstance = null;
+      // Clean up message stream
+      this.activeMessageStream?.end();
+      this.activeMessageStream = null;
     }
+  }
+
+  /**
+   * Inject a user message into a running prompt stream.
+   *
+   * Only works when `promptStreaming()` is actively running and using
+   * the AsyncIterable prompt form. The message is pushed into the
+   * stream and will be processed by the agent as a new user turn.
+   */
+  injectMessage(content: string): void {
+    if (!this.activeMessageStream) {
+      this.logger.warn('Cannot inject message — no active prompt stream');
+      return;
+    }
+
+    this.logger.info('Injecting user message into active prompt stream', {
+      contentPreview: content.substring(0, 80),
+    });
+
+    this.activeMessageStream.push({
+      type: 'user',
+      message: { role: 'user', content },
+    });
   }
 
   /**

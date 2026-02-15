@@ -1,0 +1,10 @@
+{
+  "ha": {
+    "type": "http",
+    "url": "${config.HA_URL}/api/mcp",
+    "headers": {
+      "Authorization": "Bearer ${config.HA_ACCESS_TOKEN}"
+    },
+    "description": "Home Assistant MCP server — smart home control"
+  }
+}
