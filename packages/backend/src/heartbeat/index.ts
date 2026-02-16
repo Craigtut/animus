@@ -635,7 +635,8 @@ async function getOrCreateMindSession(
   }
 
   // Merge built-in MCP tools with plugin MCP servers
-  const pluginMcp = getPluginManager().getPluginMcpServersForSdk();
+  const pluginMgr = getPluginManager();
+  const pluginMcp = pluginMgr.getPluginMcpServersForSdk();
   const mergedMcpServers: Record<string, Record<string, unknown>> = {
     ...(mindMcpServer ? { tools: mindMcpServer.serverConfig } : {}),
     ...pluginMcp.mcpServers,
@@ -644,6 +645,23 @@ async function getOrCreateMindSession(
     ...(mindMcpServer ? mindMcpServer.allowedTools : []),
     ...pluginMcp.allowedTools,
   ];
+
+  // For Claude provider: use the skill bridge plugin to expose Animus plugin skills
+  // without needing settingSources: ['project'] (which would also load CLAUDE.md).
+  // The bridge is a minimal pseudo-plugin whose skills/ symlinks to .claude/skills/.
+  // Also add 'Skill' to allowedTools so the SDK enables its built-in Skill tool.
+  let sdkPlugins: Array<{ type: 'local'; path: string }> | undefined;
+  if (provider === 'claude') {
+    const bridgePath = pluginMgr.getSkillBridgePath();
+    sdkPlugins = [{ type: 'local' as const, path: bridgePath }];
+    if (!mergedAllowedTools.includes('Skill')) {
+      mergedAllowedTools.push('Skill');
+    }
+    log.info('Claude SDK skill bridge plugin configured', {
+      bridgePath,
+      allowedTools: mergedAllowedTools,
+    });
+  }
 
   // Enable verbose agent logging when LOG_LEVEL is debug or trace
   const verboseAgent = env.LOG_LEVEL === 'debug' || env.LOG_LEVEL === 'trace';
@@ -661,8 +679,11 @@ async function getOrCreateMindSession(
     // Attach MCP servers: built-in Animus tools + plugin MCP servers
     ...(Object.keys(mergedMcpServers).length > 0 ? {
       mcpServers: mergedMcpServers,
-      allowedTools: mergedAllowedTools,
     } : {}),
+    // allowedTools: MCP tool patterns + 'Skill' for SDK skill discovery
+    ...(mergedAllowedTools.length > 0 ? { allowedTools: mergedAllowedTools } : {}),
+    // Claude SDK plugins for skill discovery (bridge to .claude/skills/)
+    ...(sdkPlugins ? { plugins: sdkPlugins } : {}),
     verbose: verboseAgent,
   });
 

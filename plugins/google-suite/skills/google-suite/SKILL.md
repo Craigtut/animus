@@ -1,5 +1,5 @@
 ---
-name: gogcli
+name: google-suite
 description: >
   Google Suite CLI via gogcli (gog). Use when the user asks about Gmail, email,
   Google Calendar, events, scheduling, Google Drive, files, Docs, Sheets,
@@ -39,7 +39,7 @@ Check if the plugin config has a keyring password set. If not, generate one and 
 ```
 run_with_credentials({
   command: "gog auth status --no-input",
-  credentialRef: "gogcli.GOG_KEYRING_PASSWORD",
+  credentialRef: "google-suite.GOG_KEYRING_PASSWORD",
   envVar: "GOG_KEYRING_PASSWORD",
   extraEnv: { "GOG_KEYRING_BACKEND": "file", "GOG_COLOR": "never" }
 })
@@ -54,7 +54,7 @@ Check if OAuth credentials are registered:
 ```
 run_with_credentials({
   command: "gog auth credentials list --json --no-input",
-  credentialRef: "gogcli.GOG_KEYRING_PASSWORD",
+  credentialRef: "google-suite.GOG_KEYRING_PASSWORD",
   envVar: "GOG_KEYRING_PASSWORD",
   extraEnv: { "GOG_KEYRING_BACKEND": "file", "GOG_COLOR": "never" }
 })
@@ -75,7 +75,7 @@ If no credentials are registered, the user needs to provide a Google OAuth clien
 ```
 run_with_credentials({
   command: "gog auth credentials /path/to/client_secret.json --no-input",
-  credentialRef: "gogcli.GOG_KEYRING_PASSWORD",
+  credentialRef: "google-suite.GOG_KEYRING_PASSWORD",
   envVar: "GOG_KEYRING_PASSWORD",
   extraEnv: { "GOG_KEYRING_BACKEND": "file", "GOG_COLOR": "never" }
 })
@@ -90,7 +90,7 @@ Check if any accounts are authenticated:
 ```
 run_with_credentials({
   command: "gog auth list --check --json --no-input",
-  credentialRef: "gogcli.GOG_KEYRING_PASSWORD",
+  credentialRef: "google-suite.GOG_KEYRING_PASSWORD",
   envVar: "GOG_KEYRING_PASSWORD",
   extraEnv: { "GOG_KEYRING_BACKEND": "file", "GOG_COLOR": "never" }
 })
@@ -103,7 +103,7 @@ If no accounts or tokens are expired, run the auth flow. Ask the user for their 
 ```
 run_with_credentials({
   command: "gog auth add user@gmail.com --remote --step 1 --services gmail,calendar,drive,docs,sheets,tasks,contacts --no-input",
-  credentialRef: "gogcli.GOG_KEYRING_PASSWORD",
+  credentialRef: "google-suite.GOG_KEYRING_PASSWORD",
   envVar: "GOG_KEYRING_PASSWORD",
   extraEnv: { "GOG_KEYRING_BACKEND": "file", "GOG_COLOR": "never" }
 })
@@ -122,7 +122,7 @@ When the user pastes the callback URL, complete the auth:
 ```
 run_with_credentials({
   command: "gog auth add user@gmail.com --remote --step 2 --auth-url 'PASTED_URL_HERE' --no-input",
-  credentialRef: "gogcli.GOG_KEYRING_PASSWORD",
+  credentialRef: "google-suite.GOG_KEYRING_PASSWORD",
   envVar: "GOG_KEYRING_PASSWORD",
   extraEnv: { "GOG_KEYRING_BACKEND": "file", "GOG_COLOR": "never" }
 })
@@ -145,7 +145,7 @@ All `gog` commands MUST be run via `run_with_credentials` to inject the keyring 
 ```
 run_with_credentials({
   command: "gog gmail search 'is:unread' --max 5 --json --no-input",
-  credentialRef: "gogcli.GOG_KEYRING_PASSWORD",
+  credentialRef: "google-suite.GOG_KEYRING_PASSWORD",
   envVar: "GOG_KEYRING_PASSWORD",
   extraEnv: {
     "GOG_KEYRING_BACKEND": "file",
@@ -159,7 +159,7 @@ If `GOG_ACCOUNT` is configured in the plugin config, also inject it:
 ```
 run_with_credentials({
   command: "gog calendar events primary --today --json --no-input",
-  credentialRef: "gogcli.GOG_KEYRING_PASSWORD",
+  credentialRef: "google-suite.GOG_KEYRING_PASSWORD",
   envVar: "GOG_KEYRING_PASSWORD",
   extraEnv: {
     "GOG_KEYRING_BACKEND": "file",

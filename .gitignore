@@ -46,8 +46,9 @@ tmp/
 temp/
 .cache/
 
-# Plugin skill symlinks (managed by Plugin Manager)
+# Plugin skill symlinks and SDK bridge (managed by Plugin Manager)
 .claude/skills/
+.claude/animus-skill-bridge/
 .agents/skills/
 .opencode/skills/
 

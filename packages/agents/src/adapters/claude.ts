@@ -63,6 +63,8 @@ interface QueryOptions {
   };
   /** Control which filesystem settings to load. Include 'project' to discover skills and CLAUDE.md. */
   settingSources?: Array<'user' | 'project' | 'local'>;
+  /** Load local plugins for skill discovery without needing settingSources: ['project']. */
+  plugins?: Array<{ type: 'local'; path: string }>;
   stderr?: (message: string) => void;
 }
 
@@ -1064,6 +1066,8 @@ class ClaudeSession extends BaseSession {
       // Most sessions (mind, sub-agents) build their own context and don't
       // need CLAUDE.md, skills, or agent definitions from the project.
       settingSources: this.config.settingSources,
+      // Load local plugins for skill discovery (avoids needing settingSources: ['project'])
+      plugins: this.config.plugins,
       // Capture stderr from the Claude CLI subprocess for diagnostics.
       // When verbose, log at info level so stderr is visible in real-time.
       stderr: (message: string) => {

@@ -45,26 +45,7 @@ fn chrono_now() -> String {
 
 fn generate_hex_secret(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
-    #[cfg(unix)]
-    {
-        use std::io::Read;
-        std::fs::File::open("/dev/urandom")
-            .expect("Failed to open /dev/urandom")
-            .read_exact(&mut buf)
-            .expect("Failed to read random bytes");
-    }
-    #[cfg(windows)]
-    {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        for (i, b) in buf.iter_mut().enumerate() {
-            *b = ((nanos.wrapping_shr((i as u32 % 16) * 8))
-                ^ (nanos.wrapping_shr(((i as u32 + 7) % 16) * 8))) as u8;
-        }
-    }
+    getrandom::getrandom(&mut buf).expect("Failed to generate random bytes");
     buf.iter().map(|b| format!("{:02x}", b)).collect()
 }
 

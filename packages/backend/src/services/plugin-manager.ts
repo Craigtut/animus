@@ -360,6 +360,10 @@ class PluginManager {
       if (!loaded.enabled) continue;
       await this.deploySkillsForPlugin(loaded, provider);
     }
+    // Create/refresh the Claude SDK bridge for skill discovery
+    if (provider === 'claude') {
+      await this.ensureSkillBridge();
+    }
   }
 
   async cleanupSkills(): Promise<void> {
@@ -371,6 +375,62 @@ class PluginManager {
       }
     }
     this.deployedSkillPaths = [];
+  }
+
+  /**
+   * Get the path to the Claude SDK skill bridge directory.
+   *
+   * The bridge is a minimal pseudo-plugin that the Claude Agent SDK loads via
+   * its `plugins` config. It contains only a `skills/` symlink pointing to
+   * `.claude/skills/` where all Animus plugin skills are already deployed.
+   * This allows the SDK to discover skills without needing
+   * `settingSources: ['project']` (which would also load CLAUDE.md).
+   */
+  getSkillBridgePath(): string {
+    return path.join(PROJECT_ROOT, '.claude', 'animus-skill-bridge');
+  }
+
+  /**
+   * Create or refresh the Claude SDK skill bridge directory.
+   *
+   * Structure:
+   *   .claude/animus-skill-bridge/
+   *   ├── .claude-plugin/
+   *   │   └── plugin.json          # Minimal manifest for the Claude SDK
+   *   └── skills -> .claude/skills/
+   */
+  private async ensureSkillBridge(): Promise<void> {
+    const bridgePath = this.getSkillBridgePath();
+    const manifestDir = path.join(bridgePath, '.claude-plugin');
+    const manifestPath = path.join(manifestDir, 'plugin.json');
+    const bridgeSkillsLink = path.join(bridgePath, 'skills');
+    const skillsDir = path.join(PROJECT_ROOT, '.claude', 'skills');
+
+    try {
+      // Create bridge directory and .claude-plugin/ manifest dir
+      await fs.mkdir(manifestDir, { recursive: true });
+
+      // Write the Claude SDK plugin manifest with explicit skills path
+      const manifest = JSON.stringify({
+        name: 'animus-skills',
+        description: 'Animus plugin skills bridge',
+        version: '1.0.0',
+        skills: './skills/',
+      }, null, 2);
+      await fs.writeFile(manifestPath, manifest, 'utf-8');
+
+      // Create skills/ symlink pointing to .claude/skills/
+      try {
+        await fs.rm(bridgeSkillsLink, { recursive: true, force: true });
+      } catch {
+        // Doesn't exist — fine
+      }
+      await fs.symlink(skillsDir, bridgeSkillsLink, 'dir');
+
+      log.info(`Claude SDK skill bridge created: ${bridgePath} (${bridgeSkillsLink} → ${skillsDir})`);
+    } catch (err) {
+      log.error('Failed to create Claude SDK skill bridge:', err);
+    }
   }
 
   private async deploySkillsForPlugin(loaded: LoadedPlugin, provider: string): Promise<void> {

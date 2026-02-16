@@ -163,6 +163,15 @@ export const claudeConfigSchema = baseSessionConfigSchema.extend({
     type: z.literal('json_schema'),
     schema: z.record(z.unknown()),
   }).optional(),
+
+  /** Which filesystem settings the SDK should load ('user', 'project', 'local') */
+  settingSources: z.array(z.enum(['user', 'project', 'local'])).optional(),
+
+  /** Load Claude SDK plugins for skill discovery (avoids needing settingSources: ['project']) */
+  plugins: z.array(z.object({
+    type: z.literal('local'),
+    path: z.string(),
+  })).optional(),
 });
 
 /**

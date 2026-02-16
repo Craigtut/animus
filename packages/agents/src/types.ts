@@ -280,6 +280,12 @@ export interface AgentSessionConfig {
    * context is fully built by the context builder.
    */
   settingSources?: Array<'user' | 'project' | 'local'>;
+  /**
+   * Load Claude SDK plugins for skill discovery.
+   * Used to expose Animus plugin skills to the Claude SDK without needing
+   * settingSources: ['project'] (which also loads CLAUDE.md).
+   */
+  plugins?: Array<{ type: 'local'; path: string }>;
 
   // Codex-specific
   workingDirectory?: string;

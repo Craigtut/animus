@@ -118,16 +118,28 @@ async function downloadNodeBinary() {
       fs.renameSync(path.join(tmpExtract, archiveName, 'bin', 'node'), destPath);
       fs.rmSync(tmpExtract, { recursive: true, force: true });
     } else if (ext === '.zip') {
-      // Windows: extract node.exe from the zip
+      // Windows: extract node.exe from the zip using a temp PowerShell script
+      // to avoid path injection issues with inline commands
       const binaryPath = `${archiveName}/node.exe`;
-      // Use PowerShell on Windows to extract
-      execSync(
-        `powershell -Command "& { $zip = [System.IO.Compression.ZipFile]::OpenRead('${tmpArchive}'); $entry = $zip.Entries | Where-Object { $_.FullName -eq '${binaryPath}' }; [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, '${destPath}', $true); $zip.Dispose() }"`,
-        { stdio: 'inherit' }
-      );
+      const ps1Path = path.join(BINARIES_DIR, '_extract.ps1');
+      const ps1Content = [
+        'Add-Type -AssemblyName System.IO.Compression.FileSystem',
+        `$zip = [System.IO.Compression.ZipFile]::OpenRead("${tmpArchive.replace(/\\/g, '\\\\')}")`,
+        `$entry = $zip.Entries | Where-Object { $_.FullName -eq "${binaryPath}" }`,
+        `[System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, "${destPath.replace(/\\/g, '\\\\')}", $true)`,
+        '$zip.Dispose()',
+      ].join('\n');
+      fs.writeFileSync(ps1Path, ps1Content);
+      try {
+        execSync(`powershell -ExecutionPolicy Bypass -File "${ps1Path}"`, { stdio: 'inherit' });
+      } finally {
+        fs.unlinkSync(ps1Path);
+      }
     }
 
-    fs.chmodSync(destPath, 0o755);
+    if (process.platform !== 'win32') {
+      fs.chmodSync(destPath, 0o755);
+    }
     console.log(`      Saved to ${destPath}`);
   } finally {
     // Clean up temp archive

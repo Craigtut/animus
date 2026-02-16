@@ -293,6 +293,16 @@ export class AgentOrchestrator {
         ...pluginMcp.allowedTools,
       ];
 
+      // For Claude provider: expose Animus plugin skills via the skill bridge plugin
+      let sdkPlugins: Array<{ type: 'local'; path: string }> | undefined;
+      if (provider === 'claude') {
+        const bridgePath = getPluginManager().getSkillBridgePath();
+        sdkPlugins = [{ type: 'local' as const, path: bridgePath }];
+        if (!mergedAllowedTools.includes('Skill')) {
+          mergedAllowedTools.push('Skill');
+        }
+      }
+
       // Create the agent session
       const verboseAgent = env.LOG_LEVEL === 'debug' || env.LOG_LEVEL === 'trace';
       const session = await this.manager.createSession({
@@ -306,8 +316,11 @@ export class AgentOrchestrator {
         ...(sessionEnv ? { env: sessionEnv } : {}),
         ...(Object.keys(mergedMcpServers).length > 0 ? {
           mcpServers: mergedMcpServers,
-          allowedTools: mergedAllowedTools,
         } : {}),
+        // allowedTools: MCP tool patterns + 'Skill' for SDK skill discovery
+        ...(mergedAllowedTools.length > 0 ? { allowedTools: mergedAllowedTools } : {}),
+        // Claude SDK plugins for skill discovery (bridge to .claude/skills/)
+        ...(sdkPlugins ? { plugins: sdkPlugins } : {}),
         verbose: verboseAgent,
       });
 
