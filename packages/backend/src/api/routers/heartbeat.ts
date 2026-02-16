@@ -123,7 +123,7 @@ export const heartbeatRouter = router({
       const db = getHeartbeatDb();
       return heartbeatStore.getRecentDecisions(db, {
         limit: input?.limit ?? 50,
-        since: input?.since,
+        ...(input?.since !== undefined && { since: input.since }),
       });
     }),
 
@@ -609,15 +609,15 @@ export const heartbeatRouter = router({
       // Extract triggerType and sessionState from tick_input event data
       const tickInputEvent = events.find((e) => e.eventType === 'tick_input');
       const tickInputData = tickInputEvent?.data as Record<string, unknown> | undefined;
-      const triggerType = (tickInputData?.triggerType as string) ?? 'unknown';
-      const sessionState = (tickInputData?.sessionState as string) ?? 'unknown';
+      const triggerType = (tickInputData?.['triggerType'] as string) ?? 'unknown';
+      const sessionState = (tickInputData?.['sessionState'] as string) ?? 'unknown';
       const sessionId = tickInputEvent?.sessionId ?? '';
 
       // Check if tick is complete (has tick_output)
       const tickOutputEvent = events.find((e) => e.eventType === 'tick_output');
       const isComplete = !!tickOutputEvent;
       const tickOutputData = tickOutputEvent?.data as Record<string, unknown> | undefined;
-      const durationMs = (tickOutputData?.durationMs as number) ?? null;
+      const durationMs = (tickOutputData?.['durationMs'] as number) ?? null;
 
       // Get tick results from heartbeat.db
       const thoughts = (hbDb

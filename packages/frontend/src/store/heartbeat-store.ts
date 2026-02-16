@@ -20,7 +20,7 @@ import type { HeartbeatState, EmotionState, Thought, Experience } from '@animus/
 // ============================================================================
 
 export interface AgentStatusEvent {
-  type: 'spawned' | 'completed' | 'failed';
+  type: 'spawned' | 'completed' | 'failed' | 'cancelled' | 'rate_limited';
   taskId: string;
   detail?: string;
   receivedAt: number;

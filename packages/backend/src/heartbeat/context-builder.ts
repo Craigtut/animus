@@ -18,6 +18,7 @@ import type {
   Contact,
   ContactChannel,
   EnergyBand,
+  Task,
 } from '@animus/shared';
 import { formatEmotionalState } from './emotion-engine.js';
 import { formatEnergyContext, type WakeUpContext } from './energy-engine.js';
@@ -109,6 +110,8 @@ export interface MindContextParams {
   pluginContextSources?: string;
   /** Credential manifest for run_with_credentials tool */
   credentialManifest?: string;
+  /** Deferred tasks for idle ticks */
+  deferredTasks?: Task[];
   /** Observational memory stream contexts */
   thoughtContext?: StreamContext | null;
   experienceContext?: StreamContext | null;
@@ -389,16 +392,48 @@ function buildDecisionRef(pluginDecisionDescriptions?: string): string {
 Decisions are how you act on the world. Each decision has a type and
 type-specific parameters. You can make zero or many decisions per tick.
 
-Types: spawn_agent, update_agent, cancel_agent, send_message,
-  update_goal, propose_goal, create_seed, create_plan, revise_plan,
-  schedule_task, start_task, complete_task, cancel_task, skip_task, no_action
+AGENT DECISIONS:
+  spawn_agent    — Delegate a task to a sub-agent
+                   params: { taskType, instructions, contactId?, channel? }
+  update_agent   — Send new context to a running agent
+                   params: { agentId, context }
+  cancel_agent   — Cancel a running agent
+                   params: { agentId, reason }
 
-Each has a { type, description, parameters: {...} } structure.
-Use no_action when you're aware of something you could do but deliberately
-choose not to. This is different from an empty decisions array.`;
+GOAL DECISIONS:
+  create_seed    — Plant an idea seed (may grow into a goal)
+                   params: { content, motivation?, linkedEmotion?, source? }
+  propose_goal   — Propose a new goal (awaits activation)
+                   params: { title, description?, motivation?, origin?, linkedEmotion?, basePriority?, completionCriteria? }
+  update_goal    — Change a goal's status
+                   params: { goalId, status: "active"|"paused"|"completed"|"abandoned"|"resumed", reason? }
+  create_plan    — Create a plan for a goal
+                   params: { goalId, strategy, milestones?: [{title, description, status}] }
+  revise_plan    — Create a new plan version (supersedes the old one)
+                   params: { goalId, strategy, milestones? }
+
+TASK DECISIONS:
+  schedule_task  — Create a new task
+                   params: { title, description?, instructions?, scheduleType: "one_shot"|"recurring"|"deferred",
+                             cronExpression?, scheduledAt?, nextRunAt?, goalId?, priority? (0-1), contactId? }
+  start_task     — Begin working on a deferred task
+                   params: { taskId }
+  complete_task  — Mark a task as done
+                   params: { taskId, result? }
+  cancel_task    — Cancel a task
+                   params: { taskId }
+  skip_task      — Skip a task's current execution (recurring: advance to next run)
+                   params: { taskId }
+
+OTHER:
+  send_message   — Send a proactive message (prefer reply field for responses)
+                   params: { contactId, channel, content }
+  no_action      — Deliberate choice to do nothing (different from empty decisions)
+
+Each has a { type, description, parameters: {...} } structure.`;
 
   if (pluginDecisionDescriptions) {
-    ref += `\n\n### Plugin Decision Types\n${pluginDecisionDescriptions}`;
+    ref += `\n\nPLUGIN DECISIONS:\n${pluginDecisionDescriptions}`;
   }
 
   return ref;
@@ -931,6 +966,20 @@ export function buildUserMessage(params: MindContextParams): string {
     sections.push('── PENDING GOALS ──\n' + params.proposedGoalsContext);
   }
 
+  // 8b. Deferred tasks (shown during interval ticks)
+  if (params.deferredTasks && params.deferredTasks.length > 0) {
+    const taskLines = params.deferredTasks.map(t =>
+      `- [${t.id.slice(0, 8)}] ${t.title} (priority: ${t.priority.toFixed(2)})` +
+      (t.goalId ? ' — linked to goal' : '')
+    ).join('\n');
+    sections.push(
+      '── PENDING TASKS ──\n' +
+      'These tasks are waiting for your attention during quiet moments.\n' +
+      'Use start_task with the task ID to begin working on one.\n\n' +
+      taskLines
+    );
+  }
+
   // 9. Previous tick outcomes
   const prevSection = buildPreviousDecisionsSection(params.previousDecisions);
   if (prevSection) {
@@ -997,9 +1046,9 @@ export function buildMindContext(params: MindContextParams): CompiledContext {
 
   const tokenBreakdown: Record<string, number> = {};
   if (systemPrompt) {
-    tokenBreakdown.systemPrompt = estimateTokens(systemPrompt);
+    tokenBreakdown['systemPrompt'] = estimateTokens(systemPrompt);
   }
-  tokenBreakdown.userMessage = estimateTokens(userMessage);
+  tokenBreakdown['userMessage'] = estimateTokens(userMessage);
 
   return {
     systemPrompt,

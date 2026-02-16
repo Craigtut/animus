@@ -50,8 +50,8 @@ export const memoryRouter = router({
     .query(({ input }) => {
       const db = getMemoryDb();
       return memoryStore.searchLongTermMemories(db, {
-        contactId: input?.contactId,
-        memoryType: input?.memoryType,
+        ...(input?.contactId !== undefined && { contactId: input.contactId }),
+        ...(input?.memoryType !== undefined && { memoryType: input.memoryType }),
         limit: input?.limit ?? 50,
       });
     }),

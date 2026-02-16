@@ -96,7 +96,7 @@ async function main() {
   fastify.addContentTypeParser(
     'application/octet-stream',
     { bodyLimit: 500 * 1024 * 1024 },
-    async (request, payload) => {
+    async (request: import('fastify').FastifyRequest, payload: import('stream').Readable) => {
       const chunks: Buffer[] = [];
       for await (const chunk of payload) {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));

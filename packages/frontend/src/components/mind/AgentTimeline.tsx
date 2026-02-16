@@ -1162,7 +1162,7 @@ function EventDetail({ event, allEvents }: { event: TimelineEvent; allEvents: Ti
       const hasReply = d['hasReply'];
       const ch = str(d['channel']);
       const contact = str(d['contactName']);
-      const contentLen = d['contentLength'] as number ?? 0;
+      const contentLen = (d['contentLength'] as number) ?? 0;
       const hasMedia = d['hasMedia'];
       const duration = computeEventDuration(event, allEvents);
       return (
@@ -1178,7 +1178,7 @@ function EventDetail({ event, allEvents }: { event: TimelineEvent; allEvents: Ti
           </DetailField>
           {contact && <DetailField label="TO">{contact}</DetailField>}
           {ch && <DetailField label="CHANNEL"><Badge label={ch} color={theme.colors.text.hint} /></DetailField>}
-          {hasReply && contentLen > 0 && <DetailField label="LENGTH">{contentLen.toLocaleString()} chars</DetailField>}
+          {Boolean(hasReply) && contentLen > 0 && <DetailField label="LENGTH">{contentLen.toLocaleString()} chars</DetailField>}
           {Boolean(hasMedia) && <DetailField label="MEDIA">Attached</DetailField>}
           {duration != null && <DetailField label="DURATION">{formatDuration(duration)}</DetailField>}
         </div>

@@ -537,7 +537,7 @@ describe('context-builder', () => {
         pluginDecisionDescriptions: '- control_device: Control a smart home device\n    Payload: { deviceId: string, action: "turn_on"|"turn_off" }\n    Required contact tier: primary',
       });
 
-      expect(prompt).toContain('Plugin Decision Types');
+      expect(prompt).toContain('PLUGIN DECISIONS:');
       expect(prompt).toContain('control_device');
       expect(prompt).toContain('smart home device');
     });
@@ -546,7 +546,7 @@ describe('context-builder', () => {
       const persona = compilePersona(makePersonaConfig());
       const prompt = buildSystemPrompt(persona);
 
-      expect(prompt).not.toContain('Plugin Decision Types');
+      expect(prompt).not.toContain('PLUGIN DECISIONS:');
     });
 
     it('omits plugin decision section when descriptions are empty string', () => {
@@ -555,7 +555,7 @@ describe('context-builder', () => {
         pluginDecisionDescriptions: '',
       });
 
-      expect(prompt).not.toContain('Plugin Decision Types');
+      expect(prompt).not.toContain('PLUGIN DECISIONS:');
     });
 
     it('includes plugin context sources in user message when provided', () => {
@@ -610,7 +610,7 @@ describe('context-builder', () => {
       }));
 
       expect(ctx.systemPrompt).toBeTruthy();
-      expect(ctx.systemPrompt).toContain('Plugin Decision Types');
+      expect(ctx.systemPrompt).toContain('PLUGIN DECISIONS:');
       expect(ctx.systemPrompt).toContain('send_notification');
     });
 

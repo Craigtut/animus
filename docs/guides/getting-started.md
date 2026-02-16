@@ -170,11 +170,87 @@ npm run build:backend
 ### Running Production Build
 
 ```bash
-cd packages/backend
-npm run start
+npm run build:prod
+npm start
 ```
 
 This serves both the API and the built frontend at `http://localhost:3000`.
+
+### Docker Deployment
+
+For self-hosted servers, use Docker:
+
+**Prerequisites:** Ensure your `.env` file includes at minimum:
+- `ANIMUS_ENCRYPTION_KEY` — Required for encrypting secrets at rest. Set to any secret string. Do NOT change after first run.
+- `JWT_SECRET` — Required for authentication tokens. Set to any secret string.
+
+```bash
+# Quick start (builds and runs in one step)
+docker compose up --build
+
+# Or build and run separately
+npm run docker:build
+npm run docker:up
+```
+
+The container mounts `./data` for persistent database storage (the directory is created automatically) and reads configuration from `.env`. Access the app at `http://localhost:3000`.
+
+To stop:
+
+```bash
+docker compose down
+```
+
+### Desktop App (Tauri)
+
+Build Animus as a native desktop application. The app bundles the full backend as a Node.js sidecar process and opens the frontend in a native webview. All data is stored in the platform-specific app data directory (`~/Library/Application Support/com.animus.app` on macOS, `~/.local/share/animus` on Linux, `%APPDATA%/Animus` on Windows).
+
+**Prerequisites:**
+
+1. **Rust toolchain** — Install via [rustup](https://rustup.rs/):
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   ```
+   After installation, restart your terminal or run `source ~/.cargo/env`.
+
+2. **Tauri CLI** — Install the v2 CLI:
+   ```bash
+   cargo install tauri-cli --locked
+   ```
+   Verify with `cargo tauri --version`.
+
+3. **Platform-specific system libraries** — Tauri requires OS-level dependencies for building native apps. See the [Tauri prerequisites guide](https://v2.tauri.app/start/prerequisites/) for your platform:
+   - **macOS**: Xcode Command Line Tools (`xcode-select --install`)
+   - **Linux**: `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`, `patchelf` (Ubuntu/Debian: `sudo apt install ...`)
+   - **Windows**: Microsoft Visual Studio C++ Build Tools, WebView2
+
+**Development mode** (uses your system Node.js + Vite dev server, no sidecar needed):
+
+```bash
+npm run dev:tauri
+```
+
+**Production build** (single command that builds JS, downloads Node binary, assembles sidecar, and packages the app):
+
+```bash
+npm run build:tauri
+```
+
+This runs three stages automatically:
+1. `npm run build:prod` — Builds shared, agents, frontend, and backend
+2. `node scripts/prepare-tauri.mjs` — Downloads a standalone Node.js binary for your platform and assembles the sidecar payload (backend dist + dependencies) into `packages/tauri/resources/`
+3. `cargo tauri build` — Compiles the Rust shell and packages the installable
+
+The output is in `packages/tauri/target/release/bundle/` — a `.dmg` on macOS, `.deb`/`.AppImage` on Linux, or `.msi` on Windows.
+
+You can also run the preparation step independently to verify it works before the full Cargo build:
+
+```bash
+npm run build:prod
+npm run prepare:tauri    # Just the Node binary download + sidecar assembly
+```
+
+Secrets (`ANIMUS_ENCRYPTION_KEY`, `JWT_SECRET`) are auto-generated on first launch and stored in the app data directory — no `.env` file needed for the desktop app.
 
 ## Database Management
 

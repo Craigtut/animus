@@ -270,7 +270,8 @@ export function validateCronExpression(
     });
     const nextRuns: string[] = [];
     for (let i = 0; i < 3; i++) {
-      nextRuns.push(interval.next().toISOString());
+      const iso = interval.next().toISOString();
+      if (iso) nextRuns.push(iso);
     }
     return { valid: true, nextRuns };
   } catch (err) {
@@ -285,7 +286,7 @@ function getTimezone(): string {
   try {
     const db = getSystemDb();
     const settings = systemStore.getSystemSettings(db);
-    return (settings as Record<string, unknown>).timezone as string ?? 'UTC';
+    return (settings as Record<string, unknown>)['timezone'] as string ?? 'UTC';
   } catch {
     return 'UTC';
   }

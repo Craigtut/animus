@@ -528,9 +528,56 @@ This approach is robust for long-term use: as the schema evolves, new `.sql` fil
 
 ---
 
-## Future: Desktop Packaging (Tauri)
+## Distribution Paths
 
-Animus is designed to eventually be packaged as a standalone desktop application using [Tauri](https://tauri.app/). This is not being implemented now, but the architecture has been evaluated for compatibility and no changes are required today.
+Animus supports three deployment methods:
+
+### 1. Bare Node.js
+
+The simplest path — clone, install, build, and run directly:
+
+```bash
+git clone https://github.com/your-username/animus.git
+cd animus
+npm install
+npm run build:prod
+npm start
+```
+
+The production build compiles shared → agents → frontend → backend in dependency order. The backend serves both the API and the built frontend SPA on port 3000.
+
+### 2. Docker
+
+For self-hosted servers, a multi-stage Docker build produces a slim production image:
+
+```bash
+docker compose up --build
+```
+
+The `docker-compose.yml` mounts `./data` for database persistence and reads configuration from `.env`. The image is based on `node:24-slim` and exposes port 3000.
+
+See `Dockerfile`, `docker-compose.yml`, and `.dockerignore` in the repo root.
+
+### 3. Desktop App (Tauri)
+
+A native desktop app using [Tauri](https://tauri.app/) with a Node.js sidecar. The full backend runs as a permanent child process — not a bridge to a Rust migration.
+
+```bash
+npm run dev:tauri    # Development (uses system node)
+npm run build:tauri  # Production bundle
+```
+
+The scaffold is at `/packages/tauri/`. See the "Desktop Packaging" section below for architecture details.
+
+---
+
+## Desktop Packaging (Tauri)
+
+### Prerequisites
+
+- **Rust toolchain**: Install via [rustup](https://rustup.rs/)
+- **Tauri CLI**: `cargo install tauri-cli --version "^2.0.0" --locked`
+- **Platform-specific deps**: See [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
 
 ### Approach: Node.js Sidecar (Permanent)
 
@@ -550,6 +597,14 @@ Tauri provides first-class [sidecar support](https://tauri.app/develop/sidecar/)
 │  └────────────────────────────────┘  │
 └──────────────────────────────────────┘
 ```
+
+### Development vs Production
+
+**Development** (`cargo tauri dev`): The Tauri `beforeDevCommand` starts both the Vite dev server (frontend HMR) and the Node.js backend via `npm run dev`. The webview connects to the Vite dev server for hot reloading. No sidecar binary is needed — it uses your system Node.js.
+
+**Production** (`cargo tauri build`): The app bundle includes a Node.js binary (placed in `packages/tauri/binaries/` with the target triple suffix) and the built JS resources. On launch, the Rust shell spawns Node.js as a sidecar process running the backend, picks a free port, and points the webview at the sidecar's URL for same-origin serving of both the API and the frontend SPA.
+
+**App icons**: Use `cargo tauri icon <source-image>` to generate all required icon sizes from a single source image (at least 1024x1024 PNG recommended). This produces icons for all platforms in `packages/tauri/icons/`.
 
 ### Why This Works Today (No Blockers)
 
@@ -579,3 +634,19 @@ Tauri is preferred over Electron for:
 - Better fit for the project's self-hosted ethos
 
 Since Animus requires a Node.js sidecar regardless (for agent SDKs), Electron's advantage of native Node.js support is less relevant — both approaches end up bundling Node.js.
+
+### Sidecar Approach: Ship Node.js Binary (Option D)
+
+The simplest sidecar strategy: bundle the Node.js binary and JS resources directly in the app. No compile-to-binary tricks (pkg, bun compile, Node.js SEA). This is the most debuggable approach — the JS files are plain text, the Node.js binary is standard.
+
+The Tauri scaffold at `/packages/tauri/` implements this:
+- `src/main.rs` — Picks a free port, spawns `node backend/index.js`, waits for health check, opens the webview
+- `tauri.conf.json` — Configures the bundle (external bin, resources, CSP, window)
+- `binaries/` — Place the Node.js binary here with the correct target triple suffix
+- `capabilities/` — Shell permissions for spawning the sidecar
+
+**Future optimizations** (not implemented):
+- Bundle size reduction via `bun compile` or Node.js SEA (single executable)
+- macOS code signing and notarization
+- Windows signal handling (SIGTERM alternative)
+- Auto-update via Tauri's updater plugin

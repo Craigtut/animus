@@ -1,0 +1,15 @@
+{
+  "name": "gogcli",
+  "displayName": "Google Suite (gogcli)",
+  "version": "1.0.0",
+  "description": "Google Suite CLI: Gmail, Calendar, Drive, Docs, Sheets, Tasks, Contacts, Chat via gogcli",
+  "author": { "name": "animus-community" },
+  "license": "MIT",
+  "components": {
+    "skills": "./skills/"
+  },
+  "permissions": {
+    "network": true
+  },
+  "configSchema": "./config.schema.json"
+}

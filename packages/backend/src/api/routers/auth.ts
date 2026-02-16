@@ -75,7 +75,7 @@ export const authRouter = router({
     const token = ctx.req.server.jwt.sign(payload, {
       expiresIn: `${COOKIE_OPTIONS.maxAge}s`,
     });
-    ctx.res.setCookie(COOKIE_OPTIONS.cookieName, token, {
+    (ctx.res as any).setCookie(COOKIE_OPTIONS.cookieName, token, {
       httpOnly: COOKIE_OPTIONS.httpOnly,
       secure: COOKIE_OPTIONS.secure,
       sameSite: COOKIE_OPTIONS.sameSite,
@@ -111,7 +111,7 @@ export const authRouter = router({
     const token = ctx.req.server.jwt.sign(payload, {
       expiresIn: `${COOKIE_OPTIONS.maxAge}s`,
     });
-    ctx.res.setCookie(COOKIE_OPTIONS.cookieName, token, {
+    (ctx.res as any).setCookie(COOKIE_OPTIONS.cookieName, token, {
       httpOnly: COOKIE_OPTIONS.httpOnly,
       secure: COOKIE_OPTIONS.secure,
       sameSite: COOKIE_OPTIONS.sameSite,
@@ -126,7 +126,7 @@ export const authRouter = router({
    * Logout — clear the session cookie.
    */
   logout: publicProcedure.mutation(({ ctx }) => {
-    ctx.res.clearCookie(COOKIE_OPTIONS.cookieName, {
+    (ctx.res as any).clearCookie(COOKIE_OPTIONS.cookieName, {
       path: COOKIE_OPTIONS.path,
     });
     return { success: true };

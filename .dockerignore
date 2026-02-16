@@ -1,0 +1,16 @@
+node_modules
+dist
+.git
+data
+logs
+.env
+.env.*
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+coverage
+.DS_Store
+.idea
+.vscode
+packages/tauri/target

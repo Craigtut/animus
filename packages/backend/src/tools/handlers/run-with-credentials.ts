@@ -166,7 +166,7 @@ export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = a
   }
 
   // 3. Build child-only env (strip agent provider keys)
-  const childEnv = { ...process.env, [input.envVar]: value };
+  const childEnv: Record<string, string | undefined> = { ...process.env, [input.envVar]: value };
   for (const key of STRIPPED_ENV_KEYS) {
     delete childEnv[key];
   }

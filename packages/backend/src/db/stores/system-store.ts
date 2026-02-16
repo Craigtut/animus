@@ -125,8 +125,8 @@ export function createContact(db: Database.Database, data: NewContact): Contact 
 }
 
 function rowToContact(row: Record<string, unknown>): Contact {
-  const c = snakeToCamel<Contact & { isPrimary: number }>(row);
-  return { ...c, isPrimary: intToBool(c.isPrimary as unknown as number) };
+  const raw = snakeToCamel<Record<string, unknown>>(row);
+  return { ...raw, isPrimary: intToBool(raw['isPrimary'] as number) } as Contact;
 }
 
 export function getContact(db: Database.Database, id: string): Contact | null {
@@ -224,8 +224,8 @@ export function getContactChannelsByContactId(
     .prepare('SELECT * FROM contact_channels WHERE contact_id = ?')
     .all(contactId) as Array<Record<string, unknown>>;
   return rows.map((row) => {
-    const ch = snakeToCamel<ContactChannel & { isVerified: number }>(row);
-    return { ...ch, isVerified: intToBool(ch.isVerified as unknown as number) };
+    const raw = snakeToCamel<Record<string, unknown>>(row);
+    return { ...raw, isVerified: intToBool(raw['isVerified'] as number) } as ContactChannel;
   });
 }
 

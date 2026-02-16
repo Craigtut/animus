@@ -7,6 +7,7 @@ import {
   updateSystemSettingsInputSchema,
   updatePersonalitySettingsInputSchema,
 } from '@animus/shared';
+import type { SystemSettings, PersonalitySettings } from '@animus/shared';
 import { router, protectedProcedure } from '../trpc.js';
 import * as systemStore from '../../db/stores/system-store.js';
 import * as personaStore from '../../db/stores/persona-store.js';
@@ -21,7 +22,11 @@ export const settingsRouter = router({
   updateSystemSettings: protectedProcedure
     .input(updateSystemSettingsInputSchema)
     .mutation(({ input }) => {
-      systemStore.updateSystemSettings(getSystemDb(), input);
+      const clean: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(input)) {
+        if (v !== undefined) clean[k] = v;
+      }
+      systemStore.updateSystemSettings(getSystemDb(), clean as Partial<SystemSettings>);
       return systemStore.getSystemSettings(getSystemDb());
     }),
 
@@ -32,7 +37,11 @@ export const settingsRouter = router({
   updatePersonalitySettings: protectedProcedure
     .input(updatePersonalitySettingsInputSchema)
     .mutation(({ input }) => {
-      personaStore.updatePersonalitySettings(getPersonaDb(), input);
+      const clean: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(input)) {
+        if (v !== undefined) clean[k] = v;
+      }
+      personaStore.updatePersonalitySettings(getPersonaDb(), clean as Partial<PersonalitySettings>);
       return personaStore.getPersonalitySettings(getPersonaDb());
     }),
 

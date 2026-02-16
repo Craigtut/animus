@@ -15,8 +15,8 @@ import { snakeToCamel, boolToInt, intToBool } from '../utils.js';
 // ============================================================================
 
 function rowToPlugin(row: Record<string, unknown>): PluginRecord {
-  const r = snakeToCamel<PluginRecord & { enabled: number }>(row);
-  return { ...r, enabled: intToBool(r.enabled as unknown as number) };
+  const raw = snakeToCamel<Record<string, unknown>>(row);
+  return { ...raw, enabled: intToBool(raw['enabled'] as number) } as PluginRecord;
 }
 
 // ============================================================================

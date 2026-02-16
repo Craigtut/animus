@@ -269,7 +269,7 @@ function compileTraits(traits: string[]): string {
       }
     }
     if (!grouped[foundCategory]) grouped[foundCategory] = [];
-    grouped[foundCategory].push(trait);
+    grouped[foundCategory]!.push(trait);
   }
 
   // Compile into natural paragraphs

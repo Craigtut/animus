@@ -11,6 +11,7 @@ import {
   Robot,
   Pulse,
   Lightning,
+  ListChecks,
   List,
   X,
 } from '@phosphor-icons/react';
@@ -20,6 +21,7 @@ import { EnergySection } from '../components/mind/EnergySection';
 import { ThoughtsSection } from '../components/mind/ThoughtsSection';
 import { MemoriesSection } from '../components/mind/MemoriesSection';
 import { GoalsSection } from '../components/mind/GoalsSection';
+import { TasksSection } from '../components/mind/TasksSection';
 import { AgentsSection } from '../components/mind/AgentsSection';
 import { HeartbeatsSection } from '../components/mind/HeartbeatsSection';
 
@@ -27,7 +29,7 @@ import { HeartbeatsSection } from '../components/mind/HeartbeatsSection';
 // Section definitions
 // ============================================================================
 
-type MindSection = 'emotions' | 'energy' | 'journal' | 'memories' | 'goals' | 'agents' | 'heartbeats';
+type MindSection = 'emotions' | 'energy' | 'journal' | 'memories' | 'goals' | 'tasks' | 'agents' | 'heartbeats';
 
 interface SidebarItem {
   id: MindSection;
@@ -41,6 +43,7 @@ const sections: SidebarItem[] = [
   { id: 'journal', label: 'Journal', icon: Notebook },
   { id: 'memories', label: 'Memories', icon: Brain },
   { id: 'goals', label: 'Goals', icon: Target },
+  { id: 'tasks', label: 'Tasks', icon: ListChecks },
   { id: 'agents', label: 'Agents', icon: Robot },
   { id: 'heartbeats', label: 'Heartbeats', icon: Pulse },
 ];
@@ -51,6 +54,7 @@ const sectionComponents: Record<MindSection, React.FC> = {
   journal: ThoughtsSection,
   memories: MemoriesSection,
   goals: GoalsSection,
+  tasks: TasksSection,
   agents: AgentsSection,
   heartbeats: HeartbeatsSection,
 };

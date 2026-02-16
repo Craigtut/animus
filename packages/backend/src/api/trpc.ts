@@ -23,7 +23,7 @@ const verifyJwt = createVerifier({ key: env.JWT_SECRET });
 function extractCookieValue(cookieHeader: string | undefined, name: string): string | null {
   if (!cookieHeader) return null;
   const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  return match ? match[1] : null;
+  return match ? match[1] ?? null : null;
 }
 
 // ============================================================================
@@ -44,7 +44,7 @@ export async function createTRPCContext({
   try {
     if (typeof (req as any).jwtVerify === 'function') {
       // Normal HTTP request — use Fastify's JWT decoration
-      const decoded = await (req as any).jwtVerify<JwtPayload>();
+      const decoded = await (req as any).jwtVerify() as JwtPayload;
       userId = decoded.userId;
     } else {
       // WebSocket raw IncomingMessage — manually verify JWT from cookie

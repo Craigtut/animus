@@ -33,7 +33,7 @@ export function OnboardingLayout() {
   const steps = isPersona ? personaSteps : setupSteps;
   const groupLabel = isPersona ? 'Persona' : 'Setup';
   const currentIndex = steps.findIndex((s) => location.pathname === s.path);
-  const currentStepLabel = currentIndex >= 0 ? steps[currentIndex].label : '';
+  const currentStepLabel = currentIndex >= 0 ? steps[currentIndex]!.label : '';
 
   return (
     <div

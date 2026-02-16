@@ -4,6 +4,7 @@ node_modules/
 # Build outputs
 dist/
 build/
+target/
 *.tsbuildinfo
 
 # Environment files
@@ -58,3 +59,11 @@ temp/
 /design-mockups
 /generated-images
 /backup
+
+# Tauri build artifacts
+packages/tauri/binaries/node-*
+packages/tauri/resources/backend/
+packages/tauri/resources/node_modules/
+packages/tauri/resources/package.json
+packages/tauri/resources/package-lock.json
+packages/tauri/gen/

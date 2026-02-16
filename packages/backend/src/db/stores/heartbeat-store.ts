@@ -43,8 +43,8 @@ export function getHeartbeatState(db: Database.Database): HeartbeatState {
        FROM heartbeat_state WHERE id = 1`
     )
     .get() as Record<string, unknown>;
-  const state = snakeToCamel<HeartbeatState & { isRunning: number }>(row);
-  return { ...state, isRunning: intToBool(state.isRunning as unknown as number) };
+  const raw = snakeToCamel<Record<string, unknown>>(row);
+  return { ...raw, isRunning: intToBool(raw['isRunning'] as number) } as HeartbeatState;
 }
 
 export function updateHeartbeatState(

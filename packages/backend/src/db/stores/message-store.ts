@@ -19,8 +19,8 @@ import { snakeToCamel, intToBool } from '../utils.js';
 // ============================================================================
 
 function rowToConversation(row: Record<string, unknown>): Conversation {
-  const c = snakeToCamel<Conversation & { isActive: number }>(row);
-  return { ...c, isActive: intToBool(c.isActive as unknown as number) };
+  const raw = snakeToCamel<Record<string, unknown>>(row);
+  return { ...raw, isActive: intToBool(raw['isActive'] as number) } as Conversation;
 }
 
 export function createConversation(

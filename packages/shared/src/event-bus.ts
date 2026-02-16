@@ -15,6 +15,7 @@ import type {
   TickDecision,
   Goal,
   GoalSeed,
+  Task,
   LongTermMemory,
   StreamType,
   AgentEventType,
@@ -56,6 +57,10 @@ export interface AnimusEventMap {
   'goal:updated': Goal;
   'seed:created': GoalSeed;
   'seed:updated': GoalSeed;
+
+  // Tasks
+  'task:created': Task;
+  'task:updated': Task;
 
   // Memory
   'memory:working_updated': { contactId: string };

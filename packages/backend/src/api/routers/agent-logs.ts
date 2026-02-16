@@ -16,7 +16,7 @@ export const agentLogsRouter = router({
       z.object({
         limit: z.number().int().positive().max(100).default(20),
         offset: z.number().int().nonnegative().default(0),
-        status: z.enum(['active', 'completed', 'failed', 'cancelled']).optional(),
+        status: z.enum(['active', 'completed', 'error', 'cancelled']).optional(),
       }).optional()
     )
     .query(({ input }) => {
@@ -24,7 +24,7 @@ export const agentLogsRouter = router({
       return agentLogStore.listSessions(db, {
         limit: input?.limit ?? 20,
         offset: input?.offset ?? 0,
-        status: input?.status,
+        ...(input?.status !== undefined && { status: input.status }),
       });
     }),
 
@@ -70,7 +70,7 @@ export const agentLogsRouter = router({
     .query(({ input }) => {
       const db = getAgentLogsDb();
       return agentLogStore.getAggregateUsage(db, {
-        since: input?.since,
+        ...(input?.since !== undefined && { since: input.since }),
       });
     }),
 });

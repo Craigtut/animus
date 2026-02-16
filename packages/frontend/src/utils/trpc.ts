@@ -5,15 +5,19 @@
  */
 
 import { createTRPCReact } from '@trpc/react-query';
+import type { CreateTRPCReact } from '@trpc/react-query';
 import { createWSClient, httpBatchLink, splitLink, wsLink } from '@trpc/client';
 import type { AppRouter } from '@animus/backend/src/api';
 
 // Create the tRPC React hooks
-export const trpc = createTRPCReact<AppRouter>();
+export const trpc: CreateTRPCReact<AppRouter, unknown> = createTRPCReact<AppRouter>();
 
 // Determine the API URL based on environment
 const getBaseUrl = () => {
   if (typeof window !== 'undefined') {
+    // Tauri or custom API URL override (e.g. dynamic sidecar port)
+    const override = (window as any).__ANIMUS_API_URL__;
+    if (override) return override;
     // Browser: use relative path (will be proxied in dev, same origin in prod)
     return '';
   }
@@ -23,6 +27,13 @@ const getBaseUrl = () => {
 
 const getWsUrl = () => {
   if (typeof window !== 'undefined') {
+    // Tauri or custom API URL override
+    const override = (window as any).__ANIMUS_API_URL__;
+    if (override) {
+      const url = new URL(override);
+      const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${url.host}/api/trpc`;
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${protocol}//${window.location.host}/api/trpc`;
   }

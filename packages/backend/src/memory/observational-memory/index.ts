@@ -407,10 +407,10 @@ export async function processAllStreams(params: {
   const { deps, thoughts, experiences, messages, contactId, config, timezone } = params;
 
   // Process each stream sequentially
-  await processStream({ deps, stream: 'thoughts', contactId: null, rawItems: thoughts, config, timezone });
-  await processStream({ deps, stream: 'experiences', contactId: null, rawItems: experiences, config, timezone });
+  await processStream({ deps, stream: 'thoughts', contactId: null, rawItems: thoughts, config, ...(timezone !== undefined && { timezone }) });
+  await processStream({ deps, stream: 'experiences', contactId: null, rawItems: experiences, config, ...(timezone !== undefined && { timezone }) });
 
   if (contactId && messages.length > 0) {
-    await processStream({ deps, stream: 'messages', contactId, rawItems: messages, config, timezone });
+    await processStream({ deps, stream: 'messages', contactId, rawItems: messages, config, ...(timezone !== undefined && { timezone }) });
   }
 }

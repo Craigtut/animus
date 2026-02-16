@@ -26,6 +26,7 @@ import type {
   Contact,
   EmotionState,
   EnergyBand,
+  Task,
 } from '@animus/shared';
 
 import { MemoryManager, buildMemoryContext, LocalEmbeddingProvider, VectorStore } from '../memory/index.js';
@@ -34,6 +35,7 @@ import { loadStreamContext, processAllStreams, type StreamContext } from '../mem
 import { OBSERVATIONAL_MEMORY_CONFIG } from '../config/observational-memory.config.js';
 import { SeedManager, GoalManager, buildGoalContext } from '../goals/index.js';
 import type { GoalContext } from '../goals/index.js';
+import { getTaskScheduler, getTaskRunner, getDeferredQueue } from '../tasks/index.js';
 
 import {
   createAgentManager,
@@ -185,6 +187,8 @@ interface GatherResult {
   pluginDecisionDescriptions: string;
   pluginContextSources: string;
   credentialManifest: string;
+  /** Deferred tasks for idle ticks (surfaced for the mind to pick up) */
+  deferredTasks: Task[];
   /** Observational memory stream contexts (observation + raw items per stream) */
   thoughtContext: StreamContext;
   experienceContext: StreamContext;
@@ -376,6 +380,16 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
     }
   }
 
+  // Build deferred task context (for interval ticks)
+  let deferredTasks: Task[] = [];
+  if (trigger.type === 'interval') {
+    try {
+      deferredTasks = getDeferredQueue().getTopTasks(5);
+    } catch (err) {
+      log.warn('Deferred task context failed:', err);
+    }
+  }
+
   // Load all contacts with their channels
   const allContacts = systemStore.listContacts(sysDb).map((c) => ({
     contact: c,
@@ -443,6 +457,7 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
     circadianBaseline,
     wakeUpContext,
     energySystemEnabled: settings.energySystemEnabled,
+    deferredTasks,
     pluginDecisionDescriptions,
     pluginContextSources,
     credentialManifest,
@@ -725,7 +740,7 @@ async function mindQuery(
     existenceLocation: fullPersona.existenceParadigm === 'simulated_life'
       ? fullPersona.location
       : fullPersona.worldDescription,
-    timezone: settings.timezone || undefined,
+    ...(settings.timezone ? { timezone: settings.timezone } : {}),
     energyLevel: gathered.energyLevel,
     energyBand: gathered.energyBand,
     circadianBaseline: gathered.circadianBaseline,
@@ -735,6 +750,7 @@ async function mindQuery(
     ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
     ...(gathered.pluginContextSources ? { pluginContextSources: gathered.pluginContextSources } : {}),
     ...(gathered.credentialManifest ? { credentialManifest: gathered.credentialManifest } : {}),
+    deferredTasks: gathered.deferredTasks,
     thoughtContext: gathered.thoughtContext,
     experienceContext: gathered.experienceContext,
     ...(gathered.messageContext ? { messageContext: gathered.messageContext } : {}),
@@ -1279,10 +1295,13 @@ async function executeOutput(
 
     // 4. Log decisions (DB writes only; agent operations happen outside transaction)
     for (const decision of output.decisions) {
-      // Permission check: agent operations only for primary contacts
-      const agentDecisionTypes = ['spawn_agent', 'update_agent', 'cancel_agent'];
+      // Permission check: restricted operations only for primary contacts
+      const restrictedDecisionTypes = [
+        'spawn_agent', 'update_agent', 'cancel_agent',
+        'propose_goal', 'create_seed', 'schedule_task',
+      ];
       if (
-        agentDecisionTypes.includes(decision.type) &&
+        restrictedDecisionTypes.includes(decision.type) &&
         gathered.contact &&
         gathered.contact.permissionTier !== 'primary'
       ) {
@@ -1389,9 +1408,16 @@ async function executeOutput(
     }
   }
 
+  // 4d. Handle goal/task decisions (outside transaction — async operations)
+  await handleGoalTaskDecisions(output, tickNumber, gathered);
+
   logExecuteEvent('execute_decisions_complete', {
     agentDecisions: output.decisions.filter(d => ['spawn_agent', 'update_agent', 'cancel_agent'].includes(d.type)).length,
     pluginDecisions: output.decisions.filter(d => !builtInDecisionTypeSchema.safeParse(d.type).success).length,
+    goalTaskDecisions: output.decisions.filter(d => [
+      'create_seed', 'propose_goal', 'update_goal', 'create_plan', 'revise_plan',
+      'schedule_task', 'start_task', 'complete_task', 'cancel_task', 'skip_task',
+    ].includes(d.type)).length,
     totalDecisions: output.decisions.length,
     decisionTypes: output.decisions.map(d => d.type),
   });
@@ -1418,8 +1444,8 @@ async function executeOutput(
               content: candidate.content,
               memoryType: candidate.type,
               importance: candidate.importance,
-              contactId: candidate.contactId,
-              keywords: candidate.keywords,
+              ...(candidate.contactId !== undefined && { contactId: candidate.contactId }),
+              ...(candidate.keywords !== undefined && { keywords: candidate.keywords }),
             })
           ));
         }
@@ -1429,12 +1455,29 @@ async function executeOutput(
     })();
 
     const seedPromise = (async () => {
-      if (seedManager && output.thought?.content && output.thought.importance >= 0.3) {
+      if (!seedManager) return;
+
+      // Seed resonance check
+      if (output.thought?.content && output.thought.importance >= 0.3) {
         try {
           await seedManager.checkSeedResonance([output.thought]);
         } catch (err) {
           log.warn('Seed resonance check failed:', err);
         }
+      }
+
+      // Apply time-based decay to all active seeds
+      try {
+        seedManager.applyDecay();
+      } catch (err) {
+        log.warn('Seed decay failed:', err);
+      }
+
+      // Check for graduation
+      try {
+        seedManager.checkGraduation();
+      } catch (err) {
+        log.warn('Seed graduation check failed:', err);
       }
     })();
 
@@ -1468,7 +1511,7 @@ async function executeOutput(
         messages: gathered.messageContext?.allFilteredItems ?? [],
         contactId: gathered.contact?.id ?? null,
         config: OBSERVATIONAL_MEMORY_CONFIG,
-        timezone: settings.timezone || undefined,
+        ...(settings.timezone ? { timezone: settings.timezone } : {}),
       }).catch(err => {
         log.warn('Observation processing failed (non-fatal):', err);
       });
@@ -1484,7 +1527,231 @@ async function executeOutput(
   agentLogStore.cleanupOldSessions(getAgentLogsDb(), settings.agentLogRetentionDays);
   taskStore.cleanupOldTaskRuns(hbDb, settings.taskRunRetentionDays);
 
+  // 9b. Periodic deferred task staleness processing (~every 50 ticks)
+  if (tickNumber % 50 === 0) {
+    try {
+      const { boosted, cancelled } = getDeferredQueue().processStaleness();
+      if (boosted > 0 || cancelled > 0) {
+        log.info(`Deferred task staleness: boosted=${boosted}, cancelled=${cancelled}`);
+      }
+    } catch (err) {
+      log.warn('Deferred task staleness processing failed:', err);
+    }
+  }
+
   logExecuteEvent('execute_complete', { totalDurationMs: Date.now() - executeStartTime });
+}
+
+// ============================================================================
+// Goal/Task Decision Handlers
+// ============================================================================
+
+/**
+ * Handle goal and task decisions from the mind's output.
+ * Runs outside the DB transaction because some operations are async.
+ * Failures are logged as 'failed' outcomes in tick_decisions.
+ */
+async function handleGoalTaskDecisions(
+  output: MindOutput,
+  tickNumber: number,
+  gathered: GatherResult,
+): Promise<void> {
+  const hbDb = getHeartbeatDb();
+  const eventBus = getEventBus();
+
+  const goalTaskTypes = new Set([
+    'create_seed', 'propose_goal', 'update_goal', 'create_plan', 'revise_plan',
+    'schedule_task', 'start_task', 'complete_task', 'cancel_task', 'skip_task',
+  ]);
+
+  for (const decision of output.decisions) {
+    if (!goalTaskTypes.has(decision.type)) continue;
+
+    const params = decision.parameters as Record<string, unknown>;
+    try {
+      switch (decision.type) {
+        case 'create_seed': {
+          if (!seedManager) break;
+          await seedManager.createSeed({
+            content: String(params['content'] ?? ''),
+            ...(params['motivation'] ? { motivation: String(params['motivation']) } : {}),
+            ...(params['linkedEmotion'] ? { linkedEmotion: params['linkedEmotion'] as any } : {}),
+            source: (params['source'] as any) ?? 'internal',
+          });
+          break;
+        }
+
+        case 'propose_goal': {
+          if (!goalManager) break;
+          goalManager.createGoal({
+            title: String(params['title'] ?? decision.description),
+            ...(params['description'] ? { description: String(params['description']) } : {}),
+            ...(params['motivation'] ? { motivation: String(params['motivation']) } : {}),
+            origin: (params['origin'] as any) ?? 'ai_internal',
+            ...(params['linkedEmotion'] ? { linkedEmotion: params['linkedEmotion'] as any } : {}),
+            status: 'proposed',
+            ...(typeof params['basePriority'] === 'number' ? { basePriority: params['basePriority'] } : {}),
+            ...(params['completionCriteria'] ? { completionCriteria: String(params['completionCriteria']) } : {}),
+          });
+          break;
+        }
+
+        case 'update_goal': {
+          if (!goalManager) break;
+          const goalId = String(params['goalId'] ?? '');
+          const newStatus = String(params['status'] ?? '');
+
+          switch (newStatus) {
+            case 'active':
+              goalManager.activateGoal(goalId);
+              break;
+            case 'paused':
+              goalManager.pauseGoal(goalId);
+              taskStore.pauseTasksByGoalId(hbDb, goalId);
+              break;
+            case 'completed':
+              goalManager.completeGoal(goalId);
+              taskStore.cancelTasksByGoalId(hbDb, goalId);
+              break;
+            case 'abandoned':
+              goalManager.abandonGoal(goalId, params['reason'] ? String(params['reason']) : undefined);
+              taskStore.cancelTasksByGoalId(hbDb, goalId);
+              break;
+            case 'resumed':
+              goalManager.resumeGoal(goalId);
+              break;
+            default:
+              log.warn(`Unknown goal status: ${newStatus}`);
+          }
+          break;
+        }
+
+        case 'create_plan': {
+          if (!goalManager) break;
+          const goalId = String(params['goalId'] ?? '');
+          goalManager.createPlan(goalId, {
+            strategy: String(params['strategy'] ?? ''),
+            milestones: Array.isArray(params['milestones']) ? params['milestones'] as any : undefined,
+            createdBy: 'mind',
+          });
+          break;
+        }
+
+        case 'revise_plan': {
+          if (!goalManager) break;
+          const goalId = String(params['goalId'] ?? '');
+          goalManager.createPlan(goalId, {
+            strategy: String(params['strategy'] ?? ''),
+            milestones: Array.isArray(params['milestones']) ? params['milestones'] as any : undefined,
+            createdBy: 'mind',
+          });
+          break;
+        }
+
+        case 'schedule_task': {
+          const scheduleType = (params['scheduleType'] as any) ?? 'deferred';
+          const task = taskStore.createTask(hbDb, {
+            title: String(params['title'] ?? decision.description),
+            ...(params['description'] ? { description: String(params['description']) } : {}),
+            ...(params['instructions'] ? { instructions: String(params['instructions']) } : {}),
+            scheduleType,
+            ...(params['cronExpression'] ? { cronExpression: String(params['cronExpression']) } : {}),
+            ...(params['scheduledAt'] ? { scheduledAt: String(params['scheduledAt']) } : {}),
+            ...(params['nextRunAt'] ? { nextRunAt: String(params['nextRunAt']) } : {}),
+            ...(params['goalId'] ? { goalId: String(params['goalId']) } : {}),
+            ...(params['planId'] ? { planId: String(params['planId']) } : {}),
+            ...(typeof params['priority'] === 'number' ? { priority: params['priority'] } : {}),
+            createdBy: 'mind',
+            ...(params['contactId'] ? { contactId: String(params['contactId']) } : {}),
+            status: 'scheduled',
+          });
+          (eventBus as import('events').EventEmitter).emit('task:created', task);
+
+          // Register with scheduler if it's a timed task
+          if (scheduleType !== 'deferred') {
+            try {
+              getTaskScheduler().registerTask(task);
+            } catch (err) {
+              log.warn(`Failed to register task ${task.id} with scheduler:`, err);
+            }
+          }
+          break;
+        }
+
+        case 'start_task': {
+          const taskId = String(params['taskId'] ?? '');
+          taskStore.updateTask(hbDb, taskId, {
+            status: 'in_progress',
+            startedAt: now(),
+          });
+          const updated = taskStore.getTask(hbDb, taskId);
+          if (updated) (eventBus as import('events').EventEmitter).emit('task:updated', updated);
+          break;
+        }
+
+        case 'complete_task': {
+          const taskId = String(params['taskId'] ?? '');
+          const result = params['result'] ? String(params['result']) : undefined;
+          getTaskRunner().completeTask(taskId, result);
+          const updated = taskStore.getTask(hbDb, taskId);
+          if (updated) (eventBus as import('events').EventEmitter).emit('task:updated', updated);
+          break;
+        }
+
+        case 'cancel_task': {
+          const taskId = String(params['taskId'] ?? '');
+          getTaskRunner().cancelTask(taskId);
+          try {
+            getTaskScheduler().unregisterTask(taskId);
+          } catch {
+            // Scheduler may not be running
+          }
+          const updated = taskStore.getTask(hbDb, taskId);
+          if (updated) (eventBus as import('events').EventEmitter).emit('task:updated', updated);
+          break;
+        }
+
+        case 'skip_task': {
+          const taskId = String(params['taskId'] ?? '');
+          const task = taskStore.getTask(hbDb, taskId);
+          if (!task) break;
+
+          if (task.scheduleType === 'recurring' && task.cronExpression) {
+            // Advance to next run time
+            const { computeNextRunAt } = await import('../tasks/task-scheduler.js');
+            const nextRunAt = computeNextRunAt(task.cronExpression);
+            if (nextRunAt) {
+              taskStore.updateTask(hbDb, taskId, { nextRunAt });
+            }
+          } else {
+            // One-shot or deferred: mark as completed with skip note
+            taskStore.updateTask(hbDb, taskId, {
+              status: 'completed',
+              result: 'Skipped by mind decision',
+              completedAt: now(),
+            });
+          }
+          const updated = taskStore.getTask(hbDb, taskId);
+          if (updated) (eventBus as import('events').EventEmitter).emit('task:updated', updated);
+          break;
+        }
+
+        default:
+          continue;
+      }
+    } catch (err) {
+      log.error(`Failed to execute ${decision.type} decision:`, err);
+      // Log failure to tick_decisions
+      heartbeatStore.insertTickDecision(hbDb, {
+        tickNumber,
+        type: decision.type,
+        description: decision.description,
+        parameters: decision.parameters,
+        outcome: 'failed',
+        outcomeDetail: String(err),
+      });
+    }
+  }
 }
 
 // ============================================================================
@@ -1680,12 +1947,12 @@ function buildPersonaConfig(
 ): PersonaConfig {
   return {
     name: persona.name || 'Animus',
-    gender: persona.gender ?? undefined,
-    age: persona.age ?? undefined,
-    physicalDescription: persona.physicalDescription ?? undefined,
+    ...(persona.gender != null && { gender: persona.gender }),
+    ...(persona.age != null && { age: persona.age }),
+    ...(persona.physicalDescription != null && { physicalDescription: persona.physicalDescription }),
     existenceParadigm: persona.existenceParadigm || 'digital_consciousness',
-    location: persona.location ?? undefined,
-    worldDescription: persona.worldDescription ?? undefined,
+    ...(persona.location != null && { location: persona.location }),
+    ...(persona.worldDescription != null && { worldDescription: persona.worldDescription }),
     dimensions: {
       extroversion: persona.personalityDimensions.extroversion ?? 0.5,
       trust: persona.personalityDimensions.trust ?? 0.5,
@@ -1700,8 +1967,8 @@ function buildPersonaConfig(
     },
     traits: persona.traits || [],
     values: persona.values || [],
-    background: persona.background ?? undefined,
-    personalityNotes: persona.personalityNotes ?? persona.communicationStyle ?? undefined,
+    ...(persona.background != null && { background: persona.background }),
+    ...((persona.personalityNotes ?? persona.communicationStyle) != null && { personalityNotes: (persona.personalityNotes ?? persona.communicationStyle)! }),
   };
 }
 
@@ -1799,6 +2066,23 @@ export async function initializeHeartbeat(): Promise<void> {
     });
   }
 
+  // Initialize task scheduler
+  try {
+    const taskScheduler = getTaskScheduler();
+    taskScheduler.setTaskDueHandler((task) => {
+      handleScheduledTask({
+        taskId: task.id,
+        taskTitle: task.title,
+        taskType: task.scheduleType,
+        taskInstructions: task.instructions || '',
+      });
+    });
+    taskScheduler.start();
+    log.info('Task scheduler started');
+  } catch (err) {
+    log.warn('Task scheduler not available:', err);
+  }
+
   // Listen for plugin changes to invalidate the session
   getEventBus().on('plugin:changed', () => {
     sessionInvalidated = true;
@@ -1863,6 +2147,13 @@ export async function stopHeartbeat(): Promise<void> {
     mindSession = null;
     mindSessionId = null;
     mindLogSessionId = null;
+  }
+
+  // Stop task scheduler
+  try {
+    getTaskScheduler().stop();
+  } catch (err) {
+    log.warn('Failed to stop task scheduler:', err);
   }
 
   // Clean up orchestrator

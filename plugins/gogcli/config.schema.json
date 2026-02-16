@@ -1,0 +1,19 @@
+{
+  "fields": [
+    {
+      "key": "GOG_KEYRING_PASSWORD",
+      "label": "Keyring Password",
+      "type": "secret",
+      "required": true,
+      "helpText": "Password for gogcli's encrypted file keyring. Generate a strong random password. This allows the agent to access stored Google tokens without OS keychain prompts."
+    },
+    {
+      "key": "GOG_ACCOUNT",
+      "label": "Default Google Account",
+      "type": "text",
+      "required": false,
+      "placeholder": "you@gmail.com",
+      "helpText": "Default Google account email for all gog commands. Can be an email or alias."
+    }
+  ]
+}

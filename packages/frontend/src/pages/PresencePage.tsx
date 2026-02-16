@@ -60,7 +60,7 @@ function ThoughtStream() {
     >
       <AnimatePresence>
         {displayThoughts.map((thought, i) => {
-          const layer = layers[i] ?? layers[layers.length - 1];
+          const layer = (layers[i] ?? layers[layers.length - 1])!;
           return (
             <Typography.Body
               key={thought.id}

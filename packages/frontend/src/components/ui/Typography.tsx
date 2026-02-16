@@ -69,11 +69,11 @@ function createVariant(variant: Variant) {
   const Component = forwardRef<HTMLElement, TypographyOwnProps & Record<string, unknown>>(
     ({ as, serif, italic, color, children, ...rest }, ref) => {
       const theme = useTheme();
-      const Tag = as ?? v.defaultAs;
-      const resolvedColor = resolveColor(color, theme);
+      const Tag = (as ?? v.defaultAs) as string;
+      const resolvedColor = resolveColor(color as string | undefined, theme);
 
       return createElement(
-        Tag,
+        Tag as any,
         {
           ref,
           css: {
@@ -87,7 +87,7 @@ function createVariant(variant: Variant) {
           },
           ...rest,
         },
-        children,
+        children as ReactNode,
       );
     },
   );

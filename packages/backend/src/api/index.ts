@@ -21,6 +21,7 @@ import { dataRouter } from './routers/data.js';
 import { providerRouter } from './routers/provider.js';
 import { memoryRouter } from './routers/memory.js';
 import { goalsRouter } from './routers/goals.js';
+import { tasksRouter } from './routers/tasks.js';
 import { agentLogsRouter } from './routers/agent-logs.js';
 import { codexAuthRouter } from './routers/codex-auth.js';
 import { pluginsRouter } from './routers/plugins.js';
@@ -48,6 +49,7 @@ export const appRouter = router({
   codexAuth: codexAuthRouter,
   memory: memoryRouter,
   goals: goalsRouter,
+  tasks: tasksRouter,
   agentLogs: agentLogsRouter,
   plugins: pluginsRouter,
   saves: savesRouter,

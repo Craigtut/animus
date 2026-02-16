@@ -116,11 +116,11 @@ export function getAggregateUsage(
     .get(...params) as Record<string, number>;
 
   return {
-    totalInputTokens: row.total_input_tokens,
-    totalOutputTokens: row.total_output_tokens,
-    totalTokens: row.total_tokens,
-    totalCostUsd: row.total_cost_usd,
-    sessionCount: row.session_count,
+    totalInputTokens: row['total_input_tokens'] ?? 0,
+    totalOutputTokens: row['total_output_tokens'] ?? 0,
+    totalTokens: row['total_tokens'] ?? 0,
+    totalCostUsd: row['total_cost_usd'] ?? 0,
+    sessionCount: row['session_count'] ?? 0,
   };
 }
 
@@ -304,7 +304,7 @@ export function getLastColdSystemPrompt(
   if (!row) return null;
   const e = snakeToCamel<AgentEvent>(row);
   const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
-  return (data as Record<string, unknown>).systemPrompt as string | null;
+  return (data as Record<string, unknown>)['systemPrompt'] as string | null;
 }
 
 // ============================================================================

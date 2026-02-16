@@ -124,8 +124,8 @@ function gatherStats(
     try {
       const db = new Database(path.join(stageDir, file), { readonly: true });
       try {
-        const row = db.prepare(sql).get() as Record<string, number> | undefined;
-        if (row) (stats as Record<string, number>)[key] = row.tick_number ?? row.cnt ?? 0;
+        const row = db.prepare(sql).get() as Record<string, number | string> | undefined;
+        if (row) (stats as Record<string, string | number>)[key] = (row['tick_number'] ?? row['cnt'] ?? 0) as number;
       } finally {
         db.close();
       }

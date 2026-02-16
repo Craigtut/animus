@@ -50,14 +50,14 @@ export class DeferredQueue {
     const db = getHeartbeatDb();
     return taskStore.createTask(db, {
       title: data.title,
-      description: data.description,
-      instructions: data.instructions,
+      ...(data.description !== undefined && { description: data.description }),
+      ...(data.instructions !== undefined && { instructions: data.instructions }),
       scheduleType: 'deferred',
       priority: data.priority ?? 0.5,
       status: 'scheduled',
-      goalId: data.goalId,
-      planId: data.planId,
-      contactId: data.contactId,
+      ...(data.goalId !== undefined && { goalId: data.goalId }),
+      ...(data.planId !== undefined && { planId: data.planId }),
+      ...(data.contactId !== undefined && { contactId: data.contactId }),
       createdBy: data.createdBy ?? 'mind',
     });
   }
