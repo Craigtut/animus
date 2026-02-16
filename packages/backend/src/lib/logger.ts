@@ -14,8 +14,10 @@
  *   [14:23:06] ERROR [Heartbeat] Mind query failed: Error: timeout
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import pc from 'picocolors';
-import { env } from '../utils/env.js';
+import { env, PROJECT_ROOT } from '../utils/env.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -58,6 +60,75 @@ function getMinLevel(): number {
 }
 
 const MIN_LEVEL = getMinLevel();
+
+// ---------------------------------------------------------------------------
+// File Logging — always writes at debug level, plain text (no ANSI codes)
+// ---------------------------------------------------------------------------
+
+const LOG_DIR = path.join(PROJECT_ROOT, 'logs');
+/** Absolute path to the log file. Exported for external reference (e.g. MCP tools). */
+export const LOG_FILE_PATH = path.join(LOG_DIR, 'animus.log');
+
+const MAX_LOG_SIZE = 5 * 1024 * 1024; // 5MB
+let logFileReady = false;
+let writeCounter = 0;
+
+const PLAIN_LEVEL_LABELS: Record<LogLevel, string> = {
+  debug: 'DEBUG',
+  info: 'LOG  ',
+  warn: 'WARN ',
+  error: 'ERROR',
+};
+
+function ensureLogDir(): boolean {
+  if (logFileReady) return true;
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    // Rotate on startup: shift .1→.2, current→.1, start fresh.
+    // Keeps two previous sessions max (animus.log, .1, .2).
+    try {
+      const exists = fs.statSync(LOG_FILE_PATH);
+      if (exists.size > 0) {
+        try { fs.unlinkSync(LOG_FILE_PATH + '.2'); } catch { /* ok */ }
+        try { fs.renameSync(LOG_FILE_PATH + '.1', LOG_FILE_PATH + '.2'); } catch { /* ok */ }
+        fs.renameSync(LOG_FILE_PATH, LOG_FILE_PATH + '.1');
+      }
+    } catch { /* no existing log file, nothing to rotate */ }
+    logFileReady = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function rotateIfNeeded(): void {
+  try {
+    const stats = fs.statSync(LOG_FILE_PATH);
+    if (stats.size > MAX_LOG_SIZE) {
+      try { fs.unlinkSync(LOG_FILE_PATH + '.2'); } catch { /* ok */ }
+      try { fs.renameSync(LOG_FILE_PATH + '.1', LOG_FILE_PATH + '.2'); } catch { /* ok */ }
+      fs.renameSync(LOG_FILE_PATH, LOG_FILE_PATH + '.1');
+    }
+  } catch { /* file doesn't exist yet */ }
+}
+
+function writeToLogFile(level: LogLevel, name: string, args: unknown[]): void {
+  if (!ensureLogDir()) return;
+  try {
+    if (writeCounter++ % 100 === 0) rotateIfNeeded();
+
+    const ts = new Date().toISOString();
+    const msg = args
+      .map((a) =>
+        typeof a === 'string' ? a
+        : a instanceof Error ? `${a.message}${a.stack ? '\n' + a.stack : ''}`
+        : JSON.stringify(a)
+      )
+      .join(' ');
+
+    fs.appendFileSync(LOG_FILE_PATH, `[${ts}] ${PLAIN_LEVEL_LABELS[level]} [${name}] ${msg}\n`);
+  } catch { /* never crash on log write failure */ }
+}
 
 // ---------------------------------------------------------------------------
 // Category filtering (DB-persisted, cached in memory)
@@ -106,6 +177,10 @@ export function createLogger(name: string, category?: string): Logger {
   const cat = category ?? name.toLowerCase();
 
   function log(level: LogLevel, args: unknown[]): void {
+    // Always write to file (captures everything regardless of level/category)
+    writeToLogFile(level, name, args);
+
+    // Console output respects level and category filters
     if (LEVEL_PRIORITY[level] < MIN_LEVEL) return;
     if (!isCategoryEnabled(cat)) return;
 

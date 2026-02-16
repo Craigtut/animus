@@ -139,17 +139,23 @@ and a long message.`;
 
 const OUTPUT_SCHEMA_REF = `── OUTPUT FORMAT ──
 
-Each tick, you produce a single JSON object with these fields, in this order:
+CRITICAL: Your entire response MUST be a single valid JSON object. Output
+ONLY the JSON — no text before it, no text after it, no markdown code
+fences, no commentary. The very first character of your response must be {
+and the very last character must be }.
+
+The JSON object has these fields, in this order:
 
 {
   "thought": { "content": "...", "importance": 0.0 },
-  "reply": null,
+  "reply": { "content": "...", "contactId": "...", "channel": "...", "replyToMessageId": "..." } | null,
   "experience": { "content": "...", "importance": 0.0 },
-  "emotionDeltas": [],
-  "decisions": [],
-  "workingMemoryUpdate": null,
-  "coreSelfUpdate": null,
-  "memoryCandidate": []
+  "emotionDeltas": [{ "emotion": "...", "delta": 0.0, "reasoning": "..." }],
+  "energyDelta": { "delta": 0.0, "reasoning": "..." },
+  "decisions": [{ "type": "...", "description": "...", "parameters": {} }],
+  "workingMemoryUpdate": "..." | null,
+  "coreSelfUpdate": "..." | null,
+  "memoryCandidate": [{ "content": "...", "type": "fact|experience|procedure|outcome", "importance": 0.0 }]
 }
 
 The order matters. You think before you speak. You speak before you reflect.
@@ -269,7 +275,11 @@ coreSelfUpdate — string | null
 
 memoryCandidate — Array of { content, memoryType, importance, contactId?, keywords? }
   Knowledge worth preserving in long-term memory. memoryType is one of:
-  "fact", "experience", "procedure", "outcome". Be selective.`;
+  "fact", "experience", "procedure", "outcome". Be selective.
+
+
+REMINDER: Output ONLY the JSON object. No prose, no explanations, no
+markdown formatting. Start with { and end with }.`;
 
 const EMOTION_GUIDANCE = `── YOUR EMOTIONS ──
 
@@ -459,7 +469,13 @@ const SESSION_AWARENESS = `── SESSION AWARENESS ──
 
 Your mind persists across ticks within a session. When your session is warm,
 continue naturally — don't reintroduce yourself. When your session is cold,
-take a moment to orient using the context provided.`;
+take a moment to orient using the context provided.
+
+Your server writes detailed logs to logs/animus.log. These capture your
+heartbeat pipeline, agent sessions, channel activity, and all system
+operations at debug level — a complete record of your runtime behavior.
+If something seems off or you want to understand what happened, these
+logs have the full picture.`;
 
 // ============================================================================
 // Channel Reply Guidance (injected per-tick based on active channel)

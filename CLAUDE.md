@@ -198,6 +198,18 @@ log.debug('Verbose details');
 - Existing categories: `server`, `heartbeat`, `agents`, `channels`, `auth`, `database`
 - Categories are toggled via `settings.updateLogCategories` tRPC endpoint, stored in `system_settings.log_categories`
 - Level filtering respects `LOG_LEVEL` env var (`debug < info < warn < error`)
+- **Log file**: All log output is also written to `logs/animus.log` at debug level (captures everything regardless of console `LOG_LEVEL` or category filters). The file rotates at 5MB (`animus.log.1`). The `logs/` directory is gitignored.
+
+```bash
+# Tail logs in real-time during development
+tail -f logs/animus.log
+
+# Search for errors
+grep "ERROR" logs/animus.log
+
+# Claude Code can read logs directly via the Read tool:
+# logs/animus.log
+```
 
 ### API Design
 

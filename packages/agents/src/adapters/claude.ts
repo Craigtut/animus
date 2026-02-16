@@ -1357,6 +1357,7 @@ class ClaudeSession extends BaseSession {
       case 'error_max_budget_usd':
         return 'max_tokens';
       case 'error_during_execution':
+      case 'error_max_structured_output_retries':
         return 'error';
       default:
         return 'complete';

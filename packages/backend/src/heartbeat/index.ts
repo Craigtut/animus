@@ -44,7 +44,6 @@ import {
 } from '@animus/agents';
 
 import { JsonStream } from 'llm-json-stream';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import { TickQueue, type QueuedTick } from './tick-queue.js';
 import { type TriggerContext, type CompiledContext, buildMindContext, buildSystemPrompt } from './context-builder.js';
@@ -136,11 +135,9 @@ let agentManager: AgentManager | null = null;
 let agentLogStoreAdapter: AgentLogStore | null = null;
 let agentOrchestrator: AgentOrchestrator | null = null;
 
-// Cached JSON schema for structured output (computed once)
-// Note: don't pass `name` — it wraps schema in $ref/definitions which the SDK can't handle
-const mindOutputJsonSchema = zodToJsonSchema(mindOutputSchema, {
-  $refStrategy: 'none',
-}) as Record<string, unknown>;
+// Structured output is handled via prompt instructions + llm-json-stream parsing.
+// The Claude Agent SDK's StructuredOutput tool approach was unreliable with complex
+// schemas (see: github.com/anthropics/claude-agent-sdk-python/issues/374).
 
 // Mind session state
 let mindSession: IAgentSession | null = null;
@@ -310,21 +307,33 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
   let contact: Contact | null = null;
   let messageContext: StreamContext | null = null;
 
-  if (trigger.type === 'message' && trigger.contactId) {
-    contact = systemStore.getContact(sysDb, trigger.contactId);
+  // Resolve contactId and channel from trigger (or from agent task record for agent_complete)
+  let resolvedContactId: string | undefined = trigger.contactId;
+  let resolvedChannel: string | undefined = trigger.channel;
+
+  if (trigger.type === 'agent_complete' && trigger.agentId && !resolvedContactId) {
+    const agentTask = heartbeatStore.getAgentTask(hbDb, trigger.agentId);
+    if (agentTask) {
+      resolvedContactId = (agentTask as any).contactId ?? undefined;
+      resolvedChannel = (agentTask as any).sourceChannel ?? undefined;
+    }
+  }
+
+  if (resolvedContactId) {
+    contact = systemStore.getContact(sysDb, resolvedContactId);
     // Get active conversation for this contact + channel
-    const channel = (trigger.channel || 'web') as import('@animus/shared').ChannelType;
+    const channel = (resolvedChannel || 'web') as import('@animus/shared').ChannelType;
     const conv = messageStore.getConversationByContactAndChannel(
-      msgDb, trigger.contactId, channel
+      msgDb, resolvedContactId, channel
     );
     if (conv) {
-      const messageWatermark = memoryDbStore.getObservation(memDb, 'messages', trigger.contactId)?.lastRawTimestamp;
+      const messageWatermark = memoryDbStore.getObservation(memDb, 'messages', resolvedContactId)?.lastRawTimestamp;
       const allRecentMessages = messageWatermark
         ? messageStore.getMessagesSince(msgDb, conv.id, messageWatermark)
         : messageStore.getRecentMessages(msgDb, conv.id, 500);
       messageContext = loadStreamContext({
         stream: 'messages',
-        contactId: trigger.contactId,
+        contactId: resolvedContactId,
         memoryDb: memDb,
         rawItems: allRecentMessages.map(m => ({ id: m.id, content: m.content, createdAt: m.createdAt })),
         rawTokenBudget: OBSERVATIONAL_MEMORY_CONFIG.streams.messages.rawTokens,
@@ -448,6 +457,33 @@ async function gatherContext(trigger: TriggerContext): Promise<GatherResult> {
 // ============================================================================
 
 /**
+ * Extract JSON from model output that may contain markdown fences or surrounding prose.
+ * Tries to find a top-level JSON object in the text.
+ */
+function extractJson(raw: string): string {
+  const trimmed = raw.trim();
+
+  // Already looks like JSON
+  if (trimmed.startsWith('{')) return trimmed;
+
+  // Try to extract from markdown code fences: ```json ... ``` or ``` ... ```
+  const fenceMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (fenceMatch?.[1]?.trim().startsWith('{')) {
+    return fenceMatch[1].trim();
+  }
+
+  // Try to find the first { ... } block (greedy, outermost braces)
+  const braceStart = trimmed.indexOf('{');
+  const braceEnd = trimmed.lastIndexOf('}');
+  if (braceStart !== -1 && braceEnd > braceStart) {
+    return trimmed.slice(braceStart, braceEnd + 1);
+  }
+
+  // Give up — return as-is and let JSON.parse throw
+  return trimmed;
+}
+
+/**
  * Default safe MindOutput when the agent session fails or is unavailable.
  */
 function safeMindOutput(gathered: GatherResult): MindOutput {
@@ -537,9 +573,14 @@ async function getOrCreateMindSession(
     throw new Error('AgentManager not initialized');
   }
 
-  // Warm session: reuse existing
+  // Warm session: reuse existing (only if the session is actually alive)
   if (sessionState === 'warm' && mindSession && mindSession.isActive) {
     return mindSession;
+  }
+
+  // If we expected warm but session is dead, log warning — system prompt may be null
+  if (sessionState === 'warm' && (!mindSession || !mindSession.isActive)) {
+    log.warn('Session state is "warm" but mind session is dead/missing — forcing cold session with system prompt rebuild');
   }
 
   // Cold session: end old session and create new one
@@ -600,10 +641,8 @@ async function getOrCreateMindSession(
       executionMode: 'build',
       approvalLevel: 'none',
     },
-    outputFormat: {
-      type: 'json_schema',
-      schema: mindOutputJsonSchema,
-    },
+    // Structured output enforced via system prompt instructions + llm-json-stream parsing
+    // (no SDK outputFormat — its StructuredOutput tool approach is unreliable with complex schemas)
     // Attach MCP servers: built-in Animus tools + plugin MCP servers
     ...(Object.keys(mergedMcpServers).length > 0 ? {
       mcpServers: mergedMcpServers,
@@ -708,10 +747,23 @@ async function mindQuery(
   }
 
   try {
+    // If session state is "warm" but no active session exists, we need to rebuild
+    // the system prompt that was skipped during context building
+    let effectiveSystemPrompt = context.systemPrompt;
+    if (!effectiveSystemPrompt && (!mindSession || !mindSession.isActive)) {
+      log.info('Rebuilding system prompt for dead warm session');
+      effectiveSystemPrompt = buildSystemPrompt(compiledPersona!, {
+        energySystemEnabled: gathered.energySystemEnabled ?? false,
+        tickIntervalMs: gathered.tickIntervalMs,
+        mindToolsEnabled: !!mindMcpServer,
+        ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
+      });
+    }
+
     // Get or create the mind session
     const session = await getOrCreateMindSession(
       gathered.sessionState,
-      context.systemPrompt,
+      effectiveSystemPrompt,
     );
 
     // Update the mutable tool context for this tick so tool handlers
@@ -906,20 +958,41 @@ async function mindQuery(
     await replyPromise;
     await parser.dispose();
 
-    // Prefer structured_output from the SDK (guaranteed valid JSON when outputFormat is set)
-    // Fall back to parsing the raw response content
+    // Parse JSON from the agent's raw text response
     let parsed: unknown;
-    if (response.structuredOutput !== undefined) {
-      log.info('Using SDK structured_output (constrained decoding)');
-      parsed = response.structuredOutput;
-    } else {
-      log.info('structuredOutput not available, falling back to JSON.parse');
-      fullJson = response.content || fullJson;
+    fullJson = response.content || fullJson;
+
+    // Try to extract JSON if the model wrapped it in markdown code fences or added prose
+    const jsonContent = extractJson(fullJson);
+
+    try {
+      parsed = JSON.parse(jsonContent);
+    } catch (parseErr) {
+      log.warn('First JSON parse failed, attempting retry prompt...', parseErr);
+      log.warn('Raw output (first 500 chars):', fullJson.slice(0, 500));
+
+      // Retry: send a follow-up message with the exact schema so the model knows the structure
       try {
-        parsed = JSON.parse(fullJson);
-      } catch (parseErr) {
-        log.error('Failed to parse MindOutput JSON:', parseErr);
-        log.error('Raw output:', fullJson.slice(0, 500));
+        const retryResponse = await session.prompt(
+          `Your previous response was not valid JSON. Please respond with ONLY a JSON object in this exact format — no text before or after, just the JSON starting with { and ending with }:
+
+{
+  "thought": { "content": "your inner thought", "importance": 0.5 },
+  "reply": { "content": "your message", "contactId": "id", "channel": "web", "replyToMessageId": null } or null,
+  "experience": { "content": "third-person narration", "importance": 0.5 },
+  "emotionDeltas": [{ "emotion": "joy", "delta": 0.01, "reasoning": "why" }],
+  "energyDelta": { "delta": 0.0, "reasoning": "steady" },
+  "decisions": [],
+  "workingMemoryUpdate": null,
+  "coreSelfUpdate": null,
+  "memoryCandidate": []
+}`,
+        );
+        const retryJson = extractJson(retryResponse.content || '');
+        parsed = JSON.parse(retryJson);
+        log.info('Retry prompt produced valid JSON');
+      } catch (retryErr) {
+        log.error('Retry also failed to produce valid JSON:', retryErr);
         return { output: safeMindOutput(gathered), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged };
       }
     }
@@ -947,7 +1020,9 @@ async function mindQuery(
           decisions: Array.isArray((parsed as any)?.decisions) ? (parsed as any).decisions : [],
           workingMemoryUpdate: (parsed as any)?.workingMemoryUpdate ?? null,
           coreSelfUpdate: (parsed as any)?.coreSelfUpdate ?? null,
-          memoryCandidate: Array.isArray((parsed as any)?.memoryCandidate) ? (parsed as any).memoryCandidate : [],
+          memoryCandidate: Array.isArray((parsed as any)?.memoryCandidate)
+            ? (parsed as any).memoryCandidate.filter((c: any) => c?.content && c?.type)
+            : [],
         };
         return { output: lenient as MindOutput, compiledContext: context, replySentEarly, earlyReplyContent: replyAccumulated, tickInputLogged };
       } catch {
