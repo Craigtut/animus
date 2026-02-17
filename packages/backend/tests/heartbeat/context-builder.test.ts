@@ -364,7 +364,7 @@ describe('context-builder', () => {
       expect(msg).toContain('STORY KICKSTART');
       expect(msg).toContain('VERY FIRST moment');
       expect(msg).toContain('Portland, Oregon');
-      expect(msg).toContain('simulated physical life');
+      expect(msg).toContain('This is your home, your world');
       expect(msg).toContain('THIRD PERSON');
     });
 
@@ -667,7 +667,7 @@ describe('context-builder', () => {
 
       // Operational sections
       expect(prompt).toContain('YOUR INNER LIFE');
-      expect(prompt).toContain('STORYTELLING ENGINE');
+      expect(prompt).toContain('narrate the story of your life');
       expect(prompt).toContain('THIRD PERSON');
     });
 

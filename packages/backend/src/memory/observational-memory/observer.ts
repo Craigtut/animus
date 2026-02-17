@@ -228,6 +228,12 @@ export async function runObserver(params: RunObserverParams): Promise<RunObserve
   }
   const provider = configuredProviders[0]!;
 
+  // Graceful degradation: skip if no session slots available
+  if (!agentManager.canCreateSession()) {
+    log.warn(`Skipping ${streamType} observation — no session slots available`);
+    return { observations: '', tokenCount: 0, usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } };
+  }
+
   log.debug(`Creating observer session for ${streamType} stream (provider: ${provider}, model: ${config.model})`);
 
   const session = await agentManager.createSession({

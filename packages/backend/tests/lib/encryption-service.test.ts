@@ -6,6 +6,7 @@ vi.mock('../../src/utils/env.js', () => ({
     ANIMUS_ENCRYPTION_KEY: 'test-encryption-key-for-testing',
     NODE_ENV: 'test',
   },
+  PROJECT_ROOT: '/tmp/animus-test',
 }));
 
 describe('EncryptionService', () => {
@@ -78,6 +79,7 @@ describe('EncryptionService (unconfigured)', () => {
         ANIMUS_ENCRYPTION_KEY: '',
         NODE_ENV: 'test',
       },
+      PROJECT_ROOT: '/tmp/animus-test',
     }));
   });
 

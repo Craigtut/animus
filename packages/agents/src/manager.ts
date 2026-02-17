@@ -273,7 +273,15 @@ export class AgentManager {
     const validated = agentSessionConfigSchema.parse(config);
     this.logger.debug('Configuration validated', { provider: validated.provider });
 
-    // 2. Check concurrency limit
+    // 2. Sweep ghost sessions (tracked but no longer active)
+    for (const [id, tracked] of this.trackedSessions) {
+      if (!tracked.session.isActive) {
+        this.trackedSessions.delete(id);
+        this.logger.warn('Removed ghost session from tracker', { sessionId: id });
+      }
+    }
+
+    // 3. Check concurrency limit
     if (
       this.maxConcurrentSessions !== null &&
       this.trackedSessions.size >= this.maxConcurrentSessions
@@ -287,10 +295,10 @@ export class AgentManager {
       });
     }
 
-    // 3. Get adapter
+    // 4. Get adapter
     const adapter = this.getAdapter(validated.provider);
 
-    // 4. Check if configured
+    // 5. Check if configured
     if (!adapter.isConfigured()) {
       throw new AgentError({
         code: 'MISSING_CREDENTIALS',
@@ -301,7 +309,7 @@ export class AgentManager {
       });
     }
 
-    // 5. Create session
+    // 6. Create session
     this.logger.info('Creating session', {
       provider: validated.provider,
       model: validated.model ?? 'default',
@@ -309,10 +317,11 @@ export class AgentManager {
       hasSystemPrompt: !!validated.systemPrompt,
       hasMcpServers: !!validated.mcpServers && Object.keys(validated.mcpServers).length > 0,
       resume: validated.resume ?? null,
+      trackedCount: this.trackedSessions.size,
     });
     const session = await adapter.createSession(validated);
 
-    // 6. Track session with warmth state
+    // 7. Track session with warmth state
     this.trackSession(session, validated);
 
     return session;

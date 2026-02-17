@@ -404,12 +404,14 @@ export class ClaudeAdapter extends BaseAdapter {
     const sdk = await this.loadSDK();
     const session = new ClaudeSession(sdk, config, this.logger);
 
+    const initialId = session.id;  // Capture pending ID before it changes
     this.trackSession(session);
 
-    // Setup cleanup on session end
+    // Setup cleanup on session end — untrack by both IDs to handle ID changes
     session.onEvent(async (event) => {
       if (event.type === 'session_end') {
-        this.untrackSession(session.id);
+        this.untrackSession(session.id);    // native ID
+        this.untrackSession(initialId);     // pending ID
       }
     });
 
@@ -496,7 +498,7 @@ class ClaudeSession extends BaseSession {
    * Get the model name, preferring the resolved model from the SDK init message.
    */
   private getModelName(): string {
-    return this.resolvedModel ?? this.getModelName();
+    return this.resolvedModel ?? this.config.model ?? 'unknown';
   }
 
   /**

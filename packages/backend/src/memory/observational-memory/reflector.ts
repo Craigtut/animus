@@ -215,6 +215,12 @@ export async function runReflector(params: RunReflectorParams): Promise<RunRefle
 
     const userMessage = buildReflectorUserMessage(currentObservations, compressionLevel);
 
+    // Graceful degradation: skip if no session slots available
+    if (!agentManager.canCreateSession()) {
+      log.warn(`Skipping ${streamType} reflection level ${compressionLevel} — no session slots available`);
+      break;
+    }
+
     const session = await agentManager.createSession({
       provider,
       model: config.model,

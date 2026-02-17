@@ -2022,8 +2022,8 @@ export async function initializeHeartbeat(): Promise<void> {
     log.info(`Marked ${orphaned} orphaned agent tasks as failed`);
   }
 
-  // Initialize the AgentManager (3 sub-agents + 1 mind session = 4 max)
-  agentManager = createAgentManager({ maxConcurrentSessions: 4 });
+  // Initialize the AgentManager (1 mind + 3 sub-agents + 2 observer/reflector + 2 buffer = 8 max)
+  agentManager = createAgentManager({ maxConcurrentSessions: 8 });
   const configuredProviders = agentManager.getConfiguredProviders();
   if (configuredProviders.length > 0) {
     log.info(`Agent providers configured: ${configuredProviders.join(', ')}`);
