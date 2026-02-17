@@ -31,7 +31,21 @@ const ORIGIN_LABELS: Record<string, string> = {
 // Goal Card
 // ============================================================================
 
-function GoalCard({ goal }: { goal: any }) {
+interface GoalItem {
+  id: string;
+  title: string;
+  status: string;
+  origin?: string | null;
+  linkedEmotion?: string | null;
+  currentSalience?: number | null;
+  description?: string | null;
+  motivation?: string | null;
+  createdAt: string;
+  lastProgressAt?: string | null;
+  completedAt?: string | null;
+}
+
+function GoalCard({ goal }: { goal: GoalItem }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
 
@@ -147,7 +161,7 @@ function GoalCard({ goal }: { goal: any }) {
                   {/* Milestones */}
                   {plan.milestones && plan.milestones.length > 0 && (
                     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                      {plan.milestones.map((ms: any, i: number) => (
+                      {plan.milestones.map((ms, i) => (
                         <div key={i} css={css`
                           display: flex; align-items: center; gap: ${theme.spacing[2]};
                         `}>
@@ -201,7 +215,15 @@ function GoalCard({ goal }: { goal: any }) {
 // Seed Card
 // ============================================================================
 
-function SeedCard({ seed }: { seed: any }) {
+interface SeedItem {
+  id: string;
+  content: string;
+  strength: number;
+  linkedEmotion?: string | null;
+  reinforcementCount: number;
+}
+
+function SeedCard({ seed }: { seed: SeedItem }) {
   const theme = useTheme();
   const mode = theme.mode;
   const colors = emotionColors[mode];
@@ -306,7 +328,7 @@ export function GoalsSection() {
             Active Goals
           </Typography.BodyAlt>
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-            {activeGoals!.map((goal: any) => (
+            {activeGoals!.map((goal) => (
               <GoalCard key={goal.id} goal={goal} />
             ))}
           </div>
@@ -323,7 +345,7 @@ export function GoalsSection() {
             Awaiting your input
           </Typography.BodyAlt>
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-            {proposedGoals!.map((goal: any) => (
+            {proposedGoals!.map((goal) => (
               <GoalCard key={goal.id} goal={goal} />
             ))}
           </div>
@@ -364,7 +386,7 @@ export function GoalsSection() {
                 css={css`overflow: hidden;`}
               >
                 <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-                  {seeds!.map((seed: any) => (
+                  {seeds!.map((seed) => (
                     <SeedCard key={seed.id} seed={seed} />
                   ))}
                 </div>
@@ -405,7 +427,7 @@ export function GoalsSection() {
             >
               {hasCompleted ? (
                 <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-                  {completedGoals!.map((goal: any) => (
+                  {completedGoals!.map((goal) => (
                     <div key={goal.id} css={css`
                       display: flex; align-items: center; gap: ${theme.spacing[2]};
                       padding: ${theme.spacing[2]} 0;

@@ -35,7 +35,7 @@ function getUtcOffset(tz: string): string {
 function buildTimezoneList(): TimezoneEntry[] {
   try {
     // Intl.supportedValuesOf exists in modern runtimes but is missing from older TS lib types
-    const tzNames = (Intl as any).supportedValuesOf('timeZone') as string[];
+    const tzNames = (Intl as unknown as { supportedValuesOf(key: string): string[] }).supportedValuesOf('timeZone');
     return tzNames.map((tz: string) => ({
       tz,
       offset: getUtcOffset(tz),

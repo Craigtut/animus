@@ -134,10 +134,29 @@ function humanizeCron(cron: string): string {
 // Edit Task Modal
 // ============================================================================
 
+interface TaskItem {
+  id: string;
+  title: string;
+  description?: string | null;
+  instructions?: string | null;
+  status: string;
+  scheduleType: string;
+  priority: number;
+  cronExpression?: string | null;
+  scheduledAt?: string | null;
+  nextRunAt?: string | null;
+  goalId?: string | null;
+  lastError?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface EditTaskModalProps {
   open: boolean;
   onClose: () => void;
-  task: any;
+  task: TaskItem;
 }
 
 function EditTaskModal({ open, onClose, task }: EditTaskModalProps) {
@@ -192,7 +211,7 @@ function EditTaskModal({ open, onClose, task }: EditTaskModalProps) {
       return;
     }
 
-    updateMutation.mutate(data as any);
+    updateMutation.mutate(data as Parameters<typeof updateMutation.mutate>[0]);
   };
 
   return (
@@ -323,7 +342,7 @@ function EditTaskModal({ open, onClose, task }: EditTaskModalProps) {
 // Task Card
 // ============================================================================
 
-function TaskCard({ task }: { task: any }) {
+function TaskCard({ task }: { task: TaskItem }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -528,7 +547,7 @@ function TaskCard({ task }: { task: any }) {
                       Recent runs ({taskRuns.length})
                     </Typography.Caption>
                     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
-                      {taskRuns.slice(0, 5).map((run: any) => {
+                      {taskRuns.slice(0, 5).map((run) => {
                         const RunIcon = STATUS_ICON[run.status] ?? Clock;
                         return (
                           <div key={run.id} css={css`
@@ -654,7 +673,7 @@ function TaskCard({ task }: { task: any }) {
 // History Task Row (compact)
 // ============================================================================
 
-function HistoryTaskRow({ task }: { task: any }) {
+function HistoryTaskRow({ task }: { task: TaskItem }) {
   const theme = useTheme();
   const isCompleted = task.status === 'completed';
   const isFailed = task.status === 'failed';
@@ -722,7 +741,7 @@ export function TasksSection() {
 
   // Filter out deferred tasks from the scheduled list (they show in their own section)
   const nonDeferredScheduled = useMemo(() =>
-    scheduledTasks?.filter((t: any) => t.scheduleType !== 'deferred') ?? [],
+    scheduledTasks?.filter((t) => t.scheduleType !== 'deferred') ?? [],
     [scheduledTasks],
   );
 
@@ -782,7 +801,7 @@ export function TasksSection() {
             Active
           </Typography.BodyAlt>
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-            {activeTasks!.map((task: any) => (
+            {activeTasks!.map((task) => (
               <TaskCard key={task.id} task={task} />
             ))}
           </div>
@@ -803,7 +822,7 @@ export function TasksSection() {
             Scheduled
           </Typography.BodyAlt>
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-            {nonDeferredScheduled.map((task: any) => (
+            {nonDeferredScheduled.map((task) => (
               <TaskCard key={task.id} task={task} />
             ))}
           </div>
@@ -844,7 +863,7 @@ export function TasksSection() {
                 css={css`overflow: hidden;`}
               >
                 <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-                  {deferredTasks!.map((task: any) => (
+                  {deferredTasks!.map((task) => (
                     <TaskCard key={task.id} task={task} />
                   ))}
                 </div>
@@ -886,12 +905,12 @@ export function TasksSection() {
               {hasHistory ? (
                 <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
                   {[...(completedTasks ?? []), ...(failedTasks ?? [])]
-                    .sort((a: any, b: any) => {
+                    .sort((a, b) => {
                       const aTime = a.completedAt ?? a.updatedAt;
                       const bTime = b.completedAt ?? b.updatedAt;
                       return new Date(bTime).getTime() - new Date(aTime).getTime();
                     })
-                    .map((task: any) => (
+                    .map((task) => (
                       <HistoryTaskRow key={task.id} task={task} />
                     ))
                   }

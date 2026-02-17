@@ -47,12 +47,12 @@ export function ContactDetail({ contactId, onBack }: ContactDetailProps) {
     );
   }
 
-  const channelList = (channels ?? []).map((ch: any) => ({
-    id: ch.id as string,
-    channel: ch.channel as string,
-    identifier: ch.identifier as string,
-    isVerified: ch.isVerified as boolean,
-    displayName: ch.displayName as string | null,
+  const channelList = (channels ?? []).map((ch) => ({
+    id: ch.id,
+    channel: ch.channel,
+    identifier: ch.identifier,
+    isVerified: ch.isVerified,
+    displayName: ch.displayName,
   }));
 
   return (

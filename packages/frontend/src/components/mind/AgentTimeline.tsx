@@ -456,12 +456,13 @@ function getPreviewContent(event: TimelineEvent): string {
  * The backend may use snake_case or different field names (e.g. emotionHistory
  * instead of emotionDeltas). This adapter handles all variations.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function normalizeTimeline(raw: any): TickTimeline | null {
   if (!raw) return null;
 
-  const events: TimelineEvent[] = (raw.events ?? []).map((e: any) => ({
+  const events: TimelineEvent[] = (raw.events ?? []).map((e: any) => ({  // eslint-disable-line @typescript-eslint/no-explicit-any
     id: String(e.id),
-    sessionId: e.sessionId,
+    sessionId: e.sessionId as string | undefined,
     eventType: String(e.eventType),
     data: (e.data ?? {}) as Record<string, unknown>,
     createdAt: String(e.createdAt),
@@ -471,23 +472,30 @@ function normalizeTimeline(raw: any): TickTimeline | null {
   let results: TickResults | null = null;
   if (raw.results) {
     const r = raw.results;
-    const thoughts = (r.thoughts ?? []).map((t: any) => ({
+    const thoughts = (r.thoughts ?? []).map((t: { content?: string; importance?: number }) => ({
       content: String(t.content ?? ''),
       importance: Number(t.importance ?? 0),
     }));
-    const experiences = (r.experiences ?? []).map((e: any) => ({
+    const experiences = (r.experiences ?? []).map((e: { content?: string; importance?: number }) => ({
       content: String(e.content ?? ''),
       importance: Number(e.importance ?? 0),
     }));
     // Backend uses emotionHistory, we call it emotionDeltas
-    const emotionDeltas = (r.emotionHistory ?? r.emotionDeltas ?? []).map((eh: any) => ({
+    const emotionDeltas = (r.emotionHistory ?? r.emotionDeltas ?? []).map((eh: {
+      emotion?: string; delta?: number; reasoning?: string;
+      intensityBefore?: number; intensity_before?: number;
+      intensityAfter?: number; intensity_after?: number;
+    }) => ({
       emotion: String(eh.emotion ?? ''),
       delta: Number(eh.delta ?? 0),
       reasoning: String(eh.reasoning ?? ''),
       intensityBefore: Number(eh.intensityBefore ?? eh.intensity_before ?? 0),
       intensityAfter: Number(eh.intensityAfter ?? eh.intensity_after ?? 0),
     }));
-    const decisions = (r.decisions ?? []).map((d: any) => ({
+    const decisions = (r.decisions ?? []).map((d: {
+      type?: string; description?: string; parameters?: Record<string, unknown> | null;
+      outcome?: string; outcomeDetail?: string | null; outcome_detail?: string | null;
+    }) => ({
       type: String(d.type ?? ''),
       description: String(d.description ?? ''),
       parameters: d.parameters ?? null,
@@ -2010,7 +2018,7 @@ export function AgentTimeline({ tickNumber, onBack }: AgentTimelineProps) {
   // Subscribe to live events when tick is not complete
   trpc.heartbeat.onAgentEvent.useSubscription(undefined, {
     enabled: isLive,
-    onData: (event: any) => {
+    onData: (event) => {
       if (!timeline || event.sessionId !== timeline.sessionId) return;
 
       setLiveEvents((prev) => {

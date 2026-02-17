@@ -140,7 +140,7 @@ export function useSubscriptionManager() {
   // 11. Memory changes
   // ========================================================================
   trpc.memory.onMemoryChange.useSubscription(undefined, {
-    onData: (event: { type: string; detail?: any }) => {
+    onData: (event: { type: string; detail?: unknown }) => {
       if (event.type === 'working') {
         queryClient.invalidateQueries({ queryKey: [['memory', 'getWorkingMemory']] });
         queryClient.invalidateQueries({ queryKey: [['memory', 'listWorkingMemories']] });

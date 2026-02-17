@@ -7,6 +7,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
+use tauri::image::Image;
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
 
 struct Sidecar(Mutex<Option<Child>>);
@@ -82,16 +85,113 @@ fn wait_for_server(port: u16, max_retries: u32) -> bool {
     false
 }
 
+/// Show the main window and bring it to focus
+fn show_main_window(app_handle: &tauri::AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+    // On macOS, show app in the Dock when window is visible
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app_handle.set_activation_policy(tauri::ActivationPolicy::Regular);
+    }
+}
+
+/// Hide the main window (minimize to tray)
+fn hide_main_window(app_handle: &tauri::AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    // On macOS, hide from Dock when window is hidden
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app_handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    }
+}
+
+/// Set up the system tray icon with menu
+fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let show_item = MenuItemBuilder::with_id("show", "Show Animus").build(app)?;
+    let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
+    let menu = MenuBuilder::new(app)
+        .item(&show_item)
+        .separator()
+        .item(&quit_item)
+        .build()?;
+
+    let icon = Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
+
+    let mut builder = TrayIconBuilder::new()
+        .icon(icon)
+        .menu(&menu)
+        .on_menu_event(|app_handle, event| {
+            match event.id().as_ref() {
+                "show" => show_main_window(app_handle),
+                "quit" => app_handle.exit(0),
+                _ => {}
+            }
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let tauri::tray::TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, .. } = event {
+                show_main_window(tray.app_handle());
+            }
+        });
+
+    // On macOS, use template icon for automatic light/dark adaptation
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.icon_as_template(true);
+    }
+
+    builder.build(app)?;
+    Ok(())
+}
+
+/// Check if --minimized was passed (autostart launches with this flag)
+fn should_start_minimized() -> bool {
+    std::env::args().any(|a| a == "--minimized")
+}
+
 fn main() {
     let context = tauri::generate_context!();
+    let start_minimized = should_start_minimized();
 
     if cfg!(debug_assertions) {
         // Dev mode: beforeDevCommand starts both frontend (5173) and backend (3000).
         // Rust just opens the webview pointing at the dev server — no sidecar needed.
-        tauri::Builder::default()
+        let app = tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
-            .run(context)
-            .expect("Error while running Animus");
+            .plugin(tauri_plugin_autostart::Builder::new()
+                .args(["--minimized"])
+                .build()
+            )
+            .setup(move |app| {
+                setup_tray(app).expect("Failed to setup tray");
+
+                // Intercept window close: hide instead of quit
+                if let Some(window) = app.get_webview_window("main") {
+                    let w = window.clone();
+                    window.on_window_event(move |event| {
+                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                            api.prevent_close();
+                            hide_main_window(&w.app_handle());
+                        }
+                    });
+                }
+
+                // If launched with --minimized, hide window immediately
+                if start_minimized {
+                    hide_main_window(&app.handle());
+                }
+
+                Ok(())
+            })
+            .build(context)
+            .expect("Error while building Animus");
+
+        app.run(|_app_handle, _event| {});
     } else {
         // Production mode: spawn Node.js sidecar, wait for health, open webview.
         let port = find_free_port();
@@ -106,6 +206,9 @@ fn main() {
         log!(log_file, "Animus Desktop starting...");
         log!(log_file, "Data dir: {}", data_dir_str);
         log!(log_file, "Port: {}", port);
+        if start_minimized {
+            log!(log_file, "Starting minimized (autostart)");
+        }
 
         // Resolve the Node.js binary and backend entry point from the app bundle.
         // macOS .app layout:
@@ -180,16 +283,37 @@ fn main() {
         // Using build() + app.run() instead of Builder::run() so we can handle RunEvent::Exit.
         let app = tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
+            .plugin(tauri_plugin_autostart::Builder::new()
+                .args(["--minimized"])
+                .build()
+            )
             .manage(sidecar)
             .setup(move |app| {
+                setup_tray(app).expect("Failed to setup tray");
+
                 // Navigate the main window to the sidecar URL (same-origin trick:
                 // sidecar serves both API and static frontend, no __ANIMUS_API_URL__ needed)
                 if let Some(window) = app.get_webview_window("main") {
                     let url = format!("http://127.0.0.1:{}", port);
                     let _ = window.navigate(url.parse().unwrap());
+
                     // Open devtools automatically in debug/development
                     #[cfg(debug_assertions)]
                     window.open_devtools();
+
+                    // Intercept window close: hide instead of quit
+                    let w = window.clone();
+                    window.on_window_event(move |event| {
+                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                            api.prevent_close();
+                            hide_main_window(&w.app_handle());
+                        }
+                    });
+
+                    // If launched with --minimized, hide window immediately
+                    if start_minimized {
+                        hide_main_window(&app.handle());
+                    }
                 }
                 Ok(())
             })

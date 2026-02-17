@@ -37,6 +37,8 @@ import {
 } from '@phosphor-icons/react';
 import { Card, SelectionCard, Button, Input, Modal, Badge, Toggle, Slider, Typography, Tooltip } from '../components/ui';
 import { trpc } from '../utils/trpc';
+import { isTauri } from '../utils/tauri';
+import { useAutostart } from '../hooks/useAutostart';
 import type { Theme } from '../styles/theme';
 import { SavesSection } from '../components/settings/SavesSection';
 
@@ -709,7 +711,7 @@ function ProviderSection() {
 
   const confirmSwitch = () => {
     if (!switchConfirm) return;
-    updateSettingsMutation.mutate({ defaultAgentProvider: switchConfirm as any });
+    updateSettingsMutation.mutate({ defaultAgentProvider: switchConfirm as 'claude' | 'codex' | 'opencode' });
     setSwitchConfirm(null);
   };
 
@@ -2087,7 +2089,13 @@ function PluginsSection() {
   const [installPath, setInstallPath] = useState('');
   const [installValidation, setInstallValidation] = useState<{
     valid: boolean;
-    manifest?: any;
+    manifest?: {
+      name: string;
+      version: string;
+      description?: string;
+      author?: string | { name: string };
+      [key: string]: unknown;
+    };
     error?: string;
   } | null>(null);
   const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null);
@@ -2784,7 +2792,7 @@ function PluginConfigModal({
         ) : hasSchema ? (
           // Schema-based form using typed fields
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-            {schema.fields.map((field: any) => {
+            {schema.fields.map((field) => {
               const value = configValues[field.key];
               const isMasked = field.type === 'secret' && value === '••••••••';
 
@@ -2912,6 +2920,7 @@ function SystemSection() {
 
   const [confirmAction, setConfirmAction] = useState<'soft' | 'full' | 'clear' | null>(null);
   const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const autostart = useAutostart();
 
 
   const handleConfirmAction = () => {
@@ -2953,6 +2962,27 @@ function SystemSection() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[8]};`}>
+      {/* Desktop App */}
+      {isTauri() && (
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+          <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+            Desktop App
+          </Typography.Subtitle>
+
+          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+            <Toggle
+              checked={autostart.enabled}
+              onChange={autostart.toggle}
+              disabled={autostart.loading || !autostart.available}
+              label="Launch at startup"
+            />
+          </div>
+          <Typography.Caption as="p" color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+            Automatically start Animus when you log in. The app will launch hidden in the system tray.
+          </Typography.Caption>
+        </div>
+      )}
+
       {/* Data Management */}
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
         <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>

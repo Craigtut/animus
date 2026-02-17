@@ -94,7 +94,7 @@ function WorkingMemorySection() {
         </Card>
       ) : (
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-          {workingMemories.map((wm: any) => (
+          {workingMemories.map((wm) => (
             <WorkingMemoryCard key={wm.contactId} memory={wm} />
           ))}
         </div>
@@ -103,7 +103,15 @@ function WorkingMemorySection() {
   );
 }
 
-function WorkingMemoryCard({ memory }: { memory: any }) {
+interface WorkingMemoryItem {
+  contactId: string;
+  contactName?: string | null;
+  content?: string | null;
+  tier?: string | null;
+  updatedAt?: string | null;
+}
+
+function WorkingMemoryCard({ memory }: { memory: WorkingMemoryItem }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
 
@@ -170,7 +178,7 @@ function LongTermMemorySection() {
     { retry: false },
   );
 
-  const displayMemories: any[] = memories ?? [];
+  const displayMemories = memories ?? [];
 
   return (
     <section>
@@ -231,7 +239,7 @@ function LongTermMemorySection() {
         </Typography.SmallBody>
       ) : (
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-          {displayMemories.map((mem: any) => (
+          {displayMemories.map((mem) => (
             <Card key={mem.id} variant="outlined" padding="md">
               <Typography.Body serif css={css`
                 margin-bottom: ${theme.spacing[2]};
@@ -265,11 +273,6 @@ function LongTermMemorySection() {
                       {(mem.importance as number).toFixed(1)}
                     </Typography.Caption>
                   </div>
-                )}
-                {mem.accessCount != null && (mem.accessCount as number) > 0 && (
-                  <Typography.Caption color="hint">
-                    Accessed {mem.accessCount} time{(mem.accessCount as number) !== 1 ? 's' : ''}
-                  </Typography.Caption>
                 )}
                 {mem.createdAt && (
                   <Typography.Caption color="disabled" css={css`

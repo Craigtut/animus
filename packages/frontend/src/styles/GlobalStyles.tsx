@@ -18,6 +18,7 @@ export function GlobalStyles() {
         }
 
         :root {
+          --titlebar-area-height: 0px;
           font-synthesis: none;
           text-rendering: optimizeLegibility;
           -webkit-font-smoothing: antialiased;

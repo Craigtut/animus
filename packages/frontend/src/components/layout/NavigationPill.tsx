@@ -44,7 +44,7 @@ export function NavigationPill() {
         aria-label="Main navigation"
         css={css`
           position: fixed;
-          top: ${theme.spacing[3]};
+          top: calc(${theme.spacing[3]} + var(--titlebar-area-height, 0px));
           left: 50%;
           transform: translateX(-50%);
           z-index: ${theme.zIndex.navPill};

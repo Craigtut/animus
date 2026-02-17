@@ -32,10 +32,10 @@ export function PeoplePage() {
     let filtered = contactList;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      filtered = contactList.filter((c: any) => c.fullName.toLowerCase().includes(q));
+      filtered = contactList.filter((c) => c.fullName.toLowerCase().includes(q));
     }
     // Sort: primary first, then by last message date
-    return [...filtered].sort((a: any, b: any) => {
+    return [...filtered].sort((a, b) => {
       if (a.isPrimary && !b.isPrimary) return -1;
       if (!a.isPrimary && b.isPrimary) return 1;
       const aTime = a.lastMessage?.createdAt ?? '';
@@ -98,7 +98,7 @@ export function PeoplePage() {
         </Typography.Body>
       ) : (
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-          {contacts.map((contact: any) => (
+          {contacts.map((contact) => (
             <ContactListItem
               key={contact.id}
               contact={contact}

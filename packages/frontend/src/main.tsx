@@ -1,6 +1,9 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { initTitlebarInset } from './utils/tauri';
+
+initTitlebarInset();
 
 const rootElement = document.getElementById('root');
 

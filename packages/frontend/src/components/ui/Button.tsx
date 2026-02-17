@@ -99,7 +99,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           ${sizeStyles[size]}
           ${variantStyles[variant]}
         `}
-        {...(props as any)}
+        {...(props as Record<string, unknown>)}
       >
         {loading && <Spinner size={size === 'sm' ? 14 : 18} />}
         {children}

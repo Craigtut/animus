@@ -299,7 +299,7 @@ function TickList({ onSelect }: { onSelect: (tickNumber: number) => void }) {
             </Typography.SmallBody>
 
             {/* Duration */}
-            {(tick as any).durationMs != null && (
+            {tick.durationMs != null && (
               <Typography.Caption
                 color="hint"
                 css={css`
@@ -307,7 +307,7 @@ function TickList({ onSelect }: { onSelect: (tickNumber: number) => void }) {
                   white-space: nowrap;
                 `}
               >
-                {formatDuration((tick as any).durationMs)}
+                {formatDuration(tick.durationMs)}
               </Typography.Caption>
             )}
 
@@ -511,7 +511,7 @@ function TickDetail({ tickNumber, onBack }: { tickNumber: number; onBack: () => 
       {decisions.length > 0 && (
         <Section title="Decisions">
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-            {decisions.map((d: any, i: number) => (
+            {decisions.map((d, i) => (
               <div key={i} css={css`
                 display: flex;
                 align-items: baseline;
@@ -548,35 +548,38 @@ function TickDetail({ tickNumber, onBack }: { tickNumber: number; onBack: () => 
               </div>
             ))}
           </div>
-          {data.usage && (
-            <div css={css`
-              display: flex;
-              gap: ${theme.spacing[4]};
-              margin-top: ${theme.spacing[2]};
-              flex-wrap: wrap;
-            `}>
-              <div>
-                <Typography.Caption color="hint">Input</Typography.Caption>
-                <Typography.SmallBody css={css`font-family: ${theme.typography.fontFamily.mono};`}>
-                  {(data.usage as any).inputTokens?.toLocaleString()}
-                </Typography.SmallBody>
-              </div>
-              <div>
-                <Typography.Caption color="hint">Output</Typography.Caption>
-                <Typography.SmallBody css={css`font-family: ${theme.typography.fontFamily.mono};`}>
-                  {(data.usage as any).outputTokens?.toLocaleString()}
-                </Typography.SmallBody>
-              </div>
-              {(data.usage as any).costUsd != null && (
+          {data.usage && (() => {
+            const usage = data.usage as { inputTokens?: number; outputTokens?: number; costUsd?: number | null };
+            return (
+              <div css={css`
+                display: flex;
+                gap: ${theme.spacing[4]};
+                margin-top: ${theme.spacing[2]};
+                flex-wrap: wrap;
+              `}>
                 <div>
-                  <Typography.Caption color="hint">Cost</Typography.Caption>
+                  <Typography.Caption color="hint">Input</Typography.Caption>
                   <Typography.SmallBody css={css`font-family: ${theme.typography.fontFamily.mono};`}>
-                    ${(data.usage as any).costUsd.toFixed(4)}
+                    {usage.inputTokens?.toLocaleString()}
                   </Typography.SmallBody>
                 </div>
-              )}
-            </div>
-          )}
+                <div>
+                  <Typography.Caption color="hint">Output</Typography.Caption>
+                  <Typography.SmallBody css={css`font-family: ${theme.typography.fontFamily.mono};`}>
+                    {usage.outputTokens?.toLocaleString()}
+                  </Typography.SmallBody>
+                </div>
+                {usage.costUsd != null && (
+                  <div>
+                    <Typography.Caption color="hint">Cost</Typography.Caption>
+                    <Typography.SmallBody css={css`font-family: ${theme.typography.fontFamily.mono};`}>
+                      ${usage.costUsd.toFixed(4)}
+                    </Typography.SmallBody>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </Section>
       )}
 

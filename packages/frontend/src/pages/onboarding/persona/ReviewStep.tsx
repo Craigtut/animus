@@ -34,7 +34,7 @@ export function ReviewStep() {
         age: !isNaN(parsedAge) && parsedAge > 0 ? parsedAge : null,
         physicalDescription: personaDraft.physicalDescription || null,
         archetype: (personaDraft.archetype && personaDraft.archetype !== 'scratch')
-          ? personaDraft.archetype as any
+          ? personaDraft.archetype as 'scholar' | 'companion' | 'maverick' | 'sage' | 'guardian' | 'spark' | 'challenger' | 'dreamer'
           : null,
         traits: personaDraft.traits.length > 0 ? personaDraft.traits : undefined,
         values: personaDraft.values.length > 0 ? personaDraft.values : undefined,
