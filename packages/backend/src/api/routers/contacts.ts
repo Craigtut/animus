@@ -2,15 +2,12 @@
  * Contacts Router — tRPC procedures for contact management.
  *
  * CRUD operations for contacts and their channel identities.
- * List queries enriched with last-message data from messages.db.
+ * Business logic delegated to ContactService.
  */
 
 import { z } from 'zod';
-import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../trpc.js';
-import { getSystemDb, getMessagesDb } from '../../db/index.js';
-import * as systemStore from '../../db/stores/system-store.js';
-import * as messageStore from '../../db/stores/message-store.js';
+import { getContactService } from '../../services/contact-service.js';
 import { channelTypeSchema } from '@animus/shared';
 
 export const contactsRouter = router({
@@ -18,7 +15,7 @@ export const contactsRouter = router({
    * Get the primary contact.
    */
   getPrimary: protectedProcedure.query(() => {
-    return systemStore.getPrimaryContact(getSystemDb());
+    return getContactService().getPrimaryContact();
   }),
 
   /**
@@ -27,42 +24,14 @@ export const contactsRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(({ input }) => {
-      const contact = systemStore.getContact(getSystemDb(), input.id);
-      if (!contact) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Contact not found' });
-      }
-      return contact;
+      return getContactService().getContact(input.id);
     }),
 
   /**
    * List all contacts, enriched with last message info.
    */
   list: protectedProcedure.query(() => {
-    const sysDb = getSystemDb();
-    const msgDb = getMessagesDb();
-    const contacts = systemStore.listContacts(sysDb);
-
-    return contacts.map((contact) => {
-      const lastMessage = messageStore.getLastMessageForContact(msgDb, contact.id);
-      const channels = systemStore.getContactChannelsByContactId(sysDb, contact.id);
-      return {
-        ...contact,
-        channels: channels.map(ch => ({
-          id: ch.id,
-          channel: ch.channel,
-          identifier: ch.identifier,
-          isVerified: ch.isVerified,
-        })),
-        lastMessage: lastMessage
-          ? {
-              content: lastMessage.content,
-              direction: lastMessage.direction,
-              createdAt: lastMessage.createdAt,
-              channel: lastMessage.channel,
-            }
-          : null,
-      };
-    });
+    return getContactService().listContacts();
   }),
 
   /**
@@ -78,12 +47,7 @@ export const contactsRouter = router({
       })
     )
     .mutation(({ input }) => {
-      return systemStore.createContact(getSystemDb(), {
-        fullName: input.fullName,
-        phoneNumber: input.phoneNumber ?? null,
-        email: input.email ?? null,
-        notes: input.notes ?? null,
-      });
+      return getContactService().createContact(input);
     }),
 
   /**
@@ -100,19 +64,8 @@ export const contactsRouter = router({
       })
     )
     .mutation(({ input }) => {
-      const db = getSystemDb();
-      const existing = systemStore.getContact(db, input.id);
-      if (!existing) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Contact not found' });
-      }
-      // Build update object, only including defined properties
-      const updateData: Parameters<typeof systemStore.updateContact>[2] = {};
-      if (input.fullName !== undefined) updateData.fullName = input.fullName;
-      if (input.phoneNumber !== undefined) updateData.phoneNumber = input.phoneNumber;
-      if (input.email !== undefined) updateData.email = input.email;
-      if (input.notes !== undefined) updateData.notes = input.notes;
-      systemStore.updateContact(db, input.id, updateData);
-      return systemStore.getContact(db, input.id)!;
+      const { id, ...data } = input;
+      return getContactService().updateContact(id, data);
     }),
 
   /**
@@ -121,18 +74,7 @@ export const contactsRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(({ input }) => {
-      const db = getSystemDb();
-      const contact = systemStore.getContact(db, input.id);
-      if (!contact) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Contact not found' });
-      }
-      if (contact.isPrimary) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Cannot delete the primary contact',
-        });
-      }
-      systemStore.deleteContact(db, input.id);
+      getContactService().deleteContact(input.id);
       return { success: true };
     }),
 
@@ -142,7 +84,7 @@ export const contactsRouter = router({
   getChannels: protectedProcedure
     .input(z.object({ contactId: z.string().uuid() }))
     .query(({ input }) => {
-      return systemStore.getContactChannelsByContactId(getSystemDb(), input.contactId);
+      return getContactService().getChannels(input.contactId);
     }),
 
   /**
@@ -158,17 +100,7 @@ export const contactsRouter = router({
       })
     )
     .mutation(({ input }) => {
-      const db = getSystemDb();
-      const contact = systemStore.getContact(db, input.contactId);
-      if (!contact) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Contact not found' });
-      }
-      return systemStore.createContactChannel(db, {
-        contactId: input.contactId,
-        channel: input.channel,
-        identifier: input.identifier,
-        displayName: input.displayName ?? null,
-      });
+      return getContactService().addChannel(input);
     }),
 
   /**
@@ -177,10 +109,7 @@ export const contactsRouter = router({
   removeChannel: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(({ input }) => {
-      const deleted = systemStore.deleteContactChannel(getSystemDb(), input.id);
-      if (!deleted) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found' });
-      }
+      getContactService().removeChannel(input.id);
       return { success: true };
     }),
 });

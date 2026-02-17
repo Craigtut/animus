@@ -10,6 +10,7 @@ import * as messageStore from '../../db/stores/message-store.js';
 import * as systemStore from '../../db/stores/system-store.js';
 import { handleIncomingMessage } from '../../heartbeat/index.js';
 import { getEventBus } from '../../lib/event-bus.js';
+import { getMessageService } from '../../services/message-service.js';
 import { channelTypeSchema, paginationInputSchema, generateUUID, now } from '@animus/shared';
 import type { Message } from '@animus/shared';
 
@@ -81,8 +82,7 @@ export const messagesRouter = router({
       pageSize: z.number().int().positive().max(100).default(20),
     }))
     .query(({ input }) => {
-      const db = getMessagesDb();
-      return messageStore.getMessages(db, input.conversationId, {
+      return getMessageService().getMessages(input.conversationId, {
         page: input.page,
         pageSize: input.pageSize,
       });
@@ -96,13 +96,7 @@ export const messagesRouter = router({
       channel: channelTypeSchema.default('web'),
     }))
     .query(({ input, ctx }) => {
-      const sysDb = getSystemDb();
-      const msgDb = getMessagesDb();
-
-      const user = systemStore.getUserById(sysDb, ctx.userId);
-      if (!user?.contactId) return null;
-
-      return messageStore.getActiveConversation(msgDb, user.contactId, input.channel);
+      return getMessageService().getActiveConversation(ctx.userId, input.channel);
     }),
 
   /**
@@ -114,17 +108,8 @@ export const messagesRouter = router({
       channel: channelTypeSchema.default('web'),
     }).optional())
     .query(({ input, ctx }) => {
-      const sysDb = getSystemDb();
-      const msgDb = getMessagesDb();
-
-      const user = systemStore.getUserById(sysDb, ctx.userId);
-      if (!user?.contactId) return [];
-
       const channel = input?.channel ?? 'web';
-      const conv = messageStore.getActiveConversation(msgDb, user.contactId, channel);
-      if (!conv) return [];
-
-      return messageStore.getRecentMessages(msgDb, conv.id, input?.limit ?? 50);
+      return getMessageService().getRecentMessages(ctx.userId, channel, input?.limit ?? 50);
     }),
 
   /**
@@ -138,13 +123,8 @@ export const messagesRouter = router({
       before: z.string().optional(),
     }))
     .query(({ input }) => {
-      const db = getMessagesDb();
-      const opts: { limit?: number; channel?: string; before?: string } = {
-        limit: input.limit,
-      };
-      if (input.channel) opts.channel = input.channel;
-      if (input.before) opts.before = input.before;
-      return messageStore.getMessagesByContact(db, input.contactId, opts);
+      const { contactId, ...opts } = input;
+      return getMessageService().getMessagesByContact(contactId, opts);
     }),
 
   /**

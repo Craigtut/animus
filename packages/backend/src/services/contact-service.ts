@@ -51,7 +51,7 @@ export interface AddChannelInput {
   contactId: string;
   channel: ChannelType;
   identifier: string;
-  displayName?: string | null;
+  displayName?: string | null | undefined;
 }
 
 // ============================================================================

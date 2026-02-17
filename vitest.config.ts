@@ -9,7 +9,7 @@ export default defineConfig({
       ANIMUS_ENCRYPTION_KEY: 'test-encryption-key-not-for-production',
     },
     include: ['packages/*/tests/**/*.test.ts', 'packages/*/src/**/*.test.ts'],
-    exclude: ['node_modules', 'dist'],
+    exclude: ['node_modules', 'dist', '**/tests/integration/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

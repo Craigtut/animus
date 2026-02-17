@@ -105,22 +105,11 @@ export function GlobalStyles() {
         }
 
         ::-webkit-scrollbar {
-          width: 6px;
-          height: 6px;
-        }
-
-        ::-webkit-scrollbar-track {
-          background: transparent;
-        }
-
-        ::-webkit-scrollbar-thumb {
-          background: ${theme.colors.border.default};
-          border-radius: ${theme.borderRadius.full};
+          display: none;
         }
 
         * {
-          scrollbar-width: thin;
-          scrollbar-color: ${theme.colors.border.default} transparent;
+          scrollbar-width: none;
         }
 
         @media (prefers-reduced-motion: reduce) {

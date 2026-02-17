@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 // Mock env before importing modules that depend on logger -> env
 vi.mock('../../../src/utils/env.js', () => ({
   env: { ANIMUS_ENCRYPTION_KEY: 'test-key', NODE_ENV: 'test', LOG_LEVEL: 'error' },
+  PROJECT_ROOT: '/tmp/animus-test',
 }));
 
 import {

@@ -148,6 +148,7 @@ export class AgentOrchestrator {
     outcome: string;
     resultContent?: string;
   }) => void;
+  private buildToolContextFactory: ((taskId: string, params: SpawnAgentParams) => ToolHandlerContext) | null;
 
   constructor(params: {
     manager: AgentManager;
@@ -156,6 +157,7 @@ export class AgentOrchestrator {
     eventBus: IEventBus;
     spawnBudgetPerHour?: number;
     getPreferredProvider?: () => AgentProvider | null;
+    buildToolContext?: (taskId: string, params: SpawnAgentParams) => ToolHandlerContext;
     onAgentComplete: (params: {
       agentId: string;
       taskDescription: string;
@@ -169,6 +171,7 @@ export class AgentOrchestrator {
     this.eventBus = params.eventBus;
     this.spawnBudgetPerHour = params.spawnBudgetPerHour ?? 20;
     this.getPreferredProvider = params.getPreferredProvider ?? null;
+    this.buildToolContextFactory = params.buildToolContext ?? null;
     this.onAgentComplete = params.onAgentComplete;
   }
 
@@ -348,7 +351,9 @@ export class AgentOrchestrator {
       this.timeoutTimers.set(taskId, timer);
 
       // Set the sub-agent tool context for this task
-      subAgentContext.current = this.buildSubAgentToolContext(taskId, params);
+      subAgentContext.current = this.buildToolContextFactory
+        ? this.buildToolContextFactory(taskId, params)
+        : this.buildSubAgentToolContext(taskId, params);
 
       // Run asynchronously (non-blocking)
       this.runAgent(taskId, session, params.instructions, logging)

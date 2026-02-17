@@ -10,6 +10,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { createLogger } from '../lib/logger.js';
 import { getEventBus } from '../lib/event-bus.js';
+import { PROJECT_ROOT } from '../utils/env.js';
 import { getSystemDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
 import { ChannelProcessHost } from './process-host.js';
@@ -421,7 +422,7 @@ export class ChannelManager {
       downloadMedia: async (params) => {
         const ext = params.filename?.split('.').pop() ?? 'bin';
         const id = crypto.randomUUID();
-        const localPath = path.join('data', 'media', `${id}.${ext}`);
+        const localPath = path.join(PROJECT_ROOT, 'data', 'media', `${id}.${ext}`);
 
         fs.mkdirSync(path.dirname(localPath), { recursive: true });
 

@@ -6,6 +6,7 @@ import {
 } from '../../src/heartbeat/agent-orchestrator.js';
 import type { AgentManager, IAgentSession, AgentResponse, AgentLogStore } from '@animus/agents';
 import type { IEventBus, AnimusEventMap } from '@animus/shared';
+import type { ToolHandlerContext } from '../../src/tools/types.js';
 
 // ---------------------------------------------------------------------------
 // Mock helpers
@@ -104,6 +105,21 @@ function createInMemoryTaskStore(): AgentTaskStore {
   };
 }
 
+function createMockToolContext(): ToolHandlerContext {
+  return {
+    agentTaskId: 'test-task',
+    contactId: 'test-contact',
+    sourceChannel: 'web',
+    conversationId: 'test-conv',
+    stores: {
+      messages: { createMessage: vi.fn().mockReturnValue({ id: 'msg-1' }) },
+      heartbeat: { updateAgentTaskProgress: vi.fn() },
+      memory: { retrieveRelevant: vi.fn().mockResolvedValue([]) },
+    },
+    eventBus: createMockEventBus(),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -131,6 +147,7 @@ describe('AgentOrchestrator', () => {
       taskStore,
       logStore,
       eventBus,
+      buildToolContext: () => createMockToolContext(),
       onAgentComplete,
     });
   });
@@ -249,6 +266,7 @@ describe('AgentOrchestrator', () => {
         taskStore,
         logStore,
         eventBus,
+        buildToolContext: () => createMockToolContext(),
         onAgentComplete,
       });
 
@@ -308,6 +326,7 @@ describe('AgentOrchestrator', () => {
         taskStore,
         logStore,
         eventBus,
+        buildToolContext: () => createMockToolContext(),
         onAgentComplete,
       });
 
@@ -353,6 +372,7 @@ describe('AgentOrchestrator', () => {
         taskStore,
         logStore,
         eventBus,
+        buildToolContext: () => createMockToolContext(),
         onAgentComplete,
       });
 
@@ -385,6 +405,7 @@ describe('AgentOrchestrator', () => {
         taskStore,
         logStore,
         eventBus,
+        buildToolContext: () => createMockToolContext(),
         onAgentComplete,
       });
 
@@ -416,6 +437,7 @@ describe('AgentOrchestrator', () => {
         taskStore,
         logStore,
         eventBus,
+        buildToolContext: () => createMockToolContext(),
         onAgentComplete,
       });
 

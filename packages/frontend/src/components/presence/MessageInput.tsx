@@ -20,13 +20,14 @@ export function MessageInput({ onSend, disabled = false }: MessageInputProps) {
   const theme = useTheme();
   const [value, setValue] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const [textareaHeight, setTextareaHeight] = useState<number | null>(null);
 
   // Line height in px: 1rem (16px) * 1.5 = 24px
   const lineHeightPx = 24;
   const paddingY = 12; // 6px top + 6px bottom (spacing[1.5] = 0.375rem = 6px)
   const maxLines = 3;
   const maxTextareaHeight = lineHeightPx * maxLines + paddingY;
+  const singleLineHeight = lineHeightPx + paddingY;
+  const [textareaHeight, setTextareaHeight] = useState<number>(singleLineHeight);
 
   // Measure and update textarea height whenever value changes
   useEffect(() => {
@@ -48,7 +49,7 @@ export function MessageInput({ onSend, disabled = false }: MessageInputProps) {
     if (!trimmed || disabled) return;
     onSend(trimmed);
     setValue('');
-    setTextareaHeight(null);
+    setTextareaHeight(singleLineHeight);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -71,7 +72,7 @@ export function MessageInput({ onSend, disabled = false }: MessageInputProps) {
   }, []);
 
   const hasContent = value.trim().length > 0;
-  const isMultiline = textareaHeight != null && textareaHeight > lineHeightPx + paddingY;
+  const isMultiline = textareaHeight > singleLineHeight;
 
   return (
     <div
@@ -123,9 +124,9 @@ export function MessageInput({ onSend, disabled = false }: MessageInputProps) {
             line-height: ${theme.typography.lineHeight.normal};
             resize: none;
             outline: none;
-            overflow-y: ${textareaHeight != null && textareaHeight >= maxTextareaHeight ? 'auto' : 'hidden'};
+            overflow-y: ${textareaHeight >= maxTextareaHeight ? 'auto' : 'hidden'};
             transition: height 100ms ease-out;
-            ${textareaHeight != null ? `height: ${textareaHeight}px;` : ''}
+            height: ${textareaHeight}px;
 
             &::placeholder {
               color: ${theme.colors.text.hint};
