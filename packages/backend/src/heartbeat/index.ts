@@ -345,10 +345,17 @@ async function mindQuery(
           }
         }
       } catch (err) {
-        // Parser failure (e.g. reply is null / malformed JSON mid-stream)
-        // Fall back to post-hoc behavior after full parse completes
+        // Parser failure — fall back to post-hoc behavior after full parse completes.
+        // "Stream ended before property was found" is the normal case when reply is
+        // null (interval ticks with nothing to say). Only log the full error for
+        // genuinely unexpected failures.
         streamingFailed = true;
-        log.debug('Reply stream interrupted (reply may be null):', err);
+        const isExpectedNull = err instanceof Error && err.message.includes('Stream ended before property was found');
+        if (isExpectedNull) {
+          log.debug('Reply stream ended (reply is likely null)');
+        } else {
+          log.warn('Reply stream interrupted unexpectedly:', err);
+        }
       }
     })();
 

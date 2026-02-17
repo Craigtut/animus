@@ -195,6 +195,9 @@ reply — { content, contactId, channel, replyToMessageId, tone? } | null
   say (e.g., idle ticks with no one to talk to). Match your reply style to
   the channel — guidance will be provided in context when relevant.
 
+  contactId MUST be a UUID from the contacts list (e.g., "780a39bf-..."),
+  never a name. channel must match one of the contact's reachable channels.
+
   This field is for responding to the current conversation. To proactively
   reach out to a different contact or on a different channel, use the
   send_message decision instead.
@@ -748,7 +751,7 @@ function buildContactsSection(
       .map((ch) => `${ch.channel}${ch.displayName ? `: ${ch.displayName}` : ''}`)
       .join(', ');
 
-    let line = `${contact.fullName} — ${contact.permissionTier}${marker}`;
+    let line = `${contact.fullName} [id: ${contact.id}] — ${contact.permissionTier}${marker}`;
     if (channelList) {
       line += ` — reachable via: ${channelList}`;
     }

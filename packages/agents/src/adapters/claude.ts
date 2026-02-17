@@ -41,7 +41,7 @@ interface QueryParams {
 
 interface QueryOptions {
   model?: string;
-  systemPrompt?: string;
+  systemPrompt?: string | { type: 'preset'; preset: 'claude_code'; append?: string };
   cwd?: string;
   permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
   allowDangerouslySkipPermissions?: boolean;

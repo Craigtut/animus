@@ -266,7 +266,13 @@ export async function getOrCreateMindSession(
   const session = await agentManager.createSession({
     provider,
     cwd: PROJECT_ROOT,
-    ...(systemPrompt != null ? { systemPrompt } : {}),
+    ...(systemPrompt != null ? {
+      systemPrompt: {
+        type: 'preset' as const,
+        preset: 'claude_code' as const,
+        append: systemPrompt,
+      },
+    } : {}),
     permissions: {
       executionMode: 'build',
       approvalLevel: 'none',

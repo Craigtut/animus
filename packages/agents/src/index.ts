@@ -63,6 +63,7 @@ export type {
   McpServerConfig,
 
   // Configuration
+  SystemPromptPreset,
   AgentSessionConfig,
   PromptOptions,
 

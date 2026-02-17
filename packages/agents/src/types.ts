@@ -211,6 +211,20 @@ export interface McpServerConfig {
 // ============================================================================
 
 /**
+ * Preset system prompt configuration.
+ *
+ * Uses the Claude Code default system prompt as a base and appends custom
+ * instructions. This preserves all built-in agentic capabilities (Skill tool,
+ * tool loop, etc.) while adding domain-specific behavior.
+ */
+export interface SystemPromptPreset {
+  type: 'preset';
+  preset: 'claude_code';
+  /** Custom instructions appended after the default Claude Code prompt */
+  append?: string;
+}
+
+/**
  * Base configuration for creating an agent session.
  */
 export interface AgentSessionConfig {
@@ -220,8 +234,11 @@ export interface AgentSessionConfig {
   /** Model identifier (provider-specific) */
   model?: string;
 
-  /** System prompt to initialize the agent with */
-  systemPrompt?: string;
+  /** System prompt to initialize the agent with.
+   *  Pass a string to replace the default prompt entirely, or use the preset
+   *  format to preserve the default Claude Code prompt while appending custom
+   *  instructions. */
+  systemPrompt?: string | SystemPromptPreset;
 
   /** Working directory for file operations */
   cwd?: string;

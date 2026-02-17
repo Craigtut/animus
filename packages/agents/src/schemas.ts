@@ -85,8 +85,15 @@ export const baseSessionConfigSchema = z.object({
   /** Model identifier (provider-specific) */
   model: z.string().optional(),
 
-  /** System prompt to initialize the agent with */
-  systemPrompt: z.string().optional(),
+  /** System prompt to initialize the agent with (string or preset format) */
+  systemPrompt: z.union([
+    z.string(),
+    z.object({
+      type: z.literal('preset'),
+      preset: z.literal('claude_code'),
+      append: z.string().optional(),
+    }),
+  ]).optional(),
 
   /** Working directory for file operations */
   cwd: z.string().optional(),
