@@ -61,6 +61,7 @@ export interface AnimusEventMap {
   // Tasks
   'task:created': Task;
   'task:updated': Task;
+  'task:deleted': { taskId: string };
 
   // Memory
   'memory:working_updated': { contactId: string };

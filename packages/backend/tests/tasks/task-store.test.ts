@@ -249,6 +249,38 @@ describe('task-store', () => {
     });
   });
 
+  describe('deleteTask', () => {
+    it('deletes an existing task and returns true', () => {
+      const task = taskStore.createTask(db, {
+        title: 'Delete me',
+        scheduleType: 'one_shot',
+        createdBy: 'user',
+      });
+      const result = taskStore.deleteTask(db, task.id);
+      expect(result).toBe(true);
+      expect(taskStore.getTask(db, task.id)).toBeNull();
+    });
+
+    it('returns false for non-existent task', () => {
+      const result = taskStore.deleteTask(db, 'non-existent-id');
+      expect(result).toBe(false);
+    });
+
+    it('cascades to task_runs', () => {
+      const task = taskStore.createTask(db, {
+        title: 'With runs',
+        scheduleType: 'recurring',
+        createdBy: 'mind',
+      });
+      taskStore.createTaskRun(db, { taskId: task.id, status: 'completed' });
+      taskStore.createTaskRun(db, { taskId: task.id, status: 'failed' });
+      expect(taskStore.getTaskRuns(db, task.id)).toHaveLength(2);
+
+      taskStore.deleteTask(db, task.id);
+      expect(taskStore.getTaskRuns(db, task.id)).toHaveLength(0);
+    });
+  });
+
   describe('task runs', () => {
     it('creates and retrieves task runs', () => {
       const task = taskStore.createTask(db, {

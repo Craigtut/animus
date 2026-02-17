@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ListChecks,
@@ -16,11 +16,13 @@ import {
   Warning,
   Timer,
   Tray,
+  PencilSimple,
+  Trash,
 } from '@phosphor-icons/react';
 import { trpc } from '../../utils/trpc';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
-import { Typography } from '../ui';
+import { Button, Input, Modal, Typography } from '../ui';
 
 // ============================================================================
 // Task Status Helpers
@@ -129,17 +131,218 @@ function humanizeCron(cron: string): string {
 }
 
 // ============================================================================
+// Edit Task Modal
+// ============================================================================
+
+interface EditTaskModalProps {
+  open: boolean;
+  onClose: () => void;
+  task: any;
+}
+
+function EditTaskModal({ open, onClose, task }: EditTaskModalProps) {
+  const theme = useTheme();
+  const utils = trpc.useUtils();
+
+  const [title, setTitle] = useState(task.title);
+  const [description, setDescription] = useState(task.description ?? '');
+  const [instructions, setInstructions] = useState(task.instructions ?? '');
+  const [priority, setPriority] = useState(task.priority ?? 0.5);
+  const [cronExpression, setCronExpression] = useState(task.cronExpression ?? '');
+  const [scheduledAt, setScheduledAt] = useState(
+    task.scheduledAt ? task.scheduledAt.slice(0, 16) : ''
+  );
+
+  // Reset form when task or open state changes
+  useEffect(() => {
+    if (open) {
+      setTitle(task.title);
+      setDescription(task.description ?? '');
+      setInstructions(task.instructions ?? '');
+      setPriority(task.priority ?? 0.5);
+      setCronExpression(task.cronExpression ?? '');
+      setScheduledAt(task.scheduledAt ? task.scheduledAt.slice(0, 16) : '');
+    }
+  }, [open, task]);
+
+  const updateMutation = trpc.tasks.updateTask.useMutation({
+    onSuccess: () => {
+      utils.tasks.getTasks.invalidate();
+      utils.tasks.getDeferredTasks.invalidate();
+      onClose();
+    },
+  });
+
+  const handleSave = () => {
+    const data: Record<string, unknown> = { taskId: task.id };
+    if (title !== task.title) data['title'] = title;
+    if (description !== (task.description ?? '')) data['description'] = description || null;
+    if (instructions !== (task.instructions ?? '')) data['instructions'] = instructions || null;
+    if (priority !== task.priority) data['priority'] = priority;
+    if (task.scheduleType === 'recurring' && cronExpression !== (task.cronExpression ?? '')) {
+      data['cronExpression'] = cronExpression || null;
+    }
+    if (task.scheduleType === 'one_shot' && scheduledAt !== (task.scheduledAt ? task.scheduledAt.slice(0, 16) : '')) {
+      data['scheduledAt'] = scheduledAt ? new Date(scheduledAt).toISOString() : null;
+    }
+
+    // Only send if there are changes beyond taskId
+    if (Object.keys(data).length <= 1) {
+      onClose();
+      return;
+    }
+
+    updateMutation.mutate(data as any);
+  };
+
+  return (
+    <Modal open={open} onClose={onClose}>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
+        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+          Edit Task
+        </Typography.Subtitle>
+
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+          <Input
+            label="Title"
+            value={title}
+            onChange={(e) => setTitle((e.target as HTMLInputElement).value)}
+            autoFocus
+          />
+
+          <Input
+            label="Description"
+            multiline
+            value={description}
+            onChange={(e) => setDescription((e.target as HTMLTextAreaElement).value)}
+            placeholder="What this task is about..."
+          />
+
+          <Input
+            label="Instructions"
+            multiline
+            value={instructions}
+            onChange={(e) => setInstructions((e.target as HTMLTextAreaElement).value)}
+            placeholder="How the mind should execute this..."
+          />
+
+          <div>
+            <label css={css`
+              display: block;
+              font-size: ${theme.typography.fontSize.sm};
+              font-weight: ${theme.typography.fontWeight.medium};
+              color: ${theme.colors.text.secondary};
+              margin-bottom: ${theme.spacing[1.5]};
+            `}>
+              Priority
+            </label>
+            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.1"
+                value={priority}
+                onChange={(e) => setPriority(parseFloat(e.target.value))}
+                css={css`flex: 1; accent-color: ${theme.colors.accent};`}
+              />
+              <Typography.SmallBody css={css`min-width: 36px; text-align: right;`}>
+                {(priority * 10).toFixed(0)}/10
+              </Typography.SmallBody>
+            </div>
+          </div>
+
+          {task.scheduleType === 'recurring' && (
+            <div>
+              <Input
+                label="Cron Expression"
+                value={cronExpression}
+                onChange={(e) => setCronExpression((e.target as HTMLInputElement).value)}
+                placeholder="e.g. 0 9 * * *"
+              />
+              {cronExpression && (
+                <Typography.Caption color="hint" css={css`margin-top: ${theme.spacing[1]};`}>
+                  {humanizeCron(cronExpression)}
+                </Typography.Caption>
+              )}
+            </div>
+          )}
+
+          {task.scheduleType === 'one_shot' && (
+            <div>
+              <label css={css`
+                display: block;
+                font-size: ${theme.typography.fontSize.sm};
+                font-weight: ${theme.typography.fontWeight.medium};
+                color: ${theme.colors.text.secondary};
+                margin-bottom: ${theme.spacing[1.5]};
+              `}>
+                Scheduled At
+              </label>
+              <input
+                type="datetime-local"
+                value={scheduledAt}
+                onChange={(e) => setScheduledAt(e.target.value)}
+                css={css`
+                  width: 100%;
+                  padding: ${theme.spacing[3]};
+                  background: ${theme.colors.background.paper};
+                  border: 1px solid ${theme.colors.border.default};
+                  border-radius: ${theme.borderRadius.default};
+                  color: ${theme.colors.text.primary};
+                  font-size: ${theme.typography.fontSize.base};
+                  outline: none;
+                  &:focus { border-color: ${theme.colors.border.focus}; }
+                  color-scheme: dark;
+                `}
+              />
+            </div>
+          )}
+        </div>
+
+        <div css={css`display: flex; justify-content: flex-end; gap: ${theme.spacing[2]};`}>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleSave}
+            disabled={!title.trim()}
+            loading={updateMutation.isPending}
+          >
+            Save
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ============================================================================
 // Task Card
 // ============================================================================
 
 function TaskCard({ task }: { task: any }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  const utils = trpc.useUtils();
 
   const { data: taskRuns } = trpc.tasks.getTaskRuns.useQuery(
     { taskId: task.id },
     { retry: false, enabled: expanded },
   );
+
+  const deleteMutation = trpc.tasks.deleteTask.useMutation({
+    onSuccess: () => {
+      setDeleteOpen(false);
+      utils.tasks.getTasks.invalidate();
+      utils.tasks.getDeferredTasks.invalidate();
+    },
+  });
 
   // Build the schedule description line
   const scheduleDescription = useMemo(() => {
@@ -176,6 +379,7 @@ function TaskCard({ task }: { task: any }) {
     : Timer;
 
   return (
+    <>
     <div
       onClick={() => setExpanded(!expanded)}
       css={css`
@@ -383,12 +587,66 @@ function TaskCard({ task }: { task: any }) {
                     </Typography.Caption>
                   )}
                 </div>
+
+                {/* Action buttons */}
+                <div css={css`
+                  display: flex;
+                  justify-content: flex-end;
+                  gap: ${theme.spacing[1]};
+                `}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    title="Edit task"
+                    onClick={(e) => { e.stopPropagation(); setEditOpen(true); }}
+                  >
+                    <PencilSimple size={16} />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    title="Delete task"
+                    onClick={(e) => { e.stopPropagation(); setDeleteOpen(true); }}
+                  >
+                    <Trash size={16} />
+                  </Button>
+                </div>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
+
     </div>
+
+    {/* Edit Modal */}
+    <EditTaskModal open={editOpen} onClose={() => setEditOpen(false)} task={task} />
+
+    {/* Delete Confirmation Modal */}
+    <Modal open={deleteOpen} onClose={() => setDeleteOpen(false)}>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
+        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+          Delete Task
+        </Typography.Subtitle>
+        <Typography.SmallBody color="secondary">
+          Are you sure you want to delete "{task.title}"? This will also remove all run history.
+        </Typography.SmallBody>
+        <div css={css`display: flex; justify-content: flex-end; gap: ${theme.spacing[2]};`}>
+          <Button variant="ghost" size="sm" onClick={() => setDeleteOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => deleteMutation.mutate({ taskId: task.id })}
+            loading={deleteMutation.isPending}
+          >
+            Delete
+          </Button>
+        </div>
+      </div>
+    </Modal>
+    </>
   );
 }
 
@@ -468,9 +726,15 @@ export function TasksSection() {
     [scheduledTasks],
   );
 
-  // Real-time subscription — invalidate on task changes
+  // Real-time subscriptions — invalidate on task changes and deletions
   const utils = trpc.useUtils();
   trpc.tasks.onTaskChange.useSubscription(undefined, {
+    onData: () => {
+      utils.tasks.getTasks.invalidate();
+      utils.tasks.getDeferredTasks.invalidate();
+    },
+  });
+  trpc.tasks.onTaskDeleted.useSubscription(undefined, {
     onData: () => {
       utils.tasks.getTasks.invalidate();
       utils.tasks.getDeferredTasks.invalidate();

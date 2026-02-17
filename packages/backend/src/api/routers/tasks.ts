@@ -3,11 +3,13 @@
  */
 
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';
 import { getHeartbeatDb } from '../../db/index.js';
 import * as taskStore from '../../db/stores/task-store.js';
 import { getEventBus } from '../../lib/event-bus.js';
+import { getTaskScheduler, getTaskRunner } from '../../tasks/index.js';
 import type { Task } from '@animus/shared';
 
 export const tasksRouter = router({
@@ -142,11 +144,14 @@ export const tasksRouter = router({
           .optional(),
         priority: z.number().min(0).max(1).optional(),
         cronExpression: z.string().nullable().optional(),
+        scheduledAt: z.string().nullable().optional(),
       })
     )
     .mutation(({ input }) => {
       const db = getHeartbeatDb();
       const { taskId, ...rest } = input;
+      const cronChanged = rest.cronExpression !== undefined;
+      const scheduledAtChanged = rest.scheduledAt !== undefined;
       const data: import('../../db/stores/task-store.js').UpdateTaskData = {};
       if (rest.title !== undefined) data.title = rest.title;
       if (rest.description !== undefined) data.description = rest.description;
@@ -154,12 +159,51 @@ export const tasksRouter = router({
       if (rest.status !== undefined) data.status = rest.status;
       if (rest.priority !== undefined) data.priority = rest.priority;
       if (rest.cronExpression !== undefined) data.cronExpression = rest.cronExpression;
+      if (rest.scheduledAt !== undefined) {
+        data.scheduledAt = rest.scheduledAt;
+        data.nextRunAt = rest.scheduledAt;
+      }
       taskStore.updateTask(db, taskId, data);
       const updated = taskStore.getTask(db, taskId);
       if (updated) {
+        // Re-register with scheduler if schedule changed
+        if (cronChanged || scheduledAtChanged) {
+          const scheduler = getTaskScheduler();
+          scheduler.unregisterTask(taskId);
+          if (updated.status === 'scheduled' && (updated.scheduleType === 'recurring' || updated.scheduleType === 'one_shot')) {
+            scheduler.registerTask(updated);
+          }
+        }
         getEventBus().emit('task:updated' as keyof import('@animus/shared').AnimusEventMap, updated as never);
       }
       return updated;
+    }),
+
+  /**
+   * Delete a task by ID.
+   */
+  deleteTask: protectedProcedure
+    .input(z.object({ taskId: z.string() }))
+    .mutation(({ input }) => {
+      const db = getHeartbeatDb();
+      const task = taskStore.getTask(db, input.taskId);
+      if (!task) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' });
+      }
+
+      // Cancel if in progress
+      if (task.status === 'in_progress') {
+        getTaskRunner().cancelTask(input.taskId);
+      }
+
+      // Unregister from scheduler (clears timer)
+      getTaskScheduler().unregisterTask(input.taskId);
+
+      // Delete from DB (CASCADE handles task_runs)
+      taskStore.deleteTask(db, input.taskId);
+
+      getEventBus().emit('task:deleted' as keyof import('@animus/shared').AnimusEventMap, { taskId: input.taskId } as never);
+      return { success: true };
     }),
 
   /**
@@ -174,6 +218,20 @@ export const tasksRouter = router({
       return () => {
         eventBus.off('task:created', handler);
         eventBus.off('task:updated', handler);
+      };
+    });
+  }),
+
+  /**
+   * Subscribe to task deletions.
+   */
+  onTaskDeleted: protectedProcedure.subscription(() => {
+    return observable<{ taskId: string }>((emit) => {
+      const eventBus = getEventBus() as import('events').EventEmitter;
+      const handler = (payload: { taskId: string }) => emit.next(payload);
+      eventBus.on('task:deleted', handler);
+      return () => {
+        eventBus.off('task:deleted', handler);
       };
     });
   }),

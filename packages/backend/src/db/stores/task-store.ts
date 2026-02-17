@@ -166,6 +166,11 @@ export function updateTask(
   );
 }
 
+export function deleteTask(db: Database.Database, id: string): boolean {
+  const result = db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
 export interface ListTasksFilters {
   status?: TaskStatus;
   scheduleType?: ScheduleType;
