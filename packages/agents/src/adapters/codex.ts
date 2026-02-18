@@ -325,6 +325,13 @@ class CodexSession extends BaseSession {
   }
 
   /**
+   * Get the model name for this session.
+   */
+  getModelName(): string {
+    return this.config.model ?? 'codex-mini-latest';
+  }
+
+  /**
    * Initialize thread if needed.
    */
   private async ensureThread(): Promise<CodexThread> {
@@ -401,16 +408,18 @@ class CodexSession extends BaseSession {
       const result = await thread.run(input);
       response = result.finalResponse;
 
-      // Update usage
+      // Update usage and calculate cost
       if (result.usage) {
         this.updateUsage({
           inputTokens: result.usage.input_tokens ?? 0,
           outputTokens: result.usage.output_tokens ?? 0,
         });
       }
+      this.calculateAndSetCost();
 
       return {
         content: response,
+        turns: [{ turnIndex: 0, text: response, hasToolCalls: false, hasThinking: false, toolNames: [] }],
         finishReason,
         usage: this.getUsage(),
         cost: this.getCost() ?? undefined,
@@ -427,7 +436,7 @@ class CodexSession extends BaseSession {
    */
   async promptStreaming(
     input: string,
-    onChunk: (chunk: string) => void,
+    onChunk: (chunk: string, meta: import('../types.js').StreamChunkMeta) => void,
     options?: PromptOptions,
   ): Promise<AgentResponse> {
     this.assertActive();
@@ -466,7 +475,7 @@ class CodexSession extends BaseSession {
             if (event.delta?.text) {
               const chunk = event.delta.text;
               accumulated += chunk;
-              onChunk(chunk);
+              onChunk(chunk, { turnIndex: 0 });
 
               await this.emit(
                 this.createEvent('response_chunk', {
@@ -493,6 +502,9 @@ class CodexSession extends BaseSession {
         }
       }
 
+      // Calculate cost from registry
+      this.calculateAndSetCost();
+
       // Emit response end
       await this.emit(
         this.createEvent('response_end', {
@@ -503,6 +515,7 @@ class CodexSession extends BaseSession {
 
       return {
         content: response,
+        turns: [{ turnIndex: 0, text: response, hasToolCalls: false, hasThinking: false, toolNames: [] }],
         finishReason,
         usage: this.getUsage(),
         cost: this.getCost() ?? undefined,

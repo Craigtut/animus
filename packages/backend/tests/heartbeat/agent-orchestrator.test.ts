@@ -21,6 +21,7 @@ function createMockSession(overrides?: Partial<IAgentSession>): IAgentSession {
     registerHooks: vi.fn(),
     prompt: vi.fn().mockResolvedValue({
       content: 'Agent result content',
+      turns: [{ turnIndex: 0, text: 'Agent result content', hasToolCalls: false, hasThinking: false, toolNames: [] }],
       model: 'claude-opus-4-6',
       usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
       cost: null,

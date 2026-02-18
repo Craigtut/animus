@@ -45,6 +45,24 @@ async function main() {
   loadCredentialsIntoEnv(getSystemDb());
   ensureClaudeOnboardingFile();
 
+  // Initialize model registry with disk cache for LiteLLM pricing data
+  const { initModelRegistry } = await import('@animus/agents');
+  const dataDir = path.dirname(env.DB_SYSTEM_PATH);
+  const modelRegistry = initModelRegistry({
+    cacheDir: path.join(dataDir, 'cache'),
+    cacheTtlMs: 24 * 60 * 60 * 1000,
+  });
+  modelRegistry.refresh().then(
+    ({ updated, errors }) => {
+      if (errors.length > 0) {
+        log.warn('Model registry refresh had errors', { errors });
+      } else {
+        log.info(`Model registry initialized (${modelRegistry.size} models, ${updated} pricing updates)`);
+      }
+    },
+    (err) => log.warn('Model registry refresh failed (local data still available)', { error: String(err) }),
+  );
+
   // Create Fastify instance
   const fastify = Fastify({
     logger: false,

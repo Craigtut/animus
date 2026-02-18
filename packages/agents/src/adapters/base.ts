@@ -18,9 +18,11 @@ import type {
   AgentCost,
   AgentResponse,
   PromptOptions,
+  StreamChunkMeta,
   ModelInfo,
 } from '../types.js';
 import { AgentError } from '../errors.js';
+import { getModelRegistry } from '../model-registry.js';
 import { createTaggedLogger, type Logger } from '../logger.js';
 import { agentSessionConfigSchema } from '../schemas.js';
 import { generateUUID, now, createSessionId, parseSessionId } from '../utils/index.js';
@@ -293,13 +295,40 @@ export abstract class BaseSession implements IAgentSession {
     return Date.now() - this.startTime;
   }
 
+  /**
+   * Get the model name for this session.
+   * Subclasses return the resolved or configured model identifier.
+   */
+  abstract getModelName(): string;
+
+  /**
+   * Calculate cost from the model registry and set it on this session.
+   * SDK-provided totalCostUsd is preserved if already set.
+   */
+  protected calculateAndSetCost(): void {
+    const registry = getModelRegistry();
+    const modelId = this.getModelName();
+    const calculated = registry.calculateCost(modelId, this.provider, this.usage);
+    if (calculated) {
+      if (this.cost?.totalCostUsd) {
+        // SDK already provided total — keep it, fill in breakdown
+        this.cost = {
+          ...calculated,
+          totalCostUsd: this.cost.totalCostUsd,
+        };
+      } else {
+        this.cost = calculated;
+      }
+    }
+  }
+
   // Abstract methods that subclasses must implement
 
   abstract prompt(input: string, options?: PromptOptions): Promise<AgentResponse>;
 
   abstract promptStreaming(
     input: string,
-    onChunk: (chunk: string) => void,
+    onChunk: (chunk: string, meta: StreamChunkMeta) => void,
     options?: PromptOptions,
   ): Promise<AgentResponse>;
 

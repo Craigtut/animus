@@ -405,6 +405,13 @@ class OpenCodeSession extends BaseSession {
   }
 
   /**
+   * Get the model name for this session.
+   */
+  getModelName(): string {
+    return this.config.model ?? 'anthropic/claude-sonnet-4-5';
+  }
+
+  /**
    * Initialize the session.
    */
   async initialize(): Promise<void> {
@@ -504,8 +511,12 @@ class OpenCodeSession extends BaseSession {
       // Wait for session to become idle
       response = await this.waitForResponse(eventStream.stream);
 
+      // Calculate cost from registry
+      this.calculateAndSetCost();
+
       return {
         content: response,
+        turns: [{ turnIndex: 0, text: response, hasToolCalls: false, hasThinking: false, toolNames: [] }],
         finishReason,
         usage: this.getUsage(),
         cost: this.getCost() ?? undefined,
@@ -524,7 +535,7 @@ class OpenCodeSession extends BaseSession {
    */
   async promptStreaming(
     input: string,
-    onChunk: (chunk: string) => void,
+    onChunk: (chunk: string, meta: import('../types.js').StreamChunkMeta) => void,
     options?: PromptOptions,
   ): Promise<AgentResponse> {
     this.assertActive();
@@ -584,7 +595,7 @@ class OpenCodeSession extends BaseSession {
             const chunk = part.text.slice(accumulated.length);
             if (chunk) {
               accumulated = part.text;
-              onChunk(chunk);
+              onChunk(chunk, { turnIndex: 0 });
 
               await this.emit(
                 this.createEvent('response_chunk', {
@@ -608,6 +619,9 @@ class OpenCodeSession extends BaseSession {
         }
       }
 
+      // Calculate cost from registry
+      this.calculateAndSetCost();
+
       // Emit response end
       await this.emit(
         this.createEvent('response_end', {
@@ -618,6 +632,7 @@ class OpenCodeSession extends BaseSession {
 
       return {
         content: response,
+        turns: [{ turnIndex: 0, text: response, hasToolCalls: false, hasThinking: false, toolNames: [] }],
         finishReason,
         usage: this.getUsage(),
         cost: this.getCost() ?? undefined,

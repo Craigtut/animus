@@ -1,6 +1,6 @@
 # Agent SDK Documentation
 
-This folder contains comprehensive research and design documentation for the three agent SDKs that the `@animus/agents` package unifies.
+This folder contains comprehensive research and design documentation for the four agent SDKs that the `@animus/agents` package unifies.
 
 ## Structure
 
@@ -14,8 +14,11 @@ docs/agents/
 ├── codex/
 │   ├── sdk-research.md          # OpenAI Codex SDK deep dive
 │   └── oauth.md                 # Codex OAuth device code proxy design
-└── opencode/
-    └── sdk-research.md          # OpenCode SDK deep dive
+├── opencode/
+│   └── sdk-research.md          # OpenCode SDK deep dive
+└── pi/
+    ├── sdk-research.md            # Pi AI + Pi Agent Core deep dive
+    └── adapter-implementation.md  # Pi adapter implementation plan
 ```
 
 ## Per-Provider Documentation
@@ -51,6 +54,18 @@ docs/agents/
 - **Auth**: Per-provider API keys
 - **Strengths**: 75+ providers, native plan mode, full tool-level permissions
 
+### Pi (`@mariozechner/pi-ai` + `@mariozechner/pi-agent-core`)
+
+| Document | Description |
+|----------|-------------|
+| [pi/sdk-research.md](./pi/sdk-research.md) | Pi AI multi-provider LLM abstraction + Pi Agent Core framework deep dive |
+| [pi/adapter-implementation.md](./pi/adapter-implementation.md) | Full implementation plan for adding Pi as fourth adapter |
+
+- **Architecture**: In-process library (no subprocess or server)
+- **Auth**: Per-provider API keys, dynamic key resolution, OAuth for 5 providers
+- **Strengths**: 20+ providers via 9 API backends, `transformContext` hook (dynamic context reshaping), cross-provider handoffs, `steer()` for mid-execution interrupts, excellent cost tracking
+- **Limitations**: No MCP (bridged at adapter), no native sub-agents, TypeBox not Zod, sequential tool execution
+
 ## Cross-Cutting Documentation
 
 | Document | Description |
@@ -62,16 +77,18 @@ docs/agents/
 
 ### SDK Comparison
 
-| Aspect | Claude | Codex | OpenCode |
-|--------|--------|-------|----------|
-| Package | `@anthropic-ai/claude-agent-sdk` | `@openai/codex-sdk` | `@opencode-ai/sdk` |
-| Architecture | Async generator (spawns CLI) | CLI subprocess | Client/Server |
-| Auth | API key / OAuth token | API key / ChatGPT OAuth | Per-provider API keys |
-| Streaming | Generator yield | Event iterator | SSE subscription |
-| Cancel/Abort | AbortController | Not supported | session.abort() |
-| Pre-exec hooks | Can block/modify | Observe only | Can block (throw) + modify |
-| Subagents | Task tool | Not native | @mentions |
-| MCP Support | Native (in-process + stdio) | stdio-based | Via config |
+| Aspect | Claude | Codex | OpenCode | Pi |
+|--------|--------|-------|----------|-----|
+| Package | `@anthropic-ai/claude-agent-sdk` | `@openai/codex-sdk` | `@opencode-ai/sdk` | `@mariozechner/pi-ai` + `pi-agent-core` |
+| Architecture | Async generator (spawns CLI) | CLI subprocess | Client/Server | In-process library |
+| Auth | API key / OAuth token | API key / ChatGPT OAuth | Per-provider API keys | Per-provider + dynamic + OAuth |
+| Streaming | Generator yield | Event iterator | SSE subscription | Async iterable + result promise |
+| Cancel/Abort | AbortController | Not supported | session.abort() | AbortController |
+| Pre-exec hooks | Can block/modify | Observe only | Can block (throw) + modify | Via tool wrapping (adapter) |
+| Subagents | Task tool | Not native | @mentions | Not native |
+| MCP Support | Native (in-process + stdio) | stdio-based | Via config | None (bridged at adapter) |
+| Context Transform | Not supported | Not supported | Not supported | transformContext hook |
+| Mid-exec Steering | injectMessage | Not supported | Not supported | steer() (best) |
 
 ### Design Decisions
 
@@ -93,6 +110,7 @@ docs/agents/
 1. **Claude Adapter** (first) - Most mature SDK, best documentation
 2. **Codex Adapter** (second) - Popular, subscription auth option
 3. **OpenCode Adapter** (third) - Most different architecture
+4. **Pi Adapter** (fourth) - Unique transformContext, multi-provider gateway
 
 ## External References
 
@@ -111,6 +129,11 @@ docs/agents/
 - [GitHub](https://github.com/opencode-ai/opencode)
 - [npm](https://www.npmjs.com/package/@opencode-ai/sdk)
 
+### Pi (pi-ai + pi-agent-core)
+- [GitHub: pi-mono](https://github.com/badlogic/pi-mono)
+- [npm: @mariozechner/pi-ai](https://www.npmjs.com/package/@mariozechner/pi-ai)
+- [npm: @mariozechner/pi-agent-core](https://www.npmjs.com/package/@mariozechner/pi-agent-core)
+
 ---
 
-*Research conducted: 2026-02-04, restructured: 2026-02-08*
+*Research conducted: 2026-02-04, restructured: 2026-02-08, Pi added: 2026-02-17*

@@ -18,6 +18,8 @@ import type {
   AgentCost,
   PromptOptions,
   HookResult,
+  StreamChunkMeta,
+  TurnResult,
 } from '../types.js';
 import { AgentError, wrapError } from '../errors.js';
 import { createTaggedLogger, type Logger } from '../logger.js';
@@ -497,7 +499,7 @@ class ClaudeSession extends BaseSession {
   /**
    * Get the model name, preferring the resolved model from the SDK init message.
    */
-  private getModelName(): string {
+  getModelName(): string {
     return this.resolvedModel ?? this.config.model ?? 'unknown';
   }
 
@@ -519,6 +521,8 @@ class ClaudeSession extends BaseSession {
     let structuredOutput: unknown;
     let finishReason: AgentResponse['finishReason'] = 'complete';
     let gotSuccessResult = false;
+    let turnIndex = 0;
+    const turns: TurnResult[] = [];
 
     try {
       const sdkOptions = this.buildSdkOptions();
@@ -582,9 +586,19 @@ class ClaudeSession extends BaseSession {
           this.vlog('Session ID resolved', { nativeSessionId: message.session_id });
         }
 
-        // Extract response from assistant message
+        // Extract response from assistant message and track turns
         if (message.type === 'assistant') {
           response = this.extractContent(message);
+          const contentBlocks = (message as AssistantMessage).message.content;
+          const toolUseBlocks = contentBlocks.filter(b => b.type === 'tool_use');
+          turns.push({
+            turnIndex,
+            text: response,
+            hasToolCalls: toolUseBlocks.length > 0,
+            hasThinking: contentBlocks.some(b => b.type === 'thinking'),
+            toolNames: toolUseBlocks.map(b => b.name).filter((n): n is string => !!n),
+          });
+          turnIndex++;
         }
 
         // Extract result info
@@ -623,6 +637,7 @@ class ClaudeSession extends BaseSession {
 
       return {
         content: response,
+        turns,
         finishReason,
         usage: this.getUsage(),
         cost: this.getCost() ?? undefined,
@@ -646,6 +661,7 @@ class ClaudeSession extends BaseSession {
 
         return {
           content: response,
+          turns,
           finishReason,
           usage: this.getUsage(),
           cost: this.getCost() ?? undefined,
@@ -694,7 +710,7 @@ class ClaudeSession extends BaseSession {
    */
   async promptStreaming(
     input: string,
-    onChunk: (chunk: string) => void,
+    onChunk: (chunk: string, meta: StreamChunkMeta) => void,
     options?: PromptOptions,
   ): Promise<AgentResponse> {
     this.assertActive();
@@ -712,6 +728,8 @@ class ClaudeSession extends BaseSession {
     let structuredOutput: unknown;
     let finishReason: AgentResponse['finishReason'] = 'complete';
     let gotSuccessResult = false;
+    let turnIndex = 0;
+    const turns: TurnResult[] = [];
 
     try {
       const sdkOptions = this.buildSdkOptions();
@@ -794,6 +812,40 @@ class ClaudeSession extends BaseSession {
         }
         lastMessageType = message.type;
 
+        // Emit turn_end BEFORE processMessage for assistant messages,
+        // so turn_end arrives before tool_call_start in the event stream.
+        // This lets consumers commit streaming text before tool indicators appear.
+        if (message.type === 'assistant') {
+          const turnText = this.extractContent(message as AssistantMessage);
+          const contentBlocks = (message as AssistantMessage).message.content;
+          const toolUseBlocks = contentBlocks.filter(b => b.type === 'tool_use');
+          const hasToolCalls = toolUseBlocks.length > 0;
+          const hasThinking = contentBlocks.some(b => b.type === 'thinking');
+          const toolNames = toolUseBlocks
+            .map(b => b.name)
+            .filter((n): n is string => !!n);
+
+          const turnResult: TurnResult = {
+            turnIndex,
+            text: turnText,
+            hasToolCalls,
+            hasThinking,
+            toolNames,
+          };
+          turns.push(turnResult);
+
+          await this.emit(
+            this.createEvent('turn_end', {
+              turnIndex,
+              text: turnText,
+              hasToolCalls,
+              hasThinking,
+              toolNames,
+            }),
+          );
+          turnIndex++;
+        }
+
         await this.processMessage(message);
 
         // Extract session ID from init message
@@ -811,7 +863,7 @@ class ClaudeSession extends BaseSession {
           if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
             const chunk = event.delta.text ?? '';
             accumulated += chunk;
-            onChunk(chunk);
+            onChunk(chunk, { turnIndex });
 
             // Emit chunk event
             await this.emit(
@@ -897,6 +949,7 @@ class ClaudeSession extends BaseSession {
 
       return {
         content: response,
+        turns,
         finishReason,
         usage: this.getUsage(),
         cost: this.getCost() ?? undefined,
@@ -928,6 +981,7 @@ class ClaudeSession extends BaseSession {
 
         return {
           content: response,
+          turns,
           finishReason,
           usage: this.getUsage(),
           cost: this.getCost() ?? undefined,
@@ -1058,7 +1112,7 @@ class ClaudeSession extends BaseSession {
       maxThinkingTokens: this.config.maxThinkingTokens,
       includePartialMessages: this.config.includePartialMessages,
       abortController: this.abortController ?? undefined,
-      resume: this.config.resume,
+      resume: this.config.resume ?? this.nativeSessionId ?? undefined,
       forkSession: this.config.forkSession,
       mcpServers: this.config.mcpServers,
       hooks: this.buildSdkHooks(),
@@ -1343,13 +1397,15 @@ class ClaudeSession extends BaseSession {
       cacheWriteTokens: result.usage.cache_creation_input_tokens,
     });
 
+    // Set SDK-provided total first, then fill in breakdown from registry
     this.cost = {
-      inputCostUsd: 0, // Would need pricing data to calculate
+      inputCostUsd: 0,
       outputCostUsd: 0,
       totalCostUsd: result.total_cost_usd,
       model: this.getModelName(),
       provider: 'claude',
     };
+    this.calculateAndSetCost();
   }
 
   /**

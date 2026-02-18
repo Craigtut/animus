@@ -277,13 +277,24 @@ export async function executeOutput(
     // 3b. Apply energy delta
     if (settings.energySystemEnabled && output.energyDelta) {
       const before = gathered.energyLevel ?? 0.85;
-      const after = clamp(before + output.energyDelta.delta, 0, 1);
+
+      // During sleep hours, ignore the mind's energy delta entirely.
+      // The circadian decay toward 0.0 is the sole force on energy at night —
+      // otherwise the mind narrates sleep as "restorative" and produces positive
+      // deltas that prevent energy from ever reaching the sleeping band.
+      const inSleepHours = isInSleepHours(
+        new Date(), settings.sleepStartHour, settings.sleepEndHour,
+        settings.timezone || 'UTC'
+      );
+      const effectiveDelta = inSleepHours ? 0 : output.energyDelta.delta;
+
+      const after = clamp(before + effectiveDelta, 0, 1);
       heartbeatStore.updateEnergyLevel(hbDb, after);
       heartbeatStore.insertEnergyHistory(hbDb, {
         tickNumber,
         energyBefore: before,
         energyAfter: after,
-        delta: output.energyDelta.delta,
+        delta: effectiveDelta,
         reasoning: output.energyDelta.reasoning,
         circadianBaseline: gathered.circadianBaseline ?? 0.85,
         energyBand: getEnergyBand(after),
@@ -293,13 +304,9 @@ export async function executeOutput(
       // Interval switching based on energy band transitions
       const prevBand = getEnergyBand(before);
       const newBand = getEnergyBand(after);
-      const inSleep = isInSleepHours(
-        new Date(), settings.sleepStartHour, settings.sleepEndHour,
-        settings.timezone || 'UTC'
-      );
       if (newBand === 'sleeping' && prevBand !== 'sleeping') {
         deps.tickQueue.updateInterval(settings.sleepTickIntervalMs);
-      } else if (prevBand === 'sleeping' && newBand !== 'sleeping' && !inSleep) {
+      } else if (prevBand === 'sleeping' && newBand !== 'sleeping' && !inSleepHours) {
         deps.tickQueue.updateInterval(settings.heartbeatIntervalMs);
       }
     }

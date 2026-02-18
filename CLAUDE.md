@@ -311,7 +311,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - **Frontend Specs**: `docs/frontend/app-shell.md` (navigation, transitions, routes), `docs/frontend/presence.md` (main space), `docs/frontend/mind.md` (inner life detail), `docs/frontend/people.md` (contacts), `docs/frontend/settings.md` (configuration), `docs/frontend/voice-mode.md` (voice interaction)
 - **Guides**: `docs/guides/getting-started.md`
 - **Skills**: `.claude/skills/build-plugin/` (plugin development guide, invoked automatically when building plugins)
-- **Agent SDKs**: `docs/agents/` (per-provider folders: claude/, codex/, opencode/ + architecture overview + plugin/extension systems)
+- **Agent SDKs**: `docs/agents/` (per-provider folders: claude/, codex/, opencode/, pi/ + architecture overview + plugin/extension systems)
 
 **When to use `/doc-explorer`:**
 - Starting work on any feature → `/doc-explorer` with the relevant topic
@@ -331,6 +331,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on reflex/fast-response/voice-latency → `/doc-explorer reflex`
 - Working on sleep/energy/circadian rhythm → `/doc-explorer sleep-energy`
 - Working on agent SDKs → `/doc-explorer agents`
+- Working on Pi adapter/transformContext → `/doc-explorer pi`
 - Building a new plugin → the `build-plugin` skill is loaded automatically; for architecture context use `/doc-explorer plugin-system`
 - Working on backend/API → `/doc-explorer architecture`
 - Unsure about project conventions → `/doc-explorer` (no args, see everything)

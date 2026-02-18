@@ -81,7 +81,12 @@ export type {
   ResponseStartData,
   ResponseChunkData,
   ResponseEndData,
+  TurnEndData,
   ErrorData,
+
+  // Streaming & Turns
+  StreamChunkMeta,
+  TurnResult,
 
   // Usage & Cost
   SessionUsage,
@@ -184,6 +189,19 @@ export {
   type AgentLogStore,
   type LoggingHookOptions,
 } from './logging-hook.js';
+
+// ============================================================================
+// Model Registry
+// ============================================================================
+
+export {
+  ModelRegistry,
+  getModelRegistry,
+  initModelRegistry,
+  resetModelRegistry,
+  type ModelEntry,
+  type ModelRegistryConfig,
+} from './model-registry.js';
 
 // ============================================================================
 // Adapters

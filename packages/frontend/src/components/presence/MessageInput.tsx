@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { PaperPlaneRight } from '@phosphor-icons/react';
 
 // ============================================================================
@@ -29,10 +29,18 @@ export function MessageInput({ onSend, disabled = false }: MessageInputProps) {
   const singleLineHeight = lineHeightPx + paddingY;
   const [textareaHeight, setTextareaHeight] = useState<number>(singleLineHeight);
 
-  // Measure and update textarea height whenever value changes
-  useEffect(() => {
+  // Measure and update textarea height whenever value changes.
+  // useLayoutEffect runs synchronously before paint, so CSS transitions
+  // haven't started yet and scrollHeight measurements are accurate.
+  useLayoutEffect(() => {
     const el = inputRef.current;
     if (!el) return;
+
+    // Empty textarea is always single line — no measurement needed
+    if (!value) {
+      setTextareaHeight(singleLineHeight);
+      return;
+    }
 
     // Temporarily collapse to measure true content height
     const prev = el.style.height;
@@ -42,7 +50,7 @@ export function MessageInput({ onSend, disabled = false }: MessageInputProps) {
 
     const clamped = Math.min(scrollH, maxTextareaHeight);
     setTextareaHeight(clamped);
-  }, [value, maxTextareaHeight]);
+  }, [value, maxTextareaHeight, singleLineHeight]);
 
   const handleSend = () => {
     const trimmed = value.trim();

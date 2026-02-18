@@ -98,6 +98,8 @@ Organized by provider with cross-cutting docs at the top level.
 | `docs/agents/codex/sdk-research.md` | 13 KB | Codex SDK - thread-based model, Codex class, startThread(), auth (ChatGPT OAuth or API key), no cancel/abort, approval policies |
 | `docs/agents/codex/oauth.md` | 18 KB | Codex OAuth device code flow - OpenAI endpoints, device auth protocol, token lifecycle, auth.json format, RFC 8628 differences, Animus proxy architecture, tRPC procedures, frontend UX |
 | `docs/agents/opencode/sdk-research.md` | 12 KB | OpenCode SDK - client/server architecture, createOpencode(), session management, plugin system, 75+ providers |
+| `docs/agents/pi/sdk-research.md` | 20 KB | Pi AI + Pi Agent Core - in-process library, 20+ providers via 9 API backends, transformContext hook, steer(), TypeBox tools, cross-provider handoffs, cost tracking, sequential tool execution |
+| `docs/agents/pi/adapter-implementation.md` | 25 KB | Pi adapter implementation plan - PiAdapter/PiSession design, transformContext exposure, MCP tool bridging (Zod→TypeBox), event mapping, warm session semantics, capabilities, error handling, build sequence |
 
 ## Exploration Strategy
 
@@ -141,6 +143,8 @@ Use this to quickly map user questions to the right docs:
 - **codex, openai, thread, codex sdk** -> `docs/agents/codex/sdk-research.md`
 - **codex oauth, chatgpt auth, device code** -> `docs/agents/codex/oauth.md`
 - **opencode, provider-agnostic, client-server** -> `docs/agents/opencode/sdk-research.md`
+- **pi, pi-ai, pi-agent-core, transformContext, steer, in-process, multi-provider gateway, TypeBox, cross-provider** -> `docs/agents/pi/sdk-research.md`
+- **pi adapter, pi implementation, context transform adapter, MCP bridging, Zod to TypeBox** -> `docs/agents/pi/adapter-implementation.md`
 - **abstraction layer, unified, event normalization, sdk comparison** -> `docs/agents/architecture-overview.md`
 - **plugin, extension, hook system, plugin architecture, plugin manager, skills-first, SKILL.md standard** -> `docs/architecture/plugin-system.md`
 - **plugin SDK comparison, plugin research, cross-SDK plugins** -> `docs/agents/plugin-extension-systems.md`

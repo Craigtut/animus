@@ -131,6 +131,17 @@ function writeToLogFile(level: LogLevel, name: string, args: unknown[]): void {
 }
 
 // ---------------------------------------------------------------------------
+// Console suppression (for sandbox TUI mode)
+// ---------------------------------------------------------------------------
+
+let consoleSuppressed = false;
+
+/** Suppress all console output from loggers. File logging continues. */
+export function suppressConsole(): void {
+  consoleSuppressed = true;
+}
+
+// ---------------------------------------------------------------------------
 // Category filtering (DB-persisted, cached in memory)
 // ---------------------------------------------------------------------------
 
@@ -180,7 +191,8 @@ export function createLogger(name: string, category?: string): Logger {
     // Always write to file (captures everything regardless of level/category)
     writeToLogFile(level, name, args);
 
-    // Console output respects level and category filters
+    // Console output respects level, category filters, and suppression
+    if (consoleSuppressed) return;
     if (LEVEL_PRIORITY[level] < MIN_LEVEL) return;
     if (!isCategoryEnabled(cat)) return;
 

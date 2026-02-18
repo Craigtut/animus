@@ -367,6 +367,7 @@ export type AgentEventData =
   | ResponseStartData
   | ResponseChunkData
   | ResponseEndData
+  | TurnEndData
   | ErrorData;
 
 export interface SessionStartData {
@@ -430,6 +431,19 @@ export interface ResponseEndData {
   finishReason: 'complete' | 'max_tokens' | 'tool_use' | 'error';
 }
 
+export interface TurnEndData {
+  /** Zero-based index of this turn within the prompt */
+  turnIndex: number;
+  /** The text content produced in this turn */
+  text: string;
+  /** Whether this turn contained tool_use blocks */
+  hasToolCalls: boolean;
+  /** Whether this turn contained thinking blocks */
+  hasThinking: boolean;
+  /** Tool names used in this turn (if any) */
+  toolNames: string[];
+}
+
 export interface ErrorData {
   code: string;
   message: string;
@@ -487,11 +501,55 @@ export interface AgentCost {
 }
 
 /**
+ * Metadata passed alongside each streaming chunk.
+ *
+ * Consumers can use the optional second argument to `onChunk` to route
+ * streamed text by turn, or ignore it for simple streaming.
+ */
+export interface StreamChunkMeta {
+  /** Which turn (zero-based) this chunk belongs to */
+  turnIndex: number;
+}
+
+/**
+ * Complete record of a single agent turn within a prompt.
+ *
+ * Available in `AgentResponse.turns` after the prompt finishes.
+ * Intermediate turns (with tool calls) contain the agent's initial
+ * reaction text. The final turn contains the canonical reply.
+ */
+export interface TurnResult {
+  /** Zero-based index of this turn */
+  turnIndex: number;
+  /** The full text produced in this turn */
+  text: string;
+  /** Whether this turn contained tool calls */
+  hasToolCalls: boolean;
+  /** Whether this turn contained thinking blocks */
+  hasThinking: boolean;
+  /** Names of tools called in this turn (if any) */
+  toolNames: string[];
+}
+
+/**
  * Result of an agent prompt.
  */
 export interface AgentResponse {
-  /** The agent's response content */
+  /** The agent's response content (final turn text) */
   content: string;
+
+  /**
+   * All turns produced during this prompt, in order.
+   *
+   * Each turn corresponds to one assistant message. Intermediate turns
+   * (with tool calls) contain the agent's initial reaction before tools
+   * execute. The final turn contains the canonical reply.
+   *
+   * For simple single-turn responses, this will be a single-element array
+   * matching `content`. For multi-turn tool-using responses, earlier entries
+   * contain the intermediate text that was previously discarded.
+   */
+  turns: TurnResult[];
 
   /** How the response ended */
   finishReason: 'complete' | 'max_tokens' | 'tool_use' | 'error';
@@ -632,10 +690,19 @@ export interface IAgentSession {
   /** Send a prompt and get a response */
   prompt(input: string, options?: PromptOptions): Promise<AgentResponse>;
 
-  /** Send a prompt with streaming response */
+  /**
+   * Send a prompt with streaming response.
+   *
+   * The `onChunk` callback receives each text fragment as it arrives.
+   * The optional second argument provides turn context so consumers can
+   * route streaming text by turn without coordinating separate channels.
+   *
+   * Simple consumers can ignore the meta: `(chunk) => showText(chunk)`
+   * Turn-aware consumers can use it: `(chunk, meta) => route(chunk, meta.turnIndex)`
+   */
   promptStreaming(
     input: string,
-    onChunk: (chunk: string) => void,
+    onChunk: (chunk: string, meta: StreamChunkMeta) => void,
     options?: PromptOptions,
   ): Promise<AgentResponse>;
 

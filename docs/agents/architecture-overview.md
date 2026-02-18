@@ -72,10 +72,14 @@ for await (const event of stream) { }
 interface IAgentSession {
   onEvent(handler: (event: AgentEvent) => void): void;
   prompt(input: string): Promise<AgentResponse>;
+  promptStreaming(
+    input: string,
+    onChunk: (chunk: string, meta: StreamChunkMeta) => void,
+  ): Promise<AgentResponse>;
 }
 ```
 
-Adapters translate native events to our normalized `AgentEvent` type.
+Adapters translate native events to our normalized `AgentEvent` type. The `promptStreaming` method provides real-time per-character text with turn context via `StreamChunkMeta`, and the returned `AgentResponse` includes a `turns` array with per-turn text and metadata. See [Turn-Aware Streaming](#turn-aware-streaming) for details.
 
 ### 3. Session Management Differences
 
@@ -141,10 +145,11 @@ type AgentEventType =
   | 'tool_error'
   | 'response_start'
   | 'response_chunk'
-  | 'response_end';
+  | 'response_end'
+  | 'turn_end';
 ```
 
-Map provider-specific events to these normalized types.
+Map provider-specific events to these normalized types. The `turn_end` event marks the completion of a single assistant turn within a multi-turn prompt — see [Turn-Aware Streaming](#turn-aware-streaming) below.
 
 ### 6. Tool System Differences
 
@@ -225,12 +230,82 @@ Complete mapping from SDK-specific events to unified `AgentEventType`:
 | `response_start` | `message_start` or `content_block_start` (text) | `item.started` (agentMessage) | `message.updated` (first) |
 | `response_chunk` | `content_block_delta` (text_delta) | `item/agentMessage/delta` | `message.part.updated` (type: text) |
 | `response_end` | `message_stop` or `assistant` message | `turn.completed` | `session.idle` |
+| `turn_end` | `assistant` message boundary | (single-turn only) | (single-turn only) |
 
 **Notes:**
 - Claude requires `includePartialMessages: true` for streaming events
 - Claude requires `maxThinkingTokens` option for thinking events
 - Codex thinking comes via `item/reasoning/delta` events
 - OpenCode SSE subscription must be active before prompt
+
+## Turn-Aware Streaming
+
+A single `promptStreaming()` call can span multiple assistant turns when the agent uses tools. Each turn produces streamed text before the agent decides to invoke a tool or deliver the final response. The abstraction layer surfaces this per-turn structure through three channels:
+
+### 1. `StreamChunkMeta` — Real-time per-character context
+
+The `onChunk` callback now receives a `meta` argument with the current turn index:
+
+```typescript
+interface StreamChunkMeta {
+  turnIndex: number;
+}
+
+// Usage
+session.promptStreaming(input, (chunk, meta) => {
+  console.log(`Turn ${meta.turnIndex}: ${chunk}`);
+});
+```
+
+This is backward-compatible — callers passing `(chunk) => {}` still work (JS ignores extra arguments).
+
+### 2. `turn_end` events — Real-time turn boundaries
+
+A `turn_end` event is emitted when an assistant turn completes (before any `tool_call_start` events for that turn). This allows consumers to commit the streamed text for a turn before tool indicators appear.
+
+```typescript
+interface TurnEndData {
+  turnIndex: number;
+  text: string;           // Full text of the completed turn
+  hasToolCalls: boolean;  // true if this turn invoked tools
+  hasThinking: boolean;   // true if this turn included thinking blocks
+  toolNames: string[];    // Names of tools called in this turn
+}
+```
+
+Turns with `hasToolCalls: true` are "intermediate" turns (the agent acknowledged the input and is taking action). Turns with `hasToolCalls: false` are typically the final response.
+
+### 3. `AgentResponse.turns` — Complete turn history after completion
+
+The `AgentResponse` returned by `promptStreaming()` (and `prompt()`) includes a `turns` array with the full per-turn breakdown:
+
+```typescript
+interface TurnResult {
+  turnIndex: number;
+  text: string;
+  hasToolCalls: boolean;
+  hasThinking: boolean;
+  toolNames: string[];
+}
+
+interface AgentResponse {
+  content: string;           // Final turn text (unchanged)
+  turns: TurnResult[];       // All turns in order
+  // ... other fields
+}
+```
+
+### Provider behavior
+
+| Provider | Multi-turn support | Turn tracking |
+|----------|--------------------|---------------|
+| **Claude** | Full — each `assistant` message from the SDK is a turn, `turn_end` emitted with tool/thinking metadata | Native |
+| **Codex** | Single-turn — `turns` array always has one entry | Synthetic |
+| **OpenCode** | Single-turn — `turns` array always has one entry | Synthetic |
+
+### Why this matters
+
+Intermediate turn text is a meaningful language reaction — the agent acknowledges the user's input before performing tool work. Upstream consumers (like the heartbeat mind system) can use these intermediate responses for user-facing feedback (e.g., "Let me look that up for you") while the agent continues working.
 
 ## Unified Error Type
 

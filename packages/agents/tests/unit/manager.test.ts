@@ -51,6 +51,7 @@ function createMockSession(
     registerHooks: vi.fn(),
     prompt: vi.fn().mockResolvedValue({
       content: 'Mock response',
+      turns: [{ turnIndex: 0, text: 'Mock response', hasToolCalls: false, hasThinking: false, toolNames: [] }],
       finishReason: 'complete',
       usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
       durationMs: 100,
@@ -58,6 +59,7 @@ function createMockSession(
     }),
     promptStreaming: vi.fn().mockResolvedValue({
       content: 'Mock streamed response',
+      turns: [{ turnIndex: 0, text: 'Mock streamed response', hasToolCalls: false, hasThinking: false, toolNames: [] }],
       finishReason: 'complete',
       usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
       durationMs: 100,
