@@ -7,7 +7,7 @@
  * This file is the orchestration spine. Pipeline stages are implemented in:
  *   - gather-context.ts    (Stage 1: GATHER)
  *   - mind-session.ts      (Session lifecycle)
- *   - mind-parsing.ts      (JSON parsing/validation)
+ *   - cognitive-tools.ts   (Cognitive MCP tools + snapshot-to-MindOutput)
  *   - decision-executor.ts (Decision execution)
  *   - execute-output.ts    (Stage 3: EXECUTE)
  *
@@ -35,8 +35,6 @@ import {
   type AgentLogStore,
 } from '@animus/agents';
 
-import { JsonStream } from 'llm-json-stream';
-
 import { TickQueue, type QueuedTick } from './tick-queue.js';
 import { type TriggerContext, type CompiledContext, buildMindContext, buildSystemPrompt } from './context-builder.js';
 import { computeBaselines, type PersonaDimensions } from './emotion-engine.js';
@@ -50,11 +48,10 @@ import {
   createMindSessionState,
   getOrCreateMindSession,
   buildMindToolContext,
-  createChunkChannel,
   resetMindSession,
   type MindSessionState,
 } from './mind-session.js';
-import { safeMindOutput, parseMindOutput } from './mind-parsing.js';
+import { safeMindOutput, snapshotToMindOutput } from './cognitive-tools.js';
 import { executeOutput } from './execute-output.js';
 
 const log = createLogger('Heartbeat', 'heartbeat');
@@ -131,14 +128,16 @@ interface MindQueryResult {
   /** The content that was sent optimistically via streaming (if any). */
   earlyReplyContent: string;
   tickInputLogged: boolean;
+  /** All thoughts from this tick (may be > 1 if mid-tick injection caused re-entry). */
+  allThoughts: Array<{ content: string; importance: number }>;
 }
 
 /**
  * Execute the mind query stage.
  *
  * Creates/reuses an agent session, sends compiled context,
- * parses structured JSON output via llm-json-stream,
- * and streams reply.content to the frontend via EventBus.
+ * captures structured state via cognitive MCP tools (record_thought +
+ * record_cognitive_state), and streams reply text via phase tracking.
  */
 async function mindQuery(
   gathered: GatherResult,
@@ -212,7 +211,7 @@ async function mindQuery(
   // If no agent manager configured, fall back to safe output
   if (!ctx.agentManager || ctx.agentManager.getConfiguredProviders().length === 0) {
     log.warn('No agent provider configured, using safe output');
-    return { output: safeMindOutput(triggerInfo), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged: false };
+    return { output: safeMindOutput(triggerInfo), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged: false, allThoughts: [] };
   }
 
   try {
@@ -283,81 +282,16 @@ async function mindQuery(
       }
     }
 
-    // Set up streaming: bridge push-based adapter to pull-based AsyncIterable
-    const channel = createChunkChannel();
-    let fullJson = '';
+    // Reset cognitive snapshot before prompting
+    const cogServer = ctx.mindSession.cognitiveServer;
+    if (cogServer) {
+      cogServer.resetSnapshot();
+    }
 
-    // Create streaming JSON parser to extract reply.content incrementally
-    const parser = JsonStream.parse(channel.iterable);
-    const replyContentStream = parser.get<string>('reply.content');
-    const replyChannelStream = parser.get<string>('reply.channel');
-    const replyMediaStream = parser.get<Array<{ type: string; path: string; filename?: string }>>('reply.media');
-
-    // Catch the internal promise rejection that fires when reply is null
-    // (property path not found). Without this, Node emits an unhandled rejection.
-    (replyContentStream as Promise<string>).catch(() => {});
-    (replyChannelStream as Promise<string>).catch(() => {});
-    (replyMediaStream as Promise<unknown>).catch(() => {});
-
-    // Consume reply chunks in parallel -- emits to frontend in real-time
+    // Phase-based reply streaming:
+    // Only stream text during the 'replying' phase (after record_thought, before record_cognitive_state)
     let replyAccumulated = '';
-    let streamingFailed = false;
     let replySentEarly = false;
-    const replyPromise = (async () => {
-      try {
-        for await (const chunk of replyContentStream) {
-          replyAccumulated += chunk;
-          eventBus.emit('reply:chunk', { content: chunk, accumulated: replyAccumulated });
-        }
-        // Content finished -- await channel and media (short values, finish ms after content)
-        if (replyAccumulated && gathered.contact) {
-          try {
-            const replyChannel = await replyChannelStream;
-            let replyMedia: Array<{ type: string; path: string; filename?: string }> | undefined;
-            try {
-              replyMedia = await replyMediaStream as Array<{ type: string; path: string; filename?: string }>;
-            } catch { /* media is optional */ }
-            if (replyChannel) {
-              const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
-              const { getChannelRouter } = await import('../channels/channel-router.js');
-              const router = getChannelRouter();
-              await router.sendOutbound({
-                contactId: gathered.contact.id,
-                channel: replyChannel,
-                content: replyAccumulated,
-                ...(triggerMetadata ? { metadata: triggerMetadata } : {}),
-                ...(replyMedia && replyMedia.length > 0 ? {
-                  media: replyMedia.map(m => {
-                    const entry: { type: 'image' | 'audio' | 'video' | 'file'; path: string; filename?: string } = {
-                      type: m.type as 'image' | 'audio' | 'video' | 'file',
-                      path: m.path,
-                    };
-                    if (m.filename) entry.filename = m.filename;
-                    return entry;
-                  }),
-                } : {}),
-              });
-              replySentEarly = true;
-              log.info(`Early reply sent on "${replyChannel}" for tick #${tickNumber}`);
-            }
-          } catch (channelErr) {
-            log.debug('Early reply send skipped:', channelErr);
-          }
-        }
-      } catch (err) {
-        // Parser failure — fall back to post-hoc behavior after full parse completes.
-        // "Stream ended before property was found" is the normal case when reply is
-        // null (interval ticks with nothing to say). Only log the full error for
-        // genuinely unexpected failures.
-        streamingFailed = true;
-        const isExpectedNull = err instanceof Error && err.message.includes('Stream ended before property was found');
-        if (isExpectedNull) {
-          log.debug('Reply stream ended (reply is likely null)');
-        } else {
-          log.warn('Reply stream interrupted unexpectedly:', err);
-        }
-      }
-    })();
 
     // --- Mid-tick message injection ---
     // While the mind is running, listen for new inbound messages from the
@@ -416,15 +350,17 @@ async function mindQuery(
     };
     eventBus.on('message:received', messageInjectionHandler);
 
-    // Feed chunks from the agent adapter into both fullJson and the parser channel
-    const response = await session.promptStreaming(
+    // Stream: feed chunks from the agent adapter, only emit reply chunks during 'replying' phase
+    await session.promptStreaming(
       context.userMessage,
       (chunk: string) => {
-        fullJson += chunk;
-        channel.push(chunk);
+        // Only stream text during the reply phase (after record_thought, before record_cognitive_state)
+        if (cogServer && cogServer.getPhase() === 'replying') {
+          replyAccumulated += chunk;
+          eventBus.emit('reply:chunk', { content: chunk, accumulated: replyAccumulated });
+        }
       },
     );
-    channel.end();
 
     // Stop listening for message injection now that the prompt is done
     eventBus.off('message:received', messageInjectionHandler);
@@ -432,35 +368,43 @@ async function mindQuery(
       log.info(`Mid-tick injection summary: ${injectedMessageIds.size} message(s) injected during mind query`);
     }
 
-    // Wait for reply streaming to finish, then clean up parser
-    await replyPromise;
-    await parser.dispose();
+    // Read cognitive snapshot and convert to MindOutput
+    const snapshot = cogServer ? cogServer.getSnapshot() : null;
+    const allThoughts = snapshot?.thoughts ?? [];
 
-    // Parse and validate the structured output using the extracted module
-    fullJson = response.content || fullJson;
-    const parseResult = await parseMindOutput(fullJson, session, triggerInfo);
+    const output = snapshot
+      ? snapshotToMindOutput(snapshot, replyAccumulated, gathered)
+      : safeMindOutput(triggerInfo);
 
-    if (parseResult.failed) {
-      log.warn('Mind output parsing failed completely, using safe fallback');
-    } else if (parseResult.lenient) {
-      log.warn('Mind output used lenient parsing (partial data recovered)');
-    } else if (parseResult.retried) {
-      log.info('Mind output required retry prompt but succeeded');
+    if (snapshot) {
+      log.info(`Cognitive tools captured: ${allThoughts.length} thought(s), ${snapshot.emotionDeltas.length} emotion delta(s), ${snapshot.decisions.length} decision(s)`);
+    } else {
+      log.warn('No cognitive server available — using safe fallback');
     }
 
-    const validated = parseResult.output;
-
-    // Emit reply events: if streaming worked, emit complete; if it failed, emit post-hoc
-    if (validated.reply?.content) {
-      if (streamingFailed || !replyAccumulated) {
-        // Streaming didn't work -- emit the full reply post-hoc
-        eventBus.emit('reply:chunk', {
-          content: validated.reply.content,
-          accumulated: validated.reply.content,
+    // Send early reply through channel router (optimistic — before execute phase)
+    if (replyAccumulated.trim() && gathered.contact && gathered.trigger.channel) {
+      try {
+        const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
+        const { getChannelRouter } = await import('../channels/channel-router.js');
+        const router = getChannelRouter();
+        await router.sendOutbound({
+          contactId: gathered.contact.id,
+          channel: gathered.trigger.channel,
+          content: replyAccumulated.trim(),
+          ...(triggerMetadata ? { metadata: triggerMetadata } : {}),
         });
+        replySentEarly = true;
+        log.info(`Early reply sent on "${gathered.trigger.channel}" for tick #${tickNumber}`);
+      } catch (channelErr) {
+        log.debug('Early reply send skipped:', channelErr);
       }
+    }
+
+    // Emit reply completion event
+    if (output.reply?.content) {
       eventBus.emit('reply:complete', {
-        content: validated.reply.content,
+        content: output.reply.content,
         tickNumber,
       });
     }
@@ -475,7 +419,7 @@ async function mindQuery(
       });
     }
 
-    return { output: validated, compiledContext: context, replySentEarly, earlyReplyContent: replyAccumulated, tickInputLogged };
+    return { output, compiledContext: context, replySentEarly, earlyReplyContent: replyAccumulated, tickInputLogged, allThoughts };
   } catch (err) {
     log.error('Mind query failed:', err);
     ctx.mindSession.toolContext.current = null;
@@ -483,7 +427,7 @@ async function mindQuery(
     // End the leaked session before nulling references
     await resetMindSession(ctx.mindSession, ctx.agentManager);
 
-    return { output: safeMindOutput(triggerInfo), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged: false };
+    return { output: safeMindOutput(triggerInfo), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged: false, allThoughts: [] };
   }
 }
 
@@ -534,7 +478,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     eventBus.emit('heartbeat:stage_change', { stage: 'mind' });
 
     // Stage 2: MIND QUERY
-    const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged } = await mindQuery(gathered, tickNumber);
+    const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged, allThoughts } = await mindQuery(gathered, tickNumber);
 
     // Log tick input to agent_logs.db (only if mindQuery didn't already log it)
     const logSessionId = ctx.mindSession.logSessionId?.() ?? null;
@@ -593,6 +537,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
       replySentEarly,
       earlyReplyContent,
       logSessionId,
+      allThoughts,
     });
 
     // Log tick output to agent_logs.db

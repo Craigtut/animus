@@ -99,7 +99,7 @@ describe('context-builder', () => {
 
       expect(prompt).toContain('Test'); // Name
       expect(prompt).toContain('YOUR INNER LIFE');
-      expect(prompt).toContain('OUTPUT FORMAT');
+      expect(prompt).toContain('OPERATING INSTRUCTIONS');
       expect(prompt).toContain('YOUR EMOTIONS');
       expect(prompt).toContain('DECISIONS');
       expect(prompt).toContain('YOUR MEMORY');
@@ -667,8 +667,8 @@ describe('context-builder', () => {
 
       // Operational sections
       expect(prompt).toContain('YOUR INNER LIFE');
-      expect(prompt).toContain('narrate the story of your life');
-      expect(prompt).toContain('THIRD PERSON');
+      expect(prompt).toContain('OPERATING INSTRUCTIONS');
+      expect(prompt).toContain('record_thought');
     });
 
     it('renders full system prompt for inspection', () => {

@@ -28,59 +28,9 @@ import { getChannelRouter } from '../channels/index.js';
 import type { MemoryManager } from '../memory/index.js';
 
 import type { GatherResult } from './gather-context.js';
+import { buildCognitiveMcpServer, type CognitiveSnapshot, type CognitivePhase } from './cognitive-tools.js';
 
 const log = createLogger('MindSession', 'heartbeat');
-
-// ============================================================================
-// Async Chunk Channel — bridges push-based adapter to pull-based AsyncIterable
-// ============================================================================
-
-export function createChunkChannel(): {
-  push: (chunk: string) => void;
-  end: () => void;
-  iterable: AsyncIterable<string>;
-} {
-  let resolve: ((value: IteratorResult<string>) => void) | null = null;
-  const buffer: string[] = [];
-  let done = false;
-
-  const iterable: AsyncIterable<string> = {
-    [Symbol.asyncIterator]() {
-      return {
-        next(): Promise<IteratorResult<string>> {
-          if (buffer.length > 0) {
-            return Promise.resolve({ value: buffer.shift()!, done: false });
-          }
-          if (done) {
-            return Promise.resolve({ value: undefined, done: true } as IteratorResult<string>);
-          }
-          return new Promise((r) => { resolve = r; });
-        },
-      };
-    },
-  };
-
-  return {
-    push(chunk: string) {
-      if (resolve) {
-        const r = resolve;
-        resolve = null;
-        r({ value: chunk, done: false });
-      } else {
-        buffer.push(chunk);
-      }
-    },
-    end() {
-      done = true;
-      if (resolve) {
-        const r = resolve;
-        resolve = null;
-        r({ value: undefined, done: true } as IteratorResult<string>);
-      }
-    },
-    iterable,
-  };
-}
 
 // ============================================================================
 // Mind Session State
@@ -92,6 +42,13 @@ export interface MindSessionState {
   logSessionId: (() => string | null) | null;
   warmSince: number | null;
   mcpServer: { serverConfig: Record<string, unknown>; allowedTools: string[] } | null;
+  cognitiveServer: {
+    serverConfig: Record<string, unknown>;
+    allowedTools: string[];
+    getSnapshot: () => CognitiveSnapshot;
+    resetSnapshot: () => void;
+    getPhase: () => CognitivePhase;
+  } | null;
   toolContext: MutableToolContext;
   invalidated: boolean;
 }
@@ -103,6 +60,7 @@ export function createMindSessionState(): MindSessionState {
     logSessionId: null,
     warmSince: null,
     mcpServer: null,
+    cognitiveServer: null,
     toolContext: { current: null },
     invalidated: false,
   };
@@ -221,7 +179,7 @@ export async function getOrCreateMindSession(
     // Settings table may not exist yet on fresh install
   }
 
-  // Build MCP server on first cold session (lazy, once per process lifetime)
+  // Build MCP servers on first cold session (lazy, once per process lifetime)
   if (!state.mcpServer && provider === 'claude') {
     try {
       state.mcpServer = await buildMindMcpServer(state.toolContext);
@@ -231,15 +189,27 @@ export async function getOrCreateMindSession(
     }
   }
 
-  // Merge built-in MCP tools with plugin MCP servers
+  // Build cognitive MCP server (record_thought + record_cognitive_state)
+  if (!state.cognitiveServer && provider === 'claude') {
+    try {
+      state.cognitiveServer = await buildCognitiveMcpServer();
+      log.info(`Cognitive MCP server built with tools: ${state.cognitiveServer.allowedTools.join(', ')}`);
+    } catch (err) {
+      log.warn('Failed to build cognitive MCP server, proceeding without:', err);
+    }
+  }
+
+  // Merge built-in MCP tools + cognitive tools + plugin MCP servers
   const pluginMgr = getPluginManager();
   const pluginMcp = pluginMgr.getPluginMcpServersForSdk();
   const mergedMcpServers: Record<string, Record<string, unknown>> = {
     ...(state.mcpServer ? { tools: state.mcpServer.serverConfig } : {}),
+    ...(state.cognitiveServer ? { cognitive: state.cognitiveServer.serverConfig } : {}),
     ...pluginMcp.mcpServers,
   };
   const mergedAllowedTools: string[] = [
     ...(state.mcpServer ? state.mcpServer.allowedTools : []),
+    ...(state.cognitiveServer ? state.cognitiveServer.allowedTools : []),
     ...pluginMcp.allowedTools,
   ];
 
@@ -277,8 +247,8 @@ export async function getOrCreateMindSession(
       executionMode: 'build',
       approvalLevel: 'none',
     },
-    // Structured output enforced via system prompt instructions + llm-json-stream parsing
-    // (no SDK outputFormat — its StructuredOutput tool approach is unreliable with complex schemas)
+    // Structured output captured via cognitive MCP tools (record_thought + record_cognitive_state)
+    // Natural language between tool calls becomes the reply
     // Attach MCP servers: built-in Animus tools + plugin MCP servers
     ...(Object.keys(mergedMcpServers).length > 0 ? {
       mcpServers: mergedMcpServers,

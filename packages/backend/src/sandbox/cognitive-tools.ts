@@ -227,7 +227,7 @@ export async function buildCognitiveMcpServer(): Promise<{
       }
       log.info('record_thought called', { importance: args.importance });
       snapshotBox.current.thought = { content: args.content, importance: args.importance };
-      return '';
+      return { content: [{ type: 'text' as const, text: 'Thought recorded.' }] };
     },
   );
 
@@ -269,7 +269,7 @@ export async function buildCognitiveMcpServer(): Promise<{
       snapshotBox.current.workingMemoryUpdate = args.workingMemoryUpdate ?? snapshotBox.current.workingMemoryUpdate;
       snapshotBox.current.coreSelfUpdate = args.coreSelfUpdate ?? snapshotBox.current.coreSelfUpdate;
 
-      return '';
+      return { content: [{ type: 'text' as const, text: 'Cognitive state recorded.' }] };
     },
   );
 

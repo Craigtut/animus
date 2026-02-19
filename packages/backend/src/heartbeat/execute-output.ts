@@ -73,6 +73,8 @@ export async function executeOutput(
     replySentEarly?: boolean;
     earlyReplyContent?: string;
     logSessionId?: string | null;
+    /** All thoughts from cognitive tools (may be > 1 for mid-tick re-entry). */
+    allThoughts?: Array<{ content: string; importance: number }>;
   },
 ): Promise<void> {
   const hbDb = getHeartbeatDb();
@@ -225,15 +227,22 @@ export async function executeOutput(
 
   // Wrap all DB writes in a transaction for atomicity
   const runTransaction = hbDb.transaction(() => {
-    // 1. Persist thought
-    if (output.thought?.content) {
-      const t = heartbeatStore.insertThought(hbDb, {
-        tickNumber,
-        content: output.thought.content,
-        importance: output.thought.importance,
-        expiresAt: expiresIn(settings.thoughtRetentionDays),
-      });
-      eventBusRef.emit('thought:created', t);
+    // 1. Persist thought(s) — when allThoughts is provided (cognitive tools),
+    //    persist every thought to capture the full thought progression across
+    //    mid-tick injection cycles. Otherwise fall back to output.thought.
+    const thoughtsToInsert = options?.allThoughts && options.allThoughts.length > 0
+      ? options.allThoughts
+      : (output.thought?.content ? [output.thought] : []);
+    for (const thought of thoughtsToInsert) {
+      if (thought.content) {
+        const t = heartbeatStore.insertThought(hbDb, {
+          tickNumber,
+          content: thought.content,
+          importance: thought.importance,
+          expiresAt: expiresIn(settings.thoughtRetentionDays),
+        });
+        eventBusRef.emit('thought:created', t);
+      }
     }
 
     // 2. Persist experience
@@ -383,10 +392,14 @@ export async function executeOutput(
     const seedPromise = (async () => {
       if (!deps.seedManager) return;
 
-      // Seed resonance check
-      if (output.thought?.content && output.thought.importance >= 0.3) {
+      // Seed resonance check — use all thoughts when available (mid-tick re-entry)
+      const resonanceThoughts = (options?.allThoughts && options.allThoughts.length > 0
+        ? options.allThoughts
+        : (output.thought?.content ? [output.thought] : [])
+      ).filter(t => t.content && t.importance >= 0.3);
+      if (resonanceThoughts.length > 0) {
         try {
-          await deps.seedManager.checkSeedResonance([output.thought]);
+          await deps.seedManager.checkSeedResonance(resonanceThoughts);
         } catch (err) {
           log.warn('Seed resonance check failed:', err);
         }
