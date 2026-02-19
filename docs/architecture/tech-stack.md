@@ -70,6 +70,7 @@ Animus is built as a self-contained, self-hosted application. The guiding princi
 | **Node.js** | ^24.0 | Runtime |
 | **Fastify** | ^5.0 | HTTP server |
 | **tRPC** | ^11.0 | API framework |
+| **@fastify/multipart** | latest | File upload handling (media attachments) |
 
 **Why Fastify?** High performance, excellent plugin ecosystem, native TypeScript support, and easy WebSocket integration.
 

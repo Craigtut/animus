@@ -103,7 +103,7 @@ docs/agents/
 | Permissions | Two-tier: `executionMode` (plan/build) + `approvalLevel` (strict/normal/trusted/none) |
 | Hooks | Event emitter with graceful degradation |
 | Session IDs | Provider prefix: `{provider}:{native_id}` |
-| Streaming output | `llm-json-stream` for field-level streaming from structured JSON |
+| Streaming output | Cognitive MCP tools with phase-based natural language streaming |
 
 ### Implementation Priority
 

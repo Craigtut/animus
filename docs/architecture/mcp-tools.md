@@ -77,8 +77,9 @@ We use a **hybrid architecture** that optimizes for each provider:
 │  │  Tool Permission Map (tool-permissions.ts)                    │  │
 │  │                                                               │  │
 │  │  • Maps PermissionTier → allowed tool names                  │  │
-│  │  • primary: all tools                                        │  │
-│  │  • standard: send_message, read_memory                       │  │
+│  │  • primary: send_message, update_progress, read_memory,     │  │
+│  │           run_with_credentials                               │  │
+│  │  • standard: send_message, read_memory, run_with_credentials│  │
 │  └────────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────────┘
                               │
@@ -91,9 +92,17 @@ We use a **hybrid architecture** that optimizes for each provider:
 │ │  Tool Handlers   │ │      │    │ │  McpServerConfig in session  │ │
 │ │  (tool-handlers/)│ │      │    │ │  options — pass-through to   │ │
 │ │                  │ │      │    │ │  each SDK's native MCP config│ │
-│ │ send_message()   │◄┼──────┘    │ └──────────────────────────────┘ │
-│ │ read_memory()    │ │           └──────────────────────────────────┘
-│ │ update_progress()│ │
+│ │ Sub-agent tools: │◄┼──────┘    │ └──────────────────────────────┘ │
+│ │  send_message()  │ │           └──────────────────────────────────┘
+│ │  update_progress │ │
+│ │  read_memory()   │ │
+│ │  run_with_creds  │ │
+│ │ Mind-only tools: │ │
+│ │  lookup_contacts │ │
+│ │  send_proactive  │ │
+│ │  send_media()    │ │
+│ │  read_memory()   │ │
+│ │  run_with_creds  │ │
 │ │                  │ │
 │ │ Has DB access,   │ │
 │ │ event bus, etc.  │ │
@@ -166,123 +175,72 @@ export interface AnimusToolDef<TInput extends z.ZodTypeAny = z.ZodTypeAny> {
 }
 ```
 
-### Tool Definitions
+### Tool Inventory
+
+There are two categories of tools: **sub-agent tools** (available to sub-agents, filtered by contact permission tier) and **mind-only tools** (available only to the mind session during heartbeat ticks).
+
+#### Sub-Agent Tools
+
+These are provided to sub-agent sessions via MCP, filtered by the triggering contact's permission tier.
+
+| Tool | Category | Description |
+|------|----------|-------------|
+| `send_message` | messaging | Send a message (with optional media) to the triggering contact via the originating channel. Used for progress updates, intermediate findings, clarifying questions. |
+| `update_progress` | progress | Report current activity and percentage complete back to the orchestrator. Updates `current_activity` in SQLite so the mind knows what the sub-agent is doing. |
+| `read_memory` | memory | Search Animus's long-term memory (LanceDB) for relevant information. Read-only — only the mind writes memories. |
+| `run_with_credentials` | system | Execute a command with a plugin credential injected as an environment variable. The credential is resolved from encrypted storage and never exposed to the LLM. |
+
+#### Mind-Only Tools
+
+These are available only to the mind session. They are served via a separate in-process MCP server (`animus-tools`) alongside the cognitive tools MCP server (`cognitive`). Not filtered by permission tier — the mind always has all of them.
+
+| Tool | Category | Description |
+|------|----------|-------------|
+| `read_memory` | memory | Same as above — search long-term memory. |
+| `lookup_contacts` | system | Discover contacts and their available communication channels. Used before `send_proactive_message` to find valid contactId/channel pairs. |
+| `send_proactive_message` | messaging | Send a message (with optional media) to **any** contact on **any** of their channels. Goes through `ChannelRouter.sendOutbound()` for full delivery. Used for unprompted outreach (interval ticks, reminders, etc.). |
+| `send_media` | messaging | Send media files (images, audio, video, documents) to the **triggering contact** on the trigger channel. Files must already exist on disk (from plugin tools, sub-agents, etc.). Delivered immediately during the mind query, before the text reply. |
+| `run_with_credentials` | system | Same as above — execute a command with injected credentials. |
+
+**Note:** The mind also has two **cognitive tools** (`record_thought`, `record_cognitive_state`) served by a separate `cognitive` MCP server. These are not part of the Animus tool registry — they're defined in `heartbeat/cognitive-tools.ts` and manage the phase-based streaming pipeline. See `docs/architecture/heartbeat.md`.
+
+#### Tool Definitions Source
+
+All tool definitions live in `packages/shared/src/tools/definitions.ts`. Each is an `AnimusToolDef` with name, description, Zod input schema, and category. The central registry:
 
 ```typescript
-// packages/shared/src/tools/definitions.ts
-
-import { z } from 'zod';
-import type { AnimusToolDef } from '../types/tools.js';
-
-/**
- * send_message — Send a message to the triggering contact via the originating channel.
- *
- * Used by sub-agents for progress updates, clarifying questions, or intermediate findings.
- * The sub-agent speaks as Animus. Messages are scoped to the contact that initiated the task.
- */
-export const sendMessageDef: AnimusToolDef = {
-  name: 'send_message',
-  description: 'Send a message to the user who triggered this task. The message will be delivered through the same channel they used (SMS, Discord, web, etc.). Use this for progress updates, clarifying questions, or sharing intermediate findings. You speak as Animus.',
-  inputSchema: z.object({
-    content: z.string().describe('The message content to send to the user'),
-    priority: z.enum(['normal', 'urgent']).default('normal')
-      .describe('Message priority. Use "urgent" only for time-sensitive information'),
-  }),
-  category: 'messaging',
-};
-
-/**
- * update_progress — Report progress back to the orchestrator.
- *
- * Updates the current_activity field in SQLite so the mind knows
- * what the sub-agent is working on.
- */
-export const updateProgressDef: AnimusToolDef = {
-  name: 'update_progress',
-  description: 'Report your current progress on the task. This helps Animus track what you are working on and can inform the user if they ask about task status. Call this periodically during long tasks.',
-  inputSchema: z.object({
-    activity: z.string().describe('Brief description of what you are currently doing'),
-    percentComplete: z.number().min(0).max(100).optional()
-      .describe('Estimated percentage complete (0-100), if estimable'),
-  }),
-  category: 'progress',
-};
-
-/**
- * read_memory — Access Animus's long-term memory (LanceDB). Read-only.
- *
- * Sub-agents can query memories but cannot write them.
- * Only the mind writes memories.
- */
-export const readMemoryDef: AnimusToolDef = {
-  name: 'read_memory',
-  description: 'Search Animus\'s long-term memory for relevant information. Returns memories ranked by relevance to your query. Use this to recall facts, past experiences, procedures, or outcomes that might help with the current task.',
-  inputSchema: z.object({
-    query: z.string().describe('Natural language search query describing what you want to recall'),
-    limit: z.number().min(1).max(20).default(5)
-      .describe('Maximum number of memories to return'),
-    types: z.array(z.enum(['fact', 'experience', 'procedure', 'outcome'])).optional()
-      .describe('Filter by memory type. Omit to search all types'),
-  }),
-  category: 'memory',
-};
-
-/**
- * Central registry of all Animus tool definitions.
- *
- * This is the single source of truth for what tools exist.
- * Handlers are attached separately in the backend.
- */
 export const ANIMUS_TOOL_DEFS = {
   send_message: sendMessageDef,
   update_progress: updateProgressDef,
   read_memory: readMemoryDef,
+  lookup_contacts: lookupContactsDef,
+  send_proactive_message: sendProactiveMessageDef,
+  send_media: sendMediaDef,
+  run_with_credentials: runWithCredentialsDef,
 } as const;
 
 export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
+
+// Mind-only tools (not given to sub-agents)
+export const MIND_TOOL_NAMES: readonly AnimusToolName[] = [
+  'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials'
+] as const;
 ```
 
-### Permission Map
+### Permission Map (Sub-Agent Tools Only)
+
+Permission filtering applies to **sub-agent tools only**. Mind tools are not filtered — the mind always has its full toolset.
 
 ```typescript
 // packages/shared/src/tools/permissions.ts
 
-import type { PermissionTier } from '../types/index.js';
-import type { AnimusToolName } from './definitions.js';
-
-/**
- * Maps contact permission tiers to allowed tool sets.
- *
- * This is a compile-time constant. The backend uses it to filter
- * tool lists before session creation.
- *
- * Permission tiers (from contacts.md):
- * - primary: Full permissions — sub-agents, tasks, goals, tools
- * - standard: Can message and get replies. No sub-agents, tasks, goals, or personal tools.
- *
- * Note: Standard contacts don't trigger sub-agent spawning (enforced in EXECUTE),
- * so these permissions primarily guard against edge cases where a sub-agent
- * running for the primary contact might interact with a standard contact's data.
- */
 export const TOOL_PERMISSIONS: Record<PermissionTier, readonly AnimusToolName[]> = {
-  primary: ['send_message', 'update_progress', 'read_memory'],
-  standard: ['send_message', 'read_memory'],
+  primary: ['send_message', 'update_progress', 'read_memory', 'run_with_credentials'],
+  standard: ['send_message', 'read_memory', 'run_with_credentials'],
 } as const;
-
-/**
- * Check if a tool is allowed for a given permission tier.
- */
-export function isToolAllowed(tool: AnimusToolName, tier: PermissionTier): boolean {
-  return TOOL_PERMISSIONS[tier].includes(tool);
-}
-
-/**
- * Get the list of allowed tools for a permission tier.
- */
-export function getAllowedTools(tier: PermissionTier): readonly AnimusToolName[] {
-  return TOOL_PERMISSIONS[tier];
-}
 ```
+
+Standard contacts don't trigger sub-agent spawning (enforced in EXECUTE), so these permissions primarily guard against edge cases. `getMindTools()` returns definitions for all `MIND_TOOL_NAMES` without tier filtering.
 
 ---
 
@@ -321,13 +279,14 @@ export interface ToolHandlerContext {
     messages: MessageStore;
     heartbeat: HeartbeatStore;
     memory: MemoryStore;
+    /** Contact store — only provided in mind context (not sub-agents). */
+    contacts?: ContactStore;
+    /** Channel router — only provided in mind context (not sub-agents). */
+    channels?: ChannelRouter;
   };
 
   /** Event bus for emitting real-time events */
   eventBus: IEventBus;
-
-  /** Embedding provider for memory search */
-  embeddingProvider: IEmbeddingProvider;
 }
 
 /**
@@ -364,132 +323,31 @@ export interface AnimusTool<TInput = unknown> {
 
 ### Handler Implementations
 
-```typescript
-// packages/backend/src/tools/handlers/send-message.ts
+Each handler file follows the same pattern: typed input from the tool's Zod schema, `ToolHandlerContext` for infrastructure access, and an MCP-compatible `ToolResult` return.
 
-import type { z } from 'zod';
-import type { ToolHandler, ToolResult } from '../types.js';
-import { sendMessageDef } from '@animus/shared';
+| Handler File | Key Behavior |
+|---|---|
+| `handlers/send-message.ts` | Writes outbound message to `messages.db`, emits `message:sent` event for frontend. If `media` is provided, routes through `ChannelRouter.sendOutbound()` for full delivery pipeline. |
+| `handlers/update-progress.ts` | Updates `current_activity` in `agent_tasks` table, emits `agent:progress` event. |
+| `handlers/read-memory.ts` | Calls `MemoryManager.retrieveRelevant()` which embeds the query and searches LanceDB. Returns formatted results. |
+| `handlers/lookup-contacts.ts` | Reads contacts from `system.db` with optional name/channel filtering. Returns contact names, IDs, tiers, and available channels. |
+| `handlers/send-proactive-message.ts` | Validates contact exists and has the specified channel, then calls `ChannelRouter.sendOutbound()` for full delivery (message storage, media attachments, IPC to channel adapters). |
+| `handlers/send-media.ts` | Validates files exist on disk, auto-detects media type from extension, then calls `ChannelRouter.sendOutbound()` using the trigger contact/channel from context. Supports multiple files per call. |
+| `handlers/run-with-credentials.ts` | Resolves a credential from encrypted storage, injects it as an environment variable into a subprocess, executes the command, and returns stdout/stderr. The LLM never sees the credential value. |
 
-type SendMessageInput = z.infer<typeof sendMessageDef.inputSchema>;
+**Mind tool context differences:** Mind-only tools receive `context.stores.contacts` and `context.stores.channels` (which sub-agent contexts do not). This is what enables `lookup_contacts`, `send_proactive_message`, and `send_media` to access the contact store and channel router directly.
 
-export const sendMessageHandler: ToolHandler<SendMessageInput> = async (
-  input,
-  context,
-): Promise<ToolResult> => {
-  // 1. Write message to messages.db
-  const messageId = await context.stores.messages.createMessage({
-    conversationId: context.conversationId,
-    direction: 'outbound',
-    sender: 'sub_agent',
-    content: input.content,
-    channelType: context.sourceChannel,
-    agentTaskId: context.agentTaskId,
-  });
+#### `send_media` — Media Delivery During Mind Query
 
-  // 2. Emit real-time event for frontend (tRPC subscription)
-  context.eventBus.emit('message:sent', {
-    messageId,
-    contactId: context.contactId,
-    channel: context.sourceChannel,
-    content: input.content,
-    sender: 'sub_agent',
-    agentTaskId: context.agentTaskId,
-  });
+`send_media` is notable because it delivers media **immediately during the mind query**, before the text reply is sent. The flow:
 
-  // 3. Route to channel adapter for delivery
-  // (The outbound router picks up the event and delivers via the right channel)
+1. Agent calls a plugin tool that generates/fetches media → gets a local file path
+2. Agent calls `send_media(files: [{ path: "..." }], caption: "Here's the image!")`
+3. Handler awaits `ChannelRouter.sendOutbound()` → media delivered immediately
+4. Agent continues writing its natural language reply (streamed to frontend)
+5. After `record_cognitive_state`, the text reply is sent via the optimistic early send
 
-  return {
-    content: [{
-      type: 'text',
-      text: `Message sent successfully to ${context.sourceChannel} channel.`,
-    }],
-  };
-};
-```
-
-```typescript
-// packages/backend/src/tools/handlers/update-progress.ts
-
-import type { z } from 'zod';
-import type { ToolHandler, ToolResult } from '../types.js';
-import { updateProgressDef } from '@animus/shared';
-
-type UpdateProgressInput = z.infer<typeof updateProgressDef.inputSchema>;
-
-export const updateProgressHandler: ToolHandler<UpdateProgressInput> = async (
-  input,
-  context,
-): Promise<ToolResult> => {
-  // Update current_activity in agent_tasks table
-  await context.stores.heartbeat.updateAgentTaskProgress(
-    context.agentTaskId,
-    input.activity,
-    input.percentComplete,
-  );
-
-  // Emit event for real-time UI updates
-  context.eventBus.emit('agent:progress', {
-    agentTaskId: context.agentTaskId,
-    activity: input.activity,
-    percentComplete: input.percentComplete,
-  });
-
-  return {
-    content: [{
-      type: 'text',
-      text: 'Progress updated.',
-    }],
-  };
-};
-```
-
-```typescript
-// packages/backend/src/tools/handlers/read-memory.ts
-
-import type { z } from 'zod';
-import type { ToolHandler, ToolResult } from '../types.js';
-import { readMemoryDef } from '@animus/shared';
-
-type ReadMemoryInput = z.infer<typeof readMemoryDef.inputSchema>;
-
-export const readMemoryHandler: ToolHandler<ReadMemoryInput> = async (
-  input,
-  context,
-): Promise<ToolResult> => {
-  // 1. Embed the query
-  const queryEmbedding = await context.embeddingProvider.embed(input.query);
-
-  // 2. Search LanceDB for relevant memories
-  const memories = await context.stores.memory.searchLongTermMemories({
-    embedding: queryEmbedding,
-    limit: input.limit,
-    types: input.types,
-  });
-
-  // 3. Format results
-  if (memories.length === 0) {
-    return {
-      content: [{
-        type: 'text',
-        text: 'No relevant memories found for this query.',
-      }],
-    };
-  }
-
-  const formatted = memories.map((m, i) =>
-    `[${i + 1}] (${m.type}, importance: ${m.importance.toFixed(2)}) ${m.content}`
-  ).join('\n\n');
-
-  return {
-    content: [{
-      type: 'text',
-      text: `Found ${memories.length} relevant memories:\n\n${formatted}`,
-    }],
-  };
-};
-```
+This means media arrives before the text reply — a natural ordering for chat platforms (image → follow-up text). The handler supports multiple files per call to avoid sequential tool-call latency.
 
 ---
 
@@ -497,66 +355,14 @@ export const readMemoryHandler: ToolHandler<ReadMemoryInput> = async (
 
 The registry combines definitions (from `@animus/shared`) with handlers (from the backend) and provides methods to create provider-specific MCP server configurations.
 
-```typescript
-// packages/backend/src/tools/registry.ts
+The registry (`packages/backend/src/tools/registry.ts`) maps every `AnimusToolName` to its definition + handler. Key functions:
 
-import {
-  ANIMUS_TOOL_DEFS,
-  getAllowedTools,
-  type AnimusToolName,
-  type PermissionTier,
-} from '@animus/shared';
-import type { AnimusTool, ToolHandlerContext } from './types.js';
-import { sendMessageHandler } from './handlers/send-message.js';
-import { updateProgressHandler } from './handlers/update-progress.js';
-import { readMemoryHandler } from './handlers/read-memory.js';
+- `getToolsForTier(tier)` — returns tools filtered by contact permission tier (sub-agent use)
+- `getMindToolRegistry()` — returns all mind-only tools (from `MIND_TOOL_NAMES`)
+- `getTool(name)` — get a specific tool by name
+- `executeTool(name, input, context)` — validate input against Zod schema, execute handler
 
-/**
- * The complete tool registry: definitions + handlers.
- */
-const TOOL_REGISTRY: Record<AnimusToolName, AnimusTool> = {
-  send_message: {
-    name: 'send_message',
-    description: ANIMUS_TOOL_DEFS.send_message.description,
-    inputSchema: ANIMUS_TOOL_DEFS.send_message.inputSchema,
-    handler: sendMessageHandler,
-  },
-  update_progress: {
-    name: 'update_progress',
-    description: ANIMUS_TOOL_DEFS.update_progress.description,
-    inputSchema: ANIMUS_TOOL_DEFS.update_progress.inputSchema,
-    handler: updateProgressHandler,
-  },
-  read_memory: {
-    name: 'read_memory',
-    description: ANIMUS_TOOL_DEFS.read_memory.description,
-    inputSchema: ANIMUS_TOOL_DEFS.read_memory.inputSchema,
-    handler: readMemoryHandler,
-  },
-};
-
-/**
- * Get tools filtered by contact permission tier.
- */
-export function getToolsForTier(tier: PermissionTier): AnimusTool[] {
-  const allowedNames = getAllowedTools(tier);
-  return allowedNames.map(name => TOOL_REGISTRY[name]);
-}
-
-/**
- * Get a specific tool by name.
- */
-export function getTool(name: AnimusToolName): AnimusTool | undefined {
-  return TOOL_REGISTRY[name];
-}
-
-/**
- * Get all registered tool names.
- */
-export function getToolNames(): AnimusToolName[] {
-  return Object.keys(TOOL_REGISTRY) as AnimusToolName[];
-}
-```
+All 7 tools are registered in the single `TOOL_REGISTRY` record. The distinction between sub-agent and mind tools is handled by which function is used to query the registry.
 
 ---
 
@@ -921,24 +727,59 @@ Each SDK receives the same tools but through different configuration formats. Th
 
 ### Claude Agent SDK
 
+**Sub-agent sessions** receive tier-filtered tools:
+
 ```typescript
-// What gets passed to Claude's query() options
+// Sub-agent MCP config (primary tier example)
 {
   mcpServers: {
     'animus-tools': createSdkMcpServer({
       name: 'animus-tools',
       version: '1.0.0',
       tools: [
-        tool('send_message', 'Send a message...', { content: z.string(), ... }, handler),
-        tool('read_memory', 'Search memories...', { query: z.string(), ... }, handler),
-        tool('update_progress', 'Report progress...', { activity: z.string(), ... }, handler),
+        tool('send_message', '...', schema, handler),
+        tool('update_progress', '...', schema, handler),
+        tool('read_memory', '...', schema, handler),
+        tool('run_with_credentials', '...', schema, handler),
       ],
     }),
   },
   allowedTools: [
     'mcp__animus-tools__send_message',
-    'mcp__animus-tools__read_memory',
     'mcp__animus-tools__update_progress',
+    'mcp__animus-tools__read_memory',
+    'mcp__animus-tools__run_with_credentials',
+  ],
+}
+```
+
+**Mind session** receives two MCP servers — `animus-tools` (mind tools) and `cognitive` (phase-tracking tools):
+
+```typescript
+// Mind session MCP config
+{
+  mcpServers: {
+    'tools': createSdkMcpServer({ tools: [
+      tool('read_memory', '...', schema, handler),
+      tool('lookup_contacts', '...', schema, handler),
+      tool('send_proactive_message', '...', schema, handler),
+      tool('send_media', '...', schema, handler),
+      tool('run_with_credentials', '...', schema, handler),
+    ]}),
+    'cognitive': createSdkMcpServer({ tools: [
+      tool('record_thought', '...', schema, handler),
+      tool('record_cognitive_state', '...', schema, handler),
+    ]}),
+    // ...plus any plugin MCP servers
+  },
+  allowedTools: [
+    'mcp__tools__read_memory',
+    'mcp__tools__lookup_contacts',
+    'mcp__tools__send_proactive_message',
+    'mcp__tools__send_media',
+    'mcp__tools__run_with_credentials',
+    'mcp__cognitive__record_thought',
+    'mcp__cognitive__record_cognitive_state',
   ],
 }
 ```
@@ -981,6 +822,12 @@ Each SDK receives the same tools but through different configuration formats. Th
 
 ## Permission Filtering Flow
 
+### Mind Session (no filtering)
+
+The mind session always gets all mind tools + cognitive tools. Tool context is refreshed each tick via `buildMindToolContext()` which populates `contactId`, `sourceChannel`, `conversationId`, and store references from the gathered trigger data.
+
+### Sub-Agent Sessions (tier-filtered)
+
 ```
 User sends message
     │
@@ -1001,8 +848,8 @@ Orchestrator receives spawn_agent
     ├── 3. Call buildMcpConfig(provider, tier, context)
     │       │
     │       ├── getToolsForTier(tier) → filters TOOL_REGISTRY
-    │       │   primary → [send_message, update_progress, read_memory]
-    │       │   standard → [send_message, read_memory]
+    │       │   primary → [send_message, update_progress, read_memory, run_with_credentials]
+    │       │   standard → [send_message, read_memory, run_with_credentials]
     │       │
     │       └── Creates provider-specific MCP server with filtered tools
     │
@@ -1093,36 +940,30 @@ stdio is the right choice for local tools. HTTP/Streamable HTTP is for **remote*
 
 ---
 
-## Implementation Plan
+## Implementation Status
 
-### Phase 1: Tool Definitions & Registry (in parallel with Claude adapter)
+### Phase 1: Tool Definitions & Registry — COMPLETE
 
-1. Create `packages/shared/src/tools/definitions.ts` — tool definitions with Zod schemas
-2. Create `packages/shared/src/tools/permissions.ts` — permission map
-3. Create `packages/backend/src/tools/types.ts` — handler interface
-4. Create `packages/backend/src/tools/registry.ts` — registry combining defs + handlers
-5. Stub out handler implementations (return placeholder results)
+- `packages/shared/src/tools/definitions.ts` — 7 tool definitions with Zod schemas
+- `packages/shared/src/tools/permissions.ts` — permission map + `getMindTools()`
+- `packages/backend/src/tools/types.ts` — handler interface with `ToolHandlerContext`
+- `packages/backend/src/tools/registry.ts` — full registry with all handlers
+- `packages/backend/src/tools/handlers/` — 7 handler implementations
 
-### Phase 2: Claude In-Process Server
+### Phase 2: Claude In-Process Server — COMPLETE
 
-1. Create `packages/backend/src/tools/servers/claude-mcp.ts`
-2. Integrate with Agent Orchestrator — inject MCP config during `spawn_agent`
-3. Test tool calls end-to-end with Claude Agent SDK
-4. Implement real handler logic (send_message, read_memory, update_progress)
+- `packages/backend/src/tools/servers/claude-mcp.ts` — in-process MCP server factory
+- `packages/backend/src/heartbeat/mind-session.ts` — mind session assembles `tools` + `cognitive` + plugin MCP servers
+- `packages/backend/src/heartbeat/cognitive-tools.ts` — cognitive MCP server (record_thought + record_cognitive_state)
+- All tools tested end-to-end with Claude Agent SDK
 
 ### Phase 3: stdio MCP Server (when implementing Codex/OpenCode adapters)
 
-1. Create `packages/backend/src/tools/servers/stdio-mcp-process.ts` — the subprocess
-2. Create `packages/backend/src/tools/servers/stdio-mcp.ts` — the fork/IPC manager
-3. Integrate with Codex adapter in orchestrator
-4. Integrate with OpenCode adapter in orchestrator
-5. Test tool calls through stdio transport
+Not yet started. Will be needed when Codex/OpenCode adapters are implemented.
 
-### Phase 4: User-Defined Tools & External MCP Servers
+### Phase 4: Plugin MCP Servers — COMPLETE
 
-1. Add UI for configuring external MCP servers (GitHub, Postgres, etc.)
-2. Merge user MCP config with built-in tools in orchestrator
-3. Design custom tool registration API (deferred — needs requirements)
+Plugin-defined MCP servers are loaded via the plugin system and merged into the mind session's MCP config alongside built-in tools. See `docs/architecture/plugin-system.md`.
 
 ---
 
@@ -1153,10 +994,11 @@ This document resolves **Open Question #3: MCP Tool Design for Sub-Agents** from
 
 - **`send_message` channel context**: The handler receives `sourceChannel` and `conversationId` via `ToolHandlerContext`, populated by the orchestrator from the triggering message.
 - **`update_progress` schema**: `{ activity: string, percentComplete?: number }` — simple and focused.
-- **`read_memory` interface**: Uses the same embedding provider and LanceDB search as the mind's GATHER CONTEXT, but exposed as a tool call.
-- **Tool permissions**: Filtered at session creation time via `getToolsForTier()`. The MCP server only exposes tools the contact is allowed to use.
-- **Custom user-defined tools**: Supported via registry extension and external MCP server passthrough.
-- **Tool call result flow**: For Claude, results return in-process. For Codex/OpenCode, results flow via IPC (child→parent→child→SDK).
+- **`read_memory` interface**: Uses `MemoryManager.retrieveRelevant()` which embeds the query and searches LanceDB, same retrieval as GATHER CONTEXT but available on-demand.
+- **Tool permissions**: Sub-agent tools filtered at session creation time via `getToolsForTier()`. Mind tools are unfiltered.
+- **Custom user-defined tools**: Supported via plugin MCP servers (see `docs/architecture/plugin-system.md`).
+- **Tool call result flow**: For Claude, results return in-process. For Codex/OpenCode, results will flow via IPC (stdio transport, not yet implemented).
+- **Mind media delivery**: The `send_media` tool allows the mind to send media files to the triggering contact during the mind query, before the text reply. This replaces the removed `reply.media` structured output path. Media-producing tools (plugins) return file paths; the mind calls `send_media` to deliver them through the channel router.
 
 ---
 

@@ -11,6 +11,7 @@ import type {
   Message,
   ChannelType,
   MessageDirection,
+  StoredMediaAttachment as SharedStoredMediaAttachment,
 } from '@animus/shared';
 import { snakeToCamel, intToBool } from '../utils.js';
 
@@ -134,6 +135,19 @@ function rowToMessage(row: Record<string, unknown>): Message {
   };
 }
 
+/**
+ * Attach media to an array of messages by batch-loading from media_attachments.
+ */
+function attachMedia(db: Database.Database, messages: Message[]): Message[] {
+  if (messages.length === 0) return messages;
+  const ids = messages.map((m) => m.id);
+  const mediaMap = getMediaAttachmentsByMessageIds(db, ids);
+  return messages.map((m) => {
+    const attachments = mediaMap.get(m.id);
+    return attachments ? { ...m, attachments } : m;
+  });
+}
+
 export function getMessages(
   db: Database.Database,
   conversationId: string,
@@ -154,7 +168,7 @@ export function getMessages(
     .all(conversationId, pageSize, offset) as Array<Record<string, unknown>>;
 
   return {
-    items: rows.map(rowToMessage),
+    items: attachMedia(db, rows.map(rowToMessage)),
     total: countRow.count,
   };
 }
@@ -169,7 +183,7 @@ export function getRecentMessages(
       'SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?'
     )
     .all(conversationId, limit) as Array<Record<string, unknown>>;
-  return rows.map(rowToMessage);
+  return attachMedia(db, rows.map(rowToMessage));
 }
 
 /**
@@ -187,7 +201,7 @@ export function getMessagesSince(
       'SELECT * FROM messages WHERE conversation_id = ? AND created_at > ? ORDER BY created_at DESC LIMIT ?'
     )
     .all(conversationId, since, limit) as Array<Record<string, unknown>>;
-  return rows.map(rowToMessage);
+  return attachMedia(db, rows.map(rowToMessage));
 }
 
 export function getMessagesByContact(
@@ -219,22 +233,53 @@ export function getMessagesByContact(
       `SELECT * FROM messages WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC LIMIT ?`
     )
     .all(...params, limit) as Array<Record<string, unknown>>;
-  return rows.map(rowToMessage);
+  return attachMedia(db, rows.map(rowToMessage));
 }
 
 // ============================================================================
 // Media Attachments
 // ============================================================================
 
-export interface StoredMediaAttachment {
-  id: string;
-  messageId: string;
-  type: 'image' | 'audio' | 'video' | 'file';
-  mimeType: string;
-  localPath: string;
-  originalFilename: string | null;
-  sizeBytes: number;
-  createdAt: string;
+export type StoredMediaAttachment = SharedStoredMediaAttachment;
+
+function rowToAttachment(row: Record<string, unknown>): StoredMediaAttachment {
+  return snakeToCamel<StoredMediaAttachment>(row);
+}
+
+export function getMediaAttachmentsByMessageIds(
+  db: Database.Database,
+  messageIds: string[]
+): Map<string, StoredMediaAttachment[]> {
+  const result = new Map<string, StoredMediaAttachment[]>();
+  if (messageIds.length === 0) return result;
+
+  const placeholders = messageIds.map(() => '?').join(',');
+  const rows = db
+    .prepare(
+      `SELECT * FROM media_attachments WHERE message_id IN (${placeholders}) ORDER BY created_at ASC`
+    )
+    .all(...messageIds) as Array<Record<string, unknown>>;
+
+  for (const row of rows) {
+    const att = rowToAttachment(row);
+    const existing = result.get(att.messageId);
+    if (existing) {
+      existing.push(att);
+    } else {
+      result.set(att.messageId, [att]);
+    }
+  }
+  return result;
+}
+
+export function getMediaAttachment(
+  db: Database.Database,
+  id: string
+): StoredMediaAttachment | null {
+  const row = db
+    .prepare('SELECT * FROM media_attachments WHERE id = ?')
+    .get(id) as Record<string, unknown> | undefined;
+  return row ? rowToAttachment(row) : null;
 }
 
 export function createMediaAttachment(
@@ -272,6 +317,7 @@ export function createMediaAttachment(
     originalFilename: data.originalFilename,
     sizeBytes: data.sizeBytes,
     createdAt: timestamp,
+    expiresAt: null,
   };
 }
 

@@ -17,6 +17,7 @@ import {
   removeCredential,
   inferCredentialType,
 } from '../../services/credential-service.js';
+import { getModelRegistry } from '@animus/agents';
 
 const providerSchema = z.enum(['claude', 'codex']);
 
@@ -124,5 +125,27 @@ export const providerRouter = router({
     .mutation(({ input }) => {
       removeCredential(getSystemDb(), input.provider);
       return { success: true };
+    }),
+
+  /**
+   * List available models for a provider (or all providers).
+   * Returns model metadata from the unified model registry.
+   */
+  listModels: protectedProcedure
+    .input(z.object({ provider: z.enum(['claude', 'codex', 'opencode']).optional() }))
+    .query(({ input }) => {
+      const registry = getModelRegistry();
+      const models = registry.listModels(input.provider);
+      return models.map(m => ({
+        id: m.id,
+        name: m.name,
+        provider: m.provider,
+        contextWindow: m.contextWindow,
+        maxOutputTokens: m.maxOutputTokens,
+        inputPricePer1M: m.inputCostPerToken * 1_000_000,
+        outputPricePer1M: m.outputCostPerToken * 1_000_000,
+        supportsVision: m.supportsVision,
+        supportsThinking: m.supportsThinking,
+      }));
     }),
 });

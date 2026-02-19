@@ -229,6 +229,9 @@ async function mindQuery(
     }
 
     // Get or create the mind session
+    const mindStart = Date.now();
+    log.info(`Mind query: session=${gathered.sessionState}, provider=${ctx.agentManager.getConfiguredProviders()[0] ?? 'none'}`);
+
     const session = await getOrCreateMindSession(
       ctx.mindSession,
       gathered.sessionState,
@@ -236,6 +239,8 @@ async function mindQuery(
       ctx.agentManager,
       ctx.agentLogStoreAdapter,
     );
+
+    log.info(`Mind session ready: id=${session.id}, hasTools=${!!ctx.mindSession.mcpServer}, hasCognitive=${!!ctx.mindSession.cognitiveServer}`);
 
     // Update the mutable tool context for this tick so tool handlers
     // can access the current contact/channel/conversation
@@ -287,6 +292,9 @@ async function mindQuery(
     if (cogServer) {
       cogServer.resetSnapshot();
     }
+
+    const estTokens = Object.values(context.tokenBreakdown).reduce((a, b) => a + b, 0);
+    log.info(`Prompting mind (${context.userMessage.length} chars, ~${estTokens} est. tokens)`);
 
     // Phase-based reply streaming:
     // Only stream text during the 'replying' phase (after record_thought, before record_cognitive_state)
@@ -376,8 +384,9 @@ async function mindQuery(
       ? snapshotToMindOutput(snapshot, replyAccumulated, gathered)
       : safeMindOutput(triggerInfo);
 
+    const mindMs = Date.now() - mindStart;
     if (snapshot) {
-      log.info(`Cognitive tools captured: ${allThoughts.length} thought(s), ${snapshot.emotionDeltas.length} emotion delta(s), ${snapshot.decisions.length} decision(s)`);
+      log.info(`Mind query complete (${(mindMs / 1000).toFixed(1)}s): ${allThoughts.length} thought(s), ${snapshot.emotionDeltas.length} emotion delta(s), ${snapshot.decisions.length} decision(s), reply=${replyAccumulated.length} chars`);
     } else {
       log.warn('No cognitive server available — using safe fallback');
     }
@@ -417,6 +426,8 @@ async function mindQuery(
         sessionTokenCount: usage.totalTokens,
         mindSessionId: session.id,
       });
+      const cost = session.getCost();
+      log.info(`Token usage: ${usage.totalTokens.toLocaleString()} total (session cumulative)${cost ? `, $${cost.totalCostUsd.toFixed(4)}` : ''}`);
     }
 
     return { output, compiledContext: context, replySentEarly, earlyReplyContent: replyAccumulated, tickInputLogged, allThoughts };
@@ -699,6 +710,14 @@ export async function initializeHeartbeat(): Promise<void> {
           return settings.defaultAgentProvider ?? null;
         } catch {
           return null;
+        }
+      },
+      getPreferredModel: () => {
+        try {
+          const settings = systemStore.getSystemSettings(getSystemDb());
+          return settings.defaultModel ?? undefined;
+        } catch {
+          return undefined;
         }
       },
       onAgentComplete: handleAgentComplete,

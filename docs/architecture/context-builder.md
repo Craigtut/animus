@@ -268,7 +268,7 @@ reply — { content: string } | null
 
   This field is for responding to the current conversation. To proactively
   reach out to a different contact or on a different channel, use the
-  send_message decision instead.
+  send_proactive_message tool. To send media files, use the send_media tool.
 
   On task ticks, this field is replaced by taskResult:
   { taskId: string, outcome: string, result?: string, skipReason?: string,
@@ -351,16 +351,11 @@ cancel_agent — Stop a running sub-agent
 
 COMMUNICATION
 
-send_message — Proactively reach out to a contact
-  {
-    type: "send_message",
-    contactId: string,       // who to message
-    channel: string,         // which channel to use
-    content: string          // the message
-  }
-  Use to message someone other than who triggered this tick, or to initiate
-  contact during idle ticks. For responding to the person who triggered this
-  tick, use the reply field in your output instead.
+  Proactive messaging and media delivery are handled via MCP tools, not
+  decisions. Use the send_proactive_message tool to reach out to any contact
+  on any channel. Use the send_media tool to send files (images, audio,
+  video, documents) to the triggering contact. Use lookup_contacts to
+  discover available contacts and channels first.
 
 
 GOALS & SEEDS

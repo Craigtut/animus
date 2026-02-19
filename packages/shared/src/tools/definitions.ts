@@ -147,6 +147,29 @@ export const sendProactiveMessageDef: AnimusToolDef = {
 };
 
 /**
+ * send_media - Send media files to the triggering contact via the originating channel.
+ * Mind-only tool. Files must already exist on disk (from plugin tools, sub-agent results, etc.).
+ */
+export const sendMediaDef: AnimusToolDef = {
+  name: 'send_media',
+  description:
+    'Send media files (images, audio, video, documents) to the contact you are currently ' +
+    'responding to, on the same channel they messaged you from. Files must already exist on ' +
+    'disk — typically produced by a plugin tool, sub-agent, or other process. Optionally ' +
+    'include a caption that will be sent alongside the media.',
+  inputSchema: z.object({
+    files: z.array(z.object({
+      path: z.string().describe('Absolute local file path to the media file'),
+      type: z.enum(['image', 'audio', 'video', 'file']).optional()
+        .describe('Media type. Auto-detected from file extension if omitted.'),
+    })).min(1).describe('Media files to send'),
+    caption: z.string().optional()
+      .describe('Optional caption/message sent alongside the media'),
+  }),
+  category: 'messaging',
+};
+
+/**
  * run_with_credentials - Execute a command with a plugin credential injected
  * as an environment variable. The credential is resolved from encrypted
  * storage and never exposed to the LLM.
@@ -182,6 +205,7 @@ export const ANIMUS_TOOL_DEFS = {
   read_memory: readMemoryDef,
   lookup_contacts: lookupContactsDef,
   send_proactive_message: sendProactiveMessageDef,
+  send_media: sendMediaDef,
   run_with_credentials: runWithCredentialsDef,
 } as const;
 
@@ -201,5 +225,5 @@ export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
  * Excludes send_message (sub-agent only) and update_progress (sub-agent only).
  */
 export const MIND_TOOL_NAMES: readonly AnimusToolName[] = [
-  'read_memory', 'lookup_contacts', 'send_proactive_message', 'run_with_credentials'
+  'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials'
 ] as const;

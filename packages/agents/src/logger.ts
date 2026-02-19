@@ -21,11 +21,9 @@ export interface Logger {
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
 
 /**
- * Default console-based logger implementation.
- *
- * Formats output with timestamps and optional context objects.
+ * Console-based logger used when no external logger is configured.
  */
-export const defaultLogger: Logger = {
+const consoleLogger: Logger = {
   debug(message: string, context?: Record<string, unknown>): void {
     if (process.env['LOG_LEVEL'] === 'debug') {
       console.debug(formatMessage('debug', message, context));
@@ -46,7 +44,53 @@ export const defaultLogger: Logger = {
 };
 
 /**
+ * Mutable box so `setDefaultLogger()` propagates to all existing tagged loggers.
+ *
+ * Tagged loggers capture `defaultLogger` by reference, which delegates through
+ * the box. Replacing `loggerBox.current` retroactively updates every tagged
+ * logger that was created with the default base.
+ */
+const loggerBox: { current: Logger } = { current: consoleLogger };
+
+/**
+ * Default logger instance used by `createTaggedLogger` when no base is provided.
+ *
+ * Delegates through `loggerBox` so that `setDefaultLogger()` affects all
+ * existing tagged loggers, including module-level ones created at import time.
+ */
+export const defaultLogger: Logger = {
+  debug(message: string, context?: Record<string, unknown>): void {
+    loggerBox.current.debug(message, context);
+  },
+  info(message: string, context?: Record<string, unknown>): void {
+    loggerBox.current.info(message, context);
+  },
+  warn(message: string, context?: Record<string, unknown>): void {
+    loggerBox.current.warn(message, context);
+  },
+  error(message: string, context?: Record<string, unknown>): void {
+    loggerBox.current.error(message, context);
+  },
+};
+
+/**
+ * Replace the default logger implementation.
+ *
+ * Call this early in your application startup (before creating an AgentManager)
+ * to route all agent package logs through your application's logging infrastructure.
+ *
+ * This retroactively affects all tagged loggers that were created with the
+ * default base — including module-level loggers like ModelRegistry.
+ *
+ * @param logger - Logger implementation matching the agents Logger interface
+ */
+export function setDefaultLogger(logger: Logger): void {
+  loggerBox.current = logger;
+}
+
+/**
  * Format a log message with timestamp and optional context.
+ * Used by the built-in console logger as a fallback.
  */
 function formatMessage(
   level: LogLevel,

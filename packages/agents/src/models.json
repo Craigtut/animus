@@ -11,6 +11,16 @@
       "supportsThinking": true,
       "notes": "Latest and most capable model. Supports 1M context in beta. Uses adaptive thinking."
     },
+    "claude-sonnet-4-6": {
+      "name": "Claude Sonnet 4.6",
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "inputPricePer1M": 3.00,
+      "outputPricePer1M": 15.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "notes": "Latest Sonnet. Fast output mode available. Excellent balance of speed and capability."
+    },
     "claude-sonnet-4-5-20250929": {
       "name": "Claude Sonnet 4.5",
       "contextWindow": 200000,

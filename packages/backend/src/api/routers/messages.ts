@@ -11,6 +11,7 @@ import * as systemStore from '../../db/stores/system-store.js';
 import { handleIncomingMessage } from '../../heartbeat/index.js';
 import { getEventBus } from '../../lib/event-bus.js';
 import { getMessageService } from '../../services/message-service.js';
+import { consumePendingUpload } from '../routes/media.js';
 import { channelTypeSchema, paginationInputSchema, generateUUID, now } from '@animus/shared';
 import type { Message } from '@animus/shared';
 
@@ -18,11 +19,13 @@ export const messagesRouter = router({
   /**
    * Send a message from the user (primary contact).
    * Writes to messages.db immediately, then triggers a heartbeat tick.
+   * Optional attachmentIds[] links pre-uploaded media files to the message.
    */
   send: protectedProcedure
     .input(z.object({
       content: z.string().min(1).max(10000),
       channel: channelTypeSchema.default('web'),
+      attachmentIds: z.array(z.string().uuid()).max(10).optional(),
     }))
     .mutation(({ input, ctx }) => {
       const sysDb = getSystemDb();
@@ -56,10 +59,44 @@ export const messagesRouter = router({
         content: input.content,
       });
 
+      // Link pending uploads as media attachments
+      const attachments: import('@animus/shared').StoredMediaAttachment[] = [];
+      if (input.attachmentIds && input.attachmentIds.length > 0) {
+        for (const uploadId of input.attachmentIds) {
+          const pending = consumePendingUpload(uploadId);
+          if (!pending) continue; // Skip expired or missing uploads
+
+          const att = messageStore.createMediaAttachment(msgDb, {
+            messageId: msg.id,
+            type: pending.type,
+            mimeType: pending.mimeType,
+            localPath: pending.localPath,
+            originalFilename: pending.originalFilename,
+            sizeBytes: pending.sizeBytes,
+          });
+          attachments.push(att);
+        }
+      }
+
+      const result: Message = attachments.length > 0
+        ? { ...msg, attachments }
+        : msg;
+
       // Emit message received event
-      getEventBus().emit('message:received', msg);
+      getEventBus().emit('message:received', result);
 
       // Trigger heartbeat tick for this message
+      const metadata: Record<string, unknown> | undefined = attachments.length > 0
+        ? {
+            media: attachments.map((a) => ({
+              type: a.type,
+              mimeType: a.mimeType,
+              localPath: a.localPath,
+              originalFilename: a.originalFilename,
+            })),
+          }
+        : undefined;
+
       handleIncomingMessage({
         contactId: contact.id,
         contactName: contact.fullName,
@@ -67,9 +104,10 @@ export const messagesRouter = router({
         content: input.content,
         messageId: msg.id,
         conversationId: conv.id,
+        ...(metadata ? { metadata } : {}),
       });
 
-      return msg;
+      return result;
     }),
 
   /**

@@ -139,7 +139,9 @@ export async function gatherContext(
   const state = heartbeatStore.getHeartbeatState(hbDb);
 
   // Determine session state
+  const gatherStart = Date.now();
   const sessionState = determineSessionState(state, settings.sessionWarmthMs, deps);
+  log.info(`Gather: session=${sessionState}, trigger=${trigger.type}${trigger.contactName ? `, contact=${trigger.contactName}` : ''}`);
 
   // Compute energy state (before emotion decay — sleep affects decay rate)
   let energyLevel: number | null = null;
@@ -385,6 +387,9 @@ export async function gatherContext(
   } catch (err) {
     log.warn('Plugin context gathering failed:', err);
   }
+
+  const gatherMs = Date.now() - gatherStart;
+  log.info(`Gather complete (${gatherMs}ms): ${recentMessages.length} messages, ${recentThoughts.length} recent thoughts, ${emotions.filter(e => e.intensity > 0.1).length} active emotions${energyBand ? `, energy=${energyBand}` : ''}${memCtx ? ', memory=yes' : ''}${goalCtx ? ', goals=yes' : ''}`);
 
   return {
     trigger,

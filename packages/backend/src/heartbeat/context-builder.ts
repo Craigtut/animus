@@ -448,8 +448,30 @@ function formatTimestamp(isoString: string, timezone?: string): string {
 
 function buildTriggerSection(trigger: TriggerContext): string {
   switch (trigger.type) {
-    case 'message':
-      return `── THIS MOMENT ──\n${trigger.contactName || 'Someone'} sent a message via ${trigger.channel || 'web'}:\n\n"${trigger.messageContent || ''}"`;
+    case 'message': {
+      const lines = [
+        '── THIS MOMENT ──',
+        `${trigger.contactName || 'Someone'} sent a message via ${trigger.channel || 'web'}:`,
+        '',
+        `"${trigger.messageContent || ''}"`,
+      ];
+
+      // Annotate media attachments so the mind knows they exist
+      const media = trigger.metadata?.['media'];
+      if (Array.isArray(media) && media.length > 0) {
+        lines.push('');
+        lines.push(`Attached media (${media.length}):`);
+        for (const item of media) {
+          const m = item as { type?: string; mimeType?: string; originalFilename?: string };
+          const name = m.originalFilename || 'unnamed';
+          lines.push(`  - [${m.type || 'file'}] ${name} (${m.mimeType || 'unknown'})`);
+        }
+        lines.push('');
+        lines.push('Note: You cannot view the attached files directly, but you know they were sent.');
+      }
+
+      return lines.join('\n');
+    }
 
     case 'interval': {
       const elapsed = trigger.elapsedMs
@@ -589,7 +611,16 @@ function buildShortTermMemorySection(params: {
     if (messages.length > 0) {
       const msgLines = messages.map((m) => {
         const sender = m.direction === 'inbound' ? (contactName || 'Contact') : 'You';
-        return `[${formatTimestamp(m.createdAt, timezone)}] ${sender}: "${m.content}"`;
+        let line = `[${formatTimestamp(m.createdAt, timezone)}] ${sender}: "${m.content}"`;
+        // Annotate messages that had media attachments
+        if (m.attachments && m.attachments.length > 0) {
+          const summary = m.attachments.map((a) => {
+            const name = a.originalFilename || a.type;
+            return `${name} (${a.mimeType})`;
+          }).join(', ');
+          line += ` [attachments: ${summary}]`;
+        }
+        return line;
       });
       parts.push(msgLines.join('\n'));
     }

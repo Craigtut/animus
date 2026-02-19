@@ -138,6 +138,7 @@ export class AgentOrchestrator {
   private spawnTimestamps: number[] = [];
   private spawnBudgetPerHour: number;
   private getPreferredProvider: (() => AgentProvider | null) | null;
+  private getPreferredModel: (() => string | undefined) | null;
   /** Cached sub-agent MCP server (built lazily, once per process) */
   private subAgentMcpServer: { serverConfig: Record<string, unknown>; allowedTools: string[] } | null = null;
   /** Per-task mutable tool contexts for sub-agent MCP handlers */
@@ -157,6 +158,7 @@ export class AgentOrchestrator {
     eventBus: IEventBus;
     spawnBudgetPerHour?: number;
     getPreferredProvider?: () => AgentProvider | null;
+    getPreferredModel?: () => string | undefined;
     buildToolContext?: (taskId: string, params: SpawnAgentParams) => ToolHandlerContext;
     onAgentComplete: (params: {
       agentId: string;
@@ -171,6 +173,7 @@ export class AgentOrchestrator {
     this.eventBus = params.eventBus;
     this.spawnBudgetPerHour = params.spawnBudgetPerHour ?? 20;
     this.getPreferredProvider = params.getPreferredProvider ?? null;
+    this.getPreferredModel = params.getPreferredModel ?? null;
     this.buildToolContextFactory = params.buildToolContext ?? null;
     this.onAgentComplete = params.onAgentComplete;
   }
@@ -308,8 +311,10 @@ export class AgentOrchestrator {
 
       // Create the agent session
       const verboseAgent = env.LOG_LEVEL === 'debug' || env.LOG_LEVEL === 'trace';
+      const model = this.getPreferredModel?.();
       const session = await this.manager.createSession({
         provider,
+        model,
         cwd: PROJECT_ROOT,
         systemPrompt: params.systemPrompt,
         permissions: {

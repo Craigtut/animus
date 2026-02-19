@@ -109,6 +109,7 @@ export async function executeOutput(
   };
 
   // Step 0: Mark execute start
+  log.info(`Execute: ${output.decisions.length} decision(s), ${output.emotionDeltas.length} emotion(s), ${output.memoryCandidate?.length ?? 0} memory candidate(s)${output.reply?.content ? `, reply=${output.reply.content.length} chars` : ''}`);
   logExecuteEvent('execute_start', {
     triggerType: gathered.trigger.type,
     contactId: gathered.contact?.id ?? null,
@@ -327,6 +328,7 @@ export async function executeOutput(
   // Execute the transaction
   runTransaction();
 
+  log.info(`DB transaction complete: thought=${!!output.thought?.content}, experience=${!!output.experience?.content}, emotions=${output.emotionDeltas.length}, energy=${!!(settings.energySystemEnabled && output.energyDelta)}`);
   logExecuteEvent('execute_transaction_complete', {
     hadThought: !!output.thought?.content,
     hadExperience: !!output.experience?.content,
@@ -346,6 +348,9 @@ export async function executeOutput(
     eventBusRef,
   );
 
+  if (output.decisions.length > 0) {
+    log.info(`Decisions executed: ${output.decisions.map(d => d.type).join(', ')}`);
+  }
   logExecuteEvent('execute_decisions_complete', {
     agentDecisions: output.decisions.filter(d => ['spawn_agent', 'update_agent', 'cancel_agent'].includes(d.type)).length,
     pluginDecisions: output.decisions.filter(d => !builtInDecisionTypeSchema.safeParse(d.type).success).length,
@@ -477,5 +482,7 @@ export async function executeOutput(
     }
   }
 
-  logExecuteEvent('execute_complete', { totalDurationMs: Date.now() - executeStartTime });
+  const executeMs = Date.now() - executeStartTime;
+  log.info(`Execute complete (${executeMs}ms)`);
+  logExecuteEvent('execute_complete', { totalDurationMs: executeMs });
 }

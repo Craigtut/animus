@@ -122,6 +122,15 @@ The web channel is the primary admin interface. It communicates over tRPC (HTTP 
 
 **Outbound**: Replies are pushed to the frontend in real-time via tRPC subscriptions. The web UI receives the full streamed response.
 
+**Media**: The web channel supports media inbound and outbound. Files are uploaded via `POST /api/media/upload` (multipart, `@fastify/multipart`), stored to `data/media/{uuid}.{ext}`, and served via `GET /api/media/:id`. The upload-then-attach flow works as follows:
+
+1. Frontend uploads files → receives pending attachment IDs
+2. Frontend sends message via `messages.send` tRPC mutation with `attachmentIds[]`
+3. Backend links pending uploads to the message as `media_attachments` DB records
+4. Frontend renders images inline (with lightbox), audio/video with native players, and files as download links
+
+Pending uploads that are never attached to a message expire after 30 minutes and are cleaned up automatically. Persisted media files are cleaned up when conversations are cleared or the system is reset.
+
 **Streaming**: Full streaming supported. Tokens are pushed as they're generated via WebSocket subscription.
 
 **Channel identifier**: The user's `id` from the `users` table.

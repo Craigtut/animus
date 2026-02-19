@@ -4,6 +4,7 @@
  * Provides soft reset, full reset, conversation clear, and data export.
  */
 
+import fs from 'node:fs';
 import { router, protectedProcedure } from '../trpc.js';
 import {
   getHeartbeatDb,
@@ -17,6 +18,31 @@ import { stopHeartbeat, getVectorStore } from '../../heartbeat/index.js';
 import * as systemStore from '../../db/stores/system-store.js';
 import * as personaStore from '../../db/stores/persona-store.js';
 import * as heartbeatStore from '../../db/stores/heartbeat-store.js';
+import { MEDIA_DIR } from '../routes/media.js';
+import { createLogger } from '../../lib/logger.js';
+
+const log = createLogger('DataRouter', 'server');
+
+/**
+ * Delete all files in the media directory.
+ * Called during resets that clear messages/media_attachments.
+ */
+function clearMediaFiles(): void {
+  try {
+    if (!fs.existsSync(MEDIA_DIR)) return;
+    const files = fs.readdirSync(MEDIA_DIR);
+    for (const file of files) {
+      try {
+        fs.unlinkSync(fs.realpathSync(`${MEDIA_DIR}/${file}`));
+      } catch {
+        // Skip files that can't be deleted
+      }
+    }
+    log.info(`Cleared ${files.length} media files from disk`);
+  } catch (err) {
+    log.warn('Failed to clear media directory:', err);
+  }
+}
 
 export const dataRouter = router({
   /**
@@ -113,12 +139,13 @@ export const dataRouter = router({
       await vectorStore.deleteAll();
     }
 
-    // Clear messages and conversations
+    // Clear messages, conversations, and media files
     msgDb.transaction(() => {
       msgDb.exec('DELETE FROM media_attachments');
       msgDb.exec('DELETE FROM messages');
       msgDb.exec('DELETE FROM conversations');
     })();
+    clearMediaFiles();
 
     return { success: true, cleared: 'heartbeat+memory+messages' };
   }),
@@ -133,6 +160,7 @@ export const dataRouter = router({
       msgDb.exec('DELETE FROM messages');
       msgDb.exec('DELETE FROM conversations');
     })();
+    clearMediaFiles();
     return { success: true, cleared: 'messages' };
   }),
 

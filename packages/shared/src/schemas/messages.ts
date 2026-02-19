@@ -21,31 +21,6 @@ export const conversationSchema = z.object({
 });
 
 // ============================================================================
-// Messages
-// ============================================================================
-
-export const messageDirectionSchema = z.enum(['inbound', 'outbound']);
-
-export const messageSchema = z.object({
-  id: uuidSchema,
-  conversationId: uuidSchema,
-  contactId: uuidSchema,
-  direction: messageDirectionSchema,
-  channel: channelTypeSchema,
-  content: z.string(),
-  metadata: z.record(z.unknown()).nullable(),
-  tickNumber: z.number().int().nonnegative().nullable(),
-  createdAt: timestampSchema,
-});
-
-export const sendMessageInputSchema = z.object({
-  conversationId: uuidSchema.optional(),
-  channel: channelTypeSchema,
-  content: z.string().min(1),
-  metadata: z.record(z.unknown()).optional(),
-});
-
-// ============================================================================
 // Media Attachments (stored in messages.db, linked to messages)
 // ============================================================================
 
@@ -66,4 +41,30 @@ export const storedMediaAttachmentSchema = z.object({
   sizeBytes: z.number().int().nonnegative(),
   createdAt: timestampSchema,
   expiresAt: timestampSchema.nullable(),
+});
+
+// ============================================================================
+// Messages
+// ============================================================================
+
+export const messageDirectionSchema = z.enum(['inbound', 'outbound']);
+
+export const messageSchema = z.object({
+  id: uuidSchema,
+  conversationId: uuidSchema,
+  contactId: uuidSchema,
+  direction: messageDirectionSchema,
+  channel: channelTypeSchema,
+  content: z.string(),
+  metadata: z.record(z.unknown()).nullable(),
+  tickNumber: z.number().int().nonnegative().nullable(),
+  createdAt: timestampSchema,
+  attachments: z.array(storedMediaAttachmentSchema).optional(),
+});
+
+export const sendMessageInputSchema = z.object({
+  conversationId: uuidSchema.optional(),
+  channel: channelTypeSchema,
+  content: z.string().min(1),
+  metadata: z.record(z.unknown()).optional(),
 });

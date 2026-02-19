@@ -581,220 +581,184 @@ interface MessageReply {
 
 ### Combined MindOutput Schema
 
-The mind produces a single structured JSON output per tick. **Field ordering matters** — the `reply` field is placed immediately after `thoughts` so the mind thinks first, then speaks. The remaining fields (experiences, emotions, decisions, memory) follow as post-reply reflection, allowing the mind to process the full tick — including the act of having replied — before recording experiences and making decisions.
+The mind captures structured cognitive state via **cognitive MCP tools** — two in-process tools that bracket every response. The model calls `record_thought` first, speaks naturally (reply streams to the user), then calls `record_cognitive_state` last to capture experience, emotions, decisions, and memory updates.
 
-This ordering also serves a practical purpose: streaming. By placing `reply` second, the user sees the response after only `thoughts` have generated, minimizing perceived latency. The internal cognition that follows (experiences, emotions, decisions, memory) processes silently while the reply is already delivered.
-
-```typescript
-// Zod schema (source of truth, compiled to JSON Schema for SDK consumption)
-const MindOutputSchema = z.object({
-  // Think first
-  thoughts: z.array(z.object({
-    content: z.string(),
-    importance: z.number().min(0).max(1),
-  })),
-
-  // Then speak
-  reply: z.object({
-    content: z.string(),
-    contactId: z.string(),
-    channel: ChannelTypeSchema,
-    replyToMessageId: z.string(),
-    tone: z.string().optional(),
-  }).nullable(),  // null when no reply needed (e.g., idle interval tick)
-
-  // Then reflect — process the experience of this tick
-  experiences: z.array(z.object({
-    content: z.string(),
-    importance: z.number().min(0).max(1),
-  })),
-
-  emotionDeltas: z.array(z.object({
-    emotion: EmotionNameSchema,
-    delta: z.number(),
-    reasoning: z.string(),
-  })),
-
-  // Agency
-  decisions: z.array(z.object({
-    type: DecisionTypeSchema,
-    description: z.string(),
-    parameters: z.record(z.unknown()),
-  })),
-
-  // Memory management
-  workingMemoryUpdate: z.string().nullable(),  // Full replacement or null (no change)
-  coreSelfUpdate: z.string().nullable(),       // Full replacement or null (no change)
-  memoryCandidate: z.array(z.object({
-    content: z.string(),
-    type: z.enum(['fact', 'experience', 'procedure', 'outcome']),
-    importance: z.number().min(0).max(1),
-    contactId: z.string().optional(),    // If contact-specific
-    keywords: z.array(z.string()).optional(),  // Auto-extracted if not provided
-  })).optional(),
-});
-```
-
-**Why this order — Think, Speak, Reflect:** When an LLM generates structured JSON, it outputs fields sequentially. By placing `thoughts` first, the model articulates its thinking before composing the reply (chain-of-thought effect). By placing `reply` before the remaining fields, the user receives the response with minimal latency. The post-reply fields then capture the mind's reflection on the full tick — experiences include the act of having responded, emotions reflect the complete moment, and decisions are informed by everything that happened.
-
----
-
-## Streaming Structured Output
-
-The mind outputs structured JSON, but the user-facing `reply` field needs to stream in real-time for a responsive experience. We use **`llm-json-stream`** to extract and stream individual fields from the structured JSON output as the LLM generates it.
-
-### The Problem
-
-Without streaming, the user must wait for the entire MindOutput to generate before seeing any response. By placing `reply` second (after only `thoughts`), the streaming latency is minimized — the user starts seeing the reply after just the thoughts generate, while post-reply cognition (experiences, emotions, decisions, memory) processes in the background.
-
-### Solution: Field-Level JSON Streaming
-
-**Library**: [`llm-json-stream`](https://www.npmjs.com/package/llm-json-stream) — a provider-agnostic incremental JSON parser that supports path-based property subscriptions and async iterables.
-
-**How it works:**
-1. The `@animus/agents` adapter emits raw `response_chunk` events as the LLM generates text
-2. The backend's heartbeat pipeline feeds these chunks into `llm-json-stream`
-3. The parser incrementally parses the JSON and emits values as specific fields become available
-4. The `reply.content` field is subscribed to and streamed to the frontend via tRPC subscription
-5. When generation completes, the full JSON is validated against the `MindOutputSchema` (Zod)
-6. The validated output is passed to the EXECUTE stage
-
-### Turn-Aware Streaming in the Agents Layer
-
-The `@animus/agents` abstraction layer tracks **turns** within a single prompt call. When the agent uses tools (e.g., during a sub-agent session), the SDK produces multiple assistant turns — each with its own streamed text. The agents layer exposes this via:
-
-- **`StreamChunkMeta`** on `onChunk` callbacks — includes `turnIndex` so consumers know which turn a chunk belongs to
-- **`turn_end` events** — emitted when an assistant turn completes (before `tool_call_start`), carrying the full turn text and metadata (whether tools were called, which tools, whether thinking was present)
-- **`AgentResponse.turns`** — after completion, the full per-turn breakdown is available
-
-For the **heartbeat mind session**, this turn structure is less relevant because the mind produces a single structured JSON output in one turn. However, for **sub-agent sessions** (which use tools heavily), intermediate turn text represents meaningful user-facing content — the agent's acknowledgment before performing work. The agent orchestrator can use `turn_end` events to stream intermediate responses to the user while the sub-agent continues working.
-
-See `docs/agents/architecture-overview.md` → [Turn-Aware Streaming] for the full interface definitions.
-
-### Architecture: Where the Parser Lives
-
-```
-┌──────────────────────┐
-│   @animus/agents     │   Adapter emits raw text chunks via
-│   (SDK Adapter)      │   response_chunk events + turn_end events
-└──────────┬───────────┘
-           │ response_chunk (raw text) + turn_end (turn boundary)
-           ▼
-┌──────────────────────┐
-│   @animus/backend    │   Heartbeat pipeline feeds chunks
-│   (Mind Query Stage) │   into llm-json-stream parser
-│                      │
-│   ┌────────────────┐ │
-│   │ llm-json-stream│ │   Incremental JSON parsing
-│   │                │ │   + path subscriptions
-│   └───────┬────────┘ │
-│           │          │
-│     ┌─────┴──────┐   │
-│     ▼            ▼   │
-│  reply.content   Full │
-│  (streaming)     JSON │
-│     │            │    │
-│     │         Zod     │
-│     │       validate  │
-│     │            │    │
-│     │         EXECUTE │
-│     ▼         stage   │
-│  tRPC sub  ──────────►│
-│  (to frontend)        │
-└──────────────────────┘
-```
-
-**The parser lives in `@animus/backend`**, not `@animus/agents`. Rationale:
-- The agents package is a **stateless SDK abstraction** — it shouldn't know about `MindOutput` schemas
-- The agents adapter just emits normalized `response_chunk` events with raw text deltas
-- The backend owns the `MindOutput` schema and decides how to interpret it
-- This keeps the agents package generic and reusable for sub-agents (which have different output schemas)
-
-### Implementation Sketch
+Internally, the tool outputs are accumulated into a `CognitiveSnapshot` and converted to a `MindOutput` type for the EXECUTE stage via `snapshotToMindOutput()`.
 
 ```typescript
-import { JsonStream } from 'llm-json-stream';
-
-async function processMindQuery(
-  session: IAgentSession,
-  prompt: string,
-  onReplyChunk: (chunk: string) => void,  // tRPC subscription emit
-): Promise<MindOutput> {
-  const jsonStream = new JsonStream();
-  let fullJson = '';
-
-  // Subscribe to the reply content field for real-time streaming
-  const replyStream = jsonStream.getStringProperty('reply.content');
-
-  // Start consuming reply chunks in parallel
-  const replyPromise = (async () => {
-    for await (const chunk of replyStream) {
-      onReplyChunk(chunk);  // Emit to frontend via tRPC subscription
-    }
-  })();
-
-  // Feed raw text chunks from the agent adapter
-  session.onEvent((event) => {
-    if (event.type === 'response_chunk') {
-      fullJson += event.text;
-      jsonStream.feed(event.text);
-    }
-    if (event.type === 'response_end') {
-      jsonStream.end();
-    }
-  });
-
-  // Send the prompt and wait for completion
-  await session.prompt(prompt);
-
-  // Wait for reply streaming to finish
-  await replyPromise;
-
-  // Validate the complete output
-  const parsed = JSON.parse(fullJson);
-  const validated = MindOutputSchema.parse(parsed);
-
-  return validated;
+// Internal type assembled from CognitiveSnapshot + reply context
+interface MindOutput {
+  thought: { content: string; importance: number };   // Last thought from the tick
+  reply: {
+    content: string;           // Accumulated natural language from reply phase
+    contactId: string;         // From trigger context
+    channel: ChannelType;      // From trigger context
+    replyToMessageId: string | null;
+  } | null;
+  experience: { content: string; importance: number };
+  emotionDeltas: Array<{ emotion: EmotionName; delta: number; reasoning: string }>;
+  energyDelta?: { delta: number; reasoning: string };
+  decisions: Array<{ type: DecisionType; description: string; parameters: Record<string, unknown> }>;
+  workingMemoryUpdate: string | null;
+  coreSelfUpdate: string | null;
+  memoryCandidate: Array<{
+    type: 'fact' | 'experience' | 'procedure' | 'outcome';
+    content: string;
+    importance: number;
+    contactId?: string;
+    keywords?: string[];
+  }>;
 }
 ```
 
-### Schema Field Ordering & Streaming Behavior
+**Why Think, Speak, Reflect:** The cognitive tools enforce a natural order — the model thinks (via `record_thought`), then speaks naturally (reply streams to user), then reflects on the full experience (via `record_cognitive_state`). This mirrors how humans process: internal thought shapes what you say, and reflection follows action. The model's experience narration can include the act of having replied.
 
-The MindOutput fields are generated in this order:
+---
 
-| Order | Field | Streaming Behavior |
-|-------|-------|--------------------|
-| 1 | `thoughts[]` | Accumulated silently (logged, not streamed to user) |
-| 2 | `reply` | **Streamed to frontend in real-time** |
-| 3 | `experiences[]` | Accumulated silently |
-| 4 | `emotionDeltas[]` | Accumulated silently |
-| 5 | `decisions[]` | Accumulated silently |
-| 6 | `workingMemoryUpdate` | Accumulated silently |
-| 7 | `coreSelfUpdate` | Accumulated silently |
-| 8 | `memoryCandidate[]` | Accumulated silently |
+## Cognitive MCP Tools & Reply Streaming
 
-The frontend only receives the `reply.content` stream. All other fields are processed internally during the EXECUTE stage. This means:
-- The UI shows a "thinking" indicator while `thoughts` generate, then transitions to streaming text when the reply starts
-- Users see replies streaming early — only thoughts precede the reply, minimizing latency
-- Post-reply cognition (experiences, emotions, decisions, memory) processes silently after the reply is already streaming
+Instead of forcing the entire mind output into a single JSON blob, the mind uses **cognitive MCP tools** to capture structured cognitive state while speaking naturally. This approach eliminates JSON parsing failures, enables natural reply streaming, and lets the model think and speak like a person rather than a JSON generator.
+
+### The Two Tools
+
+**`record_thought`** — Called FIRST, before any reply or other tool use.
+- Captures the model's inner monologue for this moment
+- Sets the streaming phase to `'replying'` — text after this tool call streams to the user
+- Accumulates into an array (supports multiple thoughts per tick via mid-tick re-entry)
+
+**`record_cognitive_state`** — Called LAST, after the reply is complete.
+- Captures experience, emotion deltas, energy delta, decisions, memory candidates, working memory, and core self updates
+- Sets the streaming phase to `'done'` — text after this is filtered out
+- Uses Zod-validated schemas for each field (no JSON parsing needed)
+
+### Phase-Based Reply Streaming
+
+The cognitive tools manage a phase state machine that controls which text streams to the user:
+
+```
+                     ┌─────────────────────────────────────────────────┐
+                     │         (mid-tick re-entry)                     │
+                     │                                                 │
+pre-thought ──[record_thought]──► replying ──[record_cognitive_state]──► done
+  (filtered)                      (STREAMS)                             (filtered)
+```
+
+- **`pre-thought`**: Any text before `record_thought` is filtered (not sent to user)
+- **`replying`**: Natural language streams to the frontend via `reply:chunk` events
+- **`done`**: Any text after `record_cognitive_state` is filtered
+
+The `onChunk` callback in `mindQuery()` checks the phase before emitting:
+
+```typescript
+state.cognitiveServer.resetSnapshot();
+let replyAccumulated = '';
+
+await session.promptStreaming(
+  context.userMessage,
+  (chunk: string) => {
+    if (cogServer.getPhase() === 'replying') {
+      replyAccumulated += chunk;
+      eventBus.emit('reply:chunk', { content: chunk, accumulated: replyAccumulated });
+    }
+  },
+);
+
+const snapshot = cogServer.getSnapshot();
+const output = snapshotToMindOutput(snapshot, replyAccumulated, gathered);
+```
+
+### Architecture
+
+```
+┌──────────────────────┐
+│   @animus/agents     │   Adapter streams text chunks via
+│   (SDK Adapter)      │   promptStreaming() onChunk callback
+└──────────┬───────────┘
+           │ text chunks + tool calls (MCP)
+           ▼
+┌──────────────────────────────────────┐
+│   @animus/backend (Mind Query Stage) │
+│                                      │
+│   ┌─────────────────────────┐        │
+│   │ Cognitive MCP Server    │        │
+│   │ (in-process, Claude SDK)│        │
+│   │                         │        │
+│   │ record_thought ────────►│ phase = 'replying'
+│   │                         │        │
+│   │ (natural language) ─────┼──────► reply:chunk events → tRPC → frontend
+│   │                         │        │
+│   │ record_cognitive_state ─│──────► CognitiveSnapshot accumulated
+│   └─────────────────────────┘        │
+│                                      │
+│   snapshotToMindOutput() ───────────► MindOutput → EXECUTE stage
+└──────────────────────────────────────┘
+```
+
+**The cognitive tools live in `@animus/backend`** (`heartbeat/cognitive-tools.ts`), built as an in-process MCP server via the Claude SDK's `createSdkMcpServer()`. The agents package remains a stateless SDK abstraction — it doesn't know about cognitive state or `MindOutput`.
+
+### Three-Layer Prompt Architecture
+
+The cognitive tools use a three-layer design for guiding model behavior:
+
+| Layer | Location | Purpose |
+|-------|----------|---------|
+| System prompt | `context-builder.ts` → `COGNITIVE_PROCEDURE` | **When** to call tools, in what **order** |
+| Tool descriptions | `cognitive-tools.ts` → `sdk.tool()` name/description | **How important** each call is, when to stop |
+| Schema `.describe()` | `cognitive-tools.ts` → Zod schema descriptions | **What** to write in each field |
+
+This separation prevents redundancy and lets each layer focus on its purpose.
+
+### Mid-Tick Re-Entry (Multiple Cycles)
+
+When a message is injected mid-tick (e.g., user sends a follow-up while the model is responding), the model may run multiple thought→reply→state cycles within a single prompt. The phase state machine is re-entrant:
+
+- `record_thought` **always** resets phase to `'replying'` (even from `'done'`)
+- `record_cognitive_state` **always** sets phase to `'done'`
+- Accumulated state uses **accumulation semantics**:
+
+| Field | Accumulation |
+|-------|-------------|
+| `thoughts` | Array — every call pushes |
+| `emotionDeltas` | Array — every call appends |
+| `decisions` | Array — every call appends |
+| `memoryCandidate` | Array — every call appends |
+| `experience` | Overwrite — latest wins (narrative progresses forward) |
+| `energyDelta` | Sum — deltas add together |
+| `workingMemoryUpdate` | Overwrite — latest wins |
+| `coreSelfUpdate` | Overwrite — latest wins |
+
+The `snapshotToMindOutput()` converter takes the **last** thought as `MindOutput.thought`. The EXECUTE stage persists **all** thoughts via the `allThoughts` option.
+
+### Turn-Aware Streaming in the Agents Layer
+
+The `@animus/agents` abstraction layer tracks **turns** within a single prompt call. When the agent uses tools, the SDK produces multiple assistant turns — each with its own streamed text. The agents layer exposes this via:
+
+- **`StreamChunkMeta`** on `onChunk` callbacks — includes `turnIndex` so consumers know which turn a chunk belongs to
+- **`turn_end` events** — emitted when an assistant turn completes (before `tool_call_start`), carrying the full turn text and metadata
+- **`AgentResponse.turns`** — after completion, the full per-turn breakdown is available
+
+For the **heartbeat mind session**, the turn structure maps directly to the cognitive tool phases: turn 1 is the `record_thought` tool call, turn 2 is the natural language reply, turn 3 is the `record_cognitive_state` tool call. For **sub-agent sessions** (which use tools heavily), intermediate turn text represents meaningful user-facing content.
+
+See `docs/agents/architecture-overview.md` → [Turn-Aware Streaming] for the full interface definitions.
 
 ### Validation Strategy
 
-The `@animus/agents` abstraction layer does **not** validate structured output — that's the caller's responsibility. The flow:
+Structured data is validated at the **tool call level**, not via post-hoc JSON parsing:
 
-1. **Adapter**: Emits raw `response_chunk` text events
-2. **Backend**: Feeds chunks to `llm-json-stream`, subscribes to paths
-3. **Backend**: After generation completes, parses full JSON and validates with Zod
-4. **On validation failure**: Log warning, attempt partial extraction of valid fields, retry the tick if critical fields are missing
+1. **Tool inputs**: Validated by Zod schemas registered with the MCP server. Invalid tool calls are rejected by the SDK before reaching the handler.
+2. **snapshotToMindOutput()**: Converts validated tool data to `MindOutput`. Provides fallback defaults for missing thoughts/experience.
+3. **safeMindOutput()**: Fallback when the agent session fails entirely — produces a minimal valid `MindOutput` from trigger context.
+4. **No JSON parsing**: The model never outputs raw JSON. All structured data flows through Zod-validated MCP tool inputs.
 
 ### Cross-Provider Behavior
 
-All three agent SDKs produce streaming text that `llm-json-stream` can parse:
-- **Claude**: Structured output via `outputFormat: { type: 'json_schema', schema }`. Text arrives via `content_block_delta` events with `text_delta`. Claude supports multi-turn prompts natively — each `assistant` message boundary triggers a `turn_end` event with full turn metadata.
-- **Codex**: Structured output via `outputSchema`. Text arrives via `item/agentMessage/delta` events. Single-turn only.
-- **OpenCode**: No native structured output enforcement — schema is injected via system prompt. Text arrives via `message.part.updated` events. Single-turn only.
+Cognitive MCP tools use the Claude SDK's in-process MCP server pattern (`createSdkMcpServer()`). Provider support:
 
-For OpenCode (no native enforcement), we validate with Zod after completion and retry if the output doesn't conform. In practice, modern LLMs follow injected schemas reliably when the schema is clear and included in the prompt.
+- **Claude**: Full support. In-process MCP server attaches to the agent session. Tools are Zod-validated.
+- **Pi**: Full support planned. Pi's in-process architecture supports MCP tool registration natively.
+- **Codex / OpenCode**: Not yet supported. These providers fall back to `safeMindOutput()` (minimal valid output). Future work may bridge cognitive tools via provider-specific mechanisms.
+
+The cognitive tools are built once per process lifetime and cached. The `CognitiveSnapshot` is reset before each tick via `resetSnapshot()`.
 
 ## Error Handling Strategy
 

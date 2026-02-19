@@ -34,6 +34,9 @@ import {
   ArrowClockwise,
   Plugs,
   FloppyDisk,
+  CaretRight,
+  CaretDown,
+  ArrowRight,
 } from '@phosphor-icons/react';
 import { Card, SelectionCard, Button, Input, Modal, Badge, Toggle, Slider, Typography, Tooltip } from '../components/ui';
 import { trpc } from '../utils/trpc';
@@ -604,11 +607,19 @@ function ProviderSection() {
   const codexCancelMutation = trpc.codexAuth.cancel.useMutation();
 
   const activeProvider = systemSettings?.defaultAgentProvider ?? 'claude';
-  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
+  const activeModel = systemSettings?.defaultModel ?? null;
+
+  // Local state
+  const [selectedProvider, setSelectedProvider] = useState<'claude' | 'codex' | 'opencode'>(activeProvider);
+  const [pendingModel, setPendingModel] = useState<string | null>(null);
+  const [showAllModels, setShowAllModels] = useState(false);
+  const [credentialsExpanded, setCredentialsExpanded] = useState(false);
   const [credentialInput, setCredentialInput] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [switchConfirm, setSwitchConfirm] = useState<string | null>(null);
   const [validateResult, setValidateResult] = useState<{ valid: boolean; message: string } | null>(null);
+  const [openCodeModelInput, setOpenCodeModelInput] = useState(activeModel ?? '');
+  const [modelSaved, setModelSaved] = useState(false);
 
   // Codex OAuth state
   const [codexOAuthSession, setCodexOAuthSession] = useState<string | null>(null);
@@ -622,6 +633,17 @@ function ProviderSection() {
   const [codexCountdown, setCodexCountdown] = useState(0);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
+
+  // Sync selectedProvider when activeProvider changes from server
+  useEffect(() => {
+    setSelectedProvider(activeProvider);
+  }, [activeProvider]);
+
+  // Model list query
+  const { data: models } = trpc.provider.listModels.useQuery(
+    { provider: selectedProvider },
+    { enabled: selectedProvider !== 'opencode' }
+  );
 
   const stopCountdown = useCallback(() => {
     if (countdownRef.current) {
@@ -665,6 +687,21 @@ function ProviderSection() {
   const claudeCliAvailable = detectData?.find((d) => d.provider === 'claude')?.methods.some((m) => m.method === 'cli' && m.available) ?? false;
   const codexCliAvailable = detectData?.find((d) => d.provider === 'codex')?.methods.some((m) => m.method === 'cli' && m.available) ?? false;
 
+  // Credential status helpers
+  const getKeyData = (provider: string) => {
+    if (provider === 'claude') return claudeKey;
+    if (provider === 'codex') return codexKey;
+    return null;
+  };
+
+  const hasCredentials = (provider: string) => getKeyData(provider)?.hasKey ?? false;
+
+  const getCliAvailable = (provider: string) => {
+    if (provider === 'claude') return claudeCliAvailable;
+    if (provider === 'codex') return codexCliAvailable;
+    return false;
+  };
+
   // Infer credential type from input prefix
   const inferredType = (() => {
     if (!credentialInput || credentialInput.length < 5) return null;
@@ -675,44 +712,67 @@ function ProviderSection() {
     return null;
   })();
 
-  // Format credential type for badge display
-  const getCredentialBadge = (keyData: typeof claudeKey) => {
-    if (!keyData?.hasKey) return { label: 'Not configured', variant: 'default' as const };
-    switch (keyData.credentialType) {
-      case 'api_key': return { label: 'API Key', variant: 'success' as const };
-      case 'oauth_token': return { label: 'OAuth Token', variant: 'success' as const };
-      case 'codex_oauth': return { label: 'ChatGPT OAuth', variant: 'success' as const };
-      case 'cli_detected': return { label: 'CLI', variant: 'success' as const };
-      default: return { label: 'Connected', variant: 'success' as const };
+  // Formatting helpers
+  const formatTokens = (n: number) =>
+    n >= 1_000_000 ? `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M` :
+    n >= 1_000 ? `${Math.round(n / 1_000)}K` : String(n);
+
+  const formatPrice = (per1M: number) => `$${per1M.toFixed(2)}`;
+
+  // Provider segment click
+  const handleProviderClick = (provider: 'claude' | 'codex' | 'opencode') => {
+    setSelectedProvider(provider);
+    setPendingModel(null);
+    setShowAllModels(false);
+    setCredentialInput('');
+    setValidateResult(null);
+
+    if (provider !== activeProvider) {
+      if (hasCredentials(provider)) {
+        setSwitchConfirm(provider);
+      } else {
+        // Expand credentials for unconfigured provider
+        setCredentialsExpanded(true);
+      }
     }
-  };
-
-  const providers = [
-    {
-      id: 'claude' as const,
-      name: 'Claude',
-      description: 'By Anthropic. Full-featured agent with native tool use and streaming.',
-      keyData: claudeKey,
-      cliAvailable: claudeCliAvailable,
-    },
-    {
-      id: 'codex' as const,
-      name: 'Codex',
-      description: 'By OpenAI. Code-focused agent with function calling.',
-      keyData: codexKey,
-      cliAvailable: codexCliAvailable,
-    },
-  ];
-
-  const handleSwitch = (provider: string) => {
-    if (provider === activeProvider) return;
-    setSwitchConfirm(provider);
   };
 
   const confirmSwitch = () => {
     if (!switchConfirm) return;
-    updateSettingsMutation.mutate({ defaultAgentProvider: switchConfirm as 'claude' | 'codex' | 'opencode' });
+    updateSettingsMutation.mutate({
+      defaultAgentProvider: switchConfirm as 'claude' | 'codex' | 'opencode',
+      defaultModel: undefined, // Reset model on provider switch
+    });
     setSwitchConfirm(null);
+    setPendingModel(null);
+  };
+
+  const handleModelSave = () => {
+    if (!pendingModel) return;
+    updateSettingsMutation.mutate(
+      { defaultModel: pendingModel },
+      {
+        onSuccess: () => {
+          setModelSaved(true);
+          setPendingModel(null);
+          setTimeout(() => setModelSaved(false), 2000);
+        },
+      },
+    );
+  };
+
+  const handleOpenCodeModelSave = () => {
+    const trimmed = openCodeModelInput.trim();
+    if (!trimmed) return;
+    updateSettingsMutation.mutate(
+      { defaultModel: trimmed },
+      {
+        onSuccess: () => {
+          setModelSaved(true);
+          setTimeout(() => setModelSaved(false), 2000);
+        },
+      },
+    );
   };
 
   const handleValidateAndSave = (provider: 'claude' | 'codex') => {
@@ -729,6 +789,10 @@ function ProviderSection() {
                 onSuccess: () => {
                   setCredentialInput('');
                   setShowKey(false);
+                  // Auto-trigger switch if this was for a pending provider
+                  if (provider !== activeProvider) {
+                    setSwitchConfirm(provider);
+                  }
                 },
               },
             );
@@ -743,7 +807,13 @@ function ProviderSection() {
   };
 
   const handleUseCli = (provider: 'claude' | 'codex') => {
-    useCliMutation.mutate({ provider });
+    useCliMutation.mutate({ provider }, {
+      onSuccess: () => {
+        if (provider !== activeProvider) {
+          setSwitchConfirm(provider);
+        }
+      },
+    });
   };
 
   const handleCodexOAuthStart = () => {
@@ -805,224 +875,640 @@ function ProviderSection() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  return (
-    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-      {providers.map((p) => {
-        const badge = getCredentialBadge(p.keyData);
-        const hasKey = p.keyData?.hasKey ?? false;
+  // Determine which models to show (first 4, rest collapsed)
+  const visibleModels = models && !showAllModels && models.length > 5
+    ? models.slice(0, 4)
+    : models;
+  const hiddenCount = models && models.length > 5 ? models.length - 4 : 0;
 
-        return (
-          <Card
-            key={p.id}
-            variant={activeProvider === p.id ? 'elevated' : 'outlined'}
-            padding="md"
-          >
-            <div
-              css={css`cursor: pointer;`}
-              onClick={() => {
-                setExpandedProvider(expandedProvider === p.id ? null : p.id);
-                setCredentialInput('');
-                setValidateResult(null);
-                setShowKey(false);
-              }}
+  const currentKeyData = getKeyData(selectedProvider);
+  const currentHasCredentials = hasCredentials(selectedProvider);
+  const currentCliAvailable = getCliAvailable(selectedProvider);
+  const needsCredentialSetup = !currentHasCredentials;
+
+  // Determine which model is "current" (saved on server)
+  const currentModelId = activeModel && selectedProvider === activeProvider
+    ? activeModel
+    : null;
+
+  // The model the radio is set to — either pending selection or current
+  const selectedModelId = pendingModel ?? currentModelId ?? models?.[0]?.id ?? null;
+
+  return (
+    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
+
+      {/* ============ Zone 1: Provider Segmented Control ============ */}
+      <div>
+        <Typography.Body as="div" css={css`
+          font-weight: ${theme.typography.fontWeight.semibold};
+          margin-bottom: ${theme.spacing[2]};
+        `}>
+          Provider
+        </Typography.Body>
+        <div css={css`
+          display: flex;
+          border: 1px solid ${theme.colors.border.default};
+          border-radius: ${theme.borderRadius.md};
+          overflow: hidden;
+        `}>
+          {(['claude', 'codex', 'opencode'] as const).map((provider, idx) => {
+            const isSelected = provider === selectedProvider;
+            const hasCreds = hasCredentials(provider);
+            const names: Record<string, string> = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode' };
+
+            return (
+              <button
+                key={provider}
+                onClick={() => handleProviderClick(provider)}
+                css={css`
+                  flex: 1;
+                  padding: ${theme.spacing[2.5]} ${theme.spacing[3]};
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  gap: ${theme.spacing[1.5]};
+                  cursor: pointer;
+                  transition: all 150ms ease-out;
+                  font-size: ${theme.typography.fontSize.sm};
+                  font-weight: ${theme.typography.fontWeight.medium};
+                  ${idx > 0 ? `border-left: 1px solid ${theme.colors.border.default};` : ''}
+                  ${isSelected ? `
+                    background: ${theme.colors.accent};
+                    color: ${theme.colors.accentForeground};
+                  ` : `
+                    background: transparent;
+                    color: ${theme.colors.text.secondary};
+                    &:hover {
+                      background: ${theme.colors.background.elevated};
+                    }
+                  `}
+                `}
+              >
+                <span css={css`
+                  width: 6px;
+                  height: 6px;
+                  border-radius: 50%;
+                  background: ${hasCreds ? theme.colors.success.main : theme.colors.text.disabled};
+                  flex-shrink: 0;
+                `} />
+                {names[provider]}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ============ Zone 2: Model Picker ============ */}
+      <div>
+        <div css={css`margin-bottom: ${theme.spacing[2]};`}>
+          <Typography.Body as="div" css={css`
+            font-weight: ${theme.typography.fontWeight.semibold};
+          `}>
+            Model
+          </Typography.Body>
+          <Typography.SmallBody color="secondary">
+            {!currentHasCredentials
+              ? `Set up ${selectedProvider === 'claude' ? 'Claude' : selectedProvider === 'codex' ? 'Codex' : 'OpenCode'} credentials below to choose a model.`
+              : selectedProvider === 'opencode'
+                ? 'OpenCode supports 75+ LLM providers. Enter your model identifier.'
+                : 'Choose which model powers your Animus.'}
+          </Typography.SmallBody>
+        </div>
+
+        {!currentHasCredentials ? (
+          /* No credentials: show nothing, guidance text above is enough */
+          null
+        ) : selectedProvider === 'opencode' ? (
+          /* OpenCode: freeform text input */
+          <div css={css`display: flex; gap: ${theme.spacing[2]}; align-items: flex-end;`}>
+            <div css={css`flex: 1;`}>
+              <Input
+                label="Model ID"
+                value={openCodeModelInput}
+                onChange={(e) => setOpenCodeModelInput((e.target as HTMLInputElement).value)}
+                placeholder="provider/model-name (e.g., openai/gpt-4.1)"
+                onKeyDown={(e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter') handleOpenCodeModelSave();
+                }}
+              />
+            </div>
+            <Button
+              size="sm"
+              onClick={handleOpenCodeModelSave}
+              disabled={!openCodeModelInput.trim() || openCodeModelInput.trim() === activeModel}
+              loading={updateSettingsMutation.isPending}
             >
-              <div css={css`display: flex; align-items: center; justify-content: space-between; margin-bottom: ${theme.spacing[1]};`}>
-                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                  <Typography.Subtitle as="span">
-                    {p.name}
-                  </Typography.Subtitle>
-                  {activeProvider === p.id && (
-                    <Badge variant="success">Currently active</Badge>
+              Save
+            </Button>
+          </div>
+        ) : (
+          /* Claude / Codex: radio-style model list */
+          <div css={css`
+            border: 1px solid ${theme.colors.border.light};
+            border-radius: ${theme.borderRadius.md};
+            overflow: hidden;
+          `}>
+
+            {visibleModels?.map((model, idx) => {
+              const isCurrentModel = model.id === currentModelId;
+              const isSelectedModel = model.id === selectedModelId;
+
+              return (
+                <div
+                  key={model.id}
+                  onClick={() => {
+                    if (model.id === currentModelId) {
+                      setPendingModel(null);
+                    } else {
+                      setPendingModel(model.id);
+                    }
+                  }}
+                  css={css`
+                    padding: ${theme.spacing[3]} ${theme.spacing[4]};
+                    cursor: pointer;
+                    transition: background 150ms ease-out;
+                    position: relative;
+                    ${idx > 0 ? `border-top: 1px solid ${theme.colors.border.light};` : ''}
+                    ${isSelectedModel ? `
+                      background: ${theme.colors.accent}0a;
+                      border-left: 2px solid ${theme.colors.accent};
+                      padding-left: calc(${theme.spacing[4]} - 2px);
+                    ` : `
+                      border-left: 2px solid transparent;
+                      padding-left: calc(${theme.spacing[4]} - 2px);
+                      &:hover {
+                        background: ${theme.colors.accent}05;
+                      }
+                    `}
+                  `}
+                >
+                  {/* Line 1: Radio + Name + Current badge */}
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; margin-bottom: ${theme.spacing[1]};`}>
+                    <span css={css`
+                      width: 18px;
+                      height: 18px;
+                      border-radius: 50%;
+                      border: 2px solid ${isSelectedModel ? theme.colors.accent : theme.colors.border.default};
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      flex-shrink: 0;
+                      transition: all 150ms ease-out;
+                      ${isSelectedModel ? `background: ${theme.colors.accent};` : ''}
+                    `}>
+                      {isSelectedModel && (
+                        <span css={css`
+                          width: 6px;
+                          height: 6px;
+                          border-radius: 50%;
+                          background: ${theme.colors.accentForeground};
+                        `} />
+                      )}
+                    </span>
+                    <Typography.Body as="span" css={css`
+                      font-weight: ${theme.typography.fontWeight.medium};
+                      font-size: 15px;
+                    `}>
+                      {model.name}
+                    </Typography.Body>
+                    {isCurrentModel && (
+                      <Badge variant="default" css={css`font-size: ${theme.typography.fontSize.xs};`}>
+                        Current
+                      </Badge>
+                    )}
+                  </div>
+
+                  {/* Line 2: Context & output */}
+                  <div css={css`
+                    margin-left: 24px;
+                    font-size: 13px;
+                    color: ${theme.colors.text.secondary};
+                    line-height: 1.4;
+                  `}>
+                    {formatTokens(model.contextWindow)} context · {formatTokens(model.maxOutputTokens)} max output
+                  </div>
+
+                  {/* Line 3: Pricing */}
+                  <div css={css`
+                    margin-left: 24px;
+                    font-size: 13px;
+                    color: ${theme.colors.text.secondary};
+                    line-height: 1.4;
+                  `}>
+                    <span css={css`color: ${theme.colors.text.primary};`}>{formatPrice(model.inputPricePer1M)}</span> input /{' '}
+                    <span css={css`color: ${theme.colors.text.primary};`}>{formatPrice(model.outputPricePer1M)}</span> output per 1M tokens
+                  </div>
+
+                  {/* Line 4: Capability badges */}
+                  {(model.supportsVision || model.supportsThinking) && (
+                    <div css={css`
+                      margin-left: 24px;
+                      margin-top: ${theme.spacing[1]};
+                      display: flex;
+                      gap: ${theme.spacing[1]};
+                    `}>
+                      {model.supportsVision && (
+                        <span css={css`
+                          font-size: 12px;
+                          padding: 1px ${theme.spacing[1.5]};
+                          background: ${theme.colors.background.elevated};
+                          border-radius: ${theme.borderRadius.sm};
+                          color: ${theme.colors.text.hint};
+                        `}>
+                          Vision
+                        </span>
+                      )}
+                      {model.supportsThinking && (
+                        <span css={css`
+                          font-size: 12px;
+                          padding: 1px ${theme.spacing[1.5]};
+                          background: ${theme.colors.background.elevated};
+                          border-radius: ${theme.borderRadius.sm};
+                          color: ${theme.colors.text.hint};
+                        `}>
+                          Thinking
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
-                <Badge variant={badge.variant}>
-                  {badge.label}
-                </Badge>
-              </div>
-              <Typography.SmallBody color="secondary">
-                {p.description}
-              </Typography.SmallBody>
-            </div>
+              );
+            })}
 
-            <AnimatePresence>
-              {expandedProvider === p.id && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  css={css`overflow: hidden;`}
-                >
-                  <div css={css`
-                    margin-top: ${theme.spacing[4]};
-                    padding-top: ${theme.spacing[4]};
-                    border-top: 1px solid ${theme.colors.border.light};
-                    display: flex;
-                    flex-direction: column;
-                    gap: ${theme.spacing[3]};
+            {/* Show more toggle */}
+            {!showAllModels && hiddenCount > 0 && (
+              <button
+                onClick={() => setShowAllModels(true)}
+                css={css`
+                  width: 100%;
+                  padding: ${theme.spacing[2.5]} ${theme.spacing[4]};
+                  border-top: 1px solid ${theme.colors.border.light};
+                  cursor: pointer;
+                  display: flex;
+                  align-items: center;
+                  gap: ${theme.spacing[1]};
+                  font-size: 13px;
+                  color: ${theme.colors.text.secondary};
+                  background: transparent;
+                  &:hover { color: ${theme.colors.text.primary}; }
+                `}
+              >
+                <CaretRight size={12} /> Show {hiddenCount} more model{hiddenCount !== 1 ? 's' : ''}
+              </button>
+            )}
+            {showAllModels && hiddenCount > 0 && (
+              <button
+                onClick={() => setShowAllModels(false)}
+                css={css`
+                  width: 100%;
+                  padding: ${theme.spacing[2.5]} ${theme.spacing[4]};
+                  border-top: 1px solid ${theme.colors.border.light};
+                  cursor: pointer;
+                  display: flex;
+                  align-items: center;
+                  gap: ${theme.spacing[1]};
+                  font-size: 13px;
+                  color: ${theme.colors.text.secondary};
+                  background: transparent;
+                  &:hover { color: ${theme.colors.text.primary}; }
+                `}
+              >
+                <CaretDown size={12} /> Show fewer
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Save bar — shown when pending model differs from current */}
+        <AnimatePresence>
+          {pendingModel && pendingModel !== currentModelId && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              <div css={css`
+                margin-top: ${theme.spacing[3]};
+                padding: ${theme.spacing[3]} ${theme.spacing[4]};
+                border: 1px solid ${theme.colors.border.default};
+                border-radius: ${theme.borderRadius.md};
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                background: ${theme.colors.background.elevated};
+              `}>
+                <div css={css`
+                  display: flex;
+                  align-items: center;
+                  gap: ${theme.spacing[2]};
+                  font-size: 14px;
+                  color: ${theme.colors.text.secondary};
+                  min-width: 0;
+                `}>
+                  <span css={css`white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`}>
+                    {models?.find(m => m.id === currentModelId)?.name ?? 'Default'}
+                  </span>
+                  <ArrowRight size={14} css={css`flex-shrink: 0; color: ${theme.colors.text.hint};`} />
+                  <span css={css`
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    color: ${theme.colors.text.primary};
+                    font-weight: ${theme.typography.fontWeight.medium};
                   `}>
-                    {/* CLI detection */}
-                    {p.cliAvailable && (
+                    {models?.find(m => m.id === pendingModel)?.name ?? pendingModel}
+                  </span>
+                </div>
+                <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-shrink: 0; margin-left: ${theme.spacing[3]};`}>
+                  <Button variant="ghost" size="sm" onClick={() => setPendingModel(null)}>
+                    Cancel
+                  </Button>
+                  <Button size="sm" onClick={handleModelSave} loading={updateSettingsMutation.isPending}>
+                    Save change
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Brief "Saved" confirmation */}
+        <AnimatePresence>
+          {modelSaved && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              css={css`
+                margin-top: ${theme.spacing[2]};
+                display: flex;
+                align-items: center;
+                gap: ${theme.spacing[1]};
+                color: ${theme.colors.success.main};
+                font-size: 13px;
+              `}
+            >
+              <CheckCircle size={14} weight="fill" /> Model saved
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* ============ Zone 3: Credentials ============ */}
+      <div>
+        <div
+          css={css`
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: ${theme.spacing[2]};
+          `}
+        >
+          <Typography.Body as="div" css={css`
+            font-weight: ${theme.typography.fontWeight.semibold};
+          `}>
+            Credentials
+          </Typography.Body>
+          {currentHasCredentials && (
+            <Typography.SmallBody as="span" color={theme.colors.success.main} css={css`
+              display: flex;
+              align-items: center;
+              gap: ${theme.spacing[1]};
+            `}>
+              <CheckCircle size={14} weight="fill" /> Connected
+            </Typography.SmallBody>
+          )}
+          {!currentHasCredentials && (
+            <Typography.SmallBody as="span" color={theme.colors.warning.main} css={css`
+              display: flex;
+              align-items: center;
+              gap: ${theme.spacing[1]};
+            `}>
+              <Warning size={14} weight="fill" /> Not configured
+            </Typography.SmallBody>
+          )}
+        </div>
+
+        {/* Collapsed state: show toggle */}
+        {currentHasCredentials && !credentialsExpanded && (
+          <button
+            onClick={() => setCredentialsExpanded(true)}
+            css={css`
+              display: flex;
+              align-items: center;
+              gap: ${theme.spacing[1]};
+              font-size: 13px;
+              color: ${theme.colors.text.secondary};
+              cursor: pointer;
+              padding: 0;
+              background: transparent;
+              &:hover { color: ${theme.colors.text.primary}; }
+            `}
+          >
+            <CaretRight size={12} /> Manage credentials
+          </button>
+        )}
+
+        {/* Expanded credential management */}
+        <AnimatePresence>
+          {(credentialsExpanded || needsCredentialSetup) && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              css={css`overflow: hidden;`}
+            >
+              <div css={css`
+                display: flex;
+                flex-direction: column;
+                gap: ${theme.spacing[3]};
+                padding-top: ${theme.spacing[2]};
+              `}>
+                {/* Collapse toggle when expanded */}
+                {currentHasCredentials && credentialsExpanded && (
+                  <button
+                    onClick={() => setCredentialsExpanded(false)}
+                    css={css`
+                      display: flex;
+                      align-items: center;
+                      gap: ${theme.spacing[1]};
+                      font-size: 13px;
+                      color: ${theme.colors.text.secondary};
+                      cursor: pointer;
+                      padding: 0;
+                      background: transparent;
+                      &:hover { color: ${theme.colors.text.primary}; }
+                    `}
+                  >
+                    <CaretDown size={12} /> Hide credentials
+                  </button>
+                )}
+
+                {needsCredentialSetup && (
+                  <Typography.SmallBody color="secondary">
+                    Set up credentials to use {selectedProvider === 'claude' ? 'Claude' : selectedProvider === 'codex' ? 'Codex' : 'OpenCode'}.
+                  </Typography.SmallBody>
+                )}
+
+                {/* CLI detection */}
+                {currentCliAvailable && selectedProvider !== 'opencode' && (
+                  <div css={css`
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    padding: ${theme.spacing[3]};
+                    background: ${theme.colors.background.elevated};
+                    border-radius: ${theme.borderRadius.sm};
+                    gap: ${theme.spacing[2]};
+                  `}>
+                    <Typography.SmallBody as="div" color="secondary">
+                      {selectedProvider === 'claude' ? 'Claude' : 'Codex'} CLI detected
+                    </Typography.SmallBody>
+                    {currentKeyData?.credentialType === 'cli_detected' ? (
+                      <Typography.Caption as="span" color={theme.colors.success.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                        <CheckCircle size={14} weight="fill" /> Active
+                      </Typography.Caption>
+                    ) : (
+                      <Button variant="ghost" size="sm" onClick={() => handleUseCli(selectedProvider as 'claude' | 'codex')} loading={useCliMutation.isPending}>
+                        Use CLI
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+                {/* Codex OAuth section */}
+                {selectedProvider === 'codex' && (
+                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                    {codexOAuthStatus === 'idle' && (
                       <div css={css`
                         display: flex;
                         align-items: center;
                         justify-content: space-between;
                         padding: ${theme.spacing[3]};
-                        background: ${theme.colors.background.elevated};
+                        border: 1px solid ${theme.colors.border.light};
                         border-radius: ${theme.borderRadius.sm};
                         gap: ${theme.spacing[2]};
                       `}>
+                        <div>
+                          <Typography.SmallBody as="div">ChatGPT Sign In</Typography.SmallBody>
+                          <Typography.Caption as="div" color="hint">Use your ChatGPT subscription</Typography.Caption>
+                        </div>
+                        <Button size="sm" onClick={handleCodexOAuthStart} loading={codexInitiateMutation.isPending}>
+                          Sign in
+                        </Button>
+                      </div>
+                    )}
+
+                    {codexOAuthStatus === 'pending' && codexOAuthData && (
+                      <div css={css`
+                        padding: ${theme.spacing[3]};
+                        border: 1px solid ${theme.colors.border.default};
+                        border-radius: ${theme.borderRadius.sm};
+                        display: flex;
+                        flex-direction: column;
+                        gap: ${theme.spacing[3]};
+                      `}>
                         <Typography.SmallBody as="div" color="secondary">
-                          {p.name} CLI detected
+                          Open{' '}
+                          <a
+                            href={codexOAuthData.verificationUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            css={css`color: ${theme.colors.text.primary}; font-weight: ${theme.typography.fontWeight.medium}; text-decoration: none; &:hover { text-decoration: underline; }`}
+                          >
+                            {codexOAuthData.verificationUrl} <ArrowSquareOut size={12} css={css`vertical-align: middle;`} />
+                          </a>{' '}
+                          and enter:
                         </Typography.SmallBody>
-                        {p.keyData?.credentialType === 'cli_detected' ? (
-                          <Typography.Caption as="span" color={theme.colors.success.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
-                            <CheckCircle size={14} weight="fill" /> Active
-                          </Typography.Caption>
-                        ) : (
-                          <Button variant="ghost" size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleUseCli(p.id); }} loading={useCliMutation.isPending}>
-                            Use CLI
-                          </Button>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Codex OAuth section */}
-                    {p.id === 'codex' && (
-                      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                        {codexOAuthStatus === 'idle' && (
-                          <div css={css`
-                            display: flex;
-                            align-items: center;
-                            justify-content: space-between;
-                            padding: ${theme.spacing[3]};
-                            border: 1px solid ${theme.colors.border.light};
+                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                          <Typography.Subtitle as="code" css={css`
+                            font-weight: ${theme.typography.fontWeight.semibold};
+                            letter-spacing: 0.12em;
+                            background: ${theme.colors.background.elevated};
+                            padding: ${theme.spacing[1.5]} ${theme.spacing[3]};
                             border-radius: ${theme.borderRadius.sm};
-                            gap: ${theme.spacing[2]};
-                          `}>
-                            <div>
-                              <Typography.SmallBody as="div">
-                                ChatGPT Sign In
-                              </Typography.SmallBody>
-                              <Typography.Caption as="div" color="hint">
-                                Use your ChatGPT subscription
-                              </Typography.Caption>
-                            </div>
-                            <Button size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleCodexOAuthStart(); }} loading={codexInitiateMutation.isPending}>
-                              Sign in
-                            </Button>
-                          </div>
-                        )}
-
-                        {codexOAuthStatus === 'pending' && codexOAuthData && (
-                          <div css={css`
-                            padding: ${theme.spacing[3]};
                             border: 1px solid ${theme.colors.border.default};
-                            border-radius: ${theme.borderRadius.sm};
-                            display: flex;
-                            flex-direction: column;
-                            gap: ${theme.spacing[3]};
                           `}>
-                            <Typography.SmallBody as="div" color="secondary">
-                              Open{' '}
-                              <a
-                                href={codexOAuthData.verificationUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                css={css`color: ${theme.colors.text.primary}; font-weight: ${theme.typography.fontWeight.medium}; text-decoration: none; &:hover { text-decoration: underline; }`}
-                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                              >
-                                {codexOAuthData.verificationUrl} <ArrowSquareOut size={12} css={css`vertical-align: middle;`} />
-                              </a>{' '}
-                              and enter:
-                            </Typography.SmallBody>
-                            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                              <Typography.Subtitle as="code" css={css`
-                                font-weight: ${theme.typography.fontWeight.semibold};
-                                letter-spacing: 0.12em;
-                                background: ${theme.colors.background.elevated};
-                                padding: ${theme.spacing[1.5]} ${theme.spacing[3]};
-                                border-radius: ${theme.borderRadius.sm};
-                                border: 1px solid ${theme.colors.border.default};
-                              `}>
-                                {codexOAuthData.userCode}
-                              </Typography.Subtitle>
-                              <button
-                                onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleCopyCode(codexOAuthData.userCode); }}
-                                css={css`
-                                  display: flex; align-items: center; gap: ${theme.spacing[0.5]};
-                                  font-size: ${theme.typography.fontSize.xs};
-                                  color: ${codeCopied ? theme.colors.success.main : theme.colors.text.hint};
-                                  cursor: pointer; padding: ${theme.spacing[1]};
-                                  &:hover { color: ${codeCopied ? theme.colors.success.main : theme.colors.text.primary}; }
-                                `}
-                              >
-                                {codeCopied ? <CheckCircle size={12} /> : <Copy size={12} />}
-                                {codeCopied ? 'Copied' : 'Copy'}
-                              </button>
-                            </div>
-                            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                              <CircleNotch
-                                size={14}
-                                css={css`
-                                  color: ${theme.colors.text.hint};
-                                  animation: spin 1s linear infinite;
-                                  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-                                `}
-                              />
-                              <Typography.Caption color="hint">
-                                Waiting...
-                              </Typography.Caption>
-                              {codexCountdown > 0 && (
-                                <Typography.Caption color="disabled" css={css`margin-left: auto;`}>
-                                  {formatCountdown(codexCountdown)}
-                                </Typography.Caption>
-                              )}
-                            </div>
-                            <Button variant="ghost" size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleCodexOAuthCancel(); }}>
-                              Cancel
-                            </Button>
-                          </div>
-                        )}
-
-                        {codexOAuthStatus === 'success' && (
-                          <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
-                            display: flex; align-items: center; gap: ${theme.spacing[2]};
-                            padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                            background: ${theme.colors.success.main}0d;
-                            border-radius: ${theme.borderRadius.sm};
-                          `}>
-                            <CheckCircle size={16} weight="fill" /> Signed in with ChatGPT
-                          </Typography.SmallBody>
-                        )}
-
-                        {(codexOAuthStatus === 'error' || codexOAuthStatus === 'expired') && (
-                          <div css={css`
-                            display: flex; align-items: center; justify-content: space-between;
-                            padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                            background: ${theme.colors.error.main}0d;
-                            border-radius: ${theme.borderRadius.sm};
-                          `}>
-                            <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
-                              <XCircle size={16} weight="fill" /> {codexOAuthMessage || 'Failed'}
-                            </Typography.SmallBody>
-                            <Button variant="ghost" size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setCodexOAuthStatus('idle'); setCodexOAuthSession(null); setCodexOAuthData(null); }}>
-                              Retry
-                            </Button>
-                          </div>
-                        )}
+                            {codexOAuthData.userCode}
+                          </Typography.Subtitle>
+                          <button
+                            onClick={() => handleCopyCode(codexOAuthData.userCode)}
+                            css={css`
+                              display: flex; align-items: center; gap: ${theme.spacing[0.5]};
+                              font-size: ${theme.typography.fontSize.xs};
+                              color: ${codeCopied ? theme.colors.success.main : theme.colors.text.hint};
+                              cursor: pointer; padding: ${theme.spacing[1]};
+                              &:hover { color: ${codeCopied ? theme.colors.success.main : theme.colors.text.primary}; }
+                            `}
+                          >
+                            {codeCopied ? <CheckCircle size={12} /> : <Copy size={12} />}
+                            {codeCopied ? 'Copied' : 'Copy'}
+                          </button>
+                        </div>
+                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                          <CircleNotch
+                            size={14}
+                            css={css`
+                              color: ${theme.colors.text.hint};
+                              animation: spin 1s linear infinite;
+                              @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                            `}
+                          />
+                          <Typography.Caption color="hint">Waiting...</Typography.Caption>
+                          {codexCountdown > 0 && (
+                            <Typography.Caption color="disabled" css={css`margin-left: auto;`}>
+                              {formatCountdown(codexCountdown)}
+                            </Typography.Caption>
+                          )}
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={handleCodexOAuthCancel}>
+                          Cancel
+                        </Button>
                       </div>
                     )}
 
-                    {/* Credential input */}
+                    {codexOAuthStatus === 'success' && (
+                      <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
+                        display: flex; align-items: center; gap: ${theme.spacing[2]};
+                        padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                        background: ${theme.colors.success.main}0d;
+                        border-radius: ${theme.borderRadius.sm};
+                      `}>
+                        <CheckCircle size={16} weight="fill" /> Signed in with ChatGPT
+                      </Typography.SmallBody>
+                    )}
+
+                    {(codexOAuthStatus === 'error' || codexOAuthStatus === 'expired') && (
+                      <div css={css`
+                        display: flex; align-items: center; justify-content: space-between;
+                        padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                        background: ${theme.colors.error.main}0d;
+                        border-radius: ${theme.borderRadius.sm};
+                      `}>
+                        <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                          <XCircle size={16} weight="fill" /> {codexOAuthMessage || 'Failed'}
+                        </Typography.SmallBody>
+                        <Button variant="ghost" size="sm" onClick={() => { setCodexOAuthStatus('idle'); setCodexOAuthSession(null); setCodexOAuthData(null); }}>
+                          Retry
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Credential input (not for opencode) */}
+                {selectedProvider !== 'opencode' && (
+                  <>
                     <div css={css`display: flex; gap: ${theme.spacing[2]}; align-items: flex-end;`}>
                       <div css={css`flex: 1;`}>
                         <Input
-                          label={p.id === 'claude' ? 'API Key or OAuth Token' : 'API Key'}
+                          label={selectedProvider === 'claude' ? 'API Key or OAuth Token' : 'API Key'}
                           type={showKey ? 'text' : 'password'}
                           value={credentialInput}
                           onChange={(e) => { setCredentialInput((e.target as HTMLInputElement).value); setValidateResult(null); }}
-                          placeholder={hasKey ? '********' : (p.id === 'claude' ? 'sk-ant-api03-... or sk-ant-oat01-...' : 'sk-proj-...')}
+                          placeholder={currentHasCredentials ? '********' : (selectedProvider === 'claude' ? 'sk-ant-api03-... or sk-ant-oat01-...' : 'sk-proj-...')}
                           rightElement={
                             <div css={css`display: flex; align-items: center; gap: ${theme.spacing[1.5]};`}>
                               {inferredType && credentialInput.length > 8 && (
@@ -1039,7 +1525,7 @@ function ProviderSection() {
                                 <ShieldCheck size={16} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
                               </Tooltip>
                               <button
-                                onClick={(e) => { e.stopPropagation(); setShowKey(!showKey); }}
+                                onClick={() => setShowKey(!showKey)}
                                 css={css`
                                   cursor: pointer; padding: 0; color: ${theme.colors.text.hint};
                                   &:hover { color: ${theme.colors.text.primary}; }
@@ -1053,7 +1539,7 @@ function ProviderSection() {
                       </div>
                       <Button
                         size="sm"
-                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleValidateAndSave(p.id); }}
+                        onClick={() => handleValidateAndSave(selectedProvider as 'claude' | 'codex')}
                         loading={validateMutation.isPending || saveKeyMutation.isPending}
                         disabled={!credentialInput.trim()}
                       >
@@ -1065,49 +1551,47 @@ function ProviderSection() {
                         {validateResult.message}
                       </Typography.Caption>
                     )}
+                  </>
+                )}
 
-                    {/* Action buttons */}
-                    <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
-                      {activeProvider !== p.id && hasKey && (
-                        <Button variant="secondary" size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleSwitch(p.id); }}>
-                          Switch to {p.name}
-                        </Button>
-                      )}
-                      {hasKey && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleRemove(p.id); }}
-                          loading={removeKeyMutation.isPending}
-                        >
-                          <Trash size={14} css={css`margin-right: ${theme.spacing[1]};`} />
-                          Remove
-                        </Button>
-                      )}
-                    </div>
-
-                    {/* Security footnote */}
-                    <Typography.Caption as="div" color="disabled" css={css`
-                      display: flex; align-items: center; gap: ${theme.spacing[1.5]};
-                    `}>
-                      <ShieldCheck size={12} css={css`flex-shrink: 0;`} />
-                      <span>Encrypted at rest. Never leaves your instance.</span>
-                    </Typography.Caption>
+                {/* Remove button */}
+                {currentHasCredentials && selectedProvider !== 'opencode' && (
+                  <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemove(selectedProvider as 'claude' | 'codex')}
+                      loading={removeKeyMutation.isPending}
+                    >
+                      <Trash size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+                      Remove credentials
+                    </Button>
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </Card>
-        );
-      })}
+                )}
 
+                {/* Security footnote */}
+                {selectedProvider !== 'opencode' && (
+                  <Typography.Caption as="div" color="disabled" css={css`
+                    display: flex; align-items: center; gap: ${theme.spacing[1.5]};
+                  `}>
+                    <ShieldCheck size={12} css={css`flex-shrink: 0;`} />
+                    <span>Encrypted at rest. Never leaves your instance.</span>
+                  </Typography.Caption>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Switch confirmation modal */}
       <Modal open={switchConfirm !== null} onClose={() => setSwitchConfirm(null)}>
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
           <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
-            Switch to {switchConfirm}?
+            Switch to {switchConfirm === 'claude' ? 'Claude' : switchConfirm === 'codex' ? 'Codex' : 'OpenCode'}?
           </Typography.Subtitle>
           <Typography.SmallBody color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
-            Your Animus will use {switchConfirm} for all future thinking. The current mind session will end and restart with the new provider.
+            Your Animus will use {switchConfirm === 'claude' ? 'Claude' : switchConfirm === 'codex' ? 'Codex' : 'OpenCode'} for all future thinking. The current mind session will end and restart with the new provider.
           </Typography.SmallBody>
           <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
             <Button variant="ghost" size="sm" onClick={() => setSwitchConfirm(null)}>Cancel</Button>

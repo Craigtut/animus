@@ -1,20 +1,30 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import { useScroll, useTransform, motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
+import { File as FileIcon, DownloadSimple } from '@phosphor-icons/react';
 import { Typography } from '../ui';
 
 // ============================================================================
 // Types
 // ============================================================================
 
+export interface AttachmentData {
+  id: string;
+  type: 'image' | 'audio' | 'video' | 'file';
+  mimeType: string;
+  originalFilename: string | null;
+  sizeBytes: number;
+}
+
 export interface MessageData {
   id: string;
   content: string;
   role: 'user' | 'assistant';
   createdAt: string;
+  attachments?: AttachmentData[];
 }
 
 export interface ReplyStreamState {
@@ -27,6 +37,194 @@ export interface ConversationProps {
   replyStream: ReplyStreamState;
   isThinking: boolean;
   onReplyStreamClear: () => void;
+}
+
+// ============================================================================
+// Media rendering helpers
+// ============================================================================
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function mediaUrl(attachmentId: string): string {
+  return `/api/media/${attachmentId}`;
+}
+
+function ImageAttachment({ attachment }: { attachment: AttachmentData }) {
+  const theme = useTheme();
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <>
+      <img
+        src={mediaUrl(attachment.id)}
+        alt={attachment.originalFilename || 'Image'}
+        loading="lazy"
+        onClick={() => setExpanded(true)}
+        css={css`
+          max-width: 100%;
+          max-height: 300px;
+          border-radius: 8px;
+          cursor: pointer;
+          object-fit: contain;
+          transition: opacity 0.15s ease;
+          &:hover { opacity: 0.9; }
+        `}
+      />
+      {/* Lightbox overlay */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setExpanded(false)}
+            css={css`
+              position: fixed;
+              inset: 0;
+              z-index: ${theme.zIndex.modal};
+              background: rgba(0, 0, 0, 0.85);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              cursor: zoom-out;
+              padding: 24px;
+            `}
+          >
+            <motion.img
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.9 }}
+              src={mediaUrl(attachment.id)}
+              alt={attachment.originalFilename || 'Image'}
+              css={css`
+                max-width: 90vw;
+                max-height: 90vh;
+                object-fit: contain;
+                border-radius: 8px;
+              `}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+function AudioAttachment({ attachment }: { attachment: AttachmentData }) {
+  const theme = useTheme();
+  return (
+    <div css={css`width: 100%;`}>
+      {attachment.originalFilename && (
+        <Typography.Caption color="secondary" css={css`margin-bottom: 4px;`}>
+          {attachment.originalFilename}
+        </Typography.Caption>
+      )}
+      <audio
+        controls
+        preload="metadata"
+        css={css`
+          width: 100%;
+          max-width: 400px;
+          height: 36px;
+          border-radius: 8px;
+        `}
+      >
+        <source src={mediaUrl(attachment.id)} type={attachment.mimeType} />
+      </audio>
+    </div>
+  );
+}
+
+function VideoAttachment({ attachment }: { attachment: AttachmentData }) {
+  return (
+    <video
+      controls
+      preload="metadata"
+      css={css`
+        max-width: 100%;
+        max-height: 360px;
+        border-radius: 8px;
+      `}
+    >
+      <source src={mediaUrl(attachment.id)} type={attachment.mimeType} />
+    </video>
+  );
+}
+
+function FileAttachment({ attachment }: { attachment: AttachmentData }) {
+  const theme = useTheme();
+  return (
+    <a
+      href={mediaUrl(attachment.id)}
+      download={attachment.originalFilename || 'file'}
+      css={css`
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        background: ${theme.mode === 'light'
+          ? 'rgba(26, 24, 22, 0.04)'
+          : 'rgba(250, 249, 244, 0.06)'};
+        color: ${theme.colors.text.secondary};
+        text-decoration: none;
+        font-size: 0.875rem;
+        transition: background 0.15s ease;
+        &:hover {
+          background: ${theme.mode === 'light'
+            ? 'rgba(26, 24, 22, 0.08)'
+            : 'rgba(250, 249, 244, 0.1)'};
+        }
+      `}
+    >
+      <FileIcon size={18} />
+      <span css={css`
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 200px;
+      `}>
+        {attachment.originalFilename || 'File'}
+      </span>
+      <Typography.Caption color="hint">
+        {formatFileSize(attachment.sizeBytes)}
+      </Typography.Caption>
+      <DownloadSimple size={14} />
+    </a>
+  );
+}
+
+function MessageAttachments({ attachments }: { attachments: AttachmentData[] }) {
+  const theme = useTheme();
+  if (attachments.length === 0) return null;
+
+  return (
+    <div
+      css={css`
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 6px;
+      `}
+    >
+      {attachments.map((att) => {
+        switch (att.type) {
+          case 'image':
+            return <ImageAttachment key={att.id} attachment={att} />;
+          case 'audio':
+            return <AudioAttachment key={att.id} attachment={att} />;
+          case 'video':
+            return <VideoAttachment key={att.id} attachment={att} />;
+          case 'file':
+            return <FileAttachment key={att.id} attachment={att} />;
+        }
+      })}
+    </div>
+  );
 }
 
 // ============================================================================
@@ -370,6 +568,9 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
                     `}
                   >
                     <MessageMarkdown content={msg.content} />
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <MessageAttachments attachments={msg.attachments} />
+                    )}
                   </Typography.Body>
                 </div>
               </FadingMessage>

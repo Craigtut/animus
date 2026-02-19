@@ -17,6 +17,7 @@ import { env, PROJECT_ROOT } from '../utils/env.js';
 import {
   attachSessionLogging,
   type AgentManager,
+  type AgentEvent,
   type IAgentSession,
   type AgentLogStore,
 } from '@animus/agents';
@@ -145,6 +146,7 @@ export async function getOrCreateMindSession(
 ): Promise<IAgentSession> {
   // Warm session: reuse existing (only if the session is actually alive)
   if (sessionState === 'warm' && state.session && state.session.isActive) {
+    log.info(`Reusing warm session: ${state.session.id}`);
     return state.session;
   }
 
@@ -169,12 +171,14 @@ export async function getOrCreateMindSession(
   }
 
   let provider = configuredProviders[0]!;
+  let model: string | undefined;
   try {
     const settings = systemStore.getSystemSettings(getSystemDb());
     const preferred = settings.defaultAgentProvider;
     if (preferred && agentManager.isConfigured(preferred)) {
       provider = preferred;
     }
+    model = settings.defaultModel ?? undefined;
   } catch {
     // Settings table may not exist yet on fresh install
   }
@@ -235,6 +239,7 @@ export async function getOrCreateMindSession(
 
   const session = await agentManager.createSession({
     provider,
+    model,
     cwd: PROJECT_ROOT,
     ...(systemPrompt != null ? {
       systemPrompt: {
@@ -266,8 +271,39 @@ export async function getOrCreateMindSession(
     state.logSessionId = logging.getLogSessionId;
   }
 
+  // Attach lifecycle event handler for heartbeat-level logging.
+  // This runs once per cold session creation, so it doesn't stack on warm reuse.
+  session.onEvent((event: AgentEvent) => {
+    switch (event.type) {
+      case 'tool_call_start': {
+        const d = event.data as { toolName: string };
+        // Cognitive tools log their own detail in cognitive-tools.ts; skip duplicates
+        if (d.toolName.startsWith('mcp__cognitive__')) break;
+        log.info(`Tool call: ${d.toolName}`);
+        break;
+      }
+      case 'turn_end': {
+        const d = event.data as { turnIndex: number; text: string; hasToolCalls: boolean; toolNames: string[] };
+        if (d.text.length > 0) {
+          const preview = d.text.length > 120 ? d.text.substring(0, 120) + '...' : d.text;
+          log.info(`Turn ${d.turnIndex}: "${preview}"${d.hasToolCalls ? ` + tools: ${d.toolNames.join(', ')}` : ''}`);
+        } else if (d.hasToolCalls) {
+          log.info(`Turn ${d.turnIndex}: tool-only [${d.toolNames.join(', ')}]`);
+        }
+        break;
+      }
+      case 'tool_error': {
+        const d = event.data as { toolName: string; error: string };
+        log.warn(`Tool error: ${d.toolName} — ${d.error}`);
+        break;
+      }
+    }
+  });
+
   state.session = session;
   state.sessionId = session.id;
+
+  log.info(`Cold session created: ${session.id}, provider=${provider}, mcpServers=${Object.keys(mergedMcpServers).join(',') || 'none'}, tools=${mergedAllowedTools.length}`);
 
   return session;
 }

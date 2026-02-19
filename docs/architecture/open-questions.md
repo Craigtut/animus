@@ -56,22 +56,19 @@
 
 ## 4. Structured Output Across SDK Adapters ✅ RESOLVED
 
-**Context:** The mind needs to produce structured JSON output on every tick. Each SDK handles structured output differently, and the reply field needs to stream in real-time.
+**Context:** The mind needs to produce structured cognitive state on every tick while streaming replies naturally.
 
-**Resolution:** Zod validation in backend, `llm-json-stream` for field-level streaming.
+**Resolution:** Cognitive MCP tools — two in-process tools bracket every response.
 
-- **Schema source of truth**: Zod schemas in `@animus/shared`, compiled to JSON Schema for SDK consumption
-- **Per-provider handling**:
-  - Claude: Native `outputFormat: { type: 'json_schema', schema }`
-  - Codex: Native `outputSchema` parameter
-  - OpenCode: Schema injected via system prompt + Zod validation after completion
-- **Validation**: Backend validates with Zod after generation completes. On failure, retry the tick
-- **Streaming**: `llm-json-stream` library parses JSON incrementally, subscribes to `reply.content` path for real-time streaming to frontend
-- **Schema field ordering**: `thoughts` → `experiences` → `emotionDeltas` → `decisions` → `workingMemoryUpdate` → `coreSelfUpdate` → `memoryCandidate` → `reply` (reply LAST so thinking informs the reply)
-- **Parser location**: Lives in `@animus/backend` (heartbeat pipeline), NOT in `@animus/agents`. Agents package just emits raw `response_chunk` text events
-- **Frontend experience**: "Thinking" indicator while fields 1-7 generate, then streaming text when reply starts
+- **Approach**: Instead of forcing output into a JSON blob, the model calls `record_thought` first (inner monologue), speaks naturally (reply streams to user), then calls `record_cognitive_state` last (experience, emotions, decisions, memory)
+- **Validation**: Zod schemas on MCP tool inputs — validated at tool call time, not post-hoc JSON parsing
+- **Streaming**: Phase-based — natural language between `record_thought` and `record_cognitive_state` streams to the frontend via `reply:chunk` events. No JSON path subscriptions needed.
+- **Internal type**: Tool outputs accumulate into a `CognitiveSnapshot`, converted to `MindOutput` via `snapshotToMindOutput()` for the EXECUTE stage
+- **Tool location**: In-process MCP server in `@animus/backend` (`heartbeat/cognitive-tools.ts`), built via Claude SDK's `createSdkMcpServer()`. Agents package remains a stateless SDK abstraction.
+- **Cross-provider**: Claude and Pi support in-process MCP tools natively. Codex/OpenCode fall back to `safeMindOutput()`.
+- **Mid-tick re-entry**: Tools support multiple cycles (thought→reply→state→thought→reply→state) with accumulation semantics for mid-tick message injection
 
-**Updated in:** `docs/architecture/heartbeat.md` (Combined MindOutput Schema + Streaming Structured Output sections)
+**Updated in:** `docs/architecture/heartbeat.md` (Combined MindOutput Schema + Cognitive MCP Tools sections)
 
 ---
 

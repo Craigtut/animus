@@ -45,8 +45,26 @@ async function main() {
   loadCredentialsIntoEnv(getSystemDb());
   ensureClaudeOnboardingFile();
 
+  // Route agents package logs through the backend logger so all output
+  // uses the same format (timestamps, level labels, file logging, categories).
+  const { setDefaultLogger, initModelRegistry } = await import('@animus/agents');
+  const agentsLog = createLogger('Agents', 'agents');
+  setDefaultLogger({
+    debug(msg: string, ctx?: Record<string, unknown>) {
+      agentsLog.debug(ctx ? `${msg} ${JSON.stringify(ctx)}` : msg);
+    },
+    info(msg: string, ctx?: Record<string, unknown>) {
+      agentsLog.info(ctx ? `${msg} ${JSON.stringify(ctx)}` : msg);
+    },
+    warn(msg: string, ctx?: Record<string, unknown>) {
+      agentsLog.warn(ctx ? `${msg} ${JSON.stringify(ctx)}` : msg);
+    },
+    error(msg: string, ctx?: Record<string, unknown>) {
+      agentsLog.error(ctx ? `${msg} ${JSON.stringify(ctx)}` : msg);
+    },
+  });
+
   // Initialize model registry with disk cache for LiteLLM pricing data
-  const { initModelRegistry } = await import('@animus/agents');
   const dataDir = path.dirname(env.DB_SYSTEM_PATH);
   const modelRegistry = initModelRegistry({
     cacheDir: path.join(dataDir, 'cache'),
@@ -109,6 +127,10 @@ async function main() {
   // Register binary file routes for saves (export/import)
   const { registerSaveFileRoutes } = await import('./api/routes/saves-file.js');
   await registerSaveFileRoutes(fastify);
+
+  // Register media upload/serve routes
+  const { registerMediaRoutes } = await import('./api/routes/media.js');
+  await registerMediaRoutes(fastify);
 
   // Register content type parser for binary uploads (save import)
   fastify.addContentTypeParser(

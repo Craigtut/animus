@@ -948,18 +948,18 @@ function bridgeMcpToolToPiTool(
 
 ## 8. Structured Output Strategy
 
-Pi has no native structured output enforcement (no equivalent to Claude's `outputFormat` or Codex's `outputSchema`). This is not a gap because we already handle this case.
+Pi has no native structured output enforcement (no equivalent to Claude's `outputFormat` or Codex's `outputSchema`). This is not a gap because we use cognitive MCP tools instead of native structured output.
 
-### Current Approach (Already Works)
+### Current Approach: Cognitive MCP Tools
 
-We already do not use Claude's native structured output for the Mind session. There is a comment in `mind-session.ts`: the `StructuredOutput` tool approach is unreliable with complex schemas like MindOutput. Instead, the MindOutput schema is included in the system prompt as operational instructions, and the response is parsed via `llm-json-stream`.
+The mind session uses two in-process MCP tools (`record_thought` and `record_cognitive_state`) to capture structured cognitive state while the model speaks naturally. The model never outputs raw JSON — all structured data flows through Zod-validated MCP tool inputs.
 
 ### Strategy for Pi
 
-1. **Schema in system prompt** — The MindOutput JSON schema is already included in the operational instructions section of the system prompt. Pi sessions receive this same system prompt via the Context Builder.
-2. **Streaming parsing** — Response chunks from PiSession's `promptStreaming()` are fed into the same `llm-json-stream` pipeline in the backend's heartbeat code. No changes needed to the parsing pipeline.
-3. **Fallback chain** — The existing `parseMindOutput()` fallback chain applies: extract JSON from response, parse, Zod validate, retry prompt on failure, lenient fallback, safe fallback. This is provider-agnostic.
-4. **No adapter-level changes** — The Pi adapter does not need to know about MindOutput. It streams raw text chunks via `response_chunk` events, and the backend handles structured output parsing.
+1. **MCP tool registration** — Pi's in-process architecture supports MCP tool registration natively. The cognitive MCP server (`createSdkMcpServer()`) can be attached to Pi sessions the same way it attaches to Claude sessions.
+2. **Phase-based streaming** — Reply text streams naturally between tool calls. The `onChunk` callback checks the cognitive phase (`'replying'`) before emitting to the frontend.
+3. **Validation** — Tool inputs are Zod-validated at call time. No post-hoc JSON parsing or fallback chains needed. On agent failure, `safeMindOutput()` provides a minimal valid output.
+4. **No adapter-level changes** — The Pi adapter does not need to know about cognitive state or MindOutput. It handles MCP tool calls via the standard SDK mechanism, and the backend's cognitive tool handlers accumulate state.
 
 ---
 

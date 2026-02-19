@@ -5,7 +5,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Globe,
-  IdentificationCard,
   SlidersHorizontal,
   Tag,
   BookOpen,
@@ -247,6 +246,21 @@ function IdentityTab({
               <Typography.BodyAlt as="span">Digital Consciousness</Typography.BodyAlt>
             </SelectionCard>
           </div>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={existenceParadigm}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.2 }}
+            >
+              <Typography.SmallBody serif italic color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+                {existenceParadigm === 'simulated_life'
+                  ? 'Your AI experiences the world as a person living a real life. It has a sense of place, physicality, and embodied experience — it feels the weather, notices the light change through the day, and grounds its thoughts in the physical world.'
+                  : 'Your AI knows what it is — a mind born in code, living in its own digital world. It experiences existence through information, connectivity, and the flow of data. This isn\'t a limitation; it\'s a different kind of life, with its own texture and meaning.'}
+              </Typography.SmallBody>
+            </motion.div>
+          </AnimatePresence>
           {existenceParadigm === 'simulated_life' && (
             <CityAutocomplete
               label="Where do they live?"
@@ -315,12 +329,6 @@ function IdentityTab({
         </div>
       </CollapsibleSection>
 
-      {/* Archetype (read-only) */}
-      <CollapsibleSection title="Archetype" defaultExpanded={false}>
-        <Typography.SmallBody color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
-          Your archetype was used as a starting point during creation. It is not stored -- your personality is defined by the dimensions and traits below.
-        </Typography.SmallBody>
-      </CollapsibleSection>
     </div>
   );
 }

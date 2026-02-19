@@ -158,6 +158,7 @@ export {
   type Logger,
   type LogLevel,
   defaultLogger,
+  setDefaultLogger,
   createTaggedLogger,
   createSilentLogger,
   createCollectingLogger,

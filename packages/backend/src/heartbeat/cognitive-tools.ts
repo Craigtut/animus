@@ -240,10 +240,11 @@ export async function buildCognitiveMcpServer(): Promise<{
     'or calling any other tool. It is critical that this is the very first thing you do.',
     recordThoughtSchema.shape,
     async (args: z.infer<typeof recordThoughtSchema>) => {
-      log.info('record_thought called', { importance: args.importance, thoughtIndex: snapshotBox.current.thoughts.length });
+      const prevPhase = phase;
       snapshotBox.current.thoughts.push({ content: args.content, importance: args.importance });
       // Always set phase to 'replying' — supports re-entry after mid-tick injection
       phase = 'replying';
+      log.info(`record_thought: "${args.content.substring(0, 80)}${args.content.length > 80 ? '...' : ''}" (importance=${args.importance}, #${snapshotBox.current.thoughts.length}, phase ${prevPhase}→replying)`);
       // Return MCP-compatible content object (bare strings fail MCP protocol validation)
       return { content: [{ type: 'text' as const, text: 'Thought recorded.' }] };
     },
@@ -257,11 +258,8 @@ export async function buildCognitiveMcpServer(): Promise<{
     'do not generate any more text, tool calls, or start another cycle. You are done.',
     recordCognitiveStateSchema.shape,
     async (args: z.infer<typeof recordCognitiveStateSchema>) => {
-      log.info('record_cognitive_state called', {
-        emotionCount: args.emotionDeltas.length,
-        decisionCount: args.decisions.length,
-        memoryCount: args.memoryCandidate.length,
-      });
+      const emotions = args.emotionDeltas.map(e => `${e.emotion}(${e.delta > 0 ? '+' : ''}${e.delta.toFixed(2)})`).join(', ');
+      log.info(`record_cognitive_state: ${args.emotionDeltas.length} emotion(s)${emotions ? ` [${emotions}]` : ''}, ${args.decisions.length} decision(s), ${args.memoryCandidate.length} memory(s), phase replying→done`);
 
       // Experience always takes the latest (narrative progresses forward)
       snapshotBox.current.experience = args.experience;

@@ -597,7 +597,7 @@ Voice doesn't need new tables. It uses the existing message, media attachment, a
 
 When the mind produces a reply for a voice-triggered message:
 
-1. `reply.content` streams from `llm-json-stream` as the mind generates
+1. Reply text streams naturally during the mind's `replying` phase (between `record_thought` and `record_cognitive_state` cognitive tool calls)
 2. A **sentence accumulator** buffers tokens until a sentence boundary
 3. Each complete sentence is immediately synthesized via sherpa-onnx Kokoro TTS (in-process)
 4. The WAV audio buffer is emitted to the frontend via the `onVoiceReply` tRPC subscription

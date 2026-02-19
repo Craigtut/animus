@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   defaultLogger,
+  setDefaultLogger,
   createTaggedLogger,
   createSilentLogger,
   createCollectingLogger,
@@ -67,6 +68,49 @@ describe('createTaggedLogger', () => {
 
     // Should not throw
     expect(() => tagged.info('Test')).not.toThrow();
+  });
+});
+
+describe('setDefaultLogger', () => {
+  it('routes defaultLogger calls through the replacement', () => {
+    const collector = createCollectingLogger();
+    setDefaultLogger(collector);
+
+    defaultLogger.info('Hello from default');
+
+    expect(collector.entries.length).toBe(1);
+    expect(collector.entries[0].message).toBe('Hello from default');
+
+    // Reset to avoid affecting other tests
+    setDefaultLogger({
+      debug() {},
+      info() {},
+      warn() {},
+      error() {},
+    });
+  });
+
+  it('retroactively affects existing tagged loggers', () => {
+    // Create a tagged logger using the default base BEFORE replacing
+    const tagged = createTaggedLogger('Retro');
+
+    // Now replace the default
+    const collector = createCollectingLogger();
+    setDefaultLogger(collector);
+
+    tagged.info('Should reach collector');
+
+    expect(collector.entries.length).toBe(1);
+    expect(collector.entries[0].message).toContain('[Retro]');
+    expect(collector.entries[0].message).toContain('Should reach collector');
+
+    // Reset
+    setDefaultLogger({
+      debug() {},
+      info() {},
+      warn() {},
+      error() {},
+    });
   });
 });
 
