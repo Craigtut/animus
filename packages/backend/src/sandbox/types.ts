@@ -64,6 +64,7 @@ export interface SandboxState {
   isStreaming: boolean;
   pluginsLoaded: number;
   sessionId?: string | undefined;
+  cognitiveMode: boolean;
 }
 
 // ============================================================================
@@ -76,4 +77,5 @@ export interface SandboxCliArgs {
   systemPrompt: string;
   noPlugins: boolean;
   verbose: boolean;
+  cognitive: boolean;
 }

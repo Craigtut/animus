@@ -15,6 +15,8 @@ import { CommandInput } from './CommandInput.js';
 import type { SandboxSession } from '../session.js';
 import type { DisplayItem, SandboxState } from '../types.js';
 import { getPluginManager } from '../../services/plugin-manager.js';
+import { COGNITIVE_SYSTEM_PROMPT } from '../cognitive-prompt.js';
+import type { CognitiveSnapshot } from '../cognitive-tools.js';
 
 interface Props {
   session: SandboxSession;
@@ -27,14 +29,76 @@ const HELP_TEXT = `Commands:
   /system <prompt>                 Set system prompt (ends session)
   /plugins                         List loaded plugins
   /events on|off                   Toggle verbose event display
+  /cognitive on|off                Toggle cognitive MCP tools (ends session)
+  /snapshot                        Show last cognitive snapshot
   /session                         Show session info
   /clear                           Clear message thread
   /help                            Show this help
   /quit                            Clean shutdown`;
 
+function formatSnapshot(snap: CognitiveSnapshot): string {
+  const lines: string[] = ['── Cognitive Snapshot ──'];
+
+  if (snap.thought) {
+    lines.push(`\nThought (${snap.thought.importance.toFixed(2)}):`);
+    lines.push(`  ${snap.thought.content}`);
+  } else {
+    lines.push('\nThought: (none recorded)');
+  }
+
+  if (snap.experience) {
+    lines.push(`\nExperience (${snap.experience.importance.toFixed(2)}):`);
+    lines.push(`  ${snap.experience.content}`);
+  }
+
+  if (snap.emotionDeltas.length > 0) {
+    lines.push('\nEmotion Deltas:');
+    for (const ed of snap.emotionDeltas) {
+      const sign = ed.delta >= 0 ? '+' : '';
+      lines.push(`  ${ed.emotion}: ${sign}${ed.delta.toFixed(3)} — ${ed.reasoning}`);
+    }
+  }
+
+  if (snap.energyDelta) {
+    const sign = snap.energyDelta.delta >= 0 ? '+' : '';
+    lines.push(`\nEnergy: ${sign}${snap.energyDelta.delta.toFixed(3)} — ${snap.energyDelta.reasoning}`);
+  }
+
+  if (snap.decisions.length > 0) {
+    lines.push('\nDecisions:');
+    for (const d of snap.decisions) {
+      lines.push(`  [${d.type}] ${d.description}`);
+    }
+  }
+
+  if (snap.memoryCandidate.length > 0) {
+    lines.push('\nMemory Candidates:');
+    for (const m of snap.memoryCandidate) {
+      lines.push(`  [${m.memoryType}] (${m.importance.toFixed(2)}) ${m.content}`);
+    }
+  }
+
+  if (snap.workingMemoryUpdate) {
+    lines.push(`\nWorking Memory Update: ${snap.workingMemoryUpdate.slice(0, 100)}...`);
+  }
+  if (snap.coreSelfUpdate) {
+    lines.push(`\nCore Self Update: ${snap.coreSelfUpdate.slice(0, 100)}...`);
+  }
+
+  return lines.join('\n');
+}
+
 export function App({ session, initialState }: Props) {
   const { exit } = useApp();
-  const [items, setItems] = useState<DisplayItem[]>([]);
+  const startupItems: DisplayItem[] = [];
+  if (initialState.cognitiveMode) {
+    startupItems.push({
+      kind: 'system',
+      text: 'Cognitive mode ACTIVE — tools: mcp__cognitive__record_thought, mcp__cognitive__record_cognitive_state',
+      timestamp: Date.now(),
+    });
+  }
+  const [items, setItems] = useState<DisplayItem[]>(startupItems);
   const [state, setState] = useState<SandboxState>(initialState);
   const [input, setInput] = useState('');
   const [streamingText, setStreamingText] = useState('');
@@ -193,6 +257,40 @@ export function App({ session, initialState }: Props) {
           break;
         }
 
+        case '/cognitive': {
+          const cval = arg.toLowerCase();
+          if (cval !== 'on' && cval !== 'off') {
+            addSystem(`Cognitive mode is ${stateRef.current.cognitiveMode ? 'ON' : 'OFF'}. Usage: /cognitive on|off`);
+            break;
+          }
+          const cogEnabled = cval === 'on';
+          await session.setCognitiveMode(cogEnabled);
+          // Update system prompt to match cognitive mode
+          const newPrompt = cogEnabled
+            ? COGNITIVE_SYSTEM_PROMPT
+            : 'You are a helpful assistant running in the Animus agent sandbox.';
+          setState((s) => ({
+            ...s,
+            cognitiveMode: cogEnabled,
+            systemPrompt: newPrompt,
+            sessionId: undefined,
+          }));
+          addSystem(`Cognitive mode ${cogEnabled ? 'enabled' : 'disabled'}. Session will restart on next message.`);
+          break;
+        }
+
+        case '/snapshot': {
+          const snap = session.getCognitiveSnapshot();
+          if (!snap) {
+            addSystem('No cognitive snapshot available. Enable cognitive mode first.');
+          } else if (!snap.thought && !snap.experience) {
+            addSystem('Cognitive snapshot is empty — no tools were called yet.');
+          } else {
+            addSystem(formatSnapshot(snap));
+          }
+          break;
+        }
+
         case '/session':
           if (!session.id) {
             addSystem('No active session.');
@@ -251,20 +349,50 @@ export function App({ session, initialState }: Props) {
           },
         );
 
-        // Clear streaming, add final response
+        // Clear streaming
         streamingTextRef.current = '';
         setStreamingText('');
-        setItems((prev) => [
-          ...prev,
-          {
-            kind: 'agent',
-            text: response.content || '(no response)',
-            timestamp: Date.now(),
-            durationMs: response.durationMs,
-            usage: response.usage,
-            cost: response.cost,
-          },
-        ]);
+
+        // In cognitive mode, the reply streams during intermediate turns
+        // (visible as turn_text items). The final response.content may be
+        // empty because the last turn is a tool call. Show a summary line
+        // with cost/usage instead of the misleading "(no response)".
+        if (stateRef.current.cognitiveMode) {
+          // Summary line with timing/cost
+          const parts: string[] = [];
+          if (response.durationMs) parts.push(`${(response.durationMs / 1000).toFixed(1)}s`);
+          if (response.usage) parts.push(`${response.usage.totalTokens} tokens`);
+          if (response.cost) parts.push(`$${response.cost.totalCostUsd.toFixed(4)}`);
+
+          if (parts.length > 0) {
+            setItems((prev) => [
+              ...prev,
+              { kind: 'system', text: `── done (${parts.join(', ')}) ──`, timestamp: Date.now() },
+            ]);
+          }
+
+          // Auto-display the cognitive snapshot
+          const snap = session.getCognitiveSnapshot();
+          if (snap && (snap.thought || snap.experience)) {
+            setItems((prev) => [
+              ...prev,
+              { kind: 'system', text: formatSnapshot(snap), timestamp: Date.now() },
+            ]);
+          }
+        } else {
+          // Normal mode: show the final agent response
+          setItems((prev) => [
+            ...prev,
+            {
+              kind: 'agent',
+              text: response.content || '(no response)',
+              timestamp: Date.now(),
+              durationMs: response.durationMs,
+              usage: response.usage,
+              cost: response.cost,
+            },
+          ]);
+        }
 
         // Update session ID if we didn't have it yet
         if (session.id) {

@@ -41,6 +41,12 @@ export function StatusBar({ state }: Props) {
       <Text color="blue">plugins: {state.pluginsLoaded}</Text>
       <Text color="gray"> | </Text>
       <Text color={statusColor}>{sessionStatus}</Text>
+      {state.cognitiveMode && (
+        <>
+          <Text color="gray"> | </Text>
+          <Text color="green">cognitive</Text>
+        </>
+      )}
       {state.showVerboseEvents && (
         <>
           <Text color="gray"> | </Text>

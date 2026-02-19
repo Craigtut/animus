@@ -19,7 +19,7 @@
     "build:tauri": "npm run build:prod && npm run prepare:tauri && cd packages/tauri && cargo tauri build",
     "prepare:tauri": "node scripts/prepare-tauri.mjs",
     "start": "npm start -w @animus/backend",
-    "sandbox": "npm run sandbox -w @animus/backend",
+    "sandbox": "cd packages/backend && npx tsx --env-file-if-exists=../../.env --conditions source src/sandbox/index.tsx",
     "docker:build": "docker build -t animus .",
     "docker:up": "docker compose up -d",
     "test": "vitest",

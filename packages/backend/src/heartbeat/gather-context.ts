@@ -161,34 +161,45 @@ export async function gatherContext(
     const elapsed = lastEnergyUpdate ? DecayEngine.hoursSince(lastEnergyUpdate) : 0;
     let decayed = applyEnergyDecay(rawEnergy, circadianBaseline, elapsed);
 
-    // Check for wake-up bumps
+    // Check for wake-up bumps.
+    // We check BOTH the raw (pre-decay) energy and the decayed energy.
+    // During the long sleep interval (e.g. 30 min), the circadian baseline
+    // can shift upward when sleep hours end, and applyEnergyDecay pulls
+    // energy above 0.05 BEFORE we get here. Without checking rawBand,
+    // wake-up detection is silently skipped.
+    const rawBand = getEnergyBand(rawEnergy);
     const previousBand = getEnergyBand(decayed);
     const inSleep = isInSleepHours(currentTime, settings.sleepStartHour, settings.sleepEndHour, tz);
 
-    if (previousBand === 'sleeping') {
+    if (previousBand === 'sleeping' || rawBand === 'sleeping') {
       if (!inSleep) {
         // Natural wake-up: sleep hours ended, bump to 0.15
         decayed = Math.max(decayed, 0.15);
         const ctx: WakeUpContext = { type: 'natural' };
         if (lastEnergyUpdate) ctx.sleepDurationHours = DecayEngine.hoursSince(lastEnergyUpdate);
         wakeUpContext = ctx;
-        // Switch back to normal tick interval
-        deps.tickQueue.updateInterval(settings.heartbeatIntervalMs);
-        log.info('Natural wake-up: bumped energy to', decayed.toFixed(2), '— restored normal tick interval');
+        log.info('Natural wake-up: bumped energy to', decayed.toFixed(2));
       } else if (trigger.type !== 'interval') {
         // Triggered wake-up: non-interval trigger during sleep
         decayed = Math.max(decayed, 0.10);
         const ctx: WakeUpContext = { type: 'triggered', triggerType: trigger.type };
         if (lastEnergyUpdate) ctx.sleepDurationHours = DecayEngine.hoursSince(lastEnergyUpdate);
         wakeUpContext = ctx;
-        // Switch back to normal tick interval — we're awake now
-        deps.tickQueue.updateInterval(settings.heartbeatIntervalMs);
-        log.info(`Triggered wake-up (${trigger.type}): bumped energy to`, decayed.toFixed(2), '— restored normal tick interval');
+        log.info(`Triggered wake-up (${trigger.type}): bumped energy to`, decayed.toFixed(2));
       }
     }
 
     energyLevel = decayed;
     energyBand = getEnergyBand(decayed);
+
+    // Reconcile tick interval with current energy state.
+    // This is the single source of truth for interval switching. It catches
+    // all edge cases: wake-up bumps above, energy decaying across the sleeping
+    // boundary between ticks, and any other state mismatch.
+    const targetInterval = energyBand === 'sleeping'
+      ? settings.sleepTickIntervalMs
+      : settings.heartbeatIntervalMs;
+    deps.tickQueue.updateInterval(targetInterval);
 
     // Accelerated emotion decay during sleep
     if (energyBand === 'sleeping') {

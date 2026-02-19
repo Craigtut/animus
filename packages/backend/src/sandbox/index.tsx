@@ -29,6 +29,7 @@ function parseArgs(): SandboxCliArgs {
     systemPrompt: 'You are a helpful assistant running in the Animus agent sandbox.',
     noPlugins: false,
     verbose: false,
+    cognitive: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -49,6 +50,9 @@ function parseArgs(): SandboxCliArgs {
       case '--verbose':
         result.verbose = true;
         break;
+      case '--cognitive':
+        result.cognitive = true;
+        break;
       case '--help':
         console.log(`Agent Sandbox TUI
 
@@ -60,6 +64,7 @@ Options:
   --system <prompt>                 System prompt
   --no-plugins                      Skip loading plugins
   --verbose                         Show all agent events
+  --cognitive                       Enable cognitive MCP tools (experimental)
   --help                            Show this help`);
         process.exit(0);
     }
@@ -151,15 +156,23 @@ async function main() {
   const { SandboxSession } = await import('./session.js');
   const { App } = await import('./components/App.js');
 
-  const session = new SandboxSession(manager, args.noPlugins);
+  const session = new SandboxSession(manager, args.noPlugins, args.cognitive);
+
+  // In cognitive mode, override system prompt with the cognitive prompt
+  let systemPrompt = args.systemPrompt;
+  if (args.cognitive) {
+    const { COGNITIVE_SYSTEM_PROMPT } = await import('./cognitive-prompt.js');
+    systemPrompt = COGNITIVE_SYSTEM_PROMPT;
+  }
 
   const initialState: SandboxState = {
     provider: args.provider,
     model: args.model,
-    systemPrompt: args.systemPrompt,
+    systemPrompt,
     showVerboseEvents: args.verbose,
     isStreaming: false,
     pluginsLoaded: pluginCount,
+    cognitiveMode: args.cognitive,
   };
 
   console.clear();

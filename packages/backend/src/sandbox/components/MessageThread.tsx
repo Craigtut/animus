@@ -48,7 +48,18 @@ function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
-function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean): React.ReactNode {
+function formatDelta(ms: number): string {
+  if (ms < 10) return '';
+  if (ms < 1000) return `+${ms}ms`;
+  return `+${(ms / 1000).toFixed(1)}s`;
+}
+
+function DeltaTag({ delta }: { delta: string }) {
+  if (!delta) return null;
+  return <Text color="gray"> {delta}</Text>;
+}
+
+function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean, delta: string): React.ReactNode {
   const { event } = item;
   const { type, data } = event;
 
@@ -60,7 +71,7 @@ function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean): R
       const inputStr = truncate(JSON.stringify(d.toolInput), 80);
       return (
         <Text dimColor>
-          {'  '}<Text color="yellow">tool</Text> {d.toolName} {inputStr}
+          {'  '}<Text color="yellow">tool</Text> {d.toolName} {inputStr}<DeltaTag delta={delta} />
         </Text>
       );
     }
@@ -70,7 +81,7 @@ function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean): R
       return (
         <Text dimColor>
           {'  '}<Text color="green">done</Text> {d.toolName}{' '}
-          <Text color="gray">({formatDuration(d.durationMs)})</Text>
+          <Text color="gray">({formatDuration(d.durationMs)})</Text><DeltaTag delta={delta} />
         </Text>
       );
     }
@@ -79,7 +90,7 @@ function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean): R
       const d = data as ToolErrorData;
       return (
         <Text>
-          {'  '}<Text color="red" bold>tool error</Text> {d.toolName}: {d.error}
+          {'  '}<Text color="red" bold>tool error</Text> {d.toolName}: {d.error}<DeltaTag delta={delta} />
         </Text>
       );
     }
@@ -87,7 +98,7 @@ function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean): R
     case 'thinking_start':
       return (
         <Text dimColor>
-          {'  '}<Text color="magenta">thinking</Text> ...
+          {'  '}<Text color="magenta">thinking</Text> ...<DeltaTag delta={delta} />
         </Text>
       );
 
@@ -101,7 +112,7 @@ function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean): R
         <Text dimColor>
           {'  '}<Text color="blue">turn_end</Text>{' '}
           <Text color="gray">[{tags.join(' | ')}]</Text>{' '}
-          <Text color="gray">({d.text.length} chars)</Text>
+          <Text color="gray">({d.text.length} chars)</Text><DeltaTag delta={delta} />
         </Text>
       );
     }
@@ -111,7 +122,7 @@ function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean): R
       return (
         <Text>
           {'  '}<Text color="red" bold>error</Text> [{d.code}] {d.message}
-          {d.recoverable ? <Text color="gray"> (recoverable)</Text> : null}
+          {d.recoverable ? <Text color="gray"> (recoverable)</Text> : null}<DeltaTag delta={delta} />
         </Text>
       );
     }
@@ -123,7 +134,7 @@ function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean): R
       const d = data as SessionStartData;
       return (
         <Text dimColor>
-          {'  '}<Text color="blue">session</Text> started — {d.provider}:{d.model}
+          {'  '}<Text color="blue">session</Text> started — {d.provider}:{d.model}<DeltaTag delta={delta} />
         </Text>
       );
     }
@@ -134,7 +145,7 @@ function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean): R
       return (
         <Text dimColor>
           {'  '}<Text color="blue">session</Text> ended — {d.reason}{' '}
-          ({formatDuration(d.totalDurationMs)})
+          ({formatDuration(d.totalDurationMs)})<DeltaTag delta={delta} />
         </Text>
       );
     }
@@ -144,7 +155,7 @@ function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean): R
       const d = data as InputReceivedData;
       return (
         <Text dimColor>
-          {'  '}<Text color="gray">input</Text> {d.type}: {truncate(d.content, 60)}
+          {'  '}<Text color="gray">input</Text> {d.type}: {truncate(d.content, 60)}<DeltaTag delta={delta} />
         </Text>
       );
     }
@@ -155,7 +166,7 @@ function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean): R
       const preview = d.content ? ` — ${truncate(d.content, 60)}` : '';
       return (
         <Text dimColor>
-          {'  '}<Text color="magenta">thought</Text> {formatDuration(d.thinkingDurationMs)}{preview}
+          {'  '}<Text color="magenta">thought</Text> {formatDuration(d.thinkingDurationMs)}{preview}<DeltaTag delta={delta} />
         </Text>
       );
     }
@@ -164,7 +175,7 @@ function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean): R
       if (!verbose) return null;
       return (
         <Text dimColor>
-          {'  '}<Text color="cyan">response</Text> streaming...
+          {'  '}<Text color="cyan">response</Text> streaming...<DeltaTag delta={delta} />
         </Text>
       );
 
@@ -180,7 +191,7 @@ function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean): R
       return (
         <Text dimColor>
           {'  '}<Text color="cyan">response</Text> complete — {d.finishReason}{' '}
-          ({d.content.length} chars)
+          ({d.content.length} chars)<DeltaTag delta={delta} />
         </Text>
       );
     }
@@ -192,7 +203,7 @@ function renderEvent(item: DisplayItem & { kind: 'event' }, verbose: boolean): R
       return (
         <Text dimColor>
           {'  '}<Text color="gray">{type}</Text>{' '}
-          {truncate(JSON.stringify(data), 80)}
+          {truncate(JSON.stringify(data), 80)}<DeltaTag delta={delta} />
         </Text>
       );
   }
@@ -203,16 +214,21 @@ export function MessageThread({ items, streamingText, verbose }: Props) {
   // Reserve lines for status bar (3) + input (2) + padding (2)
   const maxLines = (stdout?.rows ?? 24) - 7;
 
-  // Build rendered lines
+  // Build rendered lines with time deltas between consecutive items
   const rendered: React.ReactNode[] = [];
+  let prevTimestamp: number | null = null;
 
   for (const item of items) {
+    const delta = prevTimestamp !== null ? formatDelta(item.timestamp - prevTimestamp) : '';
+    prevTimestamp = item.timestamp;
+
     switch (item.kind) {
       case 'user':
         rendered.push(
           <Text key={rendered.length}>
             <Text color="green" bold>you {'>'} </Text>
             <Text>{item.text}</Text>
+            <DeltaTag delta={delta} />
           </Text>,
         );
         break;
@@ -229,6 +245,7 @@ export function MessageThread({ items, streamingText, verbose }: Props) {
             <Text color="cyan" bold>agent {'>'} </Text>
             <Text>{item.text}</Text>
             {statsStr && <Text color="gray">{statsStr}</Text>}
+            <DeltaTag delta={delta} />
           </Text>,
         );
         break;
@@ -242,13 +259,14 @@ export function MessageThread({ items, streamingText, verbose }: Props) {
           <Text key={rendered.length}>
             <Text color="magenta" dimColor>[{label}] </Text>
             <Text dimColor={item.hasToolCalls}>{item.text}</Text>
+            <DeltaTag delta={delta} />
           </Text>,
         );
         break;
       }
 
       case 'event': {
-        const node = renderEvent(item, verbose);
+        const node = renderEvent(item, verbose, delta);
         if (node) {
           rendered.push(<Box key={rendered.length}>{node}</Box>);
         }
@@ -259,6 +277,7 @@ export function MessageThread({ items, streamingText, verbose }: Props) {
         rendered.push(
           <Text key={rendered.length} color="yellow">
             {item.text}
+            <DeltaTag delta={delta} />
           </Text>,
         );
         break;
