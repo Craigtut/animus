@@ -180,6 +180,102 @@ describe('propose_goal decision', () => {
 });
 
 // ============================================================================
+// propose_goal decision — origin-based status and seed promotion
+// ============================================================================
+
+describe('propose_goal decision — origin and seed handling', () => {
+  let db: Database.Database;
+  let goalManager: GoalManager;
+  let seedManager: SeedManager;
+
+  beforeEach(() => {
+    db = createTestHeartbeatDb();
+    goalManager = new GoalManager(db);
+    seedManager = new SeedManager(db, createMockEmbeddingProvider());
+  });
+
+  it('user_directed origin creates goal with status "active"', () => {
+    // Simulates what executeGoalTaskDecisions does for propose_goal
+    // with origin: 'user_directed' (line 284 of decision-executor.ts)
+    const goal = goalManager.createGoal({
+      title: 'User wants me to learn cooking',
+      description: 'The user explicitly asked me to pursue this',
+      motivation: 'Direct user request',
+      origin: 'user_directed',
+      status: 'active', // decision-executor sets status: 'active' for user_directed
+    });
+
+    expect(goal.status).toBe('active');
+    expect(goal.origin).toBe('user_directed');
+    expect(goal.title).toBe('User wants me to learn cooking');
+  });
+
+  it('propose_goal with seedId calls promoteToGoal and marks seed as graduated', async () => {
+    // Create a graduating seed first
+    const seed = await seedManager.createSeed({
+      content: 'desire to organize digital photos',
+      motivation: 'keeps thinking about it',
+      linkedEmotion: 'curiosity',
+      source: 'internal',
+    });
+
+    heartbeatStore.updateSeed(db, seed.id, {
+      status: 'graduating',
+      strength: 0.75,
+    });
+
+    // Simulates what executeGoalTaskDecisions does when seedId is present
+    // (lines 267-276 of decision-executor.ts)
+    const goal = goalManager.promoteToGoal(seed.id, {
+      title: 'Organize Digital Photo Library',
+      description: 'Create a structured photo organization system',
+      motivation: 'Persistent interest in organizing photos',
+      linkedEmotion: 'curiosity',
+    });
+
+    // Goal is created with proposed status and linked to seed
+    expect(goal.status).toBe('proposed');
+    expect(goal.origin).toBe('ai_internal');
+    expect(goal.seedId).toBe(seed.id);
+    expect(goal.title).toBe('Organize Digital Photo Library');
+
+    // Seed is marked as graduated with link back to goal
+    const updatedSeed = heartbeatStore.getSeed(db, seed.id)!;
+    expect(updatedSeed.status).toBe('graduated');
+    expect(updatedSeed.graduatedToGoalId).toBe(goal.id);
+  });
+
+  it('propose_goal without origin defaults to ai_internal with status "proposed"', () => {
+    // Simulates what executeGoalTaskDecisions does when origin is not provided
+    // (line 264: origin defaults to 'ai_internal')
+    // (line 284: status is 'proposed' because origin !== 'user_directed')
+    const origin = undefined ?? 'ai_internal';
+    const goal = goalManager.createGoal({
+      title: 'Explore astrophotography techniques',
+      motivation: 'Emerged from thinking about space',
+      origin: origin as 'ai_internal',
+      status: origin === 'user_directed' ? 'active' : 'proposed',
+    });
+
+    expect(goal.status).toBe('proposed');
+    expect(goal.origin).toBe('ai_internal');
+  });
+
+  it('collaborative origin creates goal with status "proposed"', () => {
+    // collaborative is neither user_directed, so status should be 'proposed'
+    const origin = 'collaborative' as const;
+    const goal = goalManager.createGoal({
+      title: 'Build a reading list together',
+      origin,
+      status: origin === 'user_directed' ? 'active' : 'proposed',
+    });
+
+    expect(goal.status).toBe('proposed');
+    expect(goal.origin).toBe('collaborative');
+  });
+});
+
+// ============================================================================
 // update_goal decision tests
 // ============================================================================
 

@@ -168,7 +168,7 @@ describe('Full Tick Cycle', () => {
     // System prompt should be provided for cold session
     expect(context.systemPrompt).toBeTruthy();
     expect(context.systemPrompt).toContain('TestAnimus');
-    expect(context.systemPrompt).toContain('OUTPUT FORMAT');
+    expect(context.systemPrompt).toContain('OPERATING INSTRUCTIONS');
 
     // User message should contain the trigger
     expect(context.userMessage).toContain('Alice sent a message via web');

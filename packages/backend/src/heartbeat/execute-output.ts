@@ -75,6 +75,8 @@ export async function executeOutput(
     logSessionId?: string | null;
     /** All thoughts from cognitive tools (may be > 1 for mid-tick re-entry). */
     allThoughts?: Array<{ content: string; importance: number }>;
+    /** How many reply turns were already sent via sendOutbound during streaming. */
+    replyTurnsSent?: number;
   },
 ): Promise<void> {
   const hbDb = getHeartbeatDb();
@@ -84,6 +86,7 @@ export async function executeOutput(
   const replySentEarly = options?.replySentEarly ?? false;
   const earlyReplyContent = options?.earlyReplyContent ?? '';
   const logSessionId = options?.logSessionId ?? null;
+  const replyTurnsSent = options?.replyTurnsSent ?? 0;
 
   // Execute phase observability
   const executeStartTime = Date.now();
@@ -124,16 +127,29 @@ export async function executeOutput(
   // Per docs: "Channel send failure -> log error with full context, do NOT auto-retry.
   // Other EXECUTE operations continue."
   //
+  // Auto-reply is only for message-triggered ticks. Non-message ticks (interval,
+  // scheduled_task, agent_complete) treat the mind's natural language text as internal
+  // processing. The mind uses send_proactive_message tool to reach users on those ticks.
+  //
   // When messages were injected mid-tick, the structured output's reply may
   // address the injected messages and differ from the optimistic streamed reply.
   // In that case, send the structured reply as a follow-up message.
+  const isMessageTrigger = gathered.trigger.type === 'message';
   const finalReplyContent = output.reply?.content ?? '';
   const finalReplyDiffers = replySentEarly && finalReplyContent && finalReplyContent !== earlyReplyContent;
-  // Resolve contact: prefer gathered.contact, fall back to reply's contactId (for proactive/interval ticks)
+  // Resolve contact: prefer gathered.contact, fall back to reply's contactId
   const replyContactId = gathered.contact?.id ?? output.reply?.contactId;
-  const shouldSendReply = output.reply && finalReplyContent && replyContactId && (!replySentEarly || finalReplyDiffers);
+  const shouldSendReply = isMessageTrigger && output.reply && finalReplyContent && replyContactId && (!replySentEarly || finalReplyDiffers);
 
   if (shouldSendReply) {
+    // Strip 'media' from trigger metadata — incoming attachments shouldn't be re-sent.
+    // Keep other metadata like channelId for Discord reply routing.
+    const rawTriggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
+    const replyMetadata = rawTriggerMetadata
+      ? Object.fromEntries(Object.entries(rawTriggerMetadata).filter(([k]) => k !== 'media'))
+      : undefined;
+    const hasReplyMetadata = replyMetadata && Object.keys(replyMetadata).length > 0;
+
     try {
       // On proactive ticks (no gathered.contact), validate the contact exists
       if (!gathered.contact) {
@@ -151,7 +167,6 @@ export async function executeOutput(
         } else {
           // Valid proactive reply -- send it
           const channel = output.reply!.channel;
-          const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
           const replyMedia = output.reply!.media;
           const { getChannelRouter } = await import('../channels/channel-router.js');
           const router = getChannelRouter();
@@ -159,7 +174,7 @@ export async function executeOutput(
             contactId: replyContactId,
             channel,
             content: finalReplyContent,
-            ...(triggerMetadata ? { metadata: triggerMetadata } : {}),
+            ...(hasReplyMetadata ? { metadata: replyMetadata } : {}),
             ...(replyMedia && replyMedia.length > 0 ? {
               media: replyMedia.map(m => {
                 const entry: { type: 'image' | 'audio' | 'video' | 'file'; path: string; filename?: string } = {
@@ -176,7 +191,6 @@ export async function executeOutput(
       } else {
         // Normal reply path (message-triggered tick with gathered.contact)
         const channel = output.reply!.channel;
-        const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
         const replyMedia = output.reply!.media;
         const { getChannelRouter } = await import('../channels/channel-router.js');
         const router = getChannelRouter();
@@ -184,7 +198,7 @@ export async function executeOutput(
           contactId: replyContactId,
           channel,
           content: finalReplyContent,
-          ...(triggerMetadata ? { metadata: triggerMetadata } : {}),
+          ...(hasReplyMetadata ? { metadata: replyMetadata } : {}),
           ...(replyMedia && replyMedia.length > 0 ? {
             media: replyMedia.map(m => {
               const entry: { type: 'image' | 'audio' | 'video' | 'file'; path: string; filename?: string } = {
@@ -224,6 +238,7 @@ export async function executeOutput(
     contactName: gathered.contact?.fullName ?? null,
     contentLength: finalReplyContent.length,
     hasMedia: !!(output.reply?.media?.length),
+    turnsSent: replyTurnsSent,
   });
 
   // Wrap all DB writes in a transaction for atomicity
@@ -351,6 +366,33 @@ export async function executeOutput(
   if (output.decisions.length > 0) {
     log.info(`Decisions executed: ${output.decisions.map(d => d.type).join(', ')}`);
   }
+
+  // Auto-complete one-shot scheduled tasks after the mind processes them.
+  // The scheduler sets status to in_progress when it fires a task. If the mind
+  // handled it (sent a reply, took action) but didn't explicitly issue a
+  // complete_task decision, the task would stay in_progress forever.
+  // For one-shot tasks, firing = execution — auto-complete if still in_progress.
+  // Recurring tasks are handled by the scheduler (rescheduled in fireTask).
+  if (gathered.trigger.type === 'scheduled_task' && gathered.trigger.taskId) {
+    const taskId = gathered.trigger.taskId;
+    const mindExplicitlyHandled = output.decisions.some(
+      d => ['complete_task', 'cancel_task', 'skip_task'].includes(d.type) &&
+           (d.parameters as Record<string, unknown>)?.['taskId'] === taskId
+    );
+    if (!mindExplicitlyHandled) {
+      const task = taskStore.getTask(hbDb, taskId);
+      if (task && task.status === 'in_progress' && task.scheduleType === 'one_shot') {
+        taskStore.updateTask(hbDb, taskId, {
+          status: 'completed',
+          completedAt: now(),
+          result: 'Auto-completed after scheduled tick execution',
+        });
+        const updated = taskStore.getTask(hbDb, taskId);
+        if (updated) eventBus.emit('task:updated', updated);
+        log.info(`Auto-completed one-shot task "${task.title}" (${taskId})`);
+      }
+    }
+  }
   logExecuteEvent('execute_decisions_complete', {
     agentDecisions: output.decisions.filter(d => ['spawn_agent', 'update_agent', 'cancel_agent'].includes(d.type)).length,
     pluginDecisions: output.decisions.filter(d => !builtInDecisionTypeSchema.safeParse(d.type).success).length,
@@ -469,6 +511,8 @@ export async function executeOutput(
   heartbeatStore.cleanupOldEmotionHistory(hbDb, settings.emotionHistoryRetentionDays);
   agentLogStore.cleanupOldSessions(getAgentLogsDb(), settings.agentLogRetentionDays);
   taskStore.cleanupOldTaskRuns(hbDb, settings.taskRunRetentionDays);
+  heartbeatStore.expirePendingApprovals(hbDb);
+  heartbeatStore.cleanupOldApprovals(hbDb, 7);
 
   // 9b. Periodic deferred task staleness processing (~every 50 ticks)
   if (tickNumber % 50 === 0) {

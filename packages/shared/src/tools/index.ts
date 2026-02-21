@@ -12,6 +12,9 @@ export {
   sendProactiveMessageDef,
   sendMediaDef,
   runWithCredentialsDef,
+  resolveToolApprovalDef,
+  transcribeAudioDef,
+  generateSpeechDef,
 } from './definitions.js';
 export type { AnimusToolDef, AnimusToolName } from './definitions.js';
 

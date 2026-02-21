@@ -785,7 +785,7 @@ The `'api'` type covers both OpenAI-compatible and Ollama-compatible endpoints. 
 6. **Outbound-Initiated Messages** — Animus sending messages unprompted (reminders, notifications, check-ins) with channel selection.
 7. **Email Channel** — Inbound/outbound email with threading support.
 8. **Webhook Security for API** — HMAC-signed requests for API endpoints.
-9. **Voice Channel** — Direct voice integration (speech-to-text → mind → text-to-speech) without Home Assistant as intermediary. **Designed** — see `docs/architecture/voice-channel.md` for the full architecture using Parakeet TDT v3 (STT) and Kokoro (TTS), both via sherpa-onnx.
+9. **Voice Channel** — Direct voice integration (speech-to-text → mind → text-to-speech) without Home Assistant as intermediary. **Designed** — see `docs/architecture/voice-channel.md` for the full architecture using Parakeet TDT v3 (STT) and Pocket TTS, both via sherpa-onnx. See `docs/architecture/speech-engine.md` for the shared speech engine.
 
 ---
 

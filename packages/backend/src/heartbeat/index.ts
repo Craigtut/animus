@@ -51,7 +51,7 @@ import {
   resetMindSession,
   type MindSessionState,
 } from './mind-session.js';
-import { safeMindOutput, snapshotToMindOutput } from './cognitive-tools.js';
+import { safeMindOutput, snapshotToMindOutput, isNonResponse } from './cognitive-tools.js';
 import { executeOutput } from './execute-output.js';
 
 const log = createLogger('Heartbeat', 'heartbeat');
@@ -130,6 +130,8 @@ interface MindQueryResult {
   tickInputLogged: boolean;
   /** All thoughts from this tick (may be > 1 if mid-tick injection caused re-entry). */
   allThoughts: Array<{ content: string; importance: number }>;
+  /** How many reply turns were already sent via sendOutbound during streaming. */
+  replyTurnsSent: number;
 }
 
 /**
@@ -199,6 +201,8 @@ async function mindQuery(
     thoughtContext: gathered.thoughtContext,
     experienceContext: gathered.experienceContext,
     ...(gathered.messageContext ? { messageContext: gathered.messageContext } : {}),
+    ...(gathered.pendingApprovals.length > 0 ? { pendingApprovals: gathered.pendingApprovals } : {}),
+    ...(gathered.trustRampContext ? { trustRampContext: gathered.trustRampContext } : {}),
   });
 
   const triggerInfo = {
@@ -211,7 +215,7 @@ async function mindQuery(
   // If no agent manager configured, fall back to safe output
   if (!ctx.agentManager || ctx.agentManager.getConfiguredProviders().length === 0) {
     log.warn('No agent provider configured, using safe output');
-    return { output: safeMindOutput(triggerInfo), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged: false, allThoughts: [] };
+    return { output: safeMindOutput(triggerInfo), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged: false, allThoughts: [], replyTurnsSent: 0 };
   }
 
   try {
@@ -298,8 +302,16 @@ async function mindQuery(
 
     // Phase-based reply streaming:
     // Only stream text during the 'replying' phase (after record_thought, before record_cognitive_state)
+    // Only emit reply:chunk events for message-triggered ticks — other tick types
+    // (interval, scheduled_task, agent_complete) treat the text as internal processing.
+    // The mind uses send_proactive_message to reach users on non-message ticks.
     let replyAccumulated = '';
     let replySentEarly = false;
+    let replyTurnsSent = 0;
+    const isMessageTrigger = gathered.trigger.type === 'message';
+
+    // Per-turn accumulated text tracking for turn-based reply segments
+    const turnTextMap = new Map<number, string>();
 
     // --- Mid-tick message injection ---
     // While the mind is running, listen for new inbound messages from the
@@ -358,19 +370,76 @@ async function mindQuery(
     };
     eventBus.on('message:received', messageInjectionHandler);
 
-    // Stream: feed chunks from the agent adapter, only emit reply chunks during 'replying' phase
+    // Turn-end handler: persist each turn's reply text as a separate message
+    const turnEndHandler = async (event: import('@animus/agents').AgentEvent) => {
+      if (event.type !== 'turn_end') return;
+      const turnData = event.data as import('@animus/agents').TurnEndData;
+      const turnText = turnTextMap.get(turnData.turnIndex);
+      if (!turnText?.trim()) return;
+      if (isNonResponse(turnText)) {
+        log.info(`Filtered non-response turn ${turnData.turnIndex}: "${turnText.trim()}"`);
+        return;
+      }
+      if (!isMessageTrigger || !gathered.contact || !gathered.trigger.channel) return;
+
+      try {
+        // Strip 'media' from trigger metadata — incoming attachments shouldn't be re-sent.
+        // Keep other metadata like channelId for Discord reply routing.
+        const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
+        const replyMetadata = triggerMetadata
+          ? Object.fromEntries(Object.entries(triggerMetadata).filter(([k]) => k !== 'media'))
+          : undefined;
+        const hasReplyMetadata = replyMetadata && Object.keys(replyMetadata).length > 0;
+        const { getChannelRouter } = await import('../channels/channel-router.js');
+        const router = getChannelRouter();
+        await router.sendOutbound({
+          contactId: gathered.contact.id,
+          channel: gathered.trigger.channel,
+          content: turnText.trim(),
+          ...(hasReplyMetadata ? { metadata: replyMetadata } : {}),
+        });
+        replyTurnsSent++;
+        replySentEarly = true;
+        log.info(`Turn ${turnData.turnIndex} reply sent on "${gathered.trigger.channel}" for tick #${tickNumber} (${turnText.length} chars)`);
+
+        // Emit turn_complete for the frontend
+        eventBus.emit('reply:turn_complete', {
+          turnIndex: turnData.turnIndex,
+          content: turnText.trim(),
+          tickNumber,
+        });
+      } catch (channelErr) {
+        log.debug(`Turn ${turnData.turnIndex} reply send failed:`, channelErr);
+      }
+    };
+    session.onEvent(turnEndHandler);
+
+    // Stream: feed chunks from the agent adapter, only emit reply chunks during 'replying' phase.
+    // For non-message ticks, still accumulate text (for logging/snapshot) but don't stream to frontend.
     await session.promptStreaming(
       context.userMessage,
-      (chunk: string) => {
-        // Only stream text during the reply phase (after record_thought, before record_cognitive_state)
+      (chunk: string, meta: import('@animus/agents').StreamChunkMeta) => {
         if (cogServer && cogServer.getPhase() === 'replying') {
           replyAccumulated += chunk;
-          eventBus.emit('reply:chunk', { content: chunk, accumulated: replyAccumulated });
+
+          // Track per-turn accumulated text
+          const prev = turnTextMap.get(meta.turnIndex) ?? '';
+          turnTextMap.set(meta.turnIndex, prev + chunk);
+
+          if (isMessageTrigger) {
+            const turnAccumulated = turnTextMap.get(meta.turnIndex)!;
+            eventBus.emit('reply:chunk', {
+              content: chunk,
+              accumulated: turnAccumulated,
+              turnIndex: meta.turnIndex,
+            });
+          }
         }
       },
     );
 
-    // Stop listening for message injection now that the prompt is done
+    // Remove turn-end handler and stop listening for message injection
+    session.offEvent(turnEndHandler);
     eventBus.off('message:received', messageInjectionHandler);
     if (injectedMessageIds.size > 0) {
       log.info(`Mid-tick injection summary: ${injectedMessageIds.size} message(s) injected during mind query`);
@@ -385,36 +454,46 @@ async function mindQuery(
       : safeMindOutput(triggerInfo);
 
     const mindMs = Date.now() - mindStart;
+    const totalTurns = turnTextMap.size;
     if (snapshot) {
-      log.info(`Mind query complete (${(mindMs / 1000).toFixed(1)}s): ${allThoughts.length} thought(s), ${snapshot.emotionDeltas.length} emotion delta(s), ${snapshot.decisions.length} decision(s), reply=${replyAccumulated.length} chars`);
+      log.info(`Mind query complete (${(mindMs / 1000).toFixed(1)}s): ${allThoughts.length} thought(s), ${snapshot.emotionDeltas.length} emotion delta(s), ${snapshot.decisions.length} decision(s), reply=${replyAccumulated.length} chars, turns=${totalTurns} (${replyTurnsSent} sent early)`);
     } else {
       log.warn('No cognitive server available — using safe fallback');
     }
 
-    // Send early reply through channel router (optimistic — before execute phase)
-    if (replyAccumulated.trim() && gathered.contact && gathered.trigger.channel) {
+    // If no turns were sent during streaming (single-turn or turn_end handler didn't fire),
+    // send the full accumulated reply as one message (fallback to monolithic behavior).
+    if (!replySentEarly && isMessageTrigger && replyAccumulated.trim() && !isNonResponse(replyAccumulated) && gathered.contact && gathered.trigger.channel) {
       try {
+        // Strip 'media' from trigger metadata — incoming attachments shouldn't be re-sent.
+        // Keep other metadata like channelId for Discord reply routing.
         const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
+        const fallbackMetadata = triggerMetadata
+          ? Object.fromEntries(Object.entries(triggerMetadata).filter(([k]) => k !== 'media'))
+          : undefined;
+        const hasFallbackMetadata = fallbackMetadata && Object.keys(fallbackMetadata).length > 0;
         const { getChannelRouter } = await import('../channels/channel-router.js');
         const router = getChannelRouter();
         await router.sendOutbound({
           contactId: gathered.contact.id,
           channel: gathered.trigger.channel,
           content: replyAccumulated.trim(),
-          ...(triggerMetadata ? { metadata: triggerMetadata } : {}),
+          ...(hasFallbackMetadata ? { metadata: fallbackMetadata } : {}),
         });
         replySentEarly = true;
-        log.info(`Early reply sent on "${gathered.trigger.channel}" for tick #${tickNumber}`);
+        replyTurnsSent = 1;
+        log.info(`Fallback: full reply sent on "${gathered.trigger.channel}" for tick #${tickNumber}`);
       } catch (channelErr) {
-        log.debug('Early reply send skipped:', channelErr);
+        log.debug('Fallback reply send skipped:', channelErr);
       }
     }
 
-    // Emit reply completion event
-    if (output.reply?.content) {
+    // Emit reply completion event (only for message-triggered ticks)
+    if (isMessageTrigger && output.reply?.content) {
       eventBus.emit('reply:complete', {
         content: output.reply.content,
         tickNumber,
+        totalTurns,
       });
     }
 
@@ -430,7 +509,7 @@ async function mindQuery(
       log.info(`Token usage: ${usage.totalTokens.toLocaleString()} total (session cumulative)${cost ? `, $${cost.totalCostUsd.toFixed(4)}` : ''}`);
     }
 
-    return { output, compiledContext: context, replySentEarly, earlyReplyContent: replyAccumulated, tickInputLogged, allThoughts };
+    return { output, compiledContext: context, replySentEarly, earlyReplyContent: replyAccumulated, tickInputLogged, allThoughts, replyTurnsSent };
   } catch (err) {
     log.error('Mind query failed:', err);
     ctx.mindSession.toolContext.current = null;
@@ -438,7 +517,7 @@ async function mindQuery(
     // End the leaked session before nulling references
     await resetMindSession(ctx.mindSession, ctx.agentManager);
 
-    return { output: safeMindOutput(triggerInfo), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged: false, allThoughts: [] };
+    return { output: safeMindOutput(triggerInfo), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged: false, allThoughts: [], replyTurnsSent: 0 };
   }
 }
 
@@ -489,7 +568,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     eventBus.emit('heartbeat:stage_change', { stage: 'mind' });
 
     // Stage 2: MIND QUERY
-    const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged, allThoughts } = await mindQuery(gathered, tickNumber);
+    const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged, allThoughts, replyTurnsSent } = await mindQuery(gathered, tickNumber);
 
     // Log tick input to agent_logs.db (only if mindQuery didn't already log it)
     const logSessionId = ctx.mindSession.logSessionId?.() ?? null;
@@ -549,6 +628,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
       earlyReplyContent,
       logSessionId,
       allThoughts,
+      replyTurnsSent,
     });
 
     // Log tick output to agent_logs.db
@@ -728,11 +808,22 @@ export async function initializeHeartbeat(): Promise<void> {
   try {
     const taskScheduler = getTaskScheduler();
     taskScheduler.setTaskDueHandler((task) => {
+      // Look up goal/plan context so the mind sees full task details
+      const hbDb = getHeartbeatDb();
+      const goal = task.goalId ? heartbeatStore.getGoal(hbDb, task.goalId) : null;
+      const plan = task.planId ? heartbeatStore.getPlan(hbDb, task.planId) : null;
+      const milestone = plan && task.milestoneIndex != null
+        ? (plan.milestones as Array<{ title: string }>)?.[task.milestoneIndex]?.title
+        : undefined;
+
       handleScheduledTask({
         taskId: task.id,
         taskTitle: task.title,
         taskType: task.scheduleType,
         taskInstructions: task.instructions || '',
+        ...(goal ? { goalTitle: goal.title } : {}),
+        ...(plan ? { planTitle: plan.strategy } : {}),
+        ...(milestone ? { currentMilestone: milestone } : {}),
       });
     });
     taskScheduler.start();
@@ -745,6 +836,14 @@ export async function initializeHeartbeat(): Promise<void> {
   getEventBus().on('plugin:changed', () => {
     ctx.mindSession.invalidated = true;
     log.info('Plugin changed -- next tick will force cold session');
+  });
+
+  // Listen for tool permission changes to invalidate the session.
+  // This ensures permission updates (e.g. off → always_allow) take effect
+  // on the next tick by forcing a cold session rebuild with updated tool lists.
+  getEventBus().on('tool:permission_changed', () => {
+    ctx.mindSession.invalidated = true;
+    log.info('Tool permission changed -- next tick will force cold session');
   });
 
   // Set up the tick queue processor
@@ -904,6 +1003,14 @@ export function getHeartbeatStatus(): HeartbeatState {
  */
 export function getVectorStore(): VectorStore | null {
   return ctx.vectorStore;
+}
+
+/**
+ * Get the MemoryManager instance (if initialized).
+ * Used by memory router for semantic search.
+ */
+export function getMemoryManager(): MemoryManager | null {
+  return ctx.memoryManager;
 }
 
 /**

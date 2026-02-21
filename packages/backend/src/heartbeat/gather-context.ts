@@ -23,6 +23,7 @@ import type {
   Task,
   ContactChannel,
   ChannelType,
+  ToolApprovalRequest,
 } from '@animus/shared';
 
 import { MemoryManager, buildMemoryContext } from '../memory/index.js';
@@ -82,6 +83,10 @@ export interface GatherResult {
   thoughtContext: StreamContext;
   experienceContext: StreamContext;
   messageContext: StreamContext | null;
+  /** Pending tool approval requests for the current contact */
+  pendingApprovals: ToolApprovalRequest[];
+  /** Trust ramp context for tools with repeated approvals (interval ticks only) */
+  trustRampContext: string | null;
 }
 
 export interface GatherDeps {
@@ -388,8 +393,38 @@ export async function gatherContext(
     log.warn('Plugin context gathering failed:', err);
   }
 
+  // Load pending tool approvals for the current contact
+  const pendingApprovals = heartbeatStore.getPendingApprovals(hbDb, contact?.id ?? undefined);
+
+  // Build trust ramp context (interval ticks only — non-intrusive)
+  let trustRampContext: string | null = null;
+  if (trigger.type === 'interval') {
+    try {
+      const eligible = systemStore.getToolsEligibleForTrustRamp(sysDb);
+      if (eligible.length > 0) {
+        const suggestions: string[] = [];
+        for (const tool of eligible) {
+          const stats = heartbeatStore.getApprovalStats(hbDb, tool.toolName, 7);
+          if (stats.approved >= 5 && stats.denied === 0) {
+            suggestions.push(
+              `You've noticed that the user has approved "${tool.displayName}" ${stats.approved} times ` +
+              `in the past week without ever denying it. If it feels natural in ` +
+              `conversation, you might casually suggest they set it to "Always Allow" ` +
+              `in Settings > Tools to save time. This is not urgent.`
+            );
+          }
+        }
+        if (suggestions.length > 0) {
+          trustRampContext = '── TRUST OBSERVATION ──\n' + suggestions.join('\n\n');
+        }
+      }
+    } catch (err) {
+      log.warn('Trust ramp context failed:', err);
+    }
+  }
+
   const gatherMs = Date.now() - gatherStart;
-  log.info(`Gather complete (${gatherMs}ms): ${recentMessages.length} messages, ${recentThoughts.length} recent thoughts, ${emotions.filter(e => e.intensity > 0.1).length} active emotions${energyBand ? `, energy=${energyBand}` : ''}${memCtx ? ', memory=yes' : ''}${goalCtx ? ', goals=yes' : ''}`);
+  log.info(`Gather complete (${gatherMs}ms): ${recentMessages.length} messages, ${recentThoughts.length} recent thoughts, ${emotions.filter(e => e.intensity > 0.1).length} active emotions${energyBand ? `, energy=${energyBand}` : ''}${memCtx ? ', memory=yes' : ''}${goalCtx ? ', goals=yes' : ''}${pendingApprovals.length > 0 ? `, approvals=${pendingApprovals.length}` : ''}`);
 
   return {
     trigger,
@@ -417,5 +452,7 @@ export async function gatherContext(
     thoughtContext,
     experienceContext,
     messageContext,
+    pendingApprovals,
+    trustRampContext,
   };
 }

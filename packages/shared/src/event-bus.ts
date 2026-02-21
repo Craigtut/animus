@@ -19,6 +19,8 @@ import type {
   LongTermMemory,
   StreamType,
   AgentEventType,
+  ToolApprovalRequest,
+  ToolPermissionMode,
 } from './types/index.js';
 
 /**
@@ -49,8 +51,9 @@ export interface AnimusEventMap {
   'decision:made': TickDecision;
 
   // Reply streaming
-  'reply:chunk': { content: string; accumulated: string };
-  'reply:complete': { content: string; tickNumber: number };
+  'reply:chunk': { content: string; accumulated: string; turnIndex: number };
+  'reply:turn_complete': { turnIndex: number; content: string; tickNumber: number };
+  'reply:complete': { content: string; tickNumber: number; totalTurns: number };
 
   // Goals & Seeds
   'goal:created': Goal;
@@ -68,6 +71,7 @@ export interface AnimusEventMap {
   'memory:core_updated': Record<string, never>;
   'memory:stored': LongTermMemory;
   'memory:pruned': { count: number };
+  'memory:deleted': { id: string };
 
   // Agent tasks
   'agent:spawned': { taskId: string; provider: string };
@@ -116,6 +120,12 @@ export interface AnimusEventMap {
     data: Record<string, unknown>;
     createdAt: string;
   };
+
+  // Tool Permissions
+  'tool:approval_requested': ToolApprovalRequest;
+  'tool:approval_resolved': { id: string; toolName: string; status: 'approved' | 'denied'; scope: 'once' | null };
+  'tool:approval_expired': { id: string; toolName: string };
+  'tool:permission_changed': { toolName: string; mode: ToolPermissionMode };
 
   // System
   'system:settings_updated': Record<string, unknown>;

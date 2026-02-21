@@ -13,12 +13,18 @@
  * See docs/architecture/mcp-tools.md
  */
 
-import { getMindTools, getAllowedTools, ANIMUS_TOOL_DEFS, type AnimusToolName, type PermissionTier } from '@animus/shared';
+import { getMindTools, getAllowedTools, ANIMUS_TOOL_DEFS, type AnimusToolName, type PermissionTier, type ToolPermissionMode } from '@animus/shared';
 import type { ToolHandlerContext, ToolResult } from '../types.js';
 import { executeTool } from '../registry.js';
 import { createLogger } from '../../lib/logger.js';
 
 const log = createLogger('MindMCP', 'heartbeat');
+
+/**
+ * Lookup of tool_name → mode from the tool_permissions table.
+ * Callers pass this in so the MCP server builders stay decoupled from DB access.
+ */
+export type ToolPermissionLookup = Map<string, ToolPermissionMode>;
 
 /**
  * Mutable reference to the current tick's tool context.
@@ -33,8 +39,17 @@ export interface MutableToolContext {
  *
  * Returns the opaque config object to pass as an `mcpServers` entry,
  * plus the list of tool names for `allowedTools`.
+ *
+ * @param contextRef  Mutable reference updated before each tick prompt.
+ * @param permissions Optional lookup from tool_permissions table.
+ *                    Tools with mode `off` are excluded. `ask` tools are
+ *                    kept — the permission gate in registry.ts handles
+ *                    the approval flow at call time.
  */
-export async function buildMindMcpServer(contextRef: MutableToolContext): Promise<{
+export async function buildMindMcpServer(
+  contextRef: MutableToolContext,
+  permissions?: ToolPermissionLookup,
+): Promise<{
   /** Pass as `mcpServers['animus']` in session config */
   serverConfig: Record<string, unknown>;
   /** Tool names to add to `allowedTools` (prefixed with `mcp__animus__`) */
@@ -49,6 +64,15 @@ export async function buildMindMcpServer(contextRef: MutableToolContext): Promis
 
   for (const def of mindTools) {
     const toolName = def.name as AnimusToolName;
+
+    // Filter out tools disabled via tool_permissions (mode = 'off')
+    if (permissions) {
+      const mode = permissions.get(toolName);
+      if (mode === 'off') {
+        log.info(`Mind MCP: excluding disabled tool "${toolName}"`);
+        continue;
+      }
+    }
 
     // Build the SDK tool using the Claude SDK's `tool()` helper.
     // The handler reads from contextRef.current at call time so
@@ -102,10 +126,18 @@ export async function buildMindMcpServer(contextRef: MutableToolContext): Promis
  * A minimal stub context is provided for tools that require one (e.g.,
  * send_message, read_memory). The caller should populate contactId,
  * sourceChannel, etc. before spawning.
+ *
+ * @param tier        Contact permission tier for baseline tool filtering.
+ * @param contextRef  Mutable reference populated before spawning.
+ * @param permissions Optional lookup from tool_permissions table.
+ *                    Sub-agents ONLY get `always_allow` tools — both `off`
+ *                    and `ask` are excluded because sub-agents cannot
+ *                    interact with the user for approval.
  */
 export async function buildSubAgentMcpServer(
   tier: PermissionTier,
   contextRef: MutableToolContext,
+  permissions?: ToolPermissionLookup,
 ): Promise<{
   serverConfig: Record<string, unknown>;
   allowedTools: string[];
@@ -118,6 +150,15 @@ export async function buildSubAgentMcpServer(
 
   for (const toolName of toolNames) {
     const def = ANIMUS_TOOL_DEFS[toolName];
+
+    // Sub-agents only get always_allow tools — exclude off and ask
+    if (permissions) {
+      const mode = permissions.get(toolName);
+      if (mode === 'off' || mode === 'ask') {
+        log.info(`Sub-agent MCP: excluding tool "${toolName}" (mode=${mode})`);
+        continue;
+      }
+    }
 
     const sdkTool = sdk.tool(
       toolName,

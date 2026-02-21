@@ -163,6 +163,48 @@ export function searchLongTermMemories(
   });
 }
 
+/**
+ * Cursor-paginated long-term memories, ordered by created_at DESC.
+ * Follows the getThoughtsPaginated pattern from heartbeat-store.
+ */
+export function getLongTermMemoriesPaginated(
+  db: Database.Database,
+  limit: number = 20,
+  cursor?: string,
+  filters?: { contactId?: string; memoryType?: MemoryType },
+): LongTermMemory[] {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (cursor) {
+    conditions.push('created_at < ?');
+    params.push(cursor);
+  }
+  if (filters?.contactId) {
+    conditions.push('contact_id = ?');
+    params.push(filters.contactId);
+  }
+  if (filters?.memoryType) {
+    conditions.push('memory_type = ?');
+    params.push(filters.memoryType);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  params.push(limit);
+
+  const rows = db
+    .prepare(`SELECT * FROM long_term_memories ${where} ORDER BY created_at DESC LIMIT ?`)
+    .all(...params) as Array<Record<string, unknown>>;
+
+  return rows.map((row) => {
+    const mem = snakeToCamel<LongTermMemory>(row);
+    return {
+      ...mem,
+      keywords: typeof mem.keywords === 'string' ? JSON.parse(mem.keywords) : mem.keywords,
+    };
+  });
+}
+
 export function updateMemoryAccess(db: Database.Database, id: string): void {
   db.prepare(
     'UPDATE long_term_memories SET strength = strength + 1, last_accessed_at = ?, updated_at = ? WHERE id = ?'

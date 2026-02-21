@@ -204,6 +204,14 @@ export abstract class BaseSession implements IAgentSession {
   }
 
   /**
+   * Remove a previously registered event handler.
+   */
+  offEvent(handler: AgentEventHandler): void {
+    const idx = this.eventHandlers.indexOf(handler);
+    if (idx >= 0) this.eventHandlers.splice(idx, 1);
+  }
+
+  /**
    * Register lifecycle hooks.
    */
   registerHooks(hooks: UnifiedHooks): void {

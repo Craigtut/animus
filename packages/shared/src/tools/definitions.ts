@@ -27,7 +27,7 @@ export interface AnimusToolDef<TInput extends z.ZodTypeAny = z.ZodTypeAny> {
   /**
    * Tool category for UI grouping and permission logic.
    */
-  category: 'messaging' | 'memory' | 'progress' | 'system';
+  category: 'messaging' | 'memory' | 'progress' | 'system' | 'speech';
 }
 
 /**
@@ -195,6 +195,71 @@ export const runWithCredentialsDef: AnimusToolDef = {
 };
 
 /**
+ * resolve_tool_approval - Resolve a pending tool approval request.
+ * Mind-only tool. Used when the user approves or denies a tool usage
+ * request via natural language conversation.
+ */
+export const resolveToolApprovalDef: AnimusToolDef = {
+  name: 'resolve_tool_approval',
+  description:
+    "Resolve a pending tool approval request based on the user's response. " +
+    'Use this when a user approves or denies a tool usage request via natural language. ' +
+    'The request ID will be provided in the tick context under pending approval requests.',
+  inputSchema: z.object({
+    requestId: z.string().describe('The approval request ID from context'),
+    approved: z
+      .boolean()
+      .describe('Whether the user approved the tool usage'),
+  }),
+  category: 'system',
+};
+
+/**
+ * transcribe_audio - Transcribe an audio file to text using local STT.
+ * Mind-only tool.
+ */
+export const transcribeAudioDef: AnimusToolDef = {
+  name: 'transcribe_audio',
+  description:
+    'Transcribe an audio file to text using the local speech-to-text engine (Parakeet TDT v3). ' +
+    'Supports WAV files directly. Other formats (WebM, MP3, etc.) require ffmpeg to be installed. ' +
+    'Returns the transcribed text.',
+  inputSchema: z.object({
+    filePath: z
+      .string()
+      .describe('Absolute path to the audio file to transcribe'),
+  }),
+  category: 'speech',
+};
+
+/**
+ * generate_speech - Synthesize text to speech using local TTS.
+ * Mind-only tool. Pairs with send_media to deliver audio.
+ */
+export const generateSpeechDef: AnimusToolDef = {
+  name: 'generate_speech',
+  description:
+    'Synthesize text into speech audio using the local text-to-speech engine (Pocket TTS). ' +
+    'Returns the path to the generated WAV file in data/media/speech/. ' +
+    'Use send_media to deliver the audio file to the user. ' +
+    'By default uses the persona voice; optionally override with a specific voice ID.',
+  inputSchema: z.object({
+    text: z.string().min(1).describe('The text to synthesize into speech'),
+    speed: z
+      .number()
+      .min(0.5)
+      .max(2.0)
+      .optional()
+      .describe('Speech speed multiplier (default: 1.0)'),
+    voiceId: z
+      .string()
+      .optional()
+      .describe('Override the persona default voice. Use a built-in name (e.g., "alba") or a custom voice UUID.'),
+  }),
+  category: 'speech',
+};
+
+/**
  * Central registry of all Animus tool definitions.
  * This is the single source of truth for what tools exist.
  * Handlers are attached separately in the backend.
@@ -207,6 +272,9 @@ export const ANIMUS_TOOL_DEFS = {
   send_proactive_message: sendProactiveMessageDef,
   send_media: sendMediaDef,
   run_with_credentials: runWithCredentialsDef,
+  resolve_tool_approval: resolveToolApprovalDef,
+  transcribe_audio: transcribeAudioDef,
+  generate_speech: generateSpeechDef,
 } as const;
 
 export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
@@ -221,9 +289,11 @@ export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
  * - read_memory: dynamic memory search beyond pre-loaded context
  * - lookup_contacts: discover contacts and channels at call time
  * - send_proactive_message: send to any contact on any channel
+ * - resolve_tool_approval: handle user responses to tool approval requests
  *
  * Excludes send_message (sub-agent only) and update_progress (sub-agent only).
  */
 export const MIND_TOOL_NAMES: readonly AnimusToolName[] = [
-  'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials'
+  'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials', 'resolve_tool_approval',
+  'transcribe_audio', 'generate_speech',
 ] as const;

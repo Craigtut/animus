@@ -11,6 +11,9 @@
  *
  * Phase tracking: getPhase() returns 'pre-thought' | 'replying' | 'done'
  * to control reply streaming (only stream during 'replying' phase).
+ * Note: record_cognitive_state does NOT transition to 'done' — the phase
+ * stays 'replying' to prevent premature text cutoff. Phase resets via
+ * resetSnapshot() at the start of each tick.
  *
  * Supports mid-tick re-entry: when messages are injected mid-tick,
  * the model may run multiple thought→reply→state cycles. Thoughts
@@ -259,7 +262,8 @@ export async function buildCognitiveMcpServer(): Promise<{
     recordCognitiveStateSchema.shape,
     async (args: z.infer<typeof recordCognitiveStateSchema>) => {
       const emotions = args.emotionDeltas.map(e => `${e.emotion}(${e.delta > 0 ? '+' : ''}${e.delta.toFixed(2)})`).join(', ');
-      log.info(`record_cognitive_state: ${args.emotionDeltas.length} emotion(s)${emotions ? ` [${emotions}]` : ''}, ${args.decisions.length} decision(s), ${args.memoryCandidate.length} memory(s), phase replying→done`);
+      const alreadyCalled = snapshotBox.current.experience !== null;
+      log.info(`record_cognitive_state: ${args.emotionDeltas.length} emotion(s)${emotions ? ` [${emotions}]` : ''}, ${args.decisions.length} decision(s), ${args.memoryCandidate.length} memory(s)${alreadyCalled ? ' (DUPLICATE CALL — snapshot already has state)' : ''}, phase stays replying`);
 
       // Experience always takes the latest (narrative progresses forward)
       snapshotBox.current.experience = args.experience;
@@ -291,8 +295,13 @@ export async function buildCognitiveMcpServer(): Promise<{
       snapshotBox.current.workingMemoryUpdate = args.workingMemoryUpdate ?? snapshotBox.current.workingMemoryUpdate;
       snapshotBox.current.coreSelfUpdate = args.coreSelfUpdate ?? snapshotBox.current.coreSelfUpdate;
 
-      // Always set phase to 'done'
-      phase = 'done';
+      // DO NOT set phase to 'done' here. The AI sometimes calls this tool
+      // prematurely during intensive tasks (mid-processing, before the reply
+      // is complete). Setting phase='done' caused all subsequent reply text
+      // to be silently dropped by the streaming callback, resulting in empty
+      // or incomplete replies. Keep phase as 'replying' so text continues to
+      // accumulate. Phase resets to 'pre-thought' via resetSnapshot() at the
+      // start of the next tick.
 
       // Return MCP-compatible content object (bare strings fail MCP protocol validation)
       return { content: [{ type: 'text' as const, text: 'Cognitive state recorded. You are done — stop here.' }] };
@@ -316,6 +325,36 @@ export async function buildCognitiveMcpServer(): Promise<{
   log.info('Cognitive MCP server built');
 
   return { ...cached, ...result };
+}
+
+// ============================================================================
+// Non-response filter
+// ============================================================================
+
+/**
+ * Patterns that match "non-response" text the agent sometimes emits after
+ * calling record_cognitive_state. These are not real replies — they're the
+ * agent narrating that it has nothing to say. We filter them to prevent
+ * sending vacuous messages to the user.
+ *
+ * Only matches when the ENTIRE trimmed text is one of these phrases,
+ * so legitimate replies containing these words as part of a sentence are safe.
+ */
+const NON_RESPONSE_PATTERNS = [
+  /^no\s+response\s+(requested|needed|required|necessary)\.?$/i,
+  /^no\s+reply\s+(requested|needed|required|necessary)\.?$/i,
+  /^no\s+message\s+(requested|needed|required|necessary)\.?$/i,
+  /^\[no\s+response\]$/i,
+  /^\[no\s+reply\]$/i,
+  /^\(no\s+response\)$/i,
+  /^\(no\s+reply\)$/i,
+  /^n\/a\.?$/i,
+];
+
+export function isNonResponse(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  return NON_RESPONSE_PATTERNS.some(p => p.test(trimmed));
 }
 
 // ============================================================================
@@ -345,6 +384,13 @@ export function snapshotToMindOutput(
   const experience = snapshot.experience ?? { content: 'A moment passed.', importance: 0.1 };
 
   // Reply: construct from accumulated text + trigger context
+  // Filter out non-response phrases the agent sometimes emits after cognitive state
+  if (isNonResponse(replyText)) {
+    if (replyText.trim()) {
+      log.info(`Filtered non-response reply: "${replyText.trim()}"`);
+    }
+    replyText = '';
+  }
   const hasReply = replyText.trim().length > 0 && gathered.contact;
   const reply: MindOutput['reply'] = hasReply
     ? {

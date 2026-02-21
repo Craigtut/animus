@@ -27,8 +27,9 @@ import { env, PROJECT_ROOT } from '../utils/env.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSubAgentMcpServer, type MutableToolContext } from '../tools/servers/claude-mcp.js';
+import { buildSubAgentMcpServer, type MutableToolContext, type ToolPermissionLookup } from '../tools/servers/claude-mcp.js';
 import type { ToolHandlerContext } from '../tools/types.js';
+import { getToolPermissions } from '../db/stores/system-store.js';
 import { getPluginManager } from '../services/plugin-manager.js';
 
 const log = createLogger('AgentOrchestrator', 'agents');
@@ -281,22 +282,43 @@ export class AgentOrchestrator {
 
       if (!this.subAgentMcpServer && provider === 'claude') {
         try {
-          this.subAgentMcpServer = await buildSubAgentMcpServer(contactTier, subAgentContext);
+          const permissions = this.buildToolPermissionLookup();
+          this.subAgentMcpServer = await buildSubAgentMcpServer(contactTier, subAgentContext, permissions);
           log.info(`Sub-agent MCP server built with tools: ${this.subAgentMcpServer.allowedTools.join(', ')}`);
         } catch (err) {
           log.warn('Failed to build sub-agent MCP server:', err);
         }
       }
 
-      // Merge built-in sub-agent MCP tools with plugin MCP servers
+      // Merge built-in sub-agent MCP tools with plugin MCP servers.
+      // Sub-agents can't interact with users for approval, so exclude
+      // plugin MCP servers with 'off' or 'ask' mode (only 'always_allow' passes).
       const pluginMcp = getPluginManager().getPluginMcpServersForSdk();
+      const filteredPluginServers: Record<string, Record<string, unknown>> = {};
+      const filteredPluginTools: string[] = [];
+      try {
+        const sysDb = getSystemDb();
+        for (const [key, config] of Object.entries(pluginMcp.mcpServers)) {
+          const permKey = `mcp__${key}`;
+          const perm = systemStore.getToolPermission(sysDb, permKey);
+          if (perm && (perm.mode === 'off' || perm.mode === 'ask')) {
+            continue; // Sub-agents skip disabled and gated tools
+          }
+          filteredPluginServers[key] = config;
+          filteredPluginTools.push(`mcp__${key}__*`);
+        }
+      } catch {
+        // DB not available — include all plugin servers as fallback
+        Object.assign(filteredPluginServers, pluginMcp.mcpServers);
+        filteredPluginTools.push(...pluginMcp.allowedTools);
+      }
       const mergedMcpServers: Record<string, Record<string, unknown>> = {
         ...(this.subAgentMcpServer ? { animus: this.subAgentMcpServer.serverConfig } : {}),
-        ...pluginMcp.mcpServers,
+        ...filteredPluginServers,
       };
       const mergedAllowedTools: string[] = [
         ...(this.subAgentMcpServer ? this.subAgentMcpServer.allowedTools : []),
-        ...pluginMcp.allowedTools,
+        ...filteredPluginTools,
       ];
 
       // For Claude provider: expose Animus plugin skills via the skill bridge plugin
@@ -312,6 +334,11 @@ export class AgentOrchestrator {
       // Create the agent session
       const verboseAgent = env.LOG_LEVEL === 'debug' || env.LOG_LEVEL === 'trace';
       const model = this.getPreferredModel?.();
+
+      // Sub-agents cannot interact with the user for approval, so both
+      // 'off' and 'ask' SDK built-in tools are disallowed.
+      const disabledSdkTools = this.getDisabledSdkTools('off', 'ask');
+
       const session = await this.manager.createSession({
         provider,
         model,
@@ -327,6 +354,8 @@ export class AgentOrchestrator {
         } : {}),
         // allowedTools: MCP tool patterns + 'Skill' for SDK skill discovery
         ...(mergedAllowedTools.length > 0 ? { allowedTools: mergedAllowedTools } : {}),
+        // Disable SDK built-in tools with mode='off' or 'ask' (sub-agents can't do approvals)
+        ...(disabledSdkTools.length > 0 ? { disallowedTools: disabledSdkTools } : {}),
         // Claude SDK plugins for skill discovery (bridge to .claude/skills/)
         ...(sdkPlugins ? { plugins: sdkPlugins } : {}),
         verbose: verboseAgent,
@@ -492,6 +521,39 @@ export class AgentOrchestrator {
   // --------------------------------------------------------------------------
   // Internal
   // --------------------------------------------------------------------------
+
+  /**
+   * Build a ToolPermissionLookup from the tool_permissions table.
+   */
+  private buildToolPermissionLookup(): ToolPermissionLookup {
+    try {
+      const sysDb = getSystemDb();
+      const perms = getToolPermissions(sysDb);
+      const lookup: ToolPermissionLookup = new Map();
+      for (const p of perms) {
+        lookup.set(p.toolName, p.mode);
+      }
+      return lookup;
+    } catch {
+      return new Map();
+    }
+  }
+
+  /**
+   * Get SDK built-in tools that should be disallowed based on permission mode.
+   */
+  private getDisabledSdkTools(...blockModes: Array<'off' | 'ask'>): string[] {
+    try {
+      const sysDb = getSystemDb();
+      const perms = getToolPermissions(sysDb);
+      const modes = new Set<string>(blockModes);
+      return perms
+        .filter((p) => p.toolSource.startsWith('sdk:') && modes.has(p.mode))
+        .map((p) => p.toolName);
+    } catch {
+      return [];
+    }
+  }
 
   /**
    * Resolve the contact permission tier, defaulting to 'primary'.

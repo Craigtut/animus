@@ -20,10 +20,21 @@ import {
   type AgentEvent,
   type IAgentSession,
   type AgentLogStore,
+  type HookResult,
+  type PreToolUseEvent,
 } from '@animus/agents';
 
-import { buildMindMcpServer, type MutableToolContext } from '../tools/index.js';
+import { buildMindMcpServer, type MutableToolContext, type ToolPermissionLookup } from '../tools/index.js';
 import type { ToolHandlerContext } from '../tools/index.js';
+import { getToolPermissions, getToolPermission } from '../db/stores/system-store.js';
+import {
+  getActiveApproval,
+  getPendingApprovals,
+  createApprovalRequest,
+  consumeApproval,
+  getHeartbeatState,
+} from '../db/stores/heartbeat-store.js';
+import { getHeartbeatDb } from '../db/index.js';
 import { getPluginManager } from '../services/plugin-manager.js';
 import { getChannelRouter } from '../channels/index.js';
 import type { MemoryManager } from '../memory/index.js';
@@ -186,7 +197,8 @@ export async function getOrCreateMindSession(
   // Build MCP servers on first cold session (lazy, once per process lifetime)
   if (!state.mcpServer && provider === 'claude') {
     try {
-      state.mcpServer = await buildMindMcpServer(state.toolContext);
+      const permissions = buildToolPermissionLookup();
+      state.mcpServer = await buildMindMcpServer(state.toolContext, permissions);
       log.info(`Mind MCP server built with tools: ${state.mcpServer.allowedTools.join(', ')}`);
     } catch (err) {
       log.warn('Failed to build mind MCP server, proceeding without tools:', err);
@@ -206,15 +218,31 @@ export async function getOrCreateMindSession(
   // Merge built-in MCP tools + cognitive tools + plugin MCP servers
   const pluginMgr = getPluginManager();
   const pluginMcp = pluginMgr.getPluginMcpServersForSdk();
+
+  // Filter plugin MCP servers by permission mode — exclude disabled ('off') servers
+  const filteredPluginMcpServers: Record<string, Record<string, unknown>> = {};
+  const filteredPluginAllowedTools: string[] = [];
+  const sysDbForPerms = getSystemDb();
+  for (const [key, config] of Object.entries(pluginMcp.mcpServers)) {
+    const permKey = `mcp__${key}`;
+    const perm = getToolPermission(sysDbForPerms, permKey);
+    if (perm && perm.mode === 'off') {
+      log.info(`Excluding disabled plugin MCP server from session: ${key}`);
+      continue;
+    }
+    filteredPluginMcpServers[key] = config;
+    filteredPluginAllowedTools.push(`mcp__${key}__*`);
+  }
+
   const mergedMcpServers: Record<string, Record<string, unknown>> = {
     ...(state.mcpServer ? { tools: state.mcpServer.serverConfig } : {}),
     ...(state.cognitiveServer ? { cognitive: state.cognitiveServer.serverConfig } : {}),
-    ...pluginMcp.mcpServers,
+    ...filteredPluginMcpServers,
   };
   const mergedAllowedTools: string[] = [
     ...(state.mcpServer ? state.mcpServer.allowedTools : []),
     ...(state.cognitiveServer ? state.cognitiveServer.allowedTools : []),
-    ...pluginMcp.allowedTools,
+    ...filteredPluginAllowedTools,
   ];
 
   // For Claude provider: use the skill bridge plugin to expose Animus plugin skills
@@ -237,6 +265,31 @@ export async function getOrCreateMindSession(
   // Enable verbose agent logging when LOG_LEVEL is debug or trace
   const verboseAgent = env.LOG_LEVEL === 'debug' || env.LOG_LEVEL === 'trace';
 
+  // Build disallowed list for SDK built-in tools that are disabled (mode='off').
+  const disabledSdkTools = getDisabledSdkTools('off');
+
+  // Add only 'always_allow' SDK tools to allowedTools (auto-approved by SDK).
+  // 'ask' mode SDK tools are intentionally LEFT OUT so the SDK routes them
+  // through canUseTool, which only fires for model-initiated calls — NOT for
+  // SDK internal operations (e.g., git status via Bash during init).
+  const autoApprovedSdkTools = getAutoApprovedSdkTools();
+  if (autoApprovedSdkTools.length > 0) {
+    mergedAllowedTools.push(...autoApprovedSdkTools);
+    log.info('Added always_allow SDK tools to allowedTools:', autoApprovedSdkTools);
+  }
+
+  // Build the canUseTool callback — PRIMARY gate for 'ask'-mode SDK built-in tools.
+  // SDK routes model-initiated calls for tools NOT in allowedTools through this.
+  // Crucially, canUseTool does NOT fire for SDK internal operations (git status, etc.),
+  // so it correctly avoids false positives on SDK startup Bash calls.
+  const canUseToolCallback = buildCanUseToolCallback(state.toolContext);
+
+  // Build the PreToolUse hook — SECONDARY gate for plugin MCP tools in 'ask' mode.
+  // Plugin MCP tools use wildcard patterns in allowedTools (mcp__plugin__*), so the
+  // SDK auto-approves them. The hook catches these and enforces approval.
+  // For SDK built-in tools: this hook still fires but canUseTool handles them first.
+  const preToolUseHook = buildPreToolUseHook(state.toolContext);
+
   const session = await agentManager.createSession({
     provider,
     model,
@@ -250,7 +303,11 @@ export async function getOrCreateMindSession(
     } : {}),
     permissions: {
       executionMode: 'build',
-      approvalLevel: 'none',
+      approvalLevel: 'normal',
+    },
+    canUseTool: canUseToolCallback,
+    hooks: {
+      onPreToolUse: preToolUseHook,
     },
     // Structured output captured via cognitive MCP tools (record_thought + record_cognitive_state)
     // Natural language between tool calls becomes the reply
@@ -258,8 +315,11 @@ export async function getOrCreateMindSession(
     ...(Object.keys(mergedMcpServers).length > 0 ? {
       mcpServers: mergedMcpServers,
     } : {}),
-    // allowedTools: MCP tool patterns + 'Skill' for SDK skill discovery
+    // allowedTools: ALL non-off tools (SDK + MCP patterns + 'Skill')
+    // The SDK auto-approves everything in this list; 'ask' enforcement is via hook.
     ...(mergedAllowedTools.length > 0 ? { allowedTools: mergedAllowedTools } : {}),
+    // Disable SDK built-in tools that have mode='off' in tool_permissions
+    ...(disabledSdkTools.length > 0 ? { disallowedTools: disabledSdkTools } : {}),
     // Claude SDK plugins for skill discovery (bridge to .claude/skills/)
     ...(sdkPlugins ? { plugins: sdkPlugins } : {}),
     verbose: verboseAgent,
@@ -306,6 +366,301 @@ export async function getOrCreateMindSession(
   log.info(`Cold session created: ${session.id}, provider=${provider}, mcpServers=${Object.keys(mergedMcpServers).join(',') || 'none'}, tools=${mergedAllowedTools.length}`);
 
   return session;
+}
+
+// ============================================================================
+// Tool Permission Lookup Helpers
+// ============================================================================
+
+/**
+ * Build a ToolPermissionLookup from the tool_permissions table.
+ * Returns a Map<toolName, mode> for quick lookups in MCP server builders.
+ */
+export function buildToolPermissionLookup(): ToolPermissionLookup {
+  const sysDb = getSystemDb();
+  const perms = getToolPermissions(sysDb);
+  const lookup: ToolPermissionLookup = new Map();
+  for (const p of perms) {
+    lookup.set(p.toolName, p.mode);
+  }
+  return lookup;
+}
+
+/**
+ * Get SDK built-in tools that should be disallowed based on permission mode.
+ *
+ * @param blockModes  Which modes to treat as blocked. For the mind session,
+ *                    pass 'off' only (ask tools are kept). For sub-agents,
+ *                    pass both 'off' and 'ask'.
+ */
+function getDisabledSdkTools(...blockModes: Array<'off' | 'ask'>): string[] {
+  const sysDb = getSystemDb();
+  const perms = getToolPermissions(sysDb);
+  const modes = new Set<string>(blockModes);
+  return perms
+    .filter((p) => p.toolSource.startsWith('sdk:') && modes.has(p.mode))
+    .map((p) => p.toolName);
+}
+
+/**
+ * Get SDK built-in tools that should be added to allowedTools.
+ *
+ * Returns only 'always_allow' SDK tools. Why not 'ask' tools?
+ * - Tools in allowedTools are auto-approved by the SDK, bypassing canUseTool
+ * - The SDK also uses some tools internally (e.g., Bash for git status during init)
+ * - Internal SDK tool calls do NOT route through canUseTool or PreToolUse hooks
+ *   when the tool is in allowedTools — they just execute silently
+ * - But when a tool is NOT in allowedTools, the SDK routes model-initiated calls
+ *   through canUseTool, which correctly skips internal calls
+ *
+ * So: 'always_allow' → allowedTools (auto-approved), 'ask' → canUseTool gate
+ */
+function getAutoApprovedSdkTools(): string[] {
+  const sysDb = getSystemDb();
+  const perms = getToolPermissions(sysDb);
+  return perms
+    .filter((p) => p.toolSource.startsWith('sdk:') && p.mode === 'always_allow')
+    .map((p) => p.toolName);
+}
+
+/**
+ * Extract the server-level permission key from a plugin MCP tool name.
+ *
+ * Tool name format: mcp__<pluginName>__<serverName>__<toolFunction>
+ * Permission key:   mcp__<pluginName>__<serverName>
+ *
+ * Returns null if the format doesn't match (fewer than 4 segments).
+ */
+function getPluginMcpPermissionKey(toolName: string): string | null {
+  const parts = toolName.split('__');
+  // parts[0]='mcp', parts[1]=pluginName, parts[2]=serverName, parts[3+]=toolFunc
+  if (parts.length < 4) return null;
+  return `${parts[0]}__${parts[1]}__${parts[2]}`;
+}
+
+/**
+ * Resolve permission key and record for a given tool name.
+ *
+ * Different tool types use different key formats:
+ * - SDK built-in tools: exact name (e.g., "bash", "write")
+ * - Animus core MCP tools: exact name (e.g., "send_message")
+ * - Plugin MCP tools: server-level key (e.g., "mcp__home-assistant__main")
+ */
+function resolveToolPermission(toolName: string): {
+  permKey: string;
+  permission: import('@animus/shared').ToolPermission | null;
+} | null {
+  const sysDb = getSystemDb();
+
+  // Plugin MCP tools: use server-level key
+  if (toolName.startsWith('mcp__')) {
+    // Core Animus MCP tools have their own in-process gate in registry.ts
+    // (server name is 'animus', registered under key 'tools' in mcpServers)
+    if (toolName.startsWith('mcp__animus__')) return null;
+    // Cognitive tools are internal, always allowed
+    if (toolName.startsWith('mcp__cognitive__')) return null;
+
+    const permKey = getPluginMcpPermissionKey(toolName);
+    if (!permKey) return null;
+    return { permKey, permission: getToolPermission(sysDb, permKey) };
+  }
+
+  // SDK built-in tools and others: exact name lookup
+  return { permKey: toolName, permission: getToolPermission(sysDb, toolName) };
+}
+
+/**
+ * Build the canUseTool callback for the mind session.
+ *
+ * Primary gate for 'ask'-mode SDK built-in tools (Bash, Write, Edit, etc.).
+ * The SDK only routes tool calls through canUseTool when the tool is NOT in
+ * allowedTools. Since we only add 'always_allow' tools to allowedTools,
+ * 'ask'-mode SDK tools flow through here.
+ *
+ * Key advantage: canUseTool only fires for MODEL-initiated tool calls, not
+ * SDK internal operations (e.g., git status via Bash during CLI startup).
+ * This prevents false approval prompts on normal conversations.
+ *
+ * Also handles plugin MCP tools as a fallback (primary gate is PreToolUse hook).
+ * Animus core MCP tools are skipped (they have their own in-process gate).
+ */
+function buildCanUseToolCallback(
+  toolContextRef: MutableToolContext,
+): (
+  toolName: string,
+  input: Record<string, unknown>,
+) => Promise<
+  | { behavior: 'allow'; updatedInput?: Record<string, unknown> }
+  | { behavior: 'deny'; message?: string }
+> {
+  return async (toolName: string, input: Record<string, unknown>) => {
+    log.info(`canUseTool callback invoked for: "${toolName}"`);
+    const resolved = resolveToolPermission(toolName);
+
+    // No resolved info means tool is exempt (core MCP, cognitive, unknown)
+    if (!resolved) {
+      log.info(`canUseTool: "${toolName}" → exempt (no permission record), allowing`);
+      return { behavior: 'allow' };
+    }
+
+    const { permKey, permission } = resolved;
+
+    // No permission record — allow (seeder will catch up)
+    if (!permission) {
+      return { behavior: 'allow' };
+    }
+
+    // Off = disabled entirely
+    if (permission.mode === 'off') {
+      return { behavior: 'deny', message: `Tool "${permission.displayName}" is disabled.` };
+    }
+
+    // Always allow = no gate
+    if (permission.mode === 'always_allow') {
+      return { behavior: 'allow' };
+    }
+
+    // Mode is 'ask' — check for active approval
+    const heartbeatDb = getHeartbeatDb();
+    const ctx = toolContextRef.current;
+    const contactId = ctx?.contactId ?? '';
+
+    const activeApproval = getActiveApproval(heartbeatDb, permKey, contactId);
+    if (activeApproval) {
+      consumeApproval(heartbeatDb, activeApproval.id);
+      log.info(`Consumed approval ${activeApproval.id} for tool "${toolName}"`);
+      return { behavior: 'allow' };
+    }
+
+    // Check for existing pending request to avoid duplicates
+    const pendingRequests = getPendingApprovals(heartbeatDb, contactId);
+    const existingPending = pendingRequests.find((r) => r.toolName === permKey);
+    if (!existingPending) {
+      const heartbeatState = getHeartbeatState(heartbeatDb);
+      const approvalRequest = createApprovalRequest(heartbeatDb, {
+        toolName: permKey,
+        toolSource: permission.toolSource,
+        contactId,
+        channel: ctx?.sourceChannel ?? 'web',
+        tickNumber: heartbeatState.tickNumber,
+        agentContext: {
+          taskDescription: `Tool "${toolName}" invoked during tick ${heartbeatState.tickNumber}`,
+          conversationSummary: `Conversation ${ctx?.conversationId ?? 'unknown'}`,
+          pendingAction: `Execute tool "${toolName}"`,
+        },
+        toolInput: input,
+        triggerSummary: `Agent wants to use "${permission.displayName}"`,
+        conversationId: ctx?.conversationId ?? '',
+        originatingAgent: 'mind',
+      });
+
+      ctx?.eventBus.emit('tool:approval_requested', approvalRequest);
+      log.info(`Created approval request ${approvalRequest.id} for tool "${toolName}"`);
+    }
+
+    return {
+      behavior: 'deny',
+      message: `Tool "${permission.displayName}" requires user approval before it can run. ` +
+        'Please explain to the user what you want to do with this tool and why. ' +
+        'The system will present them with an approval request. ' +
+        'Do NOT attempt to call this tool again until the user has responded.',
+    };
+  };
+}
+
+// ============================================================================
+// PreToolUse Hook — Primary Permission Enforcement
+// ============================================================================
+
+/**
+ * Build a PreToolUse hook that enforces 'ask' mode for plugin MCP tools.
+ *
+ * Plugin MCP tools are registered with wildcard patterns in allowedTools
+ * (e.g., mcp__home-assistant__ha__*), so the SDK auto-approves them.
+ * This hook catches those calls and enforces the approval gate.
+ *
+ * For SDK built-in tools: canUseTool is the primary gate (it only fires for
+ * model-initiated calls, avoiding false positives on SDK internal operations).
+ * This hook may also fire for SDK tools as a secondary check.
+ *
+ * For 'ask' mode tools:
+ *   - No active approval → creates approval request, emits event, blocks tool
+ *   - Active approval → consumes it and allows tool
+ * For 'always_allow' and unknown tools: allows (no-op)
+ * For 'off' tools: handled by disallowedTools (never reaches here)
+ *
+ * Core Animus MCP tools are skipped (they have their own in-process gate).
+ */
+function buildPreToolUseHook(
+  toolContextRef: MutableToolContext,
+): (event: PreToolUseEvent) => Promise<HookResult | void> {
+  return async (event: PreToolUseEvent) => {
+    const { toolName } = event;
+
+    // SDK built-in tools (Bash, Write, Edit, WebSearch, etc.) are NOT gated here.
+    // Hooks fire for ALL tool calls including SDK internal operations (git status,
+    // environment checks) that happen during CLI startup. We can't distinguish
+    // those from model-initiated calls in this hook.
+    // Instead, canUseTool handles SDK built-in tools — it only fires for
+    // model-initiated calls, correctly skipping SDK internal operations.
+    if (!toolName.startsWith('mcp__')) {
+      return; // Not an MCP tool — canUseTool handles SDK tools
+    }
+
+    const resolved = resolveToolPermission(toolName);
+    if (!resolved) {
+      // Exempt tool (core MCP, cognitive, unknown) — allow
+      return;
+    }
+
+    const { permKey, permission } = resolved;
+    if (!permission || permission.mode !== 'ask') {
+      // No record or not 'ask' mode — allow
+      return;
+    }
+
+    // Mode is 'ask' — check for active approval
+    const heartbeatDb = getHeartbeatDb();
+    const ctx = toolContextRef.current;
+    const contactId = ctx?.contactId ?? '';
+
+    const activeApproval = getActiveApproval(heartbeatDb, permKey, contactId);
+    if (activeApproval) {
+      consumeApproval(heartbeatDb, activeApproval.id);
+      log.info(`[PreToolUse] Consumed approval ${activeApproval.id} for "${toolName}"`);
+      return; // Allow
+    }
+
+    // No approval — create request and block
+    const pendingRequests = getPendingApprovals(heartbeatDb, contactId);
+    const existingPending = pendingRequests.find((r) => r.toolName === permKey);
+    if (!existingPending) {
+      const heartbeatState = getHeartbeatState(heartbeatDb);
+      const approvalRequest = createApprovalRequest(heartbeatDb, {
+        toolName: permKey,
+        toolSource: permission.toolSource,
+        contactId,
+        channel: ctx?.sourceChannel ?? 'web',
+        tickNumber: heartbeatState.tickNumber,
+        agentContext: {
+          taskDescription: `Tool "${toolName}" invoked during tick ${heartbeatState.tickNumber}`,
+          conversationSummary: `Conversation ${ctx?.conversationId ?? 'unknown'}`,
+          pendingAction: `Execute tool "${toolName}"`,
+        },
+        toolInput: event.toolInput as Record<string, unknown> | null,
+        triggerSummary: `Agent wants to use "${permission.displayName}"`,
+        conversationId: ctx?.conversationId ?? '',
+        originatingAgent: 'mind',
+      });
+
+      ctx?.eventBus.emit('tool:approval_requested', approvalRequest);
+      log.info(`[PreToolUse] Created approval request ${approvalRequest.id} for "${toolName}"`);
+    } else {
+      log.info(`[PreToolUse] Pending approval already exists for "${toolName}", blocking`);
+    }
+
+    return { allow: false };
+  };
 }
 
 // ============================================================================

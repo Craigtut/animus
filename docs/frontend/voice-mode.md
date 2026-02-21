@@ -186,7 +186,7 @@ The backend streams the reply through two parallel channels:
 
 1. **Text stream:** The reply text streams word-by-word via the standard `onReply` tRPC subscription. This appears in the conversation area as a being message, streaming in with the blinking cursor, identical to text mode.
 
-2. **Audio stream:** The backend buffers reply text until sentence boundaries, synthesizes each sentence via Kokoro TTS (sub-300ms per sentence, in-process), and sends WAV audio chunks via the `onVoiceReply` tRPC subscription. The frontend queues and plays these chunks sequentially through Web Audio API.
+2. **Audio stream:** The backend buffers reply text until sentence boundaries, synthesizes each sentence via Pocket TTS (sub-300ms per sentence, in-process via shared speech service), and sends WAV audio chunks via the `onVoiceReply` tRPC subscription. The frontend queues and plays these chunks sequentially through Web Audio API.
 
 The text always leads the audio. The user sees words appear in the conversation before they hear them spoken. The delay is typically one sentence -- the first sentence must be fully generated and synthesized before audio begins. Subsequent sentences overlap: sentence N is being spoken while sentence N+1 is being generated and synthesized.
 
@@ -198,7 +198,7 @@ The text always leads the audio. The user sees words appear in the conversation 
 
 **The emotional field:** Responds to the being's emotional state as usual. During a warm reply, warm tones may brighten. The field is dynamically alive during the speaking phase.
 
-**Audio playback:** The reply plays through the browser's speakers or headphones via Web Audio API. The audio is played at 24kHz WAV quality -- clear, natural-sounding speech from Kokoro. Sentence chunks are queued and crossfaded seamlessly (a 10-20ms overlap prevents audible gaps between sentences).
+**Audio playback:** The reply plays through the browser's speakers or headphones via Web Audio API. The audio is played at 24kHz WAV quality -- clear, natural-sounding speech from Pocket TTS. Sentence chunks are queued and crossfaded seamlessly (a 10-20ms overlap prevents audible gaps between sentences).
 
 ### Interruption
 
@@ -327,7 +327,7 @@ The microphone button is in the same position (inside the message input, left of
 
 ### TTS Model Not Loaded (Partial Voice Mode)
 
-**When:** STT is available but TTS (Kokoro) is not loaded.
+**When:** STT is available but TTS (Pocket TTS) is not loaded.
 
 **Behavior:** Voice mode works for input only. The user can speak, their speech is transcribed, and the being replies -- but the reply is text-only, not spoken aloud. The voice surface does not show a "Speaking..." state. Instead, after the thinking phase, the reply streams directly into the conversation area as text. The state label transitions from "Thinking..." back to "Listening..." without a speaking phase.
 
@@ -347,7 +347,7 @@ A one-time notice appears above the voice surface (13px secondary text, fading o
 
 ### TTS Synthesis Fails
 
-**When:** Kokoro TTS throws an error during synthesis of a particular sentence.
+**When:** Pocket TTS throws an error during synthesis of a particular sentence.
 
 **Behavior:** The reply text continues streaming normally in the conversation area. The failed audio sentence is skipped. If the next sentence synthesizes successfully, playback continues from that sentence (there will be an audible gap for the failed sentence). If all TTS attempts fail, the state label transitions from "Speaking..." to "Listening..." and the reply is delivered as text-only.
 
@@ -458,7 +458,7 @@ Voice settings are accessible in Settings > Channels > Voice (see `docs/frontend
 
 | Setting | Control | Default |
 |---------|---------|---------|
-| TTS Voice | Dropdown (speaker IDs available from Kokoro) | `af` (American female) |
+| TTS Voice | Dropdown (voices from persona settings) | First built-in voice |
 | Speech Speed | Slider (0.5x to 2.0x) | 1.0x |
 | Silence Timeout | Slider (500ms to 3000ms) | 1500ms |
 | Continuous Mode | Toggle | On |

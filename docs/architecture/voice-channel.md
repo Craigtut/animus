@@ -37,7 +37,7 @@ The voice channel adds a conversational voice mode to the web Presence page. Unl
                     │                         │          │           │              │
                     │                         │          │           ▼              │
                     │                         │          │  TTS Service             │
-                    │  ◄──────────────────────┼──────────│  (sherpa-onnx Kokoro)    │
+                    │  ◄──────────────────────┼──────────│  (sherpa-onnx Pocket TTS)    │
                     │  Audio chunks via WS     │          │  Streaming WAV chunks   │
                     │         │                │          │                         │
                     │         ▼                │          │                         │
@@ -80,7 +80,7 @@ The package provides:
 - **Offline recognizer** — transcribe complete audio files or buffers
 - **Online recognizer** — streaming recognition with partial results (for real-time feedback)
 - **VAD (Voice Activity Detection)** — Silero VAD model to detect speech segments
-- **Offline TTS** — text-to-speech synthesis (used for Kokoro, see below)
+- **Offline TTS** — text-to-speech synthesis (used for Pocket TTS, see below)
 - All run completely offline via ONNX Runtime
 
 #### Model Files
@@ -101,90 +101,70 @@ Total: ~630 MB on disk. Model files are stored in `./data/models/stt/` and downl
 
 ---
 
-### Text-to-Speech: Kokoro via sherpa-onnx
+### Text-to-Speech: Pocket TTS via sherpa-onnx
 
-**Model**: Kokoro (82M parameters)
+**Model**: Pocket TTS (~200MB INT8)
 **Runtime**: sherpa-onnx (same native Node.js addon as STT — no separate process)
 
-Kokoro is an 82M-parameter TTS model that runs natively through sherpa-onnx's npm package. Since sherpa-onnx already bundles Kokoro support, **both STT and TTS use the same runtime** — no Python sidecar, no separate process, no additional dependencies.
+Pocket TTS is a zero-shot voice cloning model (~200MB INT8) that uses reference audio to reproduce any voice. Given a short WAV sample (5-15 seconds), it generates speech that mimics the speaker's voice characteristics. Since sherpa-onnx already bundles Pocket TTS support, **both STT and TTS use the same runtime** — no Python sidecar, no separate process, no additional dependencies.
 
-#### Why Kokoro via sherpa-onnx
+#### Why Pocket TTS via sherpa-onnx
 
 | Criterion | Decision |
 |-----------|----------|
 | **Unified runtime** | Same `sherpa-onnx` npm package handles both STT and TTS. No Python, no sidecar. |
-| **Speed** | Very fast on CPU — sub-300ms processing for typical sentences |
-| **Quality** | Natural-sounding speech with multiple voice options |
-| **Multilingual** | Supports multiple languages (English, Chinese, Japanese, Korean, French, etc.) |
+| **Voice cloning** | Zero-shot cloning from 5-15 seconds of reference audio |
+| **Speed** | Sub-300ms processing for typical sentences on CPU |
+| **Quality** | Natural-sounding speech that reproduces the reference voice |
 | **CPU-only** | No GPU needed |
-| **License** | Apache 2.0 |
-| **Model size** | ~350 MB on disk (ONNX model + voice data) |
+| **License** | MIT + CC-BY-4.0 |
+| **Model size** | ~200 MB (INT8 quantized) |
 
-#### Integration: In-Process via sherpa-onnx
+#### Integration: In-Process via Shared Speech Service
 
-Since sherpa-onnx is already installed for STT, TTS comes for free:
+TTS is accessed through the shared speech engine, not owned by the voice channel adapter. See `docs/architecture/speech-engine.md` for the full engine design.
 
 ```typescript
-import { OfflineTts } from 'sherpa-onnx';
+import { getSpeechService, pcmToWav } from '../speech/index.js';
 
-const tts = new OfflineTts({
-  model: {
-    kokoro: {
-      model: './data/models/tts/model.onnx',
-      voices: './data/models/tts/voices.bin',
-      tokens: './data/models/tts/tokens.txt',
-      dataDir: './data/models/tts/espeak-ng-data',
-    },
-  },
-  maxNumSentences: 1,  // Process one sentence at a time for streaming
-  numThreads: 2,
-});
-
-// Synthesize text to audio
-const audio = tts.generate({ text: 'Hello, how are you?', sid: 0, speed: 1.0 });
+const speech = getSpeechService();
+const audio = await speech.tts.synthesize('Hello, how are you?');
 // audio.samples: Float32Array (PCM samples)
 // audio.sampleRate: number (typically 24000)
+
+const wav = pcmToWav(audio.samples, audio.sampleRate);
 ```
 
 No HTTP calls, no child processes, no sidecar lifecycle management. The TTS runs in the same Node.js process as the backend.
 
 #### Model Files
 
-Download Kokoro ONNX models from sherpa-onnx releases:
-```bash
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-kokoro-en-v0.19.tar.bz2
-tar xf sherpa-onnx-kokoro-en-v0.19.tar.bz2
-```
+Pocket TTS ONNX models are stored in `./data/models/tts/`:
 
-Contents:
-- `model.onnx` — Kokoro ONNX model
-- `voices.bin` — Voice embedding data
-- `tokens.txt` — Vocabulary
-- `espeak-ng-data/` — Phonemizer data directory
+- `lm_flow.int8.onnx` — Language model (flow)
+- `lm_main.int8.onnx` — Language model (main)
+- `encoder.onnx` — Encoder
+- `decoder.int8.onnx` — Decoder
+- `text_conditioner.onnx` — Text conditioning
+- `vocab.json` — Vocabulary
+- `token_scores.json` — Token scoring
 
-Total: ~350 MB on disk. Model files are stored in `./data/models/tts/` alongside the STT models.
+Total: ~200 MB on disk.
 
 #### Voice Configuration
 
-Kokoro provides multiple built-in voices selected by speaker ID (`sid`):
-
-| Speaker ID | Voice | Description |
-|-----------|-------|-------------|
-| 0 | af | American female (default) |
-| 1 | am | American male |
-| ... | ... | Additional voices per language pack |
-
-The user configures the TTS voice in Settings > System by selecting a speaker ID. Additional language packs (Chinese, Japanese, etc.) can be downloaded separately from sherpa-onnx releases.
+Pocket TTS uses **reference audio** rather than numeric speaker IDs. Voice configuration is part of the persona (`personality_settings.voice_id` and `personality_settings.voice_speed`). The system includes 8 built-in voices and supports custom voice uploads. See `docs/architecture/speech-engine.md` for the full voice system design.
 
 #### Output Format
 
-Kokoro via sherpa-onnx produces raw PCM samples (Float32Array at 24kHz). The backend encodes these to WAV before sending to the frontend:
+Pocket TTS via sherpa-onnx produces raw PCM samples (Float32Array at 24kHz). The backend encodes these to WAV before sending to the frontend:
 
 ```typescript
-function pcmToWav(samples: Float32Array, sampleRate: number): Buffer {
-  // Standard WAV header + PCM data
-  // 24kHz, mono, 16-bit
-}
+import { pcmToWav } from '../speech/audio-utils.js';
+
+const wav = pcmToWav(samples, sampleRate);
+// Standard WAV header + PCM data
+// 24kHz, mono, 16-bit
 ```
 
 ---
@@ -356,37 +336,32 @@ This provides a natural "push-to-talk without pushing" experience. The silence t
 
 ### Voice Channel Adapter
 
-A new `VoiceChannelAdapter` implements `IChannelAdapter`:
+A new `VoiceChannelAdapter` implements `IChannelAdapter`. It does **not** own STT or TTS instances — it calls through the shared `SpeechService`. See `docs/architecture/speech-engine.md` for the engine architecture.
 
 ```typescript
+import { getSpeechService, pcmToWav } from '../speech/index.js';
+
 class VoiceChannelAdapter implements IChannelAdapter {
   readonly channelType: ChannelType = 'voice';
 
-  // STT: sherpa-onnx recognizer instance (Parakeet TDT v3)
-  private recognizer: OfflineRecognizer;
-
-  // TTS: sherpa-onnx TTS instance (Kokoro)
-  private tts: OfflineTts;
-
   async start(): Promise<void> {
-    // 1. Initialize sherpa-onnx recognizer with Parakeet v3 model
-    // 2. Initialize sherpa-onnx TTS with Kokoro model
-    // 3. Register tRPC routes for audio streaming
+    // 1. Verify speech service is initialized
+    // 2. Register tRPC routes for audio streaming
+    // STT/TTS lazy-load on first use via SpeechService
   }
 
   async stop(): Promise<void> {
-    // Release sherpa-onnx resources (recognizer + TTS)
+    // Cleanup adapter-specific resources (subscriptions, etc.)
+    // Speech engine lifecycle is managed by SpeechService, not the adapter
   }
 
   async transcribe(audioBuffer: Buffer): Promise<string> {
-    // Feed PCM audio to sherpa-onnx offline recognizer
-    // Return transcribed text
+    return getSpeechService().stt.transcribe(audioBuffer);
   }
 
   async synthesize(text: string): Promise<Buffer> {
-    // Generate audio via sherpa-onnx Kokoro TTS
-    // Convert Float32Array PCM to WAV buffer
-    // Return WAV buffer
+    const audio = await getSpeechService().tts.synthesize(text);
+    return pcmToWav(audio.samples, audio.sampleRate);
   }
 
   async send(contactId: string, content: string): Promise<void> {
@@ -405,7 +380,7 @@ class VoiceChannelAdapter implements IChannelAdapter {
 4. PCM is fed to **sherpa-onnx** offline recognizer with the Parakeet TDT v3 model
 5. Transcribed text is wrapped in an `IncomingMessage` with `channel: 'voice'`
 6. Message enters the **heartbeat pipeline** (same path as all other channels)
-7. Reply text from the mind is synthesized via **sherpa-onnx Kokoro TTS** (in-process)
+7. Reply text from the mind is synthesized via **Pocket TTS** through the shared speech service (in-process)
 8. WAV audio buffer is sent back to the frontend via tRPC subscription
 9. **Frontend** plays audio through Web Audio API
 
@@ -469,7 +444,7 @@ export const voiceRouter = router({
       sttAvailable: boolean,     // sherpa-onnx STT loaded
       ttsAvailable: boolean,     // sherpa-onnx TTS loaded
       sttModel: string,          // 'parakeet-tdt-0.6b-v3-int8'
-      ttsModel: string,          // 'kokoro'
+      ttsModel: string,          // 'pocket-tts'
     })),
 });
 ```
@@ -509,7 +484,7 @@ tRPC text subscription    Sentence buffer
                          Web Audio playback
 ```
 
-**Sentence buffering**: The reply streams word-by-word from the mind. For TTS, we buffer until a sentence boundary (`.`, `!`, `?`, or a pause token) and then synthesize each complete sentence via Kokoro. This balances latency (don't wait for the full reply) with TTS quality (complete sentences sound better than word fragments).
+**Sentence buffering**: The reply streams word-by-word from the mind. For TTS, we buffer until a sentence boundary (`.`, `!`, `?`, or a pause token) and then synthesize each complete sentence via Pocket TTS through the shared speech service. This balances latency (don't wait for the full reply) with TTS quality (complete sentences sound better than word fragments).
 
 The text reply still streams to the frontend simultaneously — the user sees the text appearing while hearing the audio with a slight delay.
 
@@ -522,18 +497,17 @@ The text reply still streams to the frontend simultaneously — the user sees th
 ```typescript
 const voiceConfigSchema = z.object({
   sttModel: z.enum(['parakeet-tdt-0.6b-v3-int8']).default('parakeet-tdt-0.6b-v3-int8'),
-  ttsSpeakerId: z.number().default(0),                      // Kokoro speaker ID
-  ttsSpeed: z.number().min(0.5).max(2.0).default(1.0),     // Kokoro speech speed
   silenceTimeoutMs: z.number().default(1500),               // Frontend silence detection
   continuousMode: z.boolean().default(true),                // Auto-return to listening after reply
 });
 ```
 
+Voice configuration (voice selection and speed) is part of the persona (`personality_settings.voice_id` and `personality_settings.voice_speed`), not the channel config. See `docs/architecture/speech-engine.md` for the voice system.
+
 ### Environment Variables (Fallback)
 
 ```env
 # Voice channel (optional — can configure via UI)
-VOICE_TTS_SPEAKER_ID=0
 VOICE_TTS_SPEED=1.0
 ```
 
@@ -542,7 +516,7 @@ VOICE_TTS_SPEED=1.0
 The voice channel requires:
 1. **sherpa-onnx npm package** installed (`npm install sherpa-onnx`)
 2. **Parakeet TDT v3 model files** downloaded to `./data/models/stt/`
-3. **Kokoro TTS model files** downloaded to `./data/models/tts/`
+3. **Pocket TTS model files** downloaded to `./data/models/tts/`
 4. **ffmpeg** installed on the system (for audio format conversion)
 
 No Python required. Both STT and TTS run natively in Node.js via sherpa-onnx.
@@ -599,15 +573,15 @@ When the mind produces a reply for a voice-triggered message:
 
 1. Reply text streams naturally during the mind's `replying` phase (between `record_thought` and `record_cognitive_state` cognitive tool calls)
 2. A **sentence accumulator** buffers tokens until a sentence boundary
-3. Each complete sentence is immediately synthesized via sherpa-onnx Kokoro TTS (in-process)
+3. Each complete sentence is immediately synthesized via Pocket TTS through the shared speech service (in-process)
 4. The WAV audio buffer is emitted to the frontend via the `onVoiceReply` tRPC subscription
 5. The frontend queues audio buffers and plays them sequentially through Web Audio API
 6. Text continues streaming to the conversation area simultaneously
 
-This means the user starts hearing the first sentence almost immediately after Kokoro synthesizes it, while the mind is still generating later sentences. The perceived latency is:
+This means the user starts hearing the first sentence almost immediately after Pocket TTS synthesizes it, while the mind is still generating later sentences. The perceived latency is:
 - STT processing: ~1-2 seconds
 - Mind thinking: variable (depends on LLM)
-- First sentence TTS: sub-300ms after first sentence completes (in-process, no HTTP overhead)
+- First sentence TTS: sub-300ms after first sentence completes (Pocket TTS in-process, no HTTP overhead)
 - Playback starts while remaining sentences generate
 
 ### Audio Chunk Format
@@ -652,12 +626,10 @@ interface VoiceReplyChunk {
 
 1. **Wake word detection** — "Hey Animus" to start voice mode without clicking
 2. **Streaming STT** — Use sherpa-onnx's online recognizer for real-time partial transcription (show words as the user speaks)
-3. **Voice cloning / Pocket TTS** — For users who want a custom cloned voice, evaluate Pocket TTS (100M params, zero-shot cloning from 5s audio, MIT + CC-BY-4.0). Would run as a Python FastAPI sidecar (`pocket-tts serve`). Kokoro doesn't support voice cloning, so this is the upgrade path for custom voices.
-4. **Voice emotion detection** — Analyze tone/prosody of user's speech to inform the mind's emotional processing
-5. **Additional Kokoro languages** — Download additional language packs from sherpa-onnx for Chinese, Japanese, Korean TTS
-6. **Phone/SIP channel** — Extend voice to phone calls via SIP/VoIP
-7. **Speaker diarization** — If multiple people are speaking, identify who's talking (sherpa-onnx supports this)
-8. **Piper TTS** — sherpa-onnx also bundles Piper TTS models as an alternative to Kokoro, with a wider set of voices and languages
+3. **Voice emotion detection** — Analyze tone/prosody of user's speech to inform the mind's emotional processing
+4. **Additional TTS languages** — Expand Pocket TTS language support as models become available
+5. **Phone/SIP channel** — Extend voice to phone calls via SIP/VoIP
+6. **Speaker diarization** — If multiple people are speaking, identify who's talking (sherpa-onnx supports this)
 
 ---
 
@@ -672,5 +644,5 @@ interface VoiceReplyChunk {
 - [sherpa-onnx GitHub](https://github.com/k2-fsa/sherpa-onnx) — STT + TTS runtime
 - [sherpa-onnx npm](https://www.npmjs.com/package/sherpa-onnx) — Node.js package
 - [Parakeet TDT v3 (HuggingFace)](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) — STT model
-- [Kokoro TTS](https://github.com/hexgrad/kokoro) — TTS model (Apache 2.0)
-- [sherpa-onnx Kokoro models](https://github.com/k2-fsa/sherpa-onnx/releases?q=kokoro) — Pre-packaged Kokoro ONNX models
+- `docs/architecture/speech-engine.md` — Shared speech engine architecture, voice system
+- [Pocket TTS](https://github.com/pocket-tts/pocket-tts) — Zero-shot voice cloning TTS model

@@ -314,25 +314,38 @@ export const heartbeatRouter = router({
 
   /**
    * Subscribe to real-time reply streaming from the mind.
-   * Emits reply chunks as the agent generates them, and a complete event when done.
+   * Emits reply chunks as the agent generates them, turn_complete when a turn's
+   * text has been persisted as a message, and complete when the full reply is done.
    */
   onReply: protectedProcedure.subscription(() => {
-    return observable<{ type: 'chunk' | 'complete'; content: string; tickNumber?: number }>((emit) => {
+    return observable<{
+      type: 'chunk' | 'turn_complete' | 'complete';
+      content: string;
+      turnIndex?: number;
+      tickNumber?: number;
+      totalTurns?: number;
+    }>((emit) => {
       const eventBus = getEventBus();
 
-      const chunkHandler = (data: { content: string; accumulated: string }) => {
-        emit.next({ type: 'chunk', content: data.content });
+      const chunkHandler = (data: { content: string; accumulated: string; turnIndex: number }) => {
+        emit.next({ type: 'chunk', content: data.content, turnIndex: data.turnIndex });
       };
 
-      const completeHandler = (data: { content: string; tickNumber: number }) => {
-        emit.next({ type: 'complete', content: data.content, tickNumber: data.tickNumber });
+      const turnCompleteHandler = (data: { turnIndex: number; content: string; tickNumber: number }) => {
+        emit.next({ type: 'turn_complete', content: data.content, turnIndex: data.turnIndex, tickNumber: data.tickNumber });
+      };
+
+      const completeHandler = (data: { content: string; tickNumber: number; totalTurns: number }) => {
+        emit.next({ type: 'complete', content: data.content, tickNumber: data.tickNumber, totalTurns: data.totalTurns });
       };
 
       eventBus.on('reply:chunk', chunkHandler);
+      eventBus.on('reply:turn_complete', turnCompleteHandler);
       eventBus.on('reply:complete', completeHandler);
 
       return () => {
         eventBus.off('reply:chunk', chunkHandler);
+        eventBus.off('reply:turn_complete', turnCompleteHandler);
         eventBus.off('reply:complete', completeHandler);
       };
     });

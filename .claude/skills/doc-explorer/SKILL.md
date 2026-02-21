@@ -52,6 +52,7 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/architecture/tech-stack.md` | 14 KB | Full technology overview - Frontend (Vite, React 19, Zustand, Emotion, Motion), Backend (Fastify, tRPC, SQLite), five databases, LanceDB, agent SDKs, deployment. Shared Abstractions section: Embedding Provider, Context Builder, Decay Engine, Event Bus, Encryption Service, Database Stores |
 | `docs/architecture/agent-orchestration.md` | 14 KB | Sub-agent delegation, custom orchestration layer, prompt template, channel-aware formatting, agent lifecycle, MCP tools, result delivery through heartbeat, failure handling, configuration |
 | `docs/architecture/mcp-tools.md` | 28 KB | Cross-provider MCP tool architecture - tool definitions (shared), handlers (backend), registry, permission filtering by contact tier, hybrid in-process/stdio strategy, Claude createSdkMcpServer optimization, extensibility, user-defined tools |
+| `docs/architecture/tool-permissions.md` | 18 KB | Tool permission & approval system - three permission states (off/ask/always_allow), four risk tiers, two-tick approval pattern, canUseTool callback, permission seeder, approval notifier, context builder integration, trust ramp, sub-agent filtering, channel-specific approval rendering, tRPC API |
 | `docs/architecture/contacts.md` | 14 KB | Contact system, user-contact linking, primary/standard/unknown tiers, identity resolution, contact channels, permission enforcement, message isolation, message storage (messages.db), contact notes |
 | `docs/architecture/channel-packages.md` | 30 KB | Channel system architecture (single source of truth) - channel protocol (IncomingMessage, identity resolution, conversation scoping, outbound routing), web channel (built-in), channel package format (manifest, config schema), AdapterContext API, child process isolation, IPC protocol (including streaming), streaming pipeline, media handling, Channel Manager, installation UX, hot-swap lifecycle, dynamic channel types, frontend integration, plugin hooks integration, security model, Channel SDK, channel reference specs (SMS/Twilio, Discord, OpenAI API, Ollama API) |
 | `docs/architecture/context-builder.md` | 16 KB | Context Builder system - centralized context assembly for all LLM prompts (mind ticks, sub-agents, task ticks), prompt compilation, token budget management, persona compilation, four compilation targets |
@@ -59,7 +60,8 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/architecture/goals.md` | 20 KB | Goal system - seeds (emergent desires), goals, plans, tasks hierarchy, salience scoring, emotional links, approval modes, cleanup, heartbeat integration |
 | `docs/architecture/tasks-system.md` | 16 KB | Task system - scheduled vs deferred tasks, task ticks, cron support, planning agent, retry logic, heartbeat integration |
 | `docs/architecture/open-questions.md` | 5 KB | Resolved design questions (all 7) - concurrent tick handling, crash recovery, MCP tool design, structured output, Claude OAuth, Codex OAuth, contact notes |
-| `docs/architecture/voice-channel.md` | 20 KB | Voice channel architecture - Parakeet TDT v3 STT + Kokoro TTS (both via sherpa-onnx, native Node.js), frontend voice mode UX, audio pipeline (capture → transcribe → mind → synthesize → playback), sentence-buffered TTS streaming, voice channel adapter, configuration, ffmpeg conversion |
+| `docs/architecture/voice-channel.md` | 20 KB | Voice channel architecture - Parakeet TDT v3 STT + Pocket TTS (both via sherpa-onnx, native Node.js), frontend voice mode UX, audio pipeline (capture → transcribe → mind → synthesize → playback), sentence-buffered TTS streaming, voice channel adapter, configuration, ffmpeg conversion |
+| `docs/architecture/speech-engine.md` | 10 KB | Shared speech engine - STTEngine + TTSEngine + VoiceManager as backend infrastructure, Pocket TTS (zero-shot voice cloning, ~200MB INT8), Parakeet TDT v3 STT (~630MB), lazy loading, voice manifest, built-in/custom voices, MCP tools (transcribe_audio, generate_speech), singleton SpeechService facade |
 | `docs/architecture/sleep-energy.md` | 16 KB | Sleep & energy system - circadian rhythm, energy level (0-1), 6 energy bands (peak/alert/tired/drowsy/very drowsy/sleeping), experience-driven energy deltas, exponential decay toward circadian baseline, wake-up mechanics (natural + triggered), accelerated emotional decay during sleep, tick interval switching, settings configuration |
 | `docs/architecture/observational-memory.md` | 22 KB | Observational memory — three-stream compression (messages/thoughts/experiences), Observer and Reflector agents, token-based thresholds replacing hard item limits, batch threshold mechanism, async processing in EXECUTE phase, memory.db schema, configuration file, context presentation (temporal annotations, gap markers, continuation hint, read-time optimization), observability/event emission, prompt caching benefits |
 | `docs/architecture/reflex-system.md` | 16 KB | Reflex fast-response system — dual-path voice architecture (reflex + heartbeat), Vercel AI SDK abstraction, lightweight context assembly using observational memory, heartbeat integration & correction path, provider configuration (Anthropic/OpenAI/Google/Ollama), subscription vs API cost model, fallback behavior, streaming pipeline |
@@ -119,11 +121,13 @@ When you need context for a task, follow this approach:
 7c. **For context assembly/prompt building**: Read `docs/architecture/context-builder.md`
 7d. **For shared abstractions (embedding, decay, encryption, event bus)**: Read `docs/architecture/tech-stack.md` (Shared Abstractions section)
 7e. **For MCP tools/custom tools**: Read `docs/architecture/mcp-tools.md` and `docs/architecture/agent-orchestration.md`
-7f. **For plugin system/plugin architecture**: Read `docs/architecture/plugin-system.md` (full architecture). For practical plugin building, the `build-plugin` skill is loaded automatically.
+7f. **For tool permissions/approval flow/trust ramp**: Read `docs/architecture/tool-permissions.md`
+7g. **For plugin system/plugin architecture**: Read `docs/architecture/plugin-system.md` (full architecture). For practical plugin building, the `build-plugin` skill is loaded automatically.
 8. **For new contributors**: Read `docs/guides/getting-started.md`
 9. **For channels/messaging/SMS/Discord/API**: Read `docs/architecture/channel-packages.md` and `docs/architecture/contacts.md`
 10. **For Codex OAuth/authentication**: Read `docs/agents/codex/oauth.md`
-11. **For voice/speech/STT/TTS/audio**: Read `docs/architecture/voice-channel.md`, `docs/frontend/voice-mode.md`, and `docs/architecture/channel-packages.md`
+11. **For voice/speech/STT/TTS/audio**: Read `docs/architecture/voice-channel.md`, `docs/architecture/speech-engine.md`, `docs/frontend/voice-mode.md`, and `docs/architecture/channel-packages.md`
+11b. **For speech engine/shared STT/TTS/voice management**: Read `docs/architecture/speech-engine.md`
 12. **For reflex/fast-response/voice-latency**: Read `docs/architecture/reflex-system.md`, `docs/architecture/voice-channel.md`, and `docs/architecture/heartbeat.md`
 13. **For secrets/credentials/encryption/API keys**: Read `docs/architecture/credential-passing.md`
 
@@ -151,6 +155,7 @@ Use this to quickly map user questions to the right docs:
 - **agent overview, implementation priority, sdk comparison quick ref** -> `docs/agents/README.md`
 - **sub-agent, delegation, orchestration, spawn agent, agent lifecycle** -> `docs/architecture/agent-orchestration.md`
 - **MCP, tools, custom tools, tool definitions, tool registry, send_message, read_memory, update_progress** -> `docs/architecture/mcp-tools.md`
+- **tool permissions, tool approval, ask first, always allow, risk tier, canUseTool, trust ramp, approval card, permission gate** -> `docs/architecture/tool-permissions.md`
 - **contacts, identity, permission, primary, standard, unknown caller, contact notes** -> `docs/architecture/contacts.md`
 - **channels, adapter, SMS, twilio, discord, API, ollama, openai, streaming, webhook, inbound, outbound, media, channel packages, channel plugin, channel install, channel manifest, channel SDK, channel isolation, hot-swap, AdapterContext, channel manager, IPC, child process** -> `docs/architecture/channel-packages.md`
 - **context builder, context assembly, prompt compilation, token budget, mind prompt, system prompt, mind instructions** -> `docs/architecture/context-builder.md`
@@ -160,7 +165,8 @@ Use this to quickly map user questions to the right docs:
 - **goals, objectives, long-term direction** -> `docs/architecture/goals.md`
 - **tasks, scheduling, cron, scheduled jobs** -> `docs/architecture/tasks-system.md`
 - **open questions, resolved questions** -> `docs/architecture/open-questions.md`
-- **voice, speech, STT, TTS, speech-to-text, text-to-speech, audio, microphone, parakeet, kokoro, sherpa-onnx, voice channel** -> `docs/architecture/voice-channel.md`
+- **voice, speech, STT, TTS, speech-to-text, text-to-speech, audio, microphone, parakeet, pocket tts, sherpa-onnx, voice channel** -> `docs/architecture/voice-channel.md`, `docs/architecture/speech-engine.md`
+- **speech engine, speech service, voice manager, voice cloning, voice manifest, built-in voices, custom voices, transcribe_audio, generate_speech** -> `docs/architecture/speech-engine.md`
 - **sleep, energy, circadian, tired, drowsy, wake up, nap, rest, energy level, sleep hours, quiet hours** -> `docs/architecture/sleep-energy.md`
 - **app shell, navigation, nav pill, command palette, connection status, route structure, space transition, click deeper** -> `docs/frontend/app-shell.md`
 - **presence, emotional field, thought stream, conversation, ambient animation, heartbeat pulse** -> `docs/frontend/presence.md`

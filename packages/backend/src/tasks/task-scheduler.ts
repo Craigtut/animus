@@ -89,19 +89,29 @@ export class TaskScheduler {
    * Sets a timer if the task has a next_run_at in the future.
    */
   registerTask(task: Task): void {
-    if (!this.running) return;
+    if (!this.running) {
+      log.debug(`Skipping register for "${task.title}" — scheduler not running`);
+      return;
+    }
 
     // Clear existing timer for this task
     this.clearTaskTimer(task.id);
 
-    if (task.status !== 'scheduled') return;
-    if (!task.nextRunAt) return;
+    if (task.status !== 'scheduled') {
+      log.debug(`Skipping register for "${task.title}" — status is "${task.status}", not "scheduled"`);
+      return;
+    }
+    if (!task.nextRunAt) {
+      log.warn(`Cannot register "${task.title}" (${task.id}) — no nextRunAt set`);
+      return;
+    }
 
     const nextRun = new Date(task.nextRunAt).getTime();
     const delay = nextRun - Date.now();
 
     if (delay <= 0) {
       // Task is overdue — fire immediately
+      log.info(`Task "${task.title}" is overdue — firing immediately`);
       this.fireTask(task);
     } else {
       // Set timer for future execution
@@ -110,6 +120,7 @@ export class TaskScheduler {
         this.fireTask(task);
       }, delay);
       this.timers.set(task.id, timer);
+      log.info(`Registered "${task.title}" — fires in ${Math.round(delay / 1000)}s (${task.nextRunAt})`);
     }
   }
 
@@ -143,19 +154,30 @@ export class TaskScheduler {
       const db = getHeartbeatDb();
       const tasks = taskStore.getActiveScheduledTasks(db);
 
+      let registered = 0;
+      let firedCatchUp = 0;
+      let skippedNoNextRun = 0;
+
       for (const task of tasks) {
-        if (!task.nextRunAt) continue;
+        if (!task.nextRunAt) {
+          skippedNoNextRun++;
+          log.warn(`Task "${task.title}" (${task.id}) has no nextRunAt — skipping`);
+          continue;
+        }
 
         const nextRun = new Date(task.nextRunAt).getTime();
         if (nextRun <= Date.now()) {
           // Missed while server was down — fire once (catch-up)
+          log.info(`Catch-up firing: "${task.title}" (was due ${task.nextRunAt})`);
           this.fireTask(task);
+          firedCatchUp++;
         } else {
           this.registerTask(task);
+          registered++;
         }
       }
 
-      log.info(`Loaded ${tasks.length} active tasks`);
+      log.info(`Loaded ${tasks.length} active tasks: ${registered} registered, ${firedCatchUp} catch-up fired, ${skippedNoNextRun} skipped (no nextRunAt)`);
     } catch (err) {
       log.error('Failed to load tasks:', err);
     }
@@ -171,6 +193,7 @@ export class TaskScheduler {
       for (const task of dueTasks) {
         // Only fire if not already tracked by a timer
         if (!this.timers.has(task.id)) {
+          log.info(`Due task found by periodic check: "${task.title}" (due ${task.nextRunAt})`);
           this.fireTask(task);
         }
       }
@@ -180,6 +203,7 @@ export class TaskScheduler {
   }
 
   private fireTask(task: Task): void {
+    log.info(`Firing task: "${task.title}" (${task.id}, ${task.scheduleType})`);
     const db = getHeartbeatDb();
 
     // Update task status to in_progress
@@ -204,6 +228,16 @@ export class TaskScheduler {
         if (updatedTask) {
           this.registerTask(updatedTask);
         }
+        log.info(`Recurring task "${task.title}" rescheduled for ${nextRunAt}`);
+      } else {
+        // Invalid cron expression — pause the task so it doesn't silently disappear
+        log.error(`Invalid cron expression "${task.cronExpression}" for task "${task.title}" — pausing`);
+        taskStore.updateTask(db, task.id, {
+          status: 'paused',
+          lastError: `Invalid cron expression: ${task.cronExpression}`,
+        });
+        getEventBus().emit('task:updated', taskStore.getTask(db, task.id)!);
+        return; // Don't fire the tick for a broken task
       }
     }
 

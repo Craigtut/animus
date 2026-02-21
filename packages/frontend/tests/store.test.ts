@@ -57,7 +57,7 @@ function resetStores() {
     recentThoughts: [],
     recentExperiences: [],
     agentEvents: [],
-    replyStream: { isStreaming: false, accumulated: '' },
+    replyStream: { turns: [] },
   });
   useMessagesStore.setState({
     activeConversationId: null,
@@ -302,25 +302,25 @@ describe('HeartbeatStore', () => {
   it('manages reply stream lifecycle', () => {
     const store = useHeartbeatStore.getState;
 
-    // Start streaming
-    store().appendReplyChunk('Hello ');
-    expect(store().replyStream.isStreaming).toBe(true);
-    expect(store().replyStream.accumulated).toBe('Hello ');
+    // Start streaming (turn 0)
+    store().appendReplyChunk('Hello ', 0);
+    expect(store().replyStream.turns).toHaveLength(1);
+    expect(store().replyStream.turns[0]?.isStreaming).toBe(true);
+    expect(store().replyStream.turns[0]?.accumulated).toBe('Hello ');
 
     // Continue streaming
-    store().appendReplyChunk('world');
-    expect(store().replyStream.accumulated).toBe('Hello world');
+    store().appendReplyChunk('world', 0);
+    expect(store().replyStream.turns[0]?.accumulated).toBe('Hello world');
 
     // Complete
     store().completeReply('Hello world', 42);
-    expect(store().replyStream.isStreaming).toBe(false);
-    expect(store().replyStream.accumulated).toBe('Hello world');
+    expect(store().replyStream.turns[0]?.isStreaming).toBe(false);
+    expect(store().replyStream.turns[0]?.accumulated).toBe('Hello world');
     expect(store().replyStream.tickNumber).toBe(42);
 
     // Clear
     store().clearReplyStream();
-    expect(store().replyStream.accumulated).toBe('');
-    expect(store().replyStream.isStreaming).toBe(false);
+    expect(store().replyStream.turns).toEqual([]);
   });
 
   it('caps thoughts at 50', () => {

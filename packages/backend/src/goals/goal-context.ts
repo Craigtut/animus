@@ -72,7 +72,7 @@ function formatGoalSection(
 
   for (let i = 0; i < goals.length; i++) {
     const { goal, plan } = goals[i]!;
-    lines.push(`${i + 1}. ${goal.title}`);
+    lines.push(`${i + 1}. ${goal.title} [goalId: ${goal.id}]`);
     if (goal.motivation) {
       lines.push(`   Why: ${goal.motivation}`);
     }
@@ -94,15 +94,16 @@ function formatGoalSection(
 
 function formatGraduatingSeeds(seeds: GoalSeed[]): string {
   return seeds.map((seed) =>
-    `A pattern has emerged in your recent thinking: you've been consistently drawn toward "${seed.content}". ` +
+    `A pattern has emerged in your recent thinking: you've been consistently drawn toward "${seed.content}". [seedId: ${seed.id}] ` +
     (seed.motivation ? `Motivation: ${seed.motivation}. ` : '') +
-    `Consider whether this is something you want to actively pursue as a goal.`
+    `If you want to pursue this, use propose_goal with this seedId. Otherwise ignore it — it will fade naturally.`
   ).join('\n\n');
 }
 
 function formatProposedGoals(goals: Goal[]): string {
   return goals.map((g) =>
-    `Proposed goal awaiting approval: "${g.title}"` +
-    (g.motivation ? ` — ${g.motivation}` : '')
+    `Proposed goal awaiting approval: "${g.title}" [goalId: ${g.id}]` +
+    (g.motivation ? ` — ${g.motivation}` : '') +
+    ` → To activate: update_goal { goalId: "${g.id}", status: "active" } | To reject: update_goal { goalId: "${g.id}", status: "abandoned" }`
   ).join('\n');
 }

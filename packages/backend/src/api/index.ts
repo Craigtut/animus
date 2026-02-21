@@ -26,6 +26,7 @@ import { agentLogsRouter } from './routers/agent-logs.js';
 import { codexAuthRouter } from './routers/codex-auth.js';
 import { pluginsRouter } from './routers/plugins.js';
 import { savesRouter } from './routers/saves.js';
+import { toolsRouter } from './routers/tools.js';
 
 // ============================================================================
 // App Router
@@ -53,6 +54,7 @@ export const appRouter = router({
   agentLogs: agentLogsRouter,
   plugins: pluginsRouter,
   saves: savesRouter,
+  tools: toolsRouter,
 });
 
 export type AppRouter = typeof appRouter;

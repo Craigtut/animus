@@ -201,11 +201,25 @@ export default function createAdapter(ctx: AdapterContext): ChannelAdapter {
       ctx.log.info('SMS adapter stopped');
     },
 
-    async send(contactId: string, content: string, _metadata?: Record<string, unknown>): Promise<void> {
+    async send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<void> {
+      // Check for tool approval request metadata — format as plain text prompt
+      const messageType = metadata?.['message_type'] as string | undefined;
+      const approvalRequests = metadata?.['approval_requests'] as
+        | Array<{ requestId: string; toolDisplayName: string; triggerSummary: string }>
+        | undefined;
+
+      let smsBody = content;
+      if (messageType === 'tool_approval_request' && approvalRequests && approvalRequests.length > 0) {
+        // Build a conversational SMS approval prompt
+        const toolNames = approvalRequests.map((r) => r.toolDisplayName).join(', ');
+        const summary = approvalRequests[0]?.triggerSummary ?? '';
+        smsBody = `${summary}\n\nI need permission to use: ${toolNames}\n\nReply "yes" to allow or "no" to deny.`;
+      }
+
       // SMS has a practical limit of ~1600 characters
       // Twilio handles segmentation, but warn on very long messages
-      if (content.length > 1600) {
-        ctx.log.warn(`SMS content exceeds 1600 chars (${content.length}), Twilio will segment`);
+      if (smsBody.length > 1600) {
+        ctx.log.warn(`SMS content exceeds 1600 chars (${smsBody.length}), Twilio will segment`);
       }
 
       // Resolve the contact's phone number
@@ -220,7 +234,7 @@ export default function createAdapter(ctx: AdapterContext): ChannelAdapter {
       const body = new URLSearchParams({
         To: contact.identifier,
         From: phoneNumber,
-        Body: content,
+        Body: smsBody,
       });
 
       const response = await fetch(url, {

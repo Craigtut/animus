@@ -24,6 +24,7 @@ export function createTestSystemDb(): Database.Database {
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '004_log_categories.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '005_energy_settings.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '006_plugins.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '010_tool_permissions.sql'));
   return db;
 }
 
@@ -31,6 +32,7 @@ export function createTestHeartbeatDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   applySql(db, path.join(MIGRATIONS_DIR, 'heartbeat', '001_initial.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'heartbeat', '003_tool_approvals.sql'));
   return db;
 }
 
@@ -52,6 +54,7 @@ export function createTestPersonaDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   applySql(db, path.join(MIGRATIONS_DIR, 'persona', '001_initial.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'persona', '002_voice.sql'));
   return db;
 }
 

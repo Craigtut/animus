@@ -37,6 +37,7 @@ import {
   CaretRight,
   CaretDown,
   ArrowRight,
+  Wrench,
 } from '@phosphor-icons/react';
 import { Card, SelectionCard, Button, Input, Modal, Badge, Toggle, Slider, Typography, Tooltip } from '../components/ui';
 import { trpc } from '../utils/trpc';
@@ -44,12 +45,13 @@ import { isTauri } from '../utils/tauri';
 import { useAutostart } from '../hooks/useAutostart';
 import type { Theme } from '../styles/theme';
 import { SavesSection } from '../components/settings/SavesSection';
+import { ToolsSection } from '../components/settings/ToolsSection';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-type SettingsSection = 'heartbeat' | 'provider' | 'channels' | 'plugins' | 'goals' | 'saves' | 'system';
+type SettingsSection = 'heartbeat' | 'provider' | 'channels' | 'plugins' | 'tools' | 'goals' | 'saves' | 'system';
 
 interface SidebarItem {
   id: SettingsSection;
@@ -62,6 +64,7 @@ const sections: SidebarItem[] = [
   { id: 'provider', label: 'Agent Provider', icon: Robot },
   { id: 'channels', label: 'Channels', icon: ChatCircle },
   { id: 'plugins', label: 'Plugins', icon: PuzzlePiece },
+  { id: 'tools', label: 'Tools', icon: Wrench },
   { id: 'goals', label: 'Goals', icon: Target },
   { id: 'saves', label: 'Saves', icon: FloppyDisk },
   { id: 'system', label: 'System', icon: GearSix },
@@ -3741,6 +3744,7 @@ export function SettingsPage() {
       case 'provider': return <ProviderSection />;
       case 'channels': return <ChannelsSection />;
       case 'plugins': return <PluginsSection />;
+      case 'tools': return <ToolsSection />;
       case 'goals': return <GoalsSection />;
       case 'saves': return <SavesSection />;
       case 'system': return <SystemSection />;

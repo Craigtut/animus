@@ -568,11 +568,13 @@ Reflex LLM -> Text chunks -> EventBus 'reflex:chunk'
                           Sentence buffer
                                    |
                                    v
-                          Kokoro TTS (per sentence)
+                          Pocket TTS (per sentence)
                                    |
                                    v
                           Audio chunks -> Frontend playback
 ```
+
+TTS synthesis is accessed via `getSpeechService().tts.synthesize()` from the shared speech module. See `docs/architecture/speech-engine.md` for engine details.
 
 The voice mode frontend spec (`docs/frontend/voice-mode.md`) already defines the Speaking experience, audio queueing, and barge-in behavior. The reflex integrates at the "reply text streams" stage -- the frontend doesn't need to know whether the text came from a reflex or a heartbeat.
 
@@ -584,7 +586,7 @@ The voice mode frontend spec (`docs/frontend/voice-mode.md`) already defines the
 | Reflex context assembly | ~5-10ms | ~1,510ms |
 | LLM TTFT (direct API) | ~300-500ms | ~2,010ms |
 | First sentence complete | ~200-400ms | ~2,310ms |
-| TTS first sentence (Kokoro) | ~200-300ms | ~2,510ms |
+| TTS first sentence (Pocket TTS) | ~200-300ms | ~2,510ms |
 | **User hears first words** | | **~2.5s** |
 
 Compare to heartbeat-only path:
@@ -596,7 +598,7 @@ Compare to heartbeat-only path:
 | Agent SDK cold start | ~580ms | ~2,180ms |
 | Agent SDK initialization | ~3,500ms | ~5,680ms |
 | LLM inference (full output) | ~2,000-4,000ms | ~8,680ms |
-| JSON parse + TTS | ~300ms | ~8,980ms |
+| JSON parse + Pocket TTS | ~300ms | ~8,980ms |
 | **User hears first words** | | **~9s** |
 
 **The reflex reduces perceived voice latency from ~9 seconds to ~2.5 seconds.**

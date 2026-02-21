@@ -105,6 +105,6 @@ export interface AnimusTool {
   name: AnimusToolName;
   description: string;
   inputSchema: unknown; // Zod schema
-  category: 'messaging' | 'memory' | 'progress' | 'system';
+  category: 'messaging' | 'memory' | 'progress' | 'system' | 'speech';
   handler: ToolHandler;
 }

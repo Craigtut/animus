@@ -93,6 +93,8 @@ export function getPersona(db: Database.Database): Persona {
     background: (row['background'] as string) || null,
     personalityNotes: (row['personality_notes'] as string) || null,
     archetype: (row['archetype'] as Persona['archetype']) || null,
+    voiceId: (row['voice_id'] as string) || null,
+    voiceSpeed: (row['voice_speed'] as number) ?? 1.0,
     isFinalized: intToBool((row['is_finalized'] as number) || 0),
     communicationStyle: (row['communication_style'] as string) || undefined,
   };
@@ -116,6 +118,8 @@ export function savePersonaDraft(
     background: 'background',
     personalityNotes: 'personality_notes',
     archetype: 'archetype',
+    voiceId: 'voice_id',
+    voiceSpeed: 'voice_speed',
   };
 
   for (const [camelKey, snakeKey] of Object.entries(mapping)) {

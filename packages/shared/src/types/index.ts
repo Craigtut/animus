@@ -301,6 +301,55 @@ export type {
 } from './channel-packages.js';
 
 // ============================================================================
+// Tool Permissions
+// ============================================================================
+
+export type RiskTier = 'safe' | 'communicates' | 'acts' | 'sensitive';
+export type ToolPermissionMode = 'off' | 'ask' | 'always_allow';
+export type ToolApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired';
+
+export interface ToolPermission {
+  toolName: string;
+  toolSource: string;
+  displayName: string;
+  description: string;
+  riskTier: RiskTier;
+  mode: ToolPermissionMode;
+  isDefault: boolean;
+  usageCount: number;
+  lastUsedAt: string | null;
+  trustRampDismissedAt: string | null;
+  updatedAt: string;
+}
+
+export interface ToolApprovalAgentContext {
+  taskDescription: string;
+  conversationSummary: string;
+  pendingAction: string;
+  relatedGoal?: string;
+}
+
+export interface ToolApprovalRequest {
+  id: string;
+  toolName: string;
+  toolSource: string;
+  contactId: string;
+  channel: string;
+  tickNumber: number;
+  agentContext: ToolApprovalAgentContext;
+  toolInput: Record<string, unknown> | null;
+  triggerSummary: string;
+  conversationId: string | null;
+  originatingAgent: string;
+  status: ToolApprovalStatus;
+  scope: 'once' | null;
+  batchId: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+  expiresAt: string;
+}
+
+// ============================================================================
 // API Types (not schema-derived)
 // ============================================================================
 

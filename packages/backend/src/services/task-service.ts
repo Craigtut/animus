@@ -12,6 +12,7 @@ import { getHeartbeatDb } from '../db/index.js';
 import * as taskStore from '../db/stores/task-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { getTaskScheduler, getTaskRunner } from '../tasks/index.js';
+import { computeNextRunAt } from '../tasks/task-scheduler.js';
 import type {
   Task,
   TaskRun,
@@ -100,6 +101,20 @@ class TaskService {
    */
   createTask(data: CreateTaskInput): Task {
     const db = getHeartbeatDb();
+
+    // Compute nextRunAt if not explicitly provided
+    let nextRunAt = data.nextRunAt;
+    if (!nextRunAt) {
+      if (data.scheduleType === 'recurring' && data.cronExpression) {
+        nextRunAt = computeNextRunAt(data.cronExpression) ?? undefined;
+        if (!nextRunAt) {
+          log.warn(`Invalid cron expression "${data.cronExpression}" — task will not fire`);
+        }
+      } else if (data.scheduleType === 'one_shot' && data.scheduledAt) {
+        nextRunAt = data.scheduledAt;
+      }
+    }
+
     const taskData: taskStore.CreateTaskData = {
       title: data.title,
       scheduleType: data.scheduleType,
@@ -109,7 +124,7 @@ class TaskService {
       ...(data.instructions !== undefined && { instructions: data.instructions }),
       ...(data.cronExpression !== undefined && { cronExpression: data.cronExpression }),
       ...(data.scheduledAt !== undefined && { scheduledAt: data.scheduledAt }),
-      ...(data.nextRunAt !== undefined && { nextRunAt: data.nextRunAt }),
+      ...(nextRunAt !== undefined && { nextRunAt }),
       ...(data.goalId !== undefined && { goalId: data.goalId }),
       ...(data.planId !== undefined && { planId: data.planId }),
       ...(data.priority !== undefined && { priority: data.priority }),
@@ -119,6 +134,16 @@ class TaskService {
     const task = taskStore.createTask(db, taskData);
     getEventBus().emit('task:created', task);
     log.info(`Created task "${task.title}" (${task.id})`);
+
+    // Register with scheduler for timed tasks
+    if (data.scheduleType !== 'deferred') {
+      try {
+        getTaskScheduler().registerTask(task);
+      } catch (err) {
+        log.warn(`Failed to register task ${task.id} with scheduler:`, err);
+      }
+    }
+
     return task;
   }
 

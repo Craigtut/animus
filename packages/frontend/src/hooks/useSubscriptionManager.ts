@@ -26,6 +26,7 @@ export function useSubscriptionManager() {
     addExperience,
     addAgentEvent,
     appendReplyChunk,
+    completeTurn,
     completeReply,
   } = useHeartbeatStore.getState();
 
@@ -87,10 +88,14 @@ export function useSubscriptionManager() {
   trpc.heartbeat.onReply.useSubscription(undefined, {
     onData: (data) => {
       if (data.type === 'chunk') {
-        useHeartbeatStore.getState().appendReplyChunk(data.content);
+        useHeartbeatStore.getState().appendReplyChunk(data.content, data.turnIndex ?? 0);
+      } else if (data.type === 'turn_complete') {
+        useHeartbeatStore.getState().completeTurn(data.turnIndex ?? 0, data.content);
+        // No query invalidation here — the onMessage subscription handles that
+        // when message:sent fires from sendOutbound
       } else {
-        useHeartbeatStore.getState().completeReply(data.content, data.tickNumber);
-        // Invalidate messages to pick up the completed reply
+        useHeartbeatStore.getState().completeReply(data.content, data.tickNumber, data.totalTurns);
+        // Safety net: invalidate messages in case turn-level sends were missed
         queryClient.invalidateQueries({ queryKey: [['messages', 'getRecent']] });
       }
     },
@@ -146,8 +151,8 @@ export function useSubscriptionManager() {
         queryClient.invalidateQueries({ queryKey: [['memory', 'listWorkingMemories']] });
       } else if (event.type === 'core') {
         queryClient.invalidateQueries({ queryKey: [['memory', 'getCoreSelf']] });
-      } else if (event.type === 'stored' || event.type === 'pruned') {
-        queryClient.invalidateQueries({ queryKey: [['memory', 'searchLongTermMemories']] });
+      } else if (event.type === 'stored' || event.type === 'pruned' || event.type === 'deleted') {
+        queryClient.invalidateQueries({ queryKey: [['memory', 'browseLongTermMemories']] });
       }
     },
   });
@@ -177,6 +182,25 @@ export function useSubscriptionManager() {
   trpc.heartbeat.onTickInputStored.useSubscription(undefined, {
     onData: () => {
       queryClient.invalidateQueries({ queryKey: [['heartbeat', 'listTicks']] });
+    },
+  });
+
+  // ========================================================================
+  // 15. Tool approval requests
+  // ========================================================================
+  trpc.tools.onApprovalRequest.useSubscription(undefined, {
+    onData: () => {
+      queryClient.invalidateQueries({ queryKey: [['tools', 'listApprovals']] });
+    },
+  });
+
+  // ========================================================================
+  // 16. Tool approval resolutions
+  // ========================================================================
+  trpc.tools.onApprovalResolved.useSubscription(undefined, {
+    onData: () => {
+      queryClient.invalidateQueries({ queryKey: [['tools', 'listApprovals']] });
+      queryClient.invalidateQueries({ queryKey: [['tools', 'listTools']] });
     },
   });
 }

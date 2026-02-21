@@ -270,6 +270,20 @@ export interface AgentSessionConfig {
   /** Lifecycle hooks */
   hooks?: UnifiedHooks;
 
+  /**
+   * Programmatic permission handler for controlling tool usage.
+   * Called before each tool execution to determine if it should be allowed.
+   * Works for ALL tool types including external MCP tools.
+   * Claude-specific: maps to the SDK's canUseTool callback.
+   */
+  canUseTool?: (
+    toolName: string,
+    input: Record<string, unknown>,
+  ) => Promise<
+    | { behavior: 'allow'; updatedInput?: Record<string, unknown> }
+    | { behavior: 'deny'; message?: string }
+  >;
+
   // Provider-specific options (see typed config interfaces)
 
   // Claude-specific
@@ -683,6 +697,9 @@ export interface IAgentSession {
 
   /** Register an event handler */
   onEvent(handler: AgentEventHandler): void;
+
+  /** Remove a previously registered event handler */
+  offEvent(handler: AgentEventHandler): void;
 
   /** Register lifecycle hooks */
   registerHooks(hooks: UnifiedHooks): void;

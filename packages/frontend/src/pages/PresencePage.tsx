@@ -51,7 +51,7 @@ export function PresencePage() {
   const energyBand = useHeartbeatStore((s) => s.energyBand);
 
   // ── Derived state ──
-  const isThinking = heartbeatState?.currentStage === 'mind' && !replyStream.isStreaming;
+  const isThinking = heartbeatState?.currentStage === 'mind' && !replyStream.turns.some(t => t.isStreaming);
 
   // Map messages from tRPC shape to component shape
   const messages: MessageData[] = (messagesData ?? []).map((m) => {

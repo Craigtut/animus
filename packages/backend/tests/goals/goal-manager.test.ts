@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import { createTestHeartbeatDb } from '../helpers.js';
 import { GoalManager } from '../../src/goals/goal-manager.js';
-import { SeedManager, cosineSimilarity, SEED_GRADUATION_THRESHOLD, SEED_CLEANUP_THRESHOLD, SEED_RESONANCE_THRESHOLD } from '../../src/goals/seed-manager.js';
+import { SeedManager, cosineSimilarity, SEED_GRADUATION_THRESHOLD, SEED_CLEANUP_THRESHOLD, SEED_RESONANCE_THRESHOLD, SEED_DECAY_RATE, SEED_BOOST_MULTIPLIER } from '../../src/goals/seed-manager.js';
 import { buildGoalContext } from '../../src/goals/goal-context.js';
 import * as heartbeatStore from '../../src/db/stores/heartbeat-store.js';
 import type { IEmbeddingProvider, EmotionState } from '@animus/shared';
@@ -424,6 +424,162 @@ describe('SeedManager', () => {
 
       await mgr.checkSeedResonance([
         { content: 'Completely unrelated', importance: 0.8 },
+      ]);
+
+      const updated = heartbeatStore.getSeed(db, seed.id)!;
+      expect(updated.reinforcementCount).toBe(seed.reinforcementCount);
+    });
+  });
+
+  describe('decay rate constant', () => {
+    it('SEED_DECAY_RATE is 0.015', () => {
+      expect(SEED_DECAY_RATE).toBe(0.015);
+    });
+
+    it('decay formula produces expected values at 24 hours', async () => {
+      const seed = await seedManager.createSeed({ content: 'Decay rate test', source: 'internal' });
+      const initialStrength = 0.5;
+      const hoursElapsed = 24;
+
+      heartbeatStore.updateSeed(db, seed.id, {
+        strength: initialStrength,
+        lastReinforcedAt: new Date(Date.now() - hoursElapsed * 60 * 60 * 1000).toISOString(),
+      });
+
+      seedManager.applyDecay();
+
+      const updated = heartbeatStore.getSeed(db, seed.id)!;
+      const expected = initialStrength * Math.exp(-0.015 * hoursElapsed);
+      expect(updated.strength).toBeCloseTo(expected, 4);
+      // At 0.015 rate, 24h: 0.5 * e^(-0.36) ≈ 0.349
+      expect(updated.strength).toBeCloseTo(0.349, 2);
+    });
+
+    it('decay formula produces expected values at 72 hours', async () => {
+      const seed = await seedManager.createSeed({ content: 'Longer decay test', source: 'internal' });
+      const initialStrength = 0.5;
+      const hoursElapsed = 72;
+
+      heartbeatStore.updateSeed(db, seed.id, {
+        strength: initialStrength,
+        lastReinforcedAt: new Date(Date.now() - hoursElapsed * 60 * 60 * 1000).toISOString(),
+      });
+
+      seedManager.applyDecay();
+
+      const updated = heartbeatStore.getSeed(db, seed.id)!;
+      const expected = initialStrength * Math.exp(-0.015 * hoursElapsed);
+      expect(updated.strength).toBeCloseTo(expected, 4);
+      // At 0.015 rate, 72h: 0.5 * e^(-1.08) ≈ 0.170
+      expect(updated.strength).toBeCloseTo(0.170, 2);
+    });
+  });
+
+  describe('graduating seed decay', () => {
+    it('resets graduating seed to active when strength drops below 0.5', async () => {
+      const seed = await seedManager.createSeed({ content: 'Graduating but fading', source: 'internal' });
+
+      // Set to graduating with strength just above 0.5, and time elapsed to push below
+      // strength = 0.55, after 6 hours at rate 0.015: 0.55 * e^(-0.09) ≈ 0.503 (still above)
+      // after 10 hours: 0.55 * e^(-0.15) ≈ 0.474 (below 0.5)
+      heartbeatStore.updateSeed(db, seed.id, {
+        status: 'graduating',
+        strength: 0.55,
+        lastReinforcedAt: new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString(),
+      });
+
+      seedManager.applyDecay();
+
+      const updated = heartbeatStore.getSeed(db, seed.id)!;
+      const expectedStrength = 0.55 * Math.exp(-SEED_DECAY_RATE * 10);
+      expect(updated.strength).toBeCloseTo(expectedStrength, 3);
+      expect(updated.strength).toBeLessThan(0.5);
+      expect(updated.status).toBe('active');
+    });
+
+    it('marks graduating seed as decayed when strength drops below SEED_CLEANUP_THRESHOLD', async () => {
+      const seed = await seedManager.createSeed({ content: 'Graduating but dying', source: 'internal' });
+
+      // Set to graduating with very low strength and old reinforcement time
+      heartbeatStore.updateSeed(db, seed.id, {
+        status: 'graduating',
+        strength: 0.005,
+        lastReinforcedAt: new Date(Date.now() - 200 * 60 * 60 * 1000).toISOString(),
+      });
+
+      seedManager.applyDecay();
+
+      const updated = heartbeatStore.getSeed(db, seed.id)!;
+      expect(updated.status).toBe('decayed');
+      expect(updated.strength).toBe(0);
+      expect(updated.decayedAt).not.toBeNull();
+    });
+
+    it('graduating seed above 0.5 stays graduating with updated strength', async () => {
+      const seed = await seedManager.createSeed({ content: 'Strong graduating', source: 'internal' });
+
+      // strength 0.8, after 2 hours: 0.8 * e^(-0.03) ≈ 0.776 (still > 0.5)
+      heartbeatStore.updateSeed(db, seed.id, {
+        status: 'graduating',
+        strength: 0.8,
+        lastReinforcedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      });
+
+      seedManager.applyDecay();
+
+      const updated = heartbeatStore.getSeed(db, seed.id)!;
+      expect(updated.status).toBe('graduating');
+      expect(updated.strength).toBeLessThan(0.8);
+      expect(updated.strength).toBeGreaterThan(0.5);
+    });
+  });
+
+  describe('resonance threshold', () => {
+    it('SEED_RESONANCE_THRESHOLD is 0.55', () => {
+      expect(SEED_RESONANCE_THRESHOLD).toBe(0.55);
+    });
+
+    it('reinforces seeds when similarity exceeds 0.55 threshold', async () => {
+      // Provider that returns slightly different but highly similar vectors
+      // cosine similarity of [1, 0.1, 0] and [1, 0, 0] is ~0.995, well above 0.55
+      const highSimProvider: IEmbeddingProvider = {
+        ...createMockEmbeddingProvider(),
+        embedSingle: async () => [1, 0, 0],
+      };
+      const mgr = new SeedManager(db, highSimProvider);
+
+      const seed = await mgr.createSeed({ content: 'Resonance test', source: 'internal' });
+      const originalStrength = seed.strength;
+
+      await mgr.checkSeedResonance([
+        { content: 'Related thought', importance: 0.7 },
+      ]);
+
+      const updated = heartbeatStore.getSeed(db, seed.id)!;
+      // similarity is 1.0 (identical vectors), boost = (1.0 - 0.55) * 0.7 * 0.15 = 0.04725
+      const expectedBoost = (1.0 - SEED_RESONANCE_THRESHOLD) * 0.7 * SEED_BOOST_MULTIPLIER;
+      expect(updated.strength).toBeGreaterThan(originalStrength);
+      expect(updated.reinforcementCount).toBe(seed.reinforcementCount + 1);
+    });
+
+    it('does not reinforce seeds when similarity is at or below 0.55 threshold', async () => {
+      // Return vectors with cosine similarity of exactly ~0.55 or below
+      // [1, 0, 0] and [0.55, 0.835, 0] have cosine similarity ≈ 0.55
+      let callCount = 0;
+      const borderlineProvider: IEmbeddingProvider = {
+        ...createMockEmbeddingProvider(),
+        embedSingle: async () => {
+          callCount++;
+          // First call is for the seed, second is for the thought
+          return callCount <= 1 ? [1, 0, 0] : [0, 1, 0]; // orthogonal = 0.0 similarity
+        },
+      };
+      const mgr = new SeedManager(db, borderlineProvider);
+
+      const seed = await mgr.createSeed({ content: 'Below threshold', source: 'internal' });
+
+      await mgr.checkSeedResonance([
+        { content: 'Unrelated thought', importance: 0.9 },
       ]);
 
       const updated = heartbeatStore.getSeed(db, seed.id)!;

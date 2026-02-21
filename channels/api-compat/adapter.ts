@@ -483,15 +483,31 @@ export default function createAdapter(ctx: AdapterContext): ChannelAdapter {
     async send(
       _contactId: string,
       content: string,
-      _metadata?: Record<string, unknown>,
+      metadata?: Record<string, unknown>,
     ): Promise<void> {
+      // Check for tool approval metadata — include in the response content
+      const messageType = metadata?.['message_type'] as string | undefined;
+      const approvalRequests = metadata?.['approval_requests'] as
+        | Array<{ requestId: string; toolName: string; toolDisplayName: string; toolSource: string; triggerSummary: string; expiresAt: string }>
+        | undefined;
+
+      let resolvedContent = content;
+      if (messageType === 'tool_approval_request' && approvalRequests && approvalRequests.length > 0) {
+        // Embed structured approval data as JSON in the response
+        const approvalBlock = JSON.stringify({
+          type: 'tool_approval_request',
+          requests: approvalRequests,
+        });
+        resolvedContent = `${content}\n\n<!-- TOOL_APPROVAL_DATA: ${approvalBlock} -->`;
+      }
+
       // Resolve the oldest pending reply (FIFO).
       // The engine calls send() when the mind produces a reply for this channel.
       const firstEntry = pendingReplies.entries().next();
       if (!firstEntry.done) {
         const [id, pending] = firstEntry.value;
         clearTimeout(pending.timer);
-        pending.resolve(content);
+        pending.resolve(resolvedContent);
         pendingReplies.delete(id);
         ctx.log.debug(`Resolved pending API reply: ${id}`);
       } else {

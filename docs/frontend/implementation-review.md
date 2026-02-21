@@ -310,7 +310,7 @@ An SVG/canvas bezier path with 8-12 control points driven by real-time audio amp
 The voice mode requires:
 - Text streaming via `onReply` subscription
 - Backend buffering text to sentence boundaries
-- Kokoro TTS synthesis per sentence (sub-300ms target)
+- Pocket TTS synthesis per sentence (sub-300ms target)
 - Audio chunk streaming via `onVoiceReply` subscription
 - Frontend queuing and seamless playback with crossfading
 - Barge-in interruption (stop playback, discard queue, start listening)

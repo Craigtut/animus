@@ -299,7 +299,9 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - **Architecture**: `docs/architecture/context-builder.md` (context assembly, prompt compilation, token budgets, persona compilation)
 - **Architecture**: `docs/architecture/channel-packages.md` (channel system — protocol, packaging, child process isolation, IPC streaming, AdapterContext, manifests, Channel Manager, hot-swap, dynamic types, security, channel reference specs)
 - **Architecture**: `docs/architecture/mcp-tools.md` (cross-provider MCP tool architecture, tool definitions, handlers, registry, permission filtering)
-- **Architecture**: `docs/architecture/voice-channel.md` (voice channel — Parakeet TDT v3 STT + Kokoro TTS, both via sherpa-onnx, frontend voice mode, audio pipeline)
+- **Architecture**: `docs/architecture/tool-permissions.md` (tool permission & approval system, three permission states, risk tiers, two-tick approval pattern, canUseTool, trust ramp, sub-agent filtering)
+- **Architecture**: `docs/architecture/voice-channel.md` (voice channel — Parakeet TDT v3 STT + Pocket TTS, both via sherpa-onnx, frontend voice mode, audio pipeline)
+- **Architecture**: `docs/architecture/speech-engine.md` (shared STT/TTS engines, Pocket TTS, Parakeet STT, voice system, voice manager)
 - **Architecture**: `docs/architecture/sleep-energy.md` (sleep & energy system, circadian rhythm, energy bands, wake-up mechanics, accelerated emotional decay)
 - **Architecture**: `docs/architecture/plugin-system.md` (plugin system — skills-first philosophy, 7 component types, manifest format, config schemas, credential handling, MCP tools, hooks, decision types, triggers, hot-swap lifecycle, security model, plugin gallery)
 - **Architecture**: `docs/architecture/credential-passing.md` (secrets & credentials — AES-256-GCM encryption at rest, agent-blind model, three storage locations, credential manifest, plugin `${config.*}` resolution, `run_with_credentials` tool, channel IPC injection, frontend masking, threat model)
@@ -327,7 +329,9 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on shared abstractions (embedding, decay, encryption, auth, migrations) → `/doc-explorer tech-stack`
 - Working on secrets/credentials/encryption/API keys → `/doc-explorer credential-passing`
 - Working on MCP tools/custom tools → `/doc-explorer mcp-tools`
-- Working on voice/speech/STT/TTS/audio → `/doc-explorer voice`
+- Working on tool permissions/approval flow/trust ramp → `/doc-explorer tool-permissions`
+- Working on voice/speech/STT/TTS/audio → `/doc-explorer voice` and `/doc-explorer speech-engine`
+- Working on speech/STT/TTS/voice synthesis/voice management → `/doc-explorer speech-engine`
 - Working on reflex/fast-response/voice-latency → `/doc-explorer reflex`
 - Working on sleep/energy/circadian rhythm → `/doc-explorer sleep-energy`
 - Working on agent SDKs → `/doc-explorer agents`

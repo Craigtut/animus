@@ -1,11 +1,14 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { useScroll, useTransform, motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import { File as FileIcon, DownloadSimple } from '@phosphor-icons/react';
 import { Typography } from '../ui';
+import { trpc } from '../../utils/trpc';
+import { ToolApprovalCard, BatchApprovalCard } from './ToolApprovalCard';
+import type { ToolApprovalRequest } from '@animus/shared';
 
 // ============================================================================
 // Types
@@ -27,9 +30,16 @@ export interface MessageData {
   attachments?: AttachmentData[];
 }
 
-export interface ReplyStreamState {
-  isStreaming: boolean;
+export interface ReplyTurn {
+  turnIndex: number;
   accumulated: string;
+  isStreaming: boolean;
+  isComplete: boolean;
+}
+
+export interface ReplyStreamState {
+  turns: ReplyTurn[];
+  tickNumber?: number;
 }
 
 export interface ConversationProps {
@@ -465,36 +475,142 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
     });
   }, [sorted.length]);
 
+  // Derived: is any turn currently streaming?
+  const isAnyTurnStreaming = replyStream.turns.some((t) => t.isStreaming);
+  // The latest streaming text (for auto-scroll tracking)
+  const latestStreamingText = replyStream.turns.reduce(
+    (acc, t) => acc + t.accumulated, ''
+  );
+
   // Auto-scroll when streaming chunks arrive
   useEffect(() => {
-    if (replyStream.isStreaming && isNearBottomRef.current) {
+    if (isAnyTurnStreaming && isNearBottomRef.current) {
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }
-  }, [replyStream.accumulated]);
+  }, [latestStreamingText, isAnyTurnStreaming]);
 
-  // Clear streaming state after the persisted message arrives in the query cache
+  // Clear streaming state after all turns are complete and persisted messages arrive
   useEffect(() => {
-    if (!replyStream.isStreaming && replyStream.accumulated && messages.length > 0) {
+    if (replyStream.turns.length > 0 && !isAnyTurnStreaming && messages.length > 0) {
       const timer = setTimeout(() => onReplyStreamClear(), 300);
       return () => clearTimeout(timer);
     }
-  }, [replyStream.isStreaming, messages.length, onReplyStreamClear]);
+  }, [isAnyTurnStreaming, replyStream.turns.length, messages.length, onReplyStreamClear]);
 
-  // Hide the streaming bubble if the early-reply message already arrived in the DB.
-  // This happens because the backend persists the reply to messages.db (triggering
-  // onMessage -> cache invalidation) before the rest of the structured output finishes
-  // parsing (which is when reply:complete fires to set isStreaming=false).
-  const replyAlreadyPersisted = replyStream.isStreaming && replyStream.accumulated
-    && sorted.some(
-      (m) => m.role === 'assistant' && m.content === replyStream.accumulated
-    );
-
-  // If early reply is already in the DB, clear the stream state immediately
-  useEffect(() => {
-    if (replyAlreadyPersisted) {
-      onReplyStreamClear();
+  // Build a set of persisted assistant message content for dedup
+  const persistedAssistantContents = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of sorted) {
+      if (m.role === 'assistant') set.add(m.content);
     }
-  }, [replyAlreadyPersisted, onReplyStreamClear]);
+    return set;
+  }, [sorted]);
+
+  // If all completed turns' content has been persisted, clear stream immediately
+  useEffect(() => {
+    if (replyStream.turns.length > 0 && !isAnyTurnStreaming) {
+      const allPersisted = replyStream.turns
+        .filter((t) => t.isComplete && t.accumulated.trim())
+        .every((t) => persistedAssistantContents.has(t.accumulated.trim()));
+      if (allPersisted) {
+        onReplyStreamClear();
+      }
+    }
+  }, [replyStream.turns, isAnyTurnStreaming, persistedAssistantContents, onReplyStreamClear]);
+
+  // ========================================================================
+  // Tool approval requests — subscriptions + local state
+  // ========================================================================
+  const [approvalMap, setApprovalMap] = useState<Map<string, ToolApprovalRequest>>(new Map());
+
+  // Fetch pending approvals on mount
+  const { data: initialPendingApprovals } = trpc.tools.listApprovals.useQuery({ status: 'pending' });
+  useEffect(() => {
+    if (initialPendingApprovals && initialPendingApprovals.length > 0) {
+      setApprovalMap((prev) => {
+        const next = new Map(prev);
+        for (const req of initialPendingApprovals) {
+          if (!next.has(req.id)) next.set(req.id, req);
+        }
+        return next;
+      });
+    }
+  }, [initialPendingApprovals]);
+
+  // Subscribe to new approval requests
+  trpc.tools.onApprovalRequest.useSubscription(undefined, {
+    onData: (request) => {
+      setApprovalMap((prev) => new Map(prev).set(request.id, request));
+    },
+  });
+
+  // Subscribe to approval resolutions
+  trpc.tools.onApprovalResolved.useSubscription(undefined, {
+    onData: (data) => {
+      setApprovalMap((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(data.id);
+        if (existing) {
+          next.set(data.id, {
+            ...existing,
+            status: data.status as ToolApprovalRequest['status'],
+            resolvedAt: new Date().toISOString(),
+          });
+        }
+        return next;
+      });
+    },
+  });
+
+  // Group pending approvals by batchId for batch rendering
+  const pendingApprovals = useMemo(() => {
+    const pending = Array.from(approvalMap.values()).filter((r) => r.status === 'pending');
+    const batched = new Map<string, ToolApprovalRequest[]>();
+    const singles: ToolApprovalRequest[] = [];
+
+    for (const req of pending) {
+      if (req.batchId) {
+        const existing = batched.get(req.batchId) ?? [];
+        existing.push(req);
+        batched.set(req.batchId, existing);
+      } else {
+        singles.push(req);
+      }
+    }
+
+    return { batched, singles };
+  }, [approvalMap]);
+
+  // Recently resolved approvals — transient pills
+  const resolvedApprovals = useMemo(() => {
+    return Array.from(approvalMap.values())
+      .filter((r) => r.status === 'approved' || r.status === 'denied')
+      .sort((a, b) =>
+        new Date(a.resolvedAt ?? a.createdAt).getTime() -
+        new Date(b.resolvedAt ?? b.createdAt).getTime()
+      );
+  }, [approvalMap]);
+
+  // Prune resolved approvals after 5 minutes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setApprovalMap((prev) => {
+        const now = Date.now();
+        let changed = false;
+        const next = new Map(prev);
+        for (const [id, req] of next) {
+          if (req.status !== 'pending' && req.resolvedAt) {
+            if (now - new Date(req.resolvedAt).getTime() > 5 * 60 * 1000) {
+              next.delete(id);
+              changed = true;
+            }
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div
@@ -518,7 +634,7 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
           justify-content: flex-end;
         `}
       >
-        {sorted.length === 0 && !isThinking && !replyStream.isStreaming ? (
+        {sorted.length === 0 && !isThinking && !isAnyTurnStreaming ? (
           <Typography.Body
             color="hint"
             css={css`
@@ -583,19 +699,41 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
               </div>
             )}
 
-            {/* Streaming reply bubble -- shows reply text as it arrives */}
-            {replyStream.isStreaming && replyStream.accumulated && !replyAlreadyPersisted && (
-              <div css={css`display: flex; justify-content: flex-start;`}>
-                <Typography.Body
-                  as="div"
-                  color="primary"
-                  css={css`max-width: 85%;`}
-                >
-                  <MessageMarkdown content={replyStream.accumulated} />
-                  <BlinkingCursor />
-                </Typography.Body>
-              </div>
-            )}
+            {/* Streaming reply bubbles -- one per turn, skipping completed turns already persisted */}
+            {replyStream.turns.map((turn) => {
+              if (!turn.accumulated) return null;
+              // Skip completed turns whose content already exists as a persisted message
+              if (turn.isComplete && persistedAssistantContents.has(turn.accumulated.trim())) {
+                return null;
+              }
+              return (
+                <div key={`turn-${turn.turnIndex}`} css={css`display: flex; justify-content: flex-start;`}>
+                  <Typography.Body
+                    as="div"
+                    color="primary"
+                    css={css`max-width: 85%;`}
+                  >
+                    <MessageMarkdown content={turn.accumulated} />
+                    {turn.isStreaming && <BlinkingCursor />}
+                  </Typography.Body>
+                </div>
+              );
+            })}
+
+            {/* Resolved approval pills — transient inline feedback */}
+            <AnimatePresence>
+              {resolvedApprovals.map((req) => (
+                <ToolApprovalCard key={req.id} request={req} />
+              ))}
+            </AnimatePresence>
+
+            {/* Pending approval cards — interactive requests */}
+            {pendingApprovals.singles.map((req) => (
+              <ToolApprovalCard key={req.id} request={req} />
+            ))}
+            {Array.from(pendingApprovals.batched.entries()).map(([batchId, reqs]) => (
+              <BatchApprovalCard key={batchId} requests={reqs} />
+            ))}
           </div>
         )}
       </div>

@@ -52,7 +52,7 @@ function resetStores() {
     recentThoughts: [],
     recentExperiences: [],
     agentEvents: [],
-    replyStream: { isStreaming: false, accumulated: '' },
+    replyStream: { turns: [] },
   });
   useMessagesStore.setState({
     activeConversationId: null,
@@ -259,50 +259,71 @@ describe('HeartbeatStore reply stream edge cases', () => {
     // If tickNumber was set before streaming, it should persist
     store().completeReply('previous', 10);
     store().clearReplyStream();
-    store().appendReplyChunk('new ');
+    store().appendReplyChunk('new ', 0);
     // tickNumber should NOT carry over after clearReplyStream
     expect(store().replyStream.tickNumber).toBeUndefined();
   });
 
   it('handles empty chunk appends', () => {
     const store = useHeartbeatStore.getState;
-    store().appendReplyChunk('');
-    expect(store().replyStream.isStreaming).toBe(true);
-    expect(store().replyStream.accumulated).toBe('');
+    store().appendReplyChunk('', 0);
+    expect(store().replyStream.turns).toHaveLength(1);
+    expect(store().replyStream.turns[0]?.isStreaming).toBe(true);
+    expect(store().replyStream.turns[0]?.accumulated).toBe('');
   });
 
   it('handles rapid sequential appends', () => {
     const store = useHeartbeatStore.getState;
     const chunks = ['H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd'];
     for (const chunk of chunks) {
-      store().appendReplyChunk(chunk);
+      store().appendReplyChunk(chunk, 0);
     }
-    expect(store().replyStream.accumulated).toBe('Hello World');
-    expect(store().replyStream.isStreaming).toBe(true);
+    expect(store().replyStream.turns[0]?.accumulated).toBe('Hello World');
+    expect(store().replyStream.turns[0]?.isStreaming).toBe(true);
   });
 
   it('completeReply sets tickNumber', () => {
     const store = useHeartbeatStore.getState;
-    store().appendReplyChunk('Hello');
+    store().appendReplyChunk('Hello', 0);
     store().completeReply('Hello', 42);
     expect(store().replyStream.tickNumber).toBe(42);
-    expect(store().replyStream.isStreaming).toBe(false);
+    expect(store().replyStream.turns[0]?.isStreaming).toBe(false);
   });
 
   it('completeReply without tickNumber works', () => {
     const store = useHeartbeatStore.getState;
-    store().appendReplyChunk('Hello');
+    store().appendReplyChunk('Hello', 0);
     store().completeReply('Hello');
     expect(store().replyStream.tickNumber).toBeUndefined();
-    expect(store().replyStream.isStreaming).toBe(false);
+    expect(store().replyStream.turns[0]?.isStreaming).toBe(false);
   });
 
   it('clearReplyStream resets everything', () => {
     const store = useHeartbeatStore.getState;
-    store().appendReplyChunk('Hello');
+    store().appendReplyChunk('Hello', 0);
     store().completeReply('Hello', 42);
     store().clearReplyStream();
-    expect(store().replyStream).toEqual({ isStreaming: false, accumulated: '' });
+    expect(store().replyStream).toEqual({ turns: [] });
+  });
+
+  it('tracks multiple turns separately', () => {
+    const store = useHeartbeatStore.getState;
+    store().appendReplyChunk('Turn 0 text', 0);
+    store().appendReplyChunk('Turn 1 text', 1);
+    expect(store().replyStream.turns).toHaveLength(2);
+    expect(store().replyStream.turns[0]?.accumulated).toBe('Turn 0 text');
+    expect(store().replyStream.turns[1]?.accumulated).toBe('Turn 1 text');
+  });
+
+  it('completeTurn marks specific turn as complete', () => {
+    const store = useHeartbeatStore.getState;
+    store().appendReplyChunk('Turn 0 text', 0);
+    store().appendReplyChunk('Turn 1 text', 1);
+    store().completeTurn(0, 'Turn 0 text');
+    expect(store().replyStream.turns[0]?.isComplete).toBe(true);
+    expect(store().replyStream.turns[0]?.isStreaming).toBe(false);
+    expect(store().replyStream.turns[1]?.isStreaming).toBe(true);
+    expect(store().replyStream.turns[1]?.isComplete).toBe(false);
   });
 });
 
@@ -525,6 +546,7 @@ describe('MessagesStore clearLiveMessages', () => {
 describe('Subscription routing expectations', () => {
   // These tests verify the subscription manager's contract:
   // each subscription routes data to the correct store action.
+  beforeEach(resetStores);
 
   it('heartbeat.onStateChange → setHeartbeatState', () => {
     const mockState = {
@@ -606,21 +628,22 @@ describe('Subscription routing expectations', () => {
   });
 
   it('heartbeat.onReply chunk → appendReplyChunk', () => {
-    useHeartbeatStore.getState().appendReplyChunk('Hello ');
-    useHeartbeatStore.getState().appendReplyChunk('world');
+    useHeartbeatStore.getState().appendReplyChunk('Hello ', 0);
+    useHeartbeatStore.getState().appendReplyChunk('world', 0);
 
     const stream = useHeartbeatStore.getState().replyStream;
-    expect(stream.isStreaming).toBe(true);
-    expect(stream.accumulated).toBe('Hello world');
+    expect(stream.turns).toHaveLength(1);
+    expect(stream.turns[0]?.isStreaming).toBe(true);
+    expect(stream.turns[0]?.accumulated).toBe('Hello world');
   });
 
   it('heartbeat.onReply complete → completeReply', () => {
-    useHeartbeatStore.getState().appendReplyChunk('Hello world');
+    useHeartbeatStore.getState().appendReplyChunk('Hello world', 0);
     useHeartbeatStore.getState().completeReply('Hello world', 42);
 
     const stream = useHeartbeatStore.getState().replyStream;
-    expect(stream.isStreaming).toBe(false);
-    expect(stream.accumulated).toBe('Hello world');
+    expect(stream.turns[0]?.isStreaming).toBe(false);
+    expect(stream.turns[0]?.accumulated).toBe('Hello world');
     expect(stream.tickNumber).toBe(42);
   });
 

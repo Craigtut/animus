@@ -34,6 +34,19 @@ const GATEWAY_INTENTS = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15);
 
 const API_BASE = 'https://discord.com/api/v10';
 
+// ============================================================================
+// Tool Approval Types (metadata-based, no import needed)
+// ============================================================================
+
+interface ApprovalRequestMeta {
+  requestId: string;
+  toolName: string;
+  toolDisplayName: string;
+  toolSource: string;
+  triggerSummary: string;
+  expiresAt: string;
+}
+
 export default function createAdapter(ctx: AdapterContext): ChannelAdapter {
   const botToken = ctx.config['botToken'] as string;
   const allowedGuildIds =
@@ -157,6 +170,60 @@ export default function createAdapter(ctx: AdapterContext): ChannelAdapter {
       const body = await resp.text();
       throw new Error(`Discord API ${resp.status}: ${body}`);
     }
+  }
+
+  /**
+   * Send a tool approval request as a Discord embed with action buttons.
+   */
+  async function sendApprovalEmbed(
+    channelId: string,
+    approval: ApprovalRequestMeta
+  ): Promise<void> {
+    const embed = {
+      title: 'Tool Approval Required',
+      description: approval.triggerSummary,
+      color: 0xf59e0b, // amber
+      fields: [
+        {
+          name: 'Tool',
+          value: approval.toolDisplayName,
+          inline: true,
+        },
+        {
+          name: 'Source',
+          value: approval.toolSource,
+          inline: true,
+        },
+      ],
+      footer: {
+        text: `Expires: ${approval.expiresAt}`,
+      },
+    };
+
+    const components = [
+      {
+        type: 1, // ACTION_ROW
+        components: [
+          {
+            type: 2, // BUTTON
+            style: 3, // SUCCESS (green)
+            label: 'Allow Once',
+            custom_id: `tool_approve_once:${approval.requestId}`,
+          },
+          {
+            type: 2,
+            style: 4, // DANGER (red)
+            label: 'Deny',
+            custom_id: `tool_deny:${approval.requestId}`,
+          },
+        ],
+      },
+    ];
+
+    await discordFetch(`/channels/${channelId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ embeds: [embed], components }),
+    });
   }
 
   // --- Gateway WebSocket ---
@@ -345,6 +412,12 @@ export default function createAdapter(ctx: AdapterContext): ChannelAdapter {
           ctx.log.error(`Error handling message: ${err instanceof Error ? err.message : String(err)}`)
         );
         break;
+
+      case 'INTERACTION_CREATE':
+        handleInteraction(data).catch(err =>
+          ctx.log.error(`Error handling interaction: ${err instanceof Error ? err.message : String(err)}`)
+        );
+        break;
     }
   }
 
@@ -446,6 +519,68 @@ export default function createAdapter(ctx: AdapterContext): ChannelAdapter {
     ctx.reportIncoming(incoming);
   }
 
+  /**
+   * Handle button interactions (tool approval responses).
+   */
+  async function handleInteraction(interaction: any): Promise<void> {
+    // Only handle component interactions (type 3 = MESSAGE_COMPONENT)
+    if (interaction.type !== 3) return;
+
+    const customId = interaction.data?.custom_id as string | undefined;
+    if (!customId) return;
+
+    // Parse tool approval button custom_id
+    let action: 'approve' | 'deny' | null = null;
+    let requestId: string | null = null;
+
+    if (customId.startsWith('tool_approve_once:')) {
+      action = 'approve';
+      requestId = customId.substring('tool_approve_once:'.length);
+    } else if (customId.startsWith('tool_deny:')) {
+      action = 'deny';
+      requestId = customId.substring('tool_deny:'.length);
+    }
+
+    if (!action || !requestId) return;
+
+    // Acknowledge the interaction immediately (deferred update)
+    try {
+      await discordFetch(`/interactions/${interaction.id}/${interaction.token}/callback`, {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 7, // UPDATE_MESSAGE
+          data: {
+            embeds: interaction.message?.embeds ?? [],
+            components: [], // Remove buttons after click
+          },
+        }),
+      });
+    } catch (err) {
+      ctx.log.error(`Failed to acknowledge interaction: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Report the approval/denial to the engine as an incoming message
+    const userId = interaction.member?.user?.id ?? interaction.user?.id ?? 'unknown';
+    const channelId = interaction.channel_id as string;
+
+    const content = action === 'approve'
+      ? `Approved tool request ${requestId}`
+      : `Denied tool request ${requestId}`;
+
+    ctx.reportIncoming({
+      identifier: userId,
+      content,
+      conversationId: channelId,
+      metadata: {
+        type: 'tool_approval_response',
+        requestId,
+        approved: action === 'approve',
+        channelId,
+        interactionId: interaction.id,
+      },
+    });
+  }
+
   // --- Adapter interface ---
 
   return {
@@ -476,6 +611,10 @@ export default function createAdapter(ctx: AdapterContext): ChannelAdapter {
         | Array<{ type: string; data: string; mimeType: string; filename?: string }>
         | undefined;
 
+      // Check for tool approval request metadata
+      const messageType = metadata?.['message_type'] as string | undefined;
+      const approvalRequests = metadata?.['approval_requests'] as ApprovalRequestMeta[] | undefined;
+
       // Determine target channel
       let targetChannelId: string;
       if (channelId) {
@@ -492,6 +631,21 @@ export default function createAdapter(ctx: AdapterContext): ChannelAdapter {
           body: JSON.stringify({ recipient_id: contact.identifier }),
         })) as { id: string };
         targetChannelId = dm.id;
+      }
+
+      // Handle tool approval requests — send as embed with buttons
+      if (messageType === 'tool_approval_request' && approvalRequests && approvalRequests.length > 0) {
+        for (const approval of approvalRequests) {
+          try {
+            await sendApprovalEmbed(targetChannelId, approval);
+            ctx.log.debug(`Approval embed sent for tool "${approval.toolName}" in channel ${targetChannelId}`);
+          } catch (err) {
+            ctx.log.error(`Failed to send approval embed: ${err instanceof Error ? err.message : String(err)}`);
+            // Fall back to plain text
+            await sendDiscordMessage(targetChannelId, content);
+          }
+        }
+        return;
       }
 
       // Send with or without media

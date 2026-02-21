@@ -1,0 +1,15 @@
+{
+  "name": "giphy",
+  "displayName": "Giphy",
+  "version": "1.0.0",
+  "description": "Search and send GIFs using the Giphy API. Express yourself with animated reactions.",
+  "author": { "name": "Cleo Hayes" },
+  "license": "MIT",
+  "components": {
+    "skills": "./skills/"
+  },
+  "permissions": {
+    "network": true
+  },
+  "configSchema": "./config.schema.json"
+}

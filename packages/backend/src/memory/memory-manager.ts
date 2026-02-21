@@ -149,7 +149,7 @@ export class MemoryManager {
    * Retrieve relevant long-term memories for a given query.
    * Score formula: 0.4 * relevance + 0.3 * importance + 0.3 * recency
    */
-  async retrieveRelevant(query: string, limit: number = MEMORY_RETRIEVAL_LIMIT): Promise<ScoredMemory[]> {
+  async retrieveRelevant(query: string, limit: number = MEMORY_RETRIEVAL_LIMIT, trackAccess: boolean = true): Promise<ScoredMemory[]> {
     // 1. Embed the query
     const queryEmbedding = await this.embeddingProvider.embedSingle(query);
 
@@ -176,9 +176,11 @@ export class MemoryManager {
     scored.sort((a, b) => b.score - a.score);
     const topMemories = scored.slice(0, limit);
 
-    // 5. Update access tracking for retrieved memories
-    for (const mem of topMemories) {
-      memoryStore.updateMemoryAccess(this.memoryDb, mem.id);
+    // 5. Update access tracking for retrieved memories (skip for UI browsing)
+    if (trackAccess) {
+      for (const mem of topMemories) {
+        memoryStore.updateMemoryAccess(this.memoryDb, mem.id);
+      }
     }
 
     return topMemories;
@@ -214,6 +216,22 @@ export class MemoryManager {
 
     if (pruned > 0) getEventBus().emit('memory:pruned', { count: pruned });
     return pruned;
+  }
+
+  // --------------------------------------------------------------------------
+  // Long-Term Memory: Manual Deletion
+  // --------------------------------------------------------------------------
+
+  /**
+   * Delete a single long-term memory by ID (from both SQLite and LanceDB).
+   */
+  async deleteLongTermMemory(id: string): Promise<boolean> {
+    const memory = memoryStore.getLongTermMemory(this.memoryDb, id);
+    if (!memory) return false;
+    this.memoryDb.prepare('DELETE FROM long_term_memories WHERE id = ?').run(id);
+    await this.vectorStore.deleteMemory(id);
+    getEventBus().emit('memory:deleted', { id });
+    return true;
   }
 
   // --------------------------------------------------------------------------

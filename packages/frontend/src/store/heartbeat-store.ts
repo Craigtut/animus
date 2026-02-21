@@ -27,12 +27,18 @@ export interface AgentStatusEvent {
 }
 
 // ============================================================================
-// Reply streaming state
+// Reply streaming state (turn-aware)
 // ============================================================================
 
-export interface ReplyStreamState {
-  isStreaming: boolean;
+export interface ReplyTurn {
+  turnIndex: number;
   accumulated: string;
+  isStreaming: boolean;   // true while chunks are arriving for this turn
+  isComplete: boolean;    // true after turn_complete received (persisted to DB)
+}
+
+export interface ReplyStreamState {
+  turns: ReplyTurn[];
   tickNumber?: number;
 }
 
@@ -71,8 +77,9 @@ interface HeartbeatStoreState {
   addThought: (thought: Thought) => void;
   addExperience: (experience: Experience) => void;
   addAgentEvent: (event: Omit<AgentStatusEvent, 'receivedAt'>) => void;
-  appendReplyChunk: (content: string) => void;
-  completeReply: (content: string, tickNumber?: number) => void;
+  appendReplyChunk: (content: string, turnIndex: number) => void;
+  completeTurn: (turnIndex: number, content: string) => void;
+  completeReply: (content: string, tickNumber?: number, totalTurns?: number) => void;
   clearReplyStream: () => void;
 }
 
@@ -90,7 +97,7 @@ export const useHeartbeatStore = create<HeartbeatStoreState>()((set) => ({
   recentThoughts: [],
   recentExperiences: [],
   agentEvents: [],
-  replyStream: { isStreaming: false, accumulated: '' },
+  replyStream: { turns: [] },
 
   // -- Heartbeat state --
   setHeartbeatState: (state) =>
@@ -148,34 +155,58 @@ export const useHeartbeatStore = create<HeartbeatStoreState>()((set) => ({
       ].slice(0, MAX_AGENT_EVENTS),
     })),
 
-  // -- Reply streaming --
-  appendReplyChunk: (content) =>
+  // -- Reply streaming (turn-aware) --
+  appendReplyChunk: (content, turnIndex) =>
     set((prev) => {
-      const next: ReplyStreamState = {
-        isStreaming: true,
-        accumulated: prev.replyStream.accumulated + content,
-      };
-      if (prev.replyStream.tickNumber !== undefined) {
-        next.tickNumber = prev.replyStream.tickNumber;
+      const turns = [...prev.replyStream.turns];
+      const existing = turns.findIndex((t) => t.turnIndex === turnIndex);
+      if (existing >= 0) {
+        turns[existing] = {
+          ...turns[existing]!,
+          accumulated: turns[existing]!.accumulated + content,
+          isStreaming: true,
+        };
+      } else {
+        turns.push({ turnIndex, accumulated: content, isStreaming: true, isComplete: false });
       }
-      return { replyStream: next };
+      return { replyStream: { ...prev.replyStream, turns } };
     }),
 
-  completeReply: (content, tickNumber) =>
-    set(() => {
-      const next: ReplyStreamState = {
-        isStreaming: false,
-        accumulated: content,
-      };
-      if (tickNumber !== undefined) {
-        next.tickNumber = tickNumber;
+  completeTurn: (turnIndex, content) =>
+    set((prev) => {
+      const turns = [...prev.replyStream.turns];
+      const existing = turns.findIndex((t) => t.turnIndex === turnIndex);
+      if (existing >= 0) {
+        turns[existing] = {
+          ...turns[existing]!,
+          accumulated: content,
+          isStreaming: false,
+          isComplete: true,
+        };
+      } else {
+        turns.push({ turnIndex, accumulated: content, isStreaming: false, isComplete: true });
       }
-      return { replyStream: next };
+      return { replyStream: { ...prev.replyStream, turns } };
+    }),
+
+  completeReply: (_content, tickNumber) =>
+    set((prev) => {
+      // Mark all turns as not streaming
+      const turns = prev.replyStream.turns.map((t) => ({
+        ...t,
+        isStreaming: false,
+      }));
+      return {
+        replyStream: {
+          turns,
+          ...(tickNumber !== undefined ? { tickNumber } : {}),
+        },
+      };
     }),
 
   clearReplyStream: () =>
     set(() => ({
-      replyStream: { isStreaming: false, accumulated: '' },
+      replyStream: { turns: [] },
     })),
 }));
 

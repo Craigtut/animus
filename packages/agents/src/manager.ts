@@ -269,9 +269,11 @@ export class AgentManager {
    * - Session creation fails
    */
   async createSession(config: AgentSessionConfig): Promise<IAgentSession> {
-    // 1. Validate configuration
-    const validated = agentSessionConfigSchema.parse(config);
-    this.logger.debug('Configuration validated', { provider: validated.provider });
+    // 1. Validate the serializable portion of the config.
+    //    We validate but pass the ORIGINAL config to the adapter to preserve
+    //    function-typed fields (canUseTool, hooks) that Zod cannot represent.
+    agentSessionConfigSchema.parse(config);
+    this.logger.debug('Configuration validated', { provider: config.provider });
 
     // 2. Sweep ghost sessions (tracked but no longer active)
     for (const [id, tracked] of this.trackedSessions) {
@@ -291,38 +293,40 @@ export class AgentManager {
         message: `Maximum concurrent sessions reached (${this.maxConcurrentSessions}). End an existing session first.`,
         category: 'resource_exhausted',
         severity: 'recoverable',
-        provider: validated.provider,
+        provider: config.provider,
       });
     }
 
     // 4. Get adapter
-    const adapter = this.getAdapter(validated.provider);
+    const adapter = this.getAdapter(config.provider);
 
     // 5. Check if configured
     if (!adapter.isConfigured()) {
       throw new AgentError({
         code: 'MISSING_CREDENTIALS',
-        message: `${validated.provider} credentials not configured`,
+        message: `${config.provider} credentials not configured`,
         category: 'authentication',
         severity: 'fatal',
-        provider: validated.provider,
+        provider: config.provider,
       });
     }
 
-    // 6. Create session
+    // 6. Create session (pass original config to preserve functions)
     this.logger.info('Creating session', {
-      provider: validated.provider,
-      model: validated.model ?? 'default',
-      verbose: validated.verbose ?? false,
-      hasSystemPrompt: !!validated.systemPrompt,
-      hasMcpServers: !!validated.mcpServers && Object.keys(validated.mcpServers).length > 0,
-      resume: validated.resume ?? null,
+      provider: config.provider,
+      model: config.model ?? 'default',
+      verbose: config.verbose ?? false,
+      hasSystemPrompt: !!config.systemPrompt,
+      hasMcpServers: !!config.mcpServers && Object.keys(config.mcpServers).length > 0,
+      hasCanUseTool: !!config.canUseTool,
+      hasHooks: !!config.hooks,
+      resume: config.resume ?? null,
       trackedCount: this.trackedSessions.size,
     });
-    const session = await adapter.createSession(validated);
+    const session = await adapter.createSession(config);
 
     // 7. Track session with warmth state
-    this.trackSession(session, validated);
+    this.trackSession(session, config);
 
     return session;
   }

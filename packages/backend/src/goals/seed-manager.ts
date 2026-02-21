@@ -17,9 +17,9 @@ import { getEventBus } from '../lib/event-bus.js';
 // Constants
 // ============================================================================
 
-export const SEED_RESONANCE_THRESHOLD = 0.7;
+export const SEED_RESONANCE_THRESHOLD = 0.55;
 export const SEED_BOOST_MULTIPLIER = 0.15;
-export const SEED_DECAY_RATE = 0.027;
+export const SEED_DECAY_RATE = 0.015;
 export const SEED_GRADUATION_THRESHOLD = 0.7;
 export const SEED_CLEANUP_THRESHOLD = 0.01;
 
@@ -143,6 +143,43 @@ export class SeedManager {
         const decayed = heartbeatStore.getSeed(this.db, seed.id);
         if (decayed) getEventBus().emit('seed:updated', decayed);
       } else if (Math.abs(decayedStrength - seed.strength) > 0.001) {
+        heartbeatStore.updateSeed(this.db, seed.id, {
+          strength: decayedStrength,
+        });
+        const updated = heartbeatStore.getSeed(this.db, seed.id);
+        if (updated) getEventBus().emit('seed:updated', updated);
+      }
+    }
+
+    // Graduating seeds also decay — if the mind doesn't promote them,
+    // they lose graduating status and eventually decay entirely.
+    const graduatingSeeds = heartbeatStore.getSeedsByStatus(this.db, 'graduating');
+
+    for (const seed of graduatingSeeds) {
+      const elapsedHours = DecayEngine.hoursSince(seed.lastReinforcedAt);
+      const decayedStrength = seed.strength * Math.exp(-SEED_DECAY_RATE * elapsedHours);
+
+      if (decayedStrength < SEED_CLEANUP_THRESHOLD) {
+        // Strength collapsed entirely — mark as decayed
+        heartbeatStore.updateSeed(this.db, seed.id, {
+          strength: 0,
+          status: 'decayed',
+          decayedAt: now(),
+        });
+        this.seedEmbeddings.delete(seed.id);
+        const decayed = heartbeatStore.getSeed(this.db, seed.id);
+        if (decayed) getEventBus().emit('seed:updated', decayed);
+      } else if (decayedStrength < 0.5) {
+        // Dropped below graduating viability — reset to active so it
+        // can re-graduate later if reinforced by new thoughts
+        heartbeatStore.updateSeed(this.db, seed.id, {
+          strength: decayedStrength,
+          status: 'active',
+        });
+        const demoted = heartbeatStore.getSeed(this.db, seed.id);
+        if (demoted) getEventBus().emit('seed:updated', demoted);
+      } else if (Math.abs(decayedStrength - seed.strength) > 0.001) {
+        // Still graduating but decaying — update strength
         heartbeatStore.updateSeed(this.db, seed.id, {
           strength: decayedStrength,
         });

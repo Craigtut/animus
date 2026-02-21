@@ -67,6 +67,15 @@ interface QueryOptions {
   settingSources?: Array<'user' | 'project' | 'local'>;
   /** Load local plugins for skill discovery without needing settingSources: ['project']. */
   plugins?: Array<{ type: 'local'; path: string }>;
+  /** Programmatic permission handler for all tool types including external MCP tools. */
+  canUseTool?: (
+    toolName: string,
+    input: Record<string, unknown>,
+    options: { signal: AbortSignal; toolUseID: string },
+  ) => Promise<
+    | { behavior: 'allow'; updatedInput?: Record<string, unknown> }
+    | { behavior: 'deny'; message?: string }
+  >;
   stderr?: (message: string) => void;
 }
 
@@ -509,12 +518,7 @@ class ClaudeSession extends BaseSession {
   async prompt(input: string, options?: PromptOptions): Promise<AgentResponse> {
     this.assertActive();
 
-    const timeout = options?.timeoutMs ?? this.config.timeoutMs ?? 300000;
     this.abortController = new AbortController();
-
-    const timer = setTimeout(() => {
-      this.abortController?.abort();
-    }, timeout);
 
     const startTime = Date.now();
     let response = '';
@@ -532,7 +536,6 @@ class ClaudeSession extends BaseSession {
         promptLength: input.length,
         promptPreview: input.substring(0, 120),
         model: sdkOptions.model ?? 'default',
-        timeoutMs: timeout,
         hasOutputFormat: !!sdkOptions.outputFormat,
         hasMcpServers: !!sdkOptions.mcpServers,
       });
@@ -671,18 +674,6 @@ class ClaudeSession extends BaseSession {
         };
       }
 
-      // Check if it was an abort
-      if (this.abortController?.signal.aborted) {
-        throw new AgentError({
-          code: 'TIMEOUT',
-          message: `Prompt timed out after ${timeout}ms`,
-          category: 'timeout',
-          severity: 'retry',
-          provider: 'claude',
-          sessionId: this.id,
-        });
-      }
-
       // Enrich error with stderr output from the CLI subprocess
       const stderrInfo = this.stderrBuffer.trim();
       if (stderrInfo) {
@@ -695,7 +686,6 @@ class ClaudeSession extends BaseSession {
 
       throw wrapError(enrichedError, 'claude', this.id);
     } finally {
-      clearTimeout(timer);
       this.stopWaitingTimer();
       this.abortController = null;
       this.queryInstance = null;
@@ -715,12 +705,7 @@ class ClaudeSession extends BaseSession {
   ): Promise<AgentResponse> {
     this.assertActive();
 
-    const timeout = options?.timeoutMs ?? this.config.timeoutMs ?? 300000;
     this.abortController = new AbortController();
-
-    const timer = setTimeout(() => {
-      this.abortController?.abort();
-    }, timeout);
 
     const startTime = Date.now();
     let response = '';
@@ -741,7 +726,6 @@ class ClaudeSession extends BaseSession {
         promptLength: input.length,
         promptPreview: input.substring(0, 120),
         model: sdkOptions.model ?? 'default',
-        timeoutMs: timeout,
         hasOutputFormat: !!sdkOptions.outputFormat,
         hasMcpServers: !!sdkOptions.mcpServers,
         mcpServerNames: sdkOptions.mcpServers ? Object.keys(sdkOptions.mcpServers) : [],
@@ -991,17 +975,6 @@ class ClaudeSession extends BaseSession {
         };
       }
 
-      if (this.abortController?.signal.aborted) {
-        throw new AgentError({
-          code: 'TIMEOUT',
-          message: `Prompt timed out after ${timeout}ms`,
-          category: 'timeout',
-          severity: 'retry',
-          provider: 'claude',
-          sessionId: this.id,
-        });
-      }
-
       // Enrich error with stderr output from the CLI subprocess
       const stderrInfo = this.stderrBuffer.trim();
       if (stderrInfo) {
@@ -1014,7 +987,6 @@ class ClaudeSession extends BaseSession {
 
       throw wrapError(enrichedError, 'claude', this.id);
     } finally {
-      clearTimeout(timer);
       this.stopWaitingTimer();
       this.abortController = null;
       this.queryInstance = null;
@@ -1124,6 +1096,29 @@ class ClaudeSession extends BaseSession {
       settingSources: this.config.settingSources,
       // Load local plugins for skill discovery (avoids needing settingSources: ['project'])
       plugins: this.config.plugins,
+      // Programmatic permission handler for all tool types (including external MCP).
+      // Wraps the unified canUseTool callback to match the Claude SDK's CanUseTool signature.
+      canUseTool: this.config.canUseTool
+        ? async (
+            toolName: string,
+            input: Record<string, unknown>,
+            sdkOptions: { signal: AbortSignal; toolUseID: string },
+          ) => {
+            this.logger.info(`[canUseTool SDK wrapper] Invoked for: "${toolName}"`);
+            const result = await this.config.canUseTool!(toolName, input);
+            this.logger.info(`[canUseTool SDK wrapper] Result for "${toolName}": ${result.behavior}`);
+            if (result.behavior === 'allow') {
+              return {
+                behavior: 'allow' as const,
+                updatedInput: result.updatedInput ?? input,
+              };
+            }
+            return {
+              behavior: 'deny' as const,
+              message: result.message ?? 'Tool denied by permission system',
+            };
+          }
+        : undefined,
       // Capture stderr from the Claude CLI subprocess for diagnostics.
       // When verbose, log at info level so stderr is visible in real-time.
       stderr: (message: string) => {

@@ -261,16 +261,31 @@ async function executeGoalTaskDecisions(
 
         case 'propose_goal': {
           if (!goalManager) break;
-          goalManager.createGoal({
-            title: String(params['title'] ?? decision.description),
-            ...(params['description'] ? { description: String(params['description']) } : {}),
-            ...(params['motivation'] ? { motivation: String(params['motivation']) } : {}),
-            origin: (params['origin'] as 'user_directed' | 'ai_internal' | 'collaborative') ?? 'ai_internal',
-            ...(params['linkedEmotion'] ? { linkedEmotion: params['linkedEmotion'] as EmotionName } : {}),
-            status: 'proposed',
-            ...(typeof params['basePriority'] === 'number' ? { basePriority: params['basePriority'] } : {}),
-            ...(params['completionCriteria'] ? { completionCriteria: String(params['completionCriteria']) } : {}),
-          });
+          const origin = (params['origin'] as 'user_directed' | 'ai_internal' | 'collaborative') ?? 'ai_internal';
+          const seedId = params['seedId'] ? String(params['seedId']) : undefined;
+
+          if (seedId) {
+            // Promote from seed: marks seed as 'graduated' and links graduatedToGoalId
+            goalManager.promoteToGoal(seedId, {
+              title: String(params['title'] ?? decision.description),
+              ...(params['description'] ? { description: String(params['description']) } : {}),
+              ...(params['motivation'] ? { motivation: String(params['motivation']) } : {}),
+              ...(params['linkedEmotion'] ? { linkedEmotion: params['linkedEmotion'] as EmotionName } : {}),
+              ...(typeof params['basePriority'] === 'number' ? { basePriority: params['basePriority'] } : {}),
+              ...(params['completionCriteria'] ? { completionCriteria: String(params['completionCriteria']) } : {}),
+            });
+          } else {
+            goalManager.createGoal({
+              title: String(params['title'] ?? decision.description),
+              ...(params['description'] ? { description: String(params['description']) } : {}),
+              ...(params['motivation'] ? { motivation: String(params['motivation']) } : {}),
+              origin,
+              ...(params['linkedEmotion'] ? { linkedEmotion: params['linkedEmotion'] as EmotionName } : {}),
+              status: origin === 'user_directed' ? 'active' : 'proposed',
+              ...(typeof params['basePriority'] === 'number' ? { basePriority: params['basePriority'] } : {}),
+              ...(params['completionCriteria'] ? { completionCriteria: String(params['completionCriteria']) } : {}),
+            });
+          }
           break;
         }
 
@@ -334,14 +349,32 @@ async function executeGoalTaskDecisions(
 
         case 'schedule_task': {
           const scheduleType = (params['scheduleType'] as ScheduleType) ?? 'deferred';
+
+          // Compute nextRunAt if not explicitly provided
+          let nextRunAt: string | undefined = params['nextRunAt'] ? String(params['nextRunAt']) : undefined;
+          const cronExpr = params['cronExpression'] ? String(params['cronExpression']) : undefined;
+          const scheduledAt = params['scheduledAt'] ? String(params['scheduledAt']) : undefined;
+
+          if (!nextRunAt) {
+            if (scheduleType === 'recurring' && cronExpr) {
+              const { computeNextRunAt } = await import('../tasks/task-scheduler.js');
+              nextRunAt = computeNextRunAt(cronExpr) ?? undefined;
+              if (!nextRunAt) {
+                log.warn(`Invalid cron expression "${cronExpr}" for schedule_task decision — task will not fire`);
+              }
+            } else if (scheduleType === 'one_shot' && scheduledAt) {
+              nextRunAt = scheduledAt;
+            }
+          }
+
           const task = taskStore.createTask(hbDb, {
             title: String(params['title'] ?? decision.description),
             ...(params['description'] ? { description: String(params['description']) } : {}),
             ...(params['instructions'] ? { instructions: String(params['instructions']) } : {}),
             scheduleType,
-            ...(params['cronExpression'] ? { cronExpression: String(params['cronExpression']) } : {}),
-            ...(params['scheduledAt'] ? { scheduledAt: String(params['scheduledAt']) } : {}),
-            ...(params['nextRunAt'] ? { nextRunAt: String(params['nextRunAt']) } : {}),
+            ...(cronExpr ? { cronExpression: cronExpr } : {}),
+            ...(scheduledAt ? { scheduledAt } : {}),
+            ...(nextRunAt ? { nextRunAt } : {}),
             ...(params['goalId'] ? { goalId: String(params['goalId']) } : {}),
             ...(params['planId'] ? { planId: String(params['planId']) } : {}),
             ...(typeof params['priority'] === 'number' ? { priority: params['priority'] } : {}),

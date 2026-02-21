@@ -84,6 +84,7 @@ async function main() {
   // Create Fastify instance
   const fastify = Fastify({
     logger: false,
+    maxParamLength: 500,
   });
 
   // Register plugins
@@ -239,6 +240,50 @@ async function main() {
   const pluginManager = getPluginManager();
   await pluginManager.loadAll();
 
+  // Seed tool permissions (after migrations + plugins, before heartbeat)
+  log.info('Seeding tool permissions...');
+  const { seedToolPermissions } = await import('./tools/permission-seeder.js');
+  const settings = systemStore.getSystemSettings(getSystemDb());
+
+  // Helper: collect plugin MCP tool info for the seeder
+  function collectPluginTools() {
+    const mcpConfigs = pluginManager.getMcpConfigs();
+    const pluginToolMap = new Map<string, Array<{ name: string; description?: string }>>();
+    for (const [namespacedKey, config] of Object.entries(mcpConfigs)) {
+      // Key format: "pluginName__serverName"
+      const sepIdx = namespacedKey.indexOf('__');
+      const pluginName = sepIdx > 0 ? namespacedKey.substring(0, sepIdx) : namespacedKey;
+      const tools = pluginToolMap.get(pluginName) ?? [];
+      tools.push({
+        name: `mcp__${namespacedKey}`,
+        description: config.description ?? `MCP tools from ${pluginName}`,
+      });
+      pluginToolMap.set(pluginName, tools);
+    }
+    return Array.from(pluginToolMap.entries()).map(
+      ([name, tools]) => ({ name, tools })
+    );
+  }
+
+  seedToolPermissions(getSystemDb(), settings.defaultAgentProvider ?? 'claude', collectPluginTools());
+
+  // Set up approval notifier (event bus listener for tool approval lifecycle)
+  const { setupApprovalNotifier } = await import('./tools/approval-notifier.js');
+  const { getEventBus } = await import('./lib/event-bus.js');
+  setupApprovalNotifier(getEventBus());
+
+  // Re-seed tool permissions when plugins change at runtime
+  getEventBus().on('plugin:changed', () => {
+    const currentSettings = systemStore.getSystemSettings(getSystemDb());
+    seedToolPermissions(getSystemDb(), currentSettings.defaultAgentProvider ?? 'claude', collectPluginTools());
+    log.info('Re-seeded tool permissions after plugin change');
+  });
+
+  // Initialize speech service (lazy-loads models on first use)
+  log.info('Initializing speech service...');
+  const { initSpeechService } = await import('./speech/index.js');
+  const speechService = await initSpeechService({ dataDir: path.dirname(env.DB_SYSTEM_PATH) });
+
   // Initialize channel manager (after plugins, before heartbeat)
   log.info('Initializing channel manager...');
   const { getChannelManager } = await import('./channels/channel-manager.js');
@@ -279,6 +324,8 @@ async function main() {
     await pluginManager.cleanupSkills();
     // Stop all channel child processes
     await channelManager.stopAll();
+    // Release speech engine resources
+    await speechService.shutdown();
     await fastify.close();
     closeDatabases();
     process.exit(0);
