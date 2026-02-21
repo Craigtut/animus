@@ -17,8 +17,8 @@ import type { ToolHandlerContext } from '../../src/tools/types.js';
 // ============================================================================
 
 describe('Tool Definitions', () => {
-  it('should have 10 tool definitions', () => {
-    expect(Object.keys(ANIMUS_TOOL_DEFS)).toHaveLength(10);
+  it('should have 11 tool definitions', () => {
+    expect(Object.keys(ANIMUS_TOOL_DEFS)).toHaveLength(11);
   });
 
   it('should define send_message', () => {
@@ -90,7 +90,7 @@ describe('Tool Permissions', () => {
 describe('Tool Registry', () => {
   it('should return all tool names', () => {
     const names = getToolNames();
-    expect(names).toEqual(['send_message', 'update_progress', 'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials', 'resolve_tool_approval', 'transcribe_audio', 'generate_speech']);
+    expect(names).toEqual(['send_message', 'update_progress', 'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials', 'resolve_tool_approval', 'transcribe_audio', 'generate_speech', 'send_voice_reply']);
   });
 
   it('should get a tool by name', () => {

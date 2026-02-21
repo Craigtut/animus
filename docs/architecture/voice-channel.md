@@ -37,7 +37,7 @@ The voice channel adds a conversational voice mode to the web Presence page. Unl
                     │                         │          │           │              │
                     │                         │          │           ▼              │
                     │                         │          │  TTS Service             │
-                    │  ◄──────────────────────┼──────────│  (sherpa-onnx Pocket TTS)    │
+                    │  ◄──────────────────────┼──────────│  (native Pocket TTS)     │
                     │  Audio chunks via WS     │          │  Streaming WAV chunks   │
                     │         │                │          │                         │
                     │         ▼                │          │                         │
@@ -101,24 +101,24 @@ Total: ~630 MB on disk. Model files are stored in `./data/models/stt/` and downl
 
 ---
 
-### Text-to-Speech: Pocket TTS via sherpa-onnx
+### Text-to-Speech: Pocket TTS via @animus/tts-native (napi-rs)
 
-**Model**: Pocket TTS (~200MB INT8)
-**Runtime**: sherpa-onnx (same native Node.js addon as STT — no separate process)
+**Model**: Pocket TTS (~225MB safetensors)
+**Runtime**: `@animus/tts-native` — a napi-rs native Node.js addon wrapping the [pocket-tts](https://github.com/babybirdprd/pocket-tts) Rust crate (Candle-based inference)
 
-Pocket TTS is a zero-shot voice cloning model (~200MB INT8) that uses reference audio to reproduce any voice. Given a short WAV sample (5-15 seconds), it generates speech that mimics the speaker's voice characteristics. Since sherpa-onnx already bundles Pocket TTS support, **both STT and TTS use the same runtime** — no Python sidecar, no separate process, no additional dependencies.
+Pocket TTS is a zero-shot voice cloning model that uses reference audio to reproduce any voice. Given a short WAV sample (5-15 seconds), it generates speech that mimics the speaker's voice characteristics. The Rust port runs the original safetensors weights natively via Candle, producing near-identical quality to the original Python implementation at 3-7x faster speeds. No Python sidecar, no separate process.
 
-#### Why Pocket TTS via sherpa-onnx
+#### Why native Rust Pocket TTS
 
 | Criterion | Decision |
 |-----------|----------|
-| **Unified runtime** | Same `sherpa-onnx` npm package handles both STT and TTS. No Python, no sidecar. |
+| **Runtime** | `@animus/tts-native` napi-rs addon (Rust, compiled per-platform) |
 | **Voice cloning** | Zero-shot cloning from 5-15 seconds of reference audio |
-| **Speed** | Sub-300ms processing for typical sentences on CPU |
-| **Quality** | Natural-sounding speech that reproduces the reference voice |
-| **CPU-only** | No GPU needed |
-| **License** | MIT + CC-BY-4.0 |
-| **Model size** | ~200 MB (INT8 quantized) |
+| **Speed** | ~3.2x realtime on Apple Silicon (e.g., 5.2s audio in 1.6s) |
+| **Quality** | Near-identical to original Python implementation. sherpa-onnx ONNX version produced garbled audio. |
+| **CPU-only** | No GPU needed. Uses Accelerate framework on macOS. |
+| **License** | CC-BY-4.0 (model weights), MIT (Rust crate) |
+| **Model size** | ~225 MB (safetensors + tokenizer) |
 
 #### Integration: In-Process via Shared Speech Service
 
@@ -139,17 +139,13 @@ No HTTP calls, no child processes, no sidecar lifecycle management. The TTS runs
 
 #### Model Files
 
-Pocket TTS ONNX models are stored in `./data/models/tts/`:
+Pocket TTS safetensors models are stored in `./data/models/tts/`:
 
-- `lm_flow.int8.onnx` — Language model (flow)
-- `lm_main.int8.onnx` — Language model (main)
-- `encoder.onnx` — Encoder
-- `decoder.int8.onnx` — Decoder
-- `text_conditioner.onnx` — Text conditioning
-- `vocab.json` — Vocabulary
-- `token_scores.json` — Token scoring
+- `tts_b6369a24.safetensors` — Combined model weights (FlowLM + Mimi), ~225 MB
+- `tokenizer.model` — SentencePiece tokenizer, ~58 KB
+- `b6369a24.yaml` — Model config, ~1.3 KB
 
-Total: ~200 MB on disk.
+Total: ~225 MB on disk. Hosted on GitHub Releases (`speech-models-v1.0.0`) for unauthenticated download.
 
 #### Voice Configuration
 
@@ -157,7 +153,7 @@ Pocket TTS uses **reference audio** rather than numeric speaker IDs. Voice confi
 
 #### Output Format
 
-Pocket TTS via sherpa-onnx produces raw PCM samples (Float32Array at 24kHz). The backend encodes these to WAV before sending to the frontend:
+Pocket TTS produces raw PCM samples (Float32Array at 24kHz). The backend encodes these to WAV before sending to the frontend:
 
 ```typescript
 import { pcmToWav } from '../speech/audio-utils.js';
@@ -377,10 +373,10 @@ class VoiceChannelAdapter implements IChannelAdapter {
 1. **Frontend** captures audio as WebM/Opus chunks via MediaRecorder
 2. Audio chunks are sent to backend via tRPC subscription or WebSocket
 3. **Backend** decodes WebM/Opus to raw PCM (16kHz, mono, 16-bit) using `ffmpeg` or a lightweight decoder
-4. PCM is fed to **sherpa-onnx** offline recognizer with the Parakeet TDT v3 model
+4. PCM is fed to **sherpa-onnx** offline recognizer with the Parakeet TDT v3 model (STT)
 5. Transcribed text is wrapped in an `IncomingMessage` with `channel: 'voice'`
 6. Message enters the **heartbeat pipeline** (same path as all other channels)
-7. Reply text from the mind is synthesized via **Pocket TTS** through the shared speech service (in-process)
+7. Reply text from the mind is synthesized via **native Pocket TTS** (`@animus/tts-native`) through the shared speech service (in-process)
 8. WAV audio buffer is sent back to the frontend via tRPC subscription
 9. **Frontend** plays audio through Web Audio API
 
@@ -514,12 +510,13 @@ VOICE_TTS_SPEED=1.0
 ### Prerequisites
 
 The voice channel requires:
-1. **sherpa-onnx npm package** installed (`npm install sherpa-onnx`)
-2. **Parakeet TDT v3 model files** downloaded to `./data/models/stt/`
-3. **Pocket TTS model files** downloaded to `./data/models/tts/`
-4. **ffmpeg** installed on the system (for audio format conversion)
+1. **sherpa-onnx npm package** installed (`npm install sherpa-onnx`) — for STT only
+2. **@animus/tts-native** built (`npm run build -w @animus/tts-native`, requires Rust toolchain) — for TTS. Auto-built on `npm run dev` if Rust is available.
+3. **Parakeet TDT v3 model files** downloaded to `./data/models/stt/`
+4. **Pocket TTS model files** (safetensors) downloaded to `./data/models/tts/`
+5. **ffmpeg** installed on the system (for audio format conversion)
 
-No Python required. Both STT and TTS run natively in Node.js via sherpa-onnx.
+No Python required. STT runs via sherpa-onnx native Node.js addon, TTS runs via @animus/tts-native napi-rs addon (Rust).
 
 If any prerequisite is missing, the voice channel shows as "unavailable" in settings with a message about what's needed. The web text channel continues to work regardless.
 
@@ -641,8 +638,10 @@ interface VoiceReplyChunk {
 - `docs/frontend/presence.md` — Presence page where voice mode lives
 - `docs/frontend/app-shell.md` — App shell and navigation
 - `docs/architecture/tech-stack.md` — Database architecture, shared abstractions
-- [sherpa-onnx GitHub](https://github.com/k2-fsa/sherpa-onnx) — STT + TTS runtime
-- [sherpa-onnx npm](https://www.npmjs.com/package/sherpa-onnx) — Node.js package
+- [sherpa-onnx GitHub](https://github.com/k2-fsa/sherpa-onnx) — STT runtime
+- [sherpa-onnx npm](https://www.npmjs.com/package/sherpa-onnx) — Node.js package (STT)
 - [Parakeet TDT v3 (HuggingFace)](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) — STT model
 - `docs/architecture/speech-engine.md` — Shared speech engine architecture, voice system
-- [Pocket TTS](https://github.com/pocket-tts/pocket-tts) — Zero-shot voice cloning TTS model
+- [pocket-tts Rust crate](https://github.com/babybirdprd/pocket-tts) — Rust port of Pocket TTS (used by @animus/tts-native)
+- [Pocket TTS model weights (HuggingFace)](https://huggingface.co/kyutai/pocket-tts) — Original model (CC-BY-4.0, gated)
+- `docs/architecture/tts-licensing-and-distribution.md` — TTS model licensing and redistribution details

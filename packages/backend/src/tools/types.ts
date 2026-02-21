@@ -71,6 +71,8 @@ export interface ToolHandlerContext {
         channel: ChannelType;
         content: string;
         media?: Array<{ type: 'image' | 'audio' | 'video' | 'file'; path: string; filename?: string }>;
+        /** Override content sent to the channel adapter. DB always stores `content`. */
+        channelContent?: string;
       }): Promise<{ id: string } | null>;
     };
   };

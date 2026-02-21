@@ -73,6 +73,12 @@ interface ConfigUpdateMessage {
   config: Record<string, unknown>;
 }
 
+interface ActionMessage {
+  type: 'action';
+  id: string;
+  action: { type: string; [key: string]: unknown };
+}
+
 interface PingMessage {
   type: 'ping';
   id: string;
@@ -90,6 +96,7 @@ type ParentMessage =
   | ResolveContactResponseMessage
   | MediaDownloadResponseMessage
   | ConfigUpdateMessage
+  | ActionMessage
   | PingMessage;
 
 // ============================================================================
@@ -145,12 +152,24 @@ export interface AdapterContext {
     filename?: string;
     auth?: { type: 'basic'; username: string; password: string } | { type: 'bearer'; token: string };
   }): Promise<{ localPath: string; sizeBytes: number }>;
+  reportPresence(params: {
+    identifier: string;
+    status: 'online' | 'idle' | 'dnd' | 'offline';
+    statusText?: string;
+    activity?: string;
+  }): void;
+}
+
+export interface ChannelAction {
+  type: string;
+  [key: string]: unknown;
 }
 
 export interface ChannelAdapter {
   start(): Promise<void>;
   stop(): Promise<void>;
   send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<void>;
+  performAction?(action: ChannelAction): Promise<void>;
 }
 
 export type CreateAdapterFn = (ctx: AdapterContext) => ChannelAdapter;
@@ -285,6 +304,16 @@ function createAdapterContext(): AdapterContext {
           filename: params.filename,
           auth: params.auth,
         });
+      });
+    },
+
+    reportPresence(params) {
+      sendToParent({
+        type: 'presence_update',
+        identifier: params.identifier,
+        status: params.status,
+        statusText: params.statusText,
+        activity: params.activity,
       });
     },
   };
@@ -435,6 +464,26 @@ function handleParentMessage(raw: unknown): void {
       doStop().catch(() => {
         // Already handled in doStop
       });
+      break;
+    }
+
+    case 'action': {
+      if (adapter && typeof adapter.performAction === 'function') {
+        adapter
+          .performAction(msg.action)
+          .then(() => sendToParent({ type: 'action_response', id: msg.id, ok: true }))
+          .catch((err: unknown) =>
+            sendToParent({
+              type: 'action_response',
+              id: msg.id,
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          );
+      } else {
+        // Adapter doesn't implement performAction — silent no-op
+        sendToParent({ type: 'action_response', id: msg.id, ok: true });
+      }
       break;
     }
 

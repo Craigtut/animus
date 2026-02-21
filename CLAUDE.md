@@ -307,6 +307,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - **Architecture**: `docs/architecture/credential-passing.md` (secrets & credentials — AES-256-GCM encryption at rest, agent-blind model, three storage locations, credential manifest, plugin `${config.*}` resolution, `run_with_credentials` tool, channel IPC injection, frontend masking, threat model)
 - **Architecture**: `docs/architecture/observational-memory.md` (observational memory — three-stream compression, Observer/Reflector agents, token-based thresholds, async processing, memory.db schema)
 - **Architecture**: `docs/architecture/reflex-system.md` (reflex fast-response layer — Vercel AI SDK, dual-path voice architecture, lightweight context, heartbeat integration, provider configuration)
+- **Architecture**: `docs/architecture/tts-licensing-and-distribution.md` (TTS model licensing, CC-BY-4.0 redistribution, weight bundling approach, voice cloning consent flow, attribution requirements)
 - **Open Questions**: `docs/architecture/open-questions.md` (all 7 resolved)
 - **Open Concerns**: `docs/architecture/open-concerns.md` (known acceptable concerns)
 - **Frontend Design**: `docs/frontend/design-principles.md`, `docs/frontend/onboarding.md`
@@ -333,6 +334,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on voice/speech/STT/TTS/audio → `/doc-explorer voice` and `/doc-explorer speech-engine`
 - Working on speech/STT/TTS/voice synthesis/voice management → `/doc-explorer speech-engine`
 - Working on reflex/fast-response/voice-latency → `/doc-explorer reflex`
+- Working on TTS licensing/model distribution/voice cloning consent → `/doc-explorer tts-licensing`
 - Working on sleep/energy/circadian rhythm → `/doc-explorer sleep-energy`
 - Working on agent SDKs → `/doc-explorer agents`
 - Working on Pi adapter/transformContext → `/doc-explorer pi`

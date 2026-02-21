@@ -48,8 +48,8 @@ describe('channel-router', () => {
   });
 
   describe('handleIncoming', () => {
-    it('returns null for unknown callers', () => {
-      const result = router.handleIncoming({
+    it('returns null for unknown callers', async () => {
+      const result = await router.handleIncoming({
         channel: 'sms',
         identifier: '+15551234567',
         content: 'Hello',
@@ -57,7 +57,7 @@ describe('channel-router', () => {
       expect(result).toBeNull();
     });
 
-    it('stores message and returns it for known contacts', () => {
+    it('stores message and returns it for known contacts', async () => {
       // Create a known contact
       const contact = systemStore.createContact(mockSysDb, {
         fullName: 'Known User',
@@ -69,7 +69,7 @@ describe('channel-router', () => {
         identifier: '+15559999999',
       });
 
-      const result = router.handleIncoming({
+      const result = await router.handleIncoming({
         channel: 'sms',
         identifier: '+15559999999',
         content: 'Hi there',

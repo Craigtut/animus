@@ -455,8 +455,9 @@ function resolveToolPermission(toolName: string): {
   // Plugin MCP tools: use server-level key
   if (toolName.startsWith('mcp__')) {
     // Core Animus MCP tools have their own in-process gate in registry.ts
-    // (server name is 'animus', registered under key 'tools' in mcpServers)
-    if (toolName.startsWith('mcp__animus__')) return null;
+    // Mind session registers under key 'tools' (mcp__tools__*),
+    // sub-agent orchestrator uses key 'animus' (mcp__animus__*)
+    if (toolName.startsWith('mcp__tools__') || toolName.startsWith('mcp__animus__')) return null;
     // Cognitive tools are internal, always allowed
     if (toolName.startsWith('mcp__cognitive__')) return null;
 

@@ -284,6 +284,18 @@ async function main() {
   const { initSpeechService } = await import('./speech/index.js');
   const speechService = await initSpeechService({ dataDir: path.dirname(env.DB_SYSTEM_PATH) });
 
+  // Initialize download manager
+  const { initDownloadManager, getSpeechAssets } = await import('./downloads/index.js');
+  const downloadManager = initDownloadManager(dataDir);
+
+  // Re-initialize voice manager when speech models finish downloading
+  getEventBus().on('download:completed', async (payload) => {
+    if (payload.category === 'speech') {
+      log.info(`Speech model downloaded: ${payload.label}, re-initializing voices...`);
+      await speechService.voices.initialize();
+    }
+  });
+
   // Initialize channel manager (after plugins, before heartbeat)
   log.info('Initializing channel manager...');
   const { getChannelManager } = await import('./channels/channel-manager.js');
@@ -302,6 +314,16 @@ async function main() {
   // Initialize heartbeat system
   log.info('Initializing heartbeat system...');
   await initializeHeartbeat();
+
+  // Auto-download missing speech models if onboarding is complete
+  const onboardingState = systemStore.getOnboardingState(getSystemDb());
+  if (onboardingState.isComplete) {
+    const missingAssets = getSpeechAssets().filter((a) => !downloadManager.isAssetPresent(a));
+    if (missingAssets.length > 0) {
+      log.info(`Auto-downloading ${missingAssets.length} missing speech model(s)...`);
+      downloadManager.enqueue(missingAssets);
+    }
+  }
 
   // Start server
   try {
@@ -322,6 +344,8 @@ async function main() {
     await stopHeartbeat();
     await pluginManager.stopTriggers();
     await pluginManager.cleanupSkills();
+    // Cancel any in-progress downloads
+    downloadManager.cancelAll();
     // Stop all channel child processes
     await channelManager.stopAll();
     // Release speech engine resources

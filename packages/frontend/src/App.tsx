@@ -46,6 +46,7 @@ import { PersonaPage } from './pages/PersonaPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { MaintenanceOverlay } from './components/MaintenanceOverlay';
+import { DownloadToast } from './components/DownloadToast';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -199,6 +200,7 @@ export function App() {
             </Routes>
           </BrowserRouter>
           <MaintenanceOverlay />
+          <DownloadToast />
         </ThemeSelector>
       </QueryClientProvider>
     </trpc.Provider>

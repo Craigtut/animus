@@ -563,12 +563,35 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     });
     const tickStart = Date.now();
 
+    // Start typing indicator for message-triggered ticks
+    let typingTimer: ReturnType<typeof setInterval> | null = null;
+    if (queuedTick.trigger.type === 'message' && queuedTick.trigger.channel) {
+      const triggerChannel = queuedTick.trigger.channel;
+      const triggerMetadata = queuedTick.trigger.metadata as Record<string, unknown> | undefined;
+      const channelId = triggerMetadata?.['channelId'] as string | undefined;
+
+      const { getChannelManager } = await import('../channels/channel-manager.js');
+      const cm = getChannelManager();
+      const manifest = cm.getChannelManifest(triggerChannel);
+
+      if (manifest?.capabilities.includes('typing-indicator') && channelId) {
+        const fireTyping = () => {
+          cm.performAction(triggerChannel, { type: 'typing_indicator', channelId }).catch(() => {});
+        };
+        fireTyping();
+        typingTimer = setInterval(fireTyping, 8_000);
+      }
+    }
+
     // Update state: entering mind stage
     heartbeatStore.updateHeartbeatState(hbDb, { currentStage: 'mind' });
     eventBus.emit('heartbeat:stage_change', { stage: 'mind' });
 
     // Stage 2: MIND QUERY
     const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged, allThoughts, replyTurnsSent } = await mindQuery(gathered, tickNumber);
+
+    // Clear typing indicator now that mind query is done
+    if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
 
     // Log tick input to agent_logs.db (only if mindQuery didn't already log it)
     const logSessionId = ctx.mindSession.logSessionId?.() ?? null;
@@ -684,6 +707,9 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
 
     log.info(`Completed tick #${tickNumber}`);
   } catch (err) {
+    // Clear typing indicator on error
+    if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
+
     log.error(`Tick #${tickNumber} failed:`, err);
 
     // Return to idle on failure

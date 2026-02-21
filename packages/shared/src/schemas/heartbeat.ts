@@ -154,6 +154,7 @@ export const builtInDecisionTypeSchema = z.enum([
   'update_agent',
   'cancel_agent',
   'send_message',
+  'send_reaction',
   'update_goal',
   'propose_goal',
   'create_seed',

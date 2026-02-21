@@ -7,19 +7,18 @@ import path from 'node:path';
 vi.mock('sherpa-onnx-node', () => {
   const mockStream = {
     acceptWaveform: vi.fn(),
-    result: { text: '  Hello world  ' },
   };
 
   const MockOfflineRecognizer = vi.fn().mockImplementation(() => ({
     createStream: vi.fn().mockReturnValue(mockStream),
     decode: vi.fn(),
+    getResult: vi.fn().mockReturnValue({ text: '  Hello world  ' }),
   }));
 
   return {
-    OfflineRecognizerConfig: vi.fn().mockImplementation((cfg: any) => cfg),
-    OfflineModelConfig: vi.fn().mockImplementation((cfg: any) => cfg),
-    OfflineTransducerModelConfig: vi.fn().mockImplementation((cfg: any) => cfg),
-    OfflineRecognizer: MockOfflineRecognizer,
+    default: {
+      OfflineRecognizer: MockOfflineRecognizer,
+    },
   };
 });
 

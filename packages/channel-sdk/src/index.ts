@@ -55,12 +55,24 @@ export interface AdapterContext {
     filename?: string;
     auth?: { type: 'basic'; username: string; password: string } | { type: 'bearer'; token: string };
   }): Promise<{ localPath: string; sizeBytes: number }>;
+  reportPresence(params: {
+    identifier: string;
+    status: 'online' | 'idle' | 'dnd' | 'offline';
+    statusText?: string;
+    activity?: string;
+  }): void;
+}
+
+export interface ChannelAction {
+  type: string;
+  [key: string]: unknown;
 }
 
 export interface ChannelAdapter {
   start(): Promise<void>;
   stop(): Promise<void>;
   send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<void>;
+  performAction?(action: ChannelAction): Promise<void>;
 }
 
 export type CreateAdapterFn = (ctx: AdapterContext) => ChannelAdapter;

@@ -1,0 +1,20 @@
+[package]
+name = "animus-tts-native"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", features = ["async", "tokio_rt"] }
+napi-derive = "2"
+pocket-tts = { git = "https://github.com/babybirdprd/pocket-tts", rev = "dbf78c816cd83c89f11dbeb9d87290ad0a3dccd0", default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

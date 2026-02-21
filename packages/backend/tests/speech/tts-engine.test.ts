@@ -3,23 +3,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Mock sherpa-onnx-node before importing TTSEngine
-vi.mock('sherpa-onnx-node', () => {
-  const MockOfflineTts = vi.fn().mockImplementation(() => ({
-    generate: vi.fn().mockReturnValue({
-      samples: new Float32Array([0.1, -0.2, 0.3, -0.4]),
-      sampleRate: 22050,
-    }),
-  }));
-
-  return {
-    OfflineTtsConfig: vi.fn().mockImplementation((cfg: any) => cfg),
-    OfflineTtsModelConfig: vi.fn().mockImplementation((cfg: any) => cfg),
-    OfflineTtsKokoroModelConfig: vi.fn().mockImplementation((cfg: any) => cfg),
-    OfflineTts: MockOfflineTts,
-    GenerationConfig: vi.fn().mockImplementation((cfg: any) => cfg),
-  };
+// Mock @animus/tts-native before importing TTSEngine
+const mockGenerate = vi.fn().mockResolvedValue(new Float32Array([0.1, -0.2, 0.3, -0.4]));
+const mockCreateVoiceState = vi.fn().mockResolvedValue({ __voiceState: true });
+const mockLoad = vi.fn().mockResolvedValue({
+  generate: mockGenerate,
+  createVoiceState: mockCreateVoiceState,
+  sampleRate: 24000,
 });
+
+vi.mock('@animus/tts-native', () => ({
+  PocketTTS: {
+    load: mockLoad,
+  },
+}));
 
 // Mock logger
 vi.mock('../../src/lib/logger.js', () => ({
@@ -42,6 +39,7 @@ function createMockVoiceManager(voices: VoiceEntry[] = []): VoiceManager {
       samples: new Float32Array([0.5, -0.5]),
       sampleRate: 16000,
     }),
+    loadVoiceWavBuffer: vi.fn().mockResolvedValue(Buffer.from('RIFF fake wav data')),
     initialize: vi.fn(),
     addCustomVoice: vi.fn(),
     removeCustomVoice: vi.fn(),
@@ -51,11 +49,8 @@ function createMockVoiceManager(voices: VoiceEntry[] = []): VoiceManager {
 function createTtsModelFiles(modelsPath: string): void {
   const ttsDir = path.join(modelsPath, 'tts');
   fs.mkdirSync(ttsDir, { recursive: true });
-  fs.writeFileSync(path.join(ttsDir, 'lm_flow.int8.onnx'), '');
-  fs.writeFileSync(path.join(ttsDir, 'lm_main.int8.onnx'), '');
-  fs.writeFileSync(path.join(ttsDir, 'encoder.onnx'), '');
-  fs.writeFileSync(path.join(ttsDir, 'decoder.int8.onnx'), '');
-  fs.writeFileSync(path.join(ttsDir, 'text_conditioner.onnx'), '');
+  fs.writeFileSync(path.join(ttsDir, 'tts_b6369a24.safetensors'), '');
+  fs.writeFileSync(path.join(ttsDir, 'tokenizer.model'), '');
 }
 
 describe('TTSEngine', () => {
@@ -65,6 +60,15 @@ describe('TTSEngine', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'animus-test-'));
     config = { modelsPath: tmpDir, defaultSpeed: 1.0 };
+    vi.clearAllMocks();
+    // Reset mock implementations after clearAllMocks
+    mockGenerate.mockResolvedValue(new Float32Array([0.1, -0.2, 0.3, -0.4]));
+    mockCreateVoiceState.mockResolvedValue({ __voiceState: true });
+    mockLoad.mockResolvedValue({
+      generate: mockGenerate,
+      createVoiceState: mockCreateVoiceState,
+      sampleRate: 24000,
+    });
   });
 
   afterEach(() => {
@@ -111,10 +115,27 @@ describe('TTSEngine', () => {
 
       expect(result.samples).toBeInstanceOf(Float32Array);
       expect(result.samples.length).toBe(4);
-      expect(result.sampleRate).toBe(22050);
+      expect(result.sampleRate).toBe(24000);
       expect(result.wavBuffer).toBeInstanceOf(Buffer);
       // WAV header starts with RIFF
       expect(result.wavBuffer.toString('ascii', 0, 4)).toBe('RIFF');
+    });
+
+    it('calls PocketTTS.load with the tts model directory', async () => {
+      createTtsModelFiles(tmpDir);
+      const voice: VoiceEntry = {
+        id: 'alba',
+        name: 'Alba',
+        type: 'builtin',
+        filePath: 'builtin/alba.wav',
+        addedAt: new Date().toISOString(),
+      };
+      const vm = createMockVoiceManager([voice]);
+      const engine = new TTSEngine(config, vm);
+
+      await engine.synthesize('Hello');
+
+      expect(mockLoad).toHaveBeenCalledWith(path.join(tmpDir, 'tts'));
     });
 
     it('uses specified voiceId when provided', async () => {
@@ -131,7 +152,25 @@ describe('TTSEngine', () => {
 
       await engine.synthesize('Test', { voiceId: 'custom-1' });
 
-      expect(vm.loadVoiceSamples).toHaveBeenCalledWith('custom-1');
+      expect(vm.loadVoiceWavBuffer).toHaveBeenCalledWith('custom-1');
+    });
+
+    it('creates voice state from WAV buffer', async () => {
+      createTtsModelFiles(tmpDir);
+      const voice: VoiceEntry = {
+        id: 'alba',
+        name: 'Alba',
+        type: 'builtin',
+        filePath: 'builtin/alba.wav',
+        addedAt: new Date().toISOString(),
+      };
+      const vm = createMockVoiceManager([voice]);
+      const engine = new TTSEngine(config, vm);
+
+      await engine.synthesize('Hello');
+
+      expect(mockCreateVoiceState).toHaveBeenCalledTimes(1);
+      expect(mockGenerate).toHaveBeenCalledWith('Hello', { __voiceState: true });
     });
 
     it('throws when models are not available', async () => {
@@ -170,8 +209,9 @@ describe('TTSEngine', () => {
       await engine.synthesize('First');
       await engine.synthesize('Second');
 
-      // loadVoiceSamples should only be called once due to caching
-      expect(vm.loadVoiceSamples).toHaveBeenCalledTimes(1);
+      // loadVoiceWavBuffer and createVoiceState should only be called once due to caching
+      expect(vm.loadVoiceWavBuffer).toHaveBeenCalledTimes(1);
+      expect(mockCreateVoiceState).toHaveBeenCalledTimes(1);
     });
 
     it('reloads when a different voice is requested', async () => {
@@ -186,9 +226,10 @@ describe('TTSEngine', () => {
       await engine.synthesize('First', { voiceId: 'alba' });
       await engine.synthesize('Second', { voiceId: 'marius' });
 
-      expect(vm.loadVoiceSamples).toHaveBeenCalledTimes(2);
-      expect(vm.loadVoiceSamples).toHaveBeenCalledWith('alba');
-      expect(vm.loadVoiceSamples).toHaveBeenCalledWith('marius');
+      expect(vm.loadVoiceWavBuffer).toHaveBeenCalledTimes(2);
+      expect(vm.loadVoiceWavBuffer).toHaveBeenCalledWith('alba');
+      expect(vm.loadVoiceWavBuffer).toHaveBeenCalledWith('marius');
+      expect(mockCreateVoiceState).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -209,12 +250,14 @@ describe('TTSEngine', () => {
       const vm = createMockVoiceManager([voice]);
       const engine = new TTSEngine(config, vm);
 
+      // Need to load the model first
+      await engine.ensureLoaded();
       await engine.setDefaultVoice('alba');
-      expect(vm.loadVoiceSamples).toHaveBeenCalledWith('alba');
+      expect(vm.loadVoiceWavBuffer).toHaveBeenCalledWith('alba');
 
       // Subsequent synthesize should not reload (already cached)
       await engine.synthesize('Test');
-      expect(vm.loadVoiceSamples).toHaveBeenCalledTimes(1);
+      expect(vm.loadVoiceWavBuffer).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -240,7 +283,8 @@ describe('TTSEngine', () => {
 
       // After dispose, ensureLoaded should re-load
       await engine.ensureLoaded();
-      // No error means it successfully re-initialized
+      // PocketTTS.load should have been called twice
+      expect(mockLoad).toHaveBeenCalledTimes(2);
     });
   });
 });

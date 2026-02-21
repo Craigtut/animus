@@ -27,6 +27,8 @@ import { codexAuthRouter } from './routers/codex-auth.js';
 import { pluginsRouter } from './routers/plugins.js';
 import { savesRouter } from './routers/saves.js';
 import { toolsRouter } from './routers/tools.js';
+import { speechRouter } from './routers/speech.js';
+import { downloadsRouter } from './routers/downloads.js';
 
 // ============================================================================
 // App Router
@@ -55,6 +57,8 @@ export const appRouter = router({
   plugins: pluginsRouter,
   saves: savesRouter,
   tools: toolsRouter,
+  speech: speechRouter,
+  downloads: downloadsRouter,
 });
 
 export type AppRouter = typeof appRouter;

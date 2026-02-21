@@ -31,6 +31,7 @@ export const channelCapabilitySchema = z.enum([
   'embeds',
   'reactions',
   'typing-indicator',
+  'voice-messages',
 ]);
 
 export const channelPermissionsSchema = z.object({

@@ -15,6 +15,7 @@
   "dependencies": {
     "@animus/agents": "*",
     "@animus/shared": "*",
+    "@animus/tts-native": "*",
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
     "@fastify/cookie": "^10.0.0",
     "@fastify/cors": "^10.0.0",
@@ -39,12 +40,16 @@
     "llm-json-stream": "^1.1.0",
     "picocolors": "^1.1.1",
     "react": "^19.2.4",
+    "sherpa-onnx-node": "^1.12.25",
+    "tar": "^7.5.9",
+    "unbzip2-stream": "^1.4.3",
     "zod": "^3.23.0",
     "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
     "@types/react": "^19.2.14",
+    "@types/unbzip2-stream": "^1.4.3",
     "tsx": "^4.19.0"
   }
 }

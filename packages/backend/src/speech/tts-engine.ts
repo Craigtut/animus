@@ -1,10 +1,9 @@
 /**
- * TTSEngine -- lazy-loaded sherpa-onnx OfflineTts (Pocket TTS).
+ * TTSEngine -- lazy-loaded native Pocket TTS via @animus/tts-native (napi-rs).
  *
- * Uses zero-shot voice cloning from reference audio.
+ * Uses zero-shot voice cloning from reference audio (WAV files).
  * Model files expected at {modelsPath}/tts/:
- *   lm_flow.int8.onnx, lm_main.int8.onnx, encoder.onnx,
- *   decoder.int8.onnx, text_conditioner.onnx, vocab.json, token_scores.json
+ *   b6369a24.yaml, tts_b6369a24.safetensors, tokenizer.model
  *   test_wavs/ (built-in reference voices)
  */
 
@@ -25,7 +24,6 @@ export interface TTSResult {
 export interface TTSSynthesisOptions {
   speed?: number;
   voiceId?: string;
-  numSteps?: number;
 }
 
 export interface TTSEngineConfig {
@@ -33,12 +31,16 @@ export interface TTSEngineConfig {
   defaultSpeed: number;
 }
 
+// Re-exported from @animus/tts-native — opaque handle
+type NativeVoiceState = import('@animus/tts-native').VoiceState;
+type NativePocketTTS = import('@animus/tts-native').PocketTTS;
+
 export class TTSEngine {
   private config: TTSEngineConfig;
   private voiceManager: VoiceManager;
-  private tts: any = null;
+  private tts: NativePocketTTS | null = null;
   private loaded = false;
-  private cachedVoice: { id: string; samples: Float32Array; sampleRate: number } | null = null;
+  private cachedVoice: { id: string; state: NativeVoiceState } | null = null;
 
   constructor(config: TTSEngineConfig, voiceManager: VoiceManager) {
     this.config = config;
@@ -49,15 +51,12 @@ export class TTSEngine {
   isAvailable(): boolean {
     const ttsDir = path.join(this.config.modelsPath, 'tts');
     return (
-      fs.existsSync(path.join(ttsDir, 'lm_flow.int8.onnx')) &&
-      fs.existsSync(path.join(ttsDir, 'lm_main.int8.onnx')) &&
-      fs.existsSync(path.join(ttsDir, 'encoder.onnx')) &&
-      fs.existsSync(path.join(ttsDir, 'decoder.int8.onnx')) &&
-      fs.existsSync(path.join(ttsDir, 'text_conditioner.onnx'))
+      fs.existsSync(path.join(ttsDir, 'tts_b6369a24.safetensors')) &&
+      fs.existsSync(path.join(ttsDir, 'tokenizer.model'))
     );
   }
 
-  /** Lazy-load the sherpa-onnx TTS. */
+  /** Lazy-load the native Pocket TTS model. */
   async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
 
@@ -66,42 +65,37 @@ export class TTSEngine {
     }
 
     const ttsDir = path.join(this.config.modelsPath, 'tts');
-    log.info('Loading TTS model (Pocket TTS)...');
+    log.info('Loading TTS model (native Pocket TTS)...');
 
-    const sherpa = await import('sherpa-onnx-node');
+    let PocketTTS: typeof import('@animus/tts-native').PocketTTS;
+    try {
+      ({ PocketTTS } = await import('@animus/tts-native'));
+    } catch (err) {
+      throw new Error(
+        'Native TTS addon not built. Run: npm run build -w @animus/tts-native (requires Rust toolchain)',
+      );
+    }
 
-    const config = new sherpa.OfflineTtsConfig({
-      model: new sherpa.OfflineTtsModelConfig({
-        kokoro: new sherpa.OfflineTtsKokoroModelConfig({
-          model: path.join(ttsDir, 'lm_main.int8.onnx'),
-          voices: path.join(ttsDir, 'vocab.json'),
-          tokens: path.join(ttsDir, 'token_scores.json'),
-          dataDir: ttsDir,
-        }),
-      }),
-      maxNumSentences: 1,
-      numThreads: 2,
-    });
-
-    this.tts = new sherpa.OfflineTts(config);
+    this.tts = await PocketTTS.load(ttsDir);
     this.loaded = true;
     log.info('TTS model loaded successfully');
   }
 
-  /** Load voice reference samples (with caching). */
-  private async loadVoice(voiceId: string): Promise<{ samples: Float32Array; sampleRate: number }> {
-    if (this.cachedVoice && this.cachedVoice.id === voiceId) {
-      return this.cachedVoice;
+  /** Load voice state from WAV bytes (with caching by voice ID). */
+  private async loadVoice(voiceId: string): Promise<NativeVoiceState> {
+    if (this.cachedVoice?.id === voiceId) {
+      return this.cachedVoice.state;
     }
 
-    const voiceSamples = await this.voiceManager.loadVoiceSamples(voiceId);
-    this.cachedVoice = { id: voiceId, ...voiceSamples };
-    log.debug(`Loaded voice reference: ${voiceId}`);
-    return voiceSamples;
+    const wavBuffer = await this.voiceManager.loadVoiceWavBuffer(voiceId);
+    const state = await this.tts!.createVoiceState(Buffer.from(wavBuffer));
+    this.cachedVoice = { id: voiceId, state };
+    log.debug(`Loaded voice state: ${voiceId}`);
+    return state;
   }
 
-  /** Get the default voice from the persona or fall back to first available. */
-  private async getDefaultVoice(): Promise<{ samples: Float32Array; sampleRate: number }> {
+  /** Get the default voice from the first available voice entry. */
+  private async getDefaultVoice(): Promise<NativeVoiceState> {
     const voices = this.voiceManager.listVoices();
     const defaultVoice = voices.length > 0 ? voices[0]! : null;
 
@@ -116,35 +110,24 @@ export class TTSEngine {
   async synthesize(text: string, options?: TTSSynthesisOptions): Promise<TTSResult> {
     await this.ensureLoaded();
 
-    const voiceRef = options?.voiceId
+    const voiceState = options?.voiceId
       ? await this.loadVoice(options.voiceId)
       : await this.getDefaultVoice();
 
-    const sherpa = await import('sherpa-onnx-node');
+    const samples = await this.tts!.generate(text, voiceState);
+    const sampleRate = this.tts!.sampleRate;
+    const wavBuffer = pcmToWav(samples, sampleRate);
 
-    const generationConfig = new sherpa.GenerationConfig({
-      speed: options?.speed ?? this.config.defaultSpeed,
-      referenceAudio: voiceRef.samples,
-      referenceSampleRate: voiceRef.sampleRate,
-      numSteps: options?.numSteps ?? 5,
-      extra: { max_reference_audio_len: 12 },
-    });
+    log.debug(`Synthesized ${text.length} chars -> ${samples.length} samples`);
 
-    const audio = this.tts.generate({ text, generationConfig });
-    const wavBuffer = pcmToWav(audio.samples, audio.sampleRate);
-
-    log.debug(`Synthesized ${text.length} chars -> ${audio.samples.length} samples`);
-
-    return {
-      samples: audio.samples,
-      sampleRate: audio.sampleRate,
-      wavBuffer,
-    };
+    return { samples, sampleRate, wavBuffer };
   }
 
   /** Update the cached default voice (called when persona voice changes). */
   async setDefaultVoice(voiceId: string): Promise<void> {
-    await this.loadVoice(voiceId);
+    if (this.loaded) {
+      await this.loadVoice(voiceId);
+    }
     log.info(`Default voice set to: ${voiceId}`);
   }
 

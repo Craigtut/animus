@@ -3,22 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Mock sherpa-onnx-node
+// Mock sherpa-onnx-node (still used for STT)
 vi.mock('sherpa-onnx-node', () => ({
-  OfflineRecognizerConfig: vi.fn().mockImplementation((cfg: any) => cfg),
-  OfflineModelConfig: vi.fn().mockImplementation((cfg: any) => cfg),
-  OfflineTransducerModelConfig: vi.fn().mockImplementation((cfg: any) => cfg),
-  OfflineRecognizer: vi.fn().mockImplementation(() => ({
-    createStream: vi.fn(),
-    decode: vi.fn(),
-  })),
-  OfflineTtsConfig: vi.fn().mockImplementation((cfg: any) => cfg),
-  OfflineTtsModelConfig: vi.fn().mockImplementation((cfg: any) => cfg),
-  OfflineTtsKokoroModelConfig: vi.fn().mockImplementation((cfg: any) => cfg),
-  OfflineTts: vi.fn().mockImplementation(() => ({
-    generate: vi.fn(),
-  })),
-  GenerationConfig: vi.fn().mockImplementation((cfg: any) => cfg),
+  default: {
+    OfflineRecognizer: vi.fn().mockImplementation(() => ({
+      createStream: vi.fn(),
+      decode: vi.fn(),
+    })),
+  },
 }));
 
 // Mock logger

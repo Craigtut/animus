@@ -36,7 +36,7 @@ export interface ProcessHostConfig {
     conversationId?: string;
     media?: IncomingMessage['media'];
     metadata?: Record<string, unknown>;
-  }) => void;
+  }) => void | Promise<void>;
   onStatusChange: (status: string, error?: string) => void;
   onRouteRegister: (method: string, path: string) => void;
   resolveContact: (contactId: string) => Promise<{ identifier: string; displayName?: string } | null>;
@@ -46,9 +46,20 @@ export interface ProcessHostConfig {
     filename?: string;
     auth?: { type: 'basic'; username: string; password: string } | { type: 'bearer'; token: string };
   }) => Promise<{ localPath: string; sizeBytes: number }>;
+  onPresenceUpdate?: (channelType: string, identifier: string, data: {
+    status: 'online' | 'idle' | 'dnd' | 'offline';
+    statusText?: string;
+    activity?: string;
+  }) => void;
 }
 
 interface PendingSend {
+  resolve: (ok: boolean) => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+interface PendingAction {
   resolve: (ok: boolean) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -68,6 +79,7 @@ const READY_TIMEOUT_MS = 10_000;
 const STOP_ACK_TIMEOUT_MS = 10_000;
 const KILL_TIMEOUT_MS = 5_000;
 const SEND_TIMEOUT_MS = 30_000;
+const ACTION_TIMEOUT_MS = 10_000;
 const ROUTE_TIMEOUT_MS = 30_000;
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
 const PING_TIMEOUT_MS = 5_000;
@@ -79,6 +91,7 @@ export class ChannelProcessHost {
   private log: ReturnType<typeof createLogger>;
 
   private pendingSendRequests = new Map<string, PendingSend>();
+  private pendingActionRequests = new Map<string, PendingAction>();
   private pendingRouteRequests = new Map<string, PendingRoute>();
 
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
@@ -258,6 +271,27 @@ export class ChannelProcessHost {
         }
       },
 
+      onPresenceUpdate: (msg) => {
+        this.config.onPresenceUpdate?.(
+          this.config.pkg.channelType,
+          msg.identifier,
+          {
+            status: msg.status,
+            statusText: msg.statusText,
+            activity: msg.activity,
+          }
+        );
+      },
+
+      onActionResponse: (msg) => {
+        const pending = this.pendingActionRequests.get(msg.id);
+        if (pending) {
+          clearTimeout(pending.timer);
+          this.pendingActionRequests.delete(msg.id);
+          pending.resolve(msg.ok);
+        }
+      },
+
       onRouteRegister: (msg) => {
         const key = `${msg.method} ${msg.path}`;
         this.registeredRoutes.add(key);
@@ -423,6 +457,27 @@ export class ChannelProcessHost {
       if (metadata) msg.metadata = metadata;
       if (ipcMedia) msg.media = ipcMedia;
       this.sendToChild(msg);
+    });
+  }
+
+  async performAction(action: { type: string; [key: string]: unknown }): Promise<boolean> {
+    if (!this.childProcess || this.childProcess.killed) {
+      this.log.warn('Cannot perform action: process not running');
+      return false;
+    }
+
+    const id = generateCorrelationId();
+
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingActionRequests.delete(id);
+        this.log.warn(`Action timeout after ${ACTION_TIMEOUT_MS}ms (type: ${action.type})`);
+        resolve(false);
+      }, ACTION_TIMEOUT_MS);
+
+      this.pendingActionRequests.set(id, { resolve, reject: () => resolve(false), timer });
+
+      this.sendToChild({ type: 'action', id, action });
     });
   }
 
@@ -622,6 +677,12 @@ export class ChannelProcessHost {
       pending.reject(error);
     }
     this.pendingSendRequests.clear();
+
+    for (const [id, pending] of this.pendingActionRequests) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+    this.pendingActionRequests.clear();
 
     for (const [id, pending] of this.pendingRouteRequests) {
       clearTimeout(pending.timer);

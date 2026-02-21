@@ -8,12 +8,14 @@ import {
   SlidersHorizontal,
   Tag,
   BookOpen,
+  SpeakerHigh,
   CaretDown,
   CaretUp,
   List,
   X,
 } from '@phosphor-icons/react';
 import { Card, SelectionCard, Button, Input, Slider, Typography, CityAutocomplete, TimezoneSelect } from '../components/ui';
+import { VoiceTab } from '../components/persona/VoiceTab';
 import { trpc } from '../utils/trpc';
 import type { Theme } from '../styles/theme';
 
@@ -84,7 +86,7 @@ const allValues = [
 // Types
 // ============================================================================
 
-type PersonaTab = 'identity' | 'personality' | 'traits-values' | 'background';
+type PersonaTab = 'identity' | 'personality' | 'traits-values' | 'background' | 'voice';
 
 interface SidebarItem {
   id: PersonaTab;
@@ -97,6 +99,7 @@ const tabs: SidebarItem[] = [
   { id: 'personality', label: 'Personality', icon: SlidersHorizontal },
   { id: 'traits-values', label: 'Traits & Values', icon: Tag },
   { id: 'background', label: 'Background', icon: BookOpen },
+  { id: 'voice', label: 'Voice', icon: SpeakerHigh },
 ];
 
 // ============================================================================
@@ -649,6 +652,8 @@ export function PersonaPage() {
   const [values, setValues] = useState<string[]>([]);
   const [background, setBackground] = useState('');
   const [personalityNotes, setPersonalityNotes] = useState('');
+  const [voiceId, setVoiceId] = useState<string | null>(null);
+  const [voiceSpeed, setVoiceSpeed] = useState(1.0);
 
   // Populate draft from server data
   useEffect(() => {
@@ -665,6 +670,8 @@ export function PersonaPage() {
     setValues(persona.values ?? []);
     setBackground(persona.background ?? '');
     setPersonalityNotes(persona.personalityNotes ?? '');
+    setVoiceId(persona.voiceId ?? null);
+    setVoiceSpeed(persona.voiceSpeed ?? 1.0);
     setDirty(false);
   }, [persona]);
 
@@ -712,6 +719,8 @@ export function PersonaPage() {
       values,
       background: background || null,
       personalityNotes: personalityNotes || null,
+      voiceId: voiceId || null,
+      voiceSpeed,
     });
   };
 
@@ -760,6 +769,8 @@ export function PersonaPage() {
         return <TraitsValuesTab traits={traits} toggleTrait={toggleTrait} values={values} toggleValue={toggleValue} errors={errors} />;
       case 'background':
         return <BackgroundTab background={background} setBackground={setBackground} personalityNotes={personalityNotes} setPersonalityNotes={setPersonalityNotes} markDirty={markDirty} />;
+      case 'voice':
+        return <VoiceTab voiceId={voiceId} setVoiceId={setVoiceId} voiceSpeed={voiceSpeed} setVoiceSpeed={setVoiceSpeed} markDirty={markDirty} />;
       default:
         return null;
     }

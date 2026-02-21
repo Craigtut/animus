@@ -10,7 +10,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { createLogger } from '../lib/logger.js';
 import { getEventBus } from '../lib/event-bus.js';
-import { PROJECT_ROOT } from '../utils/env.js';
+import { env } from '../utils/env.js';
 import { getSystemDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
 import { ChannelProcessHost } from './process-host.js';
@@ -32,6 +32,12 @@ export class ChannelManager {
   private configSchemas = new Map<string, ConfigSchema>();
   /** Built-in channels (like web) that run in-process, not as child processes. */
   private builtInSenders = new Map<string, (contactId: string, content: string, metadata?: Record<string, unknown>) => Promise<void>>();
+  private presence = new Map<string, Map<string, {
+    status: 'online' | 'idle' | 'dnd' | 'offline';
+    statusText?: string;
+    activity?: string;
+    updatedAt: number;
+  }>>();
 
   /**
    * Register a built-in channel (always in-process, not a package).
@@ -301,6 +307,47 @@ export class ChannelManager {
   }
 
   /**
+   * Perform an action on a channel (e.g., typing indicator, reaction).
+   * Best-effort: returns false on failure, never throws.
+   */
+  async performAction(channelType: string, action: { type: string; [key: string]: unknown }): Promise<boolean> {
+    // Map action type to capability name
+    const capabilityMap: Record<string, string> = {
+      typing_indicator: 'typing-indicator',
+      add_reaction: 'reactions',
+      send_voice_message: 'voice-messages',
+    };
+    const requiredCapability = capabilityMap[action.type];
+
+    // Check capability if mapping exists
+    if (requiredCapability) {
+      const manifest = this.manifests.get(channelType);
+      if (!manifest || !manifest.capabilities.includes(requiredCapability)) {
+        return false;
+      }
+    }
+
+    // Built-in channels: no-op (web doesn't support these actions)
+    if (this.builtInSenders.has(channelType)) {
+      return true;
+    }
+
+    // Package channels: delegate to process host
+    const host = this.processes.get(channelType);
+    if (!host || !host.isRunning) {
+      log.warn(`Cannot perform action on channel ${channelType}: not running`);
+      return false;
+    }
+
+    try {
+      return await host.performAction(action);
+    } catch (err) {
+      log.error(`performAction failed on channel ${channelType}:`, err);
+      return false;
+    }
+  }
+
+  /**
    * Check if a channel type is available (built-in or running package).
    */
   isChannelAvailable(channelType: string): boolean {
@@ -370,6 +417,81 @@ export class ChannelManager {
     return [...new Set([...this.builtInSenders.keys(), ...this.manifests.keys()])];
   }
 
+  /** Update presence for a contact on a specific channel. */
+  updatePresence(channelType: string, identifier: string, data: {
+    status: 'online' | 'idle' | 'dnd' | 'offline';
+    statusText?: string;
+    activity?: string;
+  }): void {
+    if (!this.presence.has(channelType)) {
+      this.presence.set(channelType, new Map());
+    }
+    this.presence.get(channelType)!.set(identifier, {
+      ...data,
+      updatedAt: Date.now(),
+    });
+  }
+
+  /** Get presence for a single contact on a channel. */
+  getPresence(channelType: string, identifier: string): {
+    status: 'online' | 'idle' | 'dnd' | 'offline';
+    statusText?: string;
+    activity?: string;
+    updatedAt: number;
+  } | undefined {
+    return this.presence.get(channelType)?.get(identifier);
+  }
+
+  /** Get all presence entries for a channel. */
+  getAllPresence(channelType: string): Map<string, {
+    status: 'online' | 'idle' | 'dnd' | 'offline';
+    statusText?: string;
+    activity?: string;
+    updatedAt: number;
+  }> {
+    return this.presence.get(channelType) ?? new Map();
+  }
+
+  /** Get aggregated presence for a contact across all their channels. */
+  getContactPresenceSummary(contactId: string): {
+    status: 'online' | 'idle' | 'dnd' | 'offline';
+    statusText?: string;
+    activity?: string;
+  } | null {
+    const db = getSystemDb();
+    const channels = systemStore.getContactChannelsByContactId(db, contactId);
+    if (channels.length === 0) return null;
+
+    // Priority: online > idle > dnd > offline
+    const priority: Record<string, number> = { online: 3, idle: 2, dnd: 1, offline: 0 };
+    let bestStatus: 'online' | 'idle' | 'dnd' | 'offline' = 'offline';
+    let bestActivity: string | undefined;
+    let bestStatusText: string | undefined;
+
+    for (const ch of channels) {
+      const p = this.presence.get(ch.channel)?.get(ch.identifier);
+      if (!p) continue;
+      // Skip entries older than 10 minutes (stale)
+      if (Date.now() - p.updatedAt > 10 * 60 * 1000) continue;
+      if ((priority[p.status] ?? 0) > (priority[bestStatus] ?? 0)) {
+        bestStatus = p.status;
+        bestActivity = p.activity;
+        bestStatusText = p.statusText;
+      }
+    }
+
+    // If all entries are stale/missing, return null
+    if (bestStatus === 'offline') {
+      const hasAnyPresence = channels.some(ch => {
+        const p = this.presence.get(ch.channel)?.get(ch.identifier);
+        return p && (Date.now() - p.updatedAt <= 10 * 60 * 1000);
+      });
+      if (!hasAnyPresence) return null;
+    }
+
+    return { status: bestStatus, statusText: bestStatusText, activity: bestActivity };
+  }
+
   // ---- Internal ----
 
   private async startProcess(pkg: ChannelPackage, manifest: ChannelManifest): Promise<void> {
@@ -390,9 +512,9 @@ export class ChannelManager {
       pkg,
       manifest,
       decryptedConfig,
-      onIncoming: (msg) => {
+      onIncoming: async (msg) => {
         const router = getChannelRouter();
-        router.handleIncoming({
+        await router.handleIncoming({
           channel: pkg.channelType as Parameters<typeof router.handleIncoming>[0]['channel'],
           identifier: msg.identifier,
           content: msg.content,
@@ -419,10 +541,13 @@ export class ChannelManager {
         if (contact?.fullName) result.displayName = contact.fullName;
         return result;
       },
+      onPresenceUpdate: (channelType, identifier, data) => {
+        this.updatePresence(channelType, identifier, data);
+      },
       downloadMedia: async (params) => {
         const ext = params.filename?.split('.').pop() ?? 'bin';
         const id = crypto.randomUUID();
-        const localPath = path.join(PROJECT_ROOT, 'data', 'media', `${id}.${ext}`);
+        const localPath = path.join(path.dirname(env.DB_SYSTEM_PATH), 'media', `${id}.${ext}`);
 
         fs.mkdirSync(path.dirname(localPath), { recursive: true });
 

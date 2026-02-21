@@ -14,6 +14,7 @@
 import { trpc } from '../utils/trpc';
 import { useHeartbeatStore } from '../store/heartbeat-store';
 import { useMessagesStore } from '../store/messages-store';
+import { useDownloadStore } from '../store/download-store';
 import { useQueryClient } from '@tanstack/react-query';
 
 export function useSubscriptionManager() {
@@ -201,6 +202,31 @@ export function useSubscriptionManager() {
     onData: () => {
       queryClient.invalidateQueries({ queryKey: [['tools', 'listApprovals']] });
       queryClient.invalidateQueries({ queryKey: [['tools', 'listTools']] });
+    },
+  });
+
+  // ========================================================================
+  // 17. Download progress
+  // ========================================================================
+  trpc.downloads.onProgress.useSubscription(undefined, {
+    onData: (data) => {
+      const store = useDownloadStore.getState();
+      switch (data.type) {
+        case 'started':
+          store.handleStarted(data.assetId, data.label, data.category);
+          break;
+        case 'progress':
+          store.handleProgress(data.assetId, data.label, data.category, data.bytesDownloaded, data.totalBytes, data.percent, data.phase);
+          break;
+        case 'completed':
+          store.handleCompleted(data.assetId, data.label, data.category);
+          // Invalidate speech status so Voice tab updates
+          queryClient.invalidateQueries({ queryKey: [['speech']] });
+          break;
+        case 'failed':
+          store.handleFailed(data.assetId, data.label, data.category, data.error, data.retriesRemaining);
+          break;
+      }
     },
   });
 }

@@ -127,6 +127,12 @@ export interface AnimusEventMap {
   'tool:approval_expired': { id: string; toolName: string };
   'tool:permission_changed': { toolName: string; mode: ToolPermissionMode };
 
+  // Downloads
+  'download:started': { assetId: string; label: string; category: string };
+  'download:progress': { assetId: string; label: string; category: string; bytesDownloaded: number; totalBytes: number; percent: number; phase: 'downloading' | 'extracting' };
+  'download:completed': { assetId: string; label: string; category: string };
+  'download:failed': { assetId: string; label: string; category: string; error: string; retriesRemaining: number };
+
   // System
   'system:settings_updated': Record<string, unknown>;
   'system:shutdown': void;

@@ -470,6 +470,7 @@ Communication between the main process and adapter child processes uses Node.js 
 | `resolve_contact_response` | `{ id, result }` | Response to a contact resolution request |
 | `media_download_response` | `{ id, localPath, sizeBytes, error? }` | Response to a media download request |
 | `config_update` | `{ config }` | Push updated configuration without full restart |
+| `action` | `{ id, action: { type, ...params } }` | Perform a channel action (typing indicator, reaction, etc.). Best-effort — adapter returns `ok: true` even if it doesn't implement the action. |
 | `ping` | `{ id }` | Health check (expects `pong` response) |
 
 **Child → Main messages:**
@@ -489,6 +490,7 @@ Communication between the main process and adapter child processes uses Node.js 
 | `route_register` | `{ method, path }` | Register an HTTP route on the main process |
 | `error` | `{ message, stack }` | Unhandled error in the adapter |
 | `stop_ack` | `{}` | Confirms graceful shutdown is complete |
+| `action_response` | `{ id, ok, error? }` | Response to an action request |
 | `pong` | `{ id }` | Health check response |
 
 ### IPC Streaming Protocol
@@ -1115,16 +1117,59 @@ export interface AdapterContext {
   downloadMedia(params: MediaDownloadParams): Promise<MediaDownloadResult>;
 }
 
+export interface ChannelAction {
+  type: string;
+  [key: string]: unknown;
+}
+
 export interface ChannelAdapter {
   start(): Promise<void>;
   stop(): Promise<void>;
   send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<void>;
+  performAction?(action: ChannelAction): Promise<void>;
 }
 
 export type AdapterFactory = (ctx: AdapterContext) => ChannelAdapter;
 ```
 
 This package contains **only types** — no runtime code. It's a devDependency for channel packages and provides autocomplete and type checking during development.
+
+### Channel Actions (`performAction`)
+
+The `performAction` method on `ChannelAdapter` is an optional extension point for channels that support richer interactions beyond text messaging. The engine uses it for features like typing indicators and emoji reactions.
+
+**How it works:**
+
+1. The engine calls `ChannelManager.performAction(channelType, action)`.
+2. The Channel Manager checks the manifest's `capabilities` array to see if the channel supports the action type (capability gating).
+3. If supported, it sends an `action` IPC message to the child process.
+4. The child bootstrapper calls `adapter.performAction(action)` if implemented, or returns `ok: true` as a silent no-op.
+5. The `action_response` IPC message is sent back.
+
+**Capability gating map:**
+
+| Action Type | Required Capability |
+|-------------|-------------------|
+| `typing_indicator` | `typing-indicator` |
+| `add_reaction` | `reactions` |
+
+**Defined action types:**
+
+| Action Type | Parameters | Description |
+|-------------|-----------|-------------|
+| `typing_indicator` | `{ channelId }` | Show "typing..." indicator in the channel |
+| `add_reaction` | `{ channelId, messageId, emoji }` | React to a message with a Unicode emoji |
+
+**Design principles:**
+
+- **`ChannelAction` is loosely typed** (`{ type: string; [key: string]: unknown }`) — adapters handle what they support and ignore the rest. This keeps the interface stable as new action types are added.
+- **Best-effort, never throws** — `performAction` failures are logged but never crash the tick. Actions are UX enhancements, not critical operations.
+- **`performAction` is optional** — existing adapters work unchanged. The child bootstrapper returns `ok: true` for the no-op case.
+- **10-second timeout** — shorter than `send` (30s) because actions are lightweight. Timeout resolves `false`, doesn't throw.
+
+**Typing indicators** are system-driven: the heartbeat `executeTick()` automatically fires `typing_indicator` when processing message-triggered ticks on channels that declare the `typing-indicator` capability. The timer fires immediately, then every 8 seconds (Discord typing lasts 10s), and clears when the mind query completes.
+
+**Emoji reactions** are mind-driven: the mind can issue a `send_reaction` decision with `{ emoji }` params. The decision executor resolves `channelId` and `messageId` from the trigger metadata and calls `performAction` with `add_reaction`. The mind doesn't need platform-specific IDs.
 
 ---
 

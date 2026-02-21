@@ -42,19 +42,25 @@ export class STTEngine {
     const sttDir = path.join(this.modelsPath, 'stt');
     log.info('Loading STT model (Parakeet TDT v3)...');
 
-    const sherpa = await import('sherpa-onnx-node');
+    const sherpaModule = await import('sherpa-onnx-node');
+    const sherpa = sherpaModule.default;
 
-    const config = new sherpa.OfflineRecognizerConfig({
-      modelConfig: new sherpa.OfflineModelConfig({
-        transducer: new sherpa.OfflineTransducerModelConfig({
+    const config = {
+      featConfig: {
+        sampleRate: 16000,
+        featureDim: 80,
+      },
+      modelConfig: {
+        transducer: {
           encoder: path.join(sttDir, 'encoder.int8.onnx'),
           decoder: path.join(sttDir, 'decoder.int8.onnx'),
           joiner: path.join(sttDir, 'joiner.int8.onnx'),
-        }),
+        },
         tokens: path.join(sttDir, 'tokens.txt'),
         numThreads: 2,
-      }),
-    });
+        provider: 'cpu',
+      },
+    };
 
     this.recognizer = new sherpa.OfflineRecognizer(config);
     this.loaded = true;
@@ -69,7 +75,8 @@ export class STTEngine {
     stream.acceptWaveform({ sampleRate, samples: pcmSamples });
     this.recognizer.decode(stream);
 
-    const text = stream.result.text.trim();
+    const result = this.recognizer.getResult(stream);
+    const text = result.text.trim();
     log.debug(`Transcribed ${pcmSamples.length} samples -> "${text.substring(0, 80)}..."`);
     return text;
   }

@@ -107,6 +107,7 @@ export async function executeDecisions(
   tickNumber: number,
   contact: Contact | null,
   triggerChannel: string | undefined,
+  triggerMetadata: Record<string, unknown> | undefined,
   deps: DecisionExecutorDeps,
   eventBus: IEventBus,
 ): Promise<void> {
@@ -120,6 +121,9 @@ export async function executeDecisions(
   await executeGoalTaskDecisions(
     hbDb, decisions, tickNumber, eventBus, deps.seedManager, deps.goalManager,
   );
+
+  // 4. Handle channel decisions (reactions, etc.)
+  await executeChannelDecisions(hbDb, decisions, tickNumber, triggerChannel, triggerMetadata);
 }
 
 // ============================================================================
@@ -462,6 +466,61 @@ async function executeGoalTaskDecisions(
       heartbeatStore.insertTickDecision(hbDb, {
         tickNumber,
         type: decision.type,
+        description: decision.description,
+        parameters: decision.parameters,
+        outcome: 'failed',
+        outcomeDetail: String(err),
+      });
+    }
+  }
+}
+
+// ============================================================================
+// Channel Decision Dispatch
+// ============================================================================
+
+/**
+ * Execute channel-related decisions: send_reaction.
+ * Resolves external IDs (channelId, messageId) from trigger metadata.
+ */
+async function executeChannelDecisions(
+  hbDb: Database.Database,
+  decisions: MindOutput['decisions'],
+  tickNumber: number,
+  triggerChannel: string | undefined,
+  triggerMetadata: Record<string, unknown> | undefined,
+): Promise<void> {
+  for (const decision of decisions) {
+    if (decision.type !== 'send_reaction') continue;
+
+    const params = decision.parameters as Record<string, unknown>;
+    const emoji = String(params['emoji'] ?? '');
+    if (!emoji || !triggerChannel) continue;
+
+    // Resolve external IDs from trigger metadata
+    const channelId = String(triggerMetadata?.['channelId'] ?? '');
+    const messageId = String(triggerMetadata?.['messageId'] ?? '');
+    if (!channelId || !messageId) {
+      log.warn('send_reaction: missing channelId or messageId in trigger metadata');
+      continue;
+    }
+
+    try {
+      const { getChannelManager } = await import('../channels/channel-manager.js');
+      const ok = await getChannelManager().performAction(triggerChannel, {
+        type: 'add_reaction',
+        channelId,
+        messageId,
+        emoji,
+      });
+      if (!ok) {
+        log.warn(`send_reaction failed for emoji ${emoji}`);
+      }
+    } catch (err) {
+      log.error('send_reaction execution error:', err);
+      heartbeatStore.insertTickDecision(hbDb, {
+        tickNumber,
+        type: 'send_reaction',
         description: decision.description,
         parameters: decision.parameters,
         outcome: 'failed',

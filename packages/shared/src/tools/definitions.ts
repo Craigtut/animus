@@ -260,6 +260,31 @@ export const generateSpeechDef: AnimusToolDef = {
 };
 
 /**
+ * send_voice_reply - Reply to the current conversation with a voice message.
+ * Mind-only tool. Combines TTS + channel delivery + text storage.
+ */
+export const sendVoiceReplyDef: AnimusToolDef = {
+  name: 'send_voice_reply',
+  description:
+    'Reply to the current conversation with a voice message. Synthesizes the text into ' +
+    'speech audio and delivers it through the channel. The text is stored as message content ' +
+    'in conversation history for future context. Use this when the user sent you a voice ' +
+    'message and you want to reply in kind, or when a spoken response feels more natural ' +
+    "than text. Write your text as natural speech — avoid emojis, markdown, URLs, or " +
+    "anything that doesn't translate well to spoken word.",
+  inputSchema: z.object({
+    text: z.string().min(1).describe(
+      'The text to speak. Write as natural speech — no emojis, no markdown, no URLs.'
+    ),
+    speed: z.number().min(0.5).max(2.0).optional()
+      .describe('Speech speed multiplier (default: 1.0)'),
+    voiceId: z.string().optional()
+      .describe('Override the persona default voice. Use a built-in name or custom voice UUID.'),
+  }),
+  category: 'speech',
+};
+
+/**
  * Central registry of all Animus tool definitions.
  * This is the single source of truth for what tools exist.
  * Handlers are attached separately in the backend.
@@ -275,6 +300,7 @@ export const ANIMUS_TOOL_DEFS = {
   resolve_tool_approval: resolveToolApprovalDef,
   transcribe_audio: transcribeAudioDef,
   generate_speech: generateSpeechDef,
+  send_voice_reply: sendVoiceReplyDef,
 } as const;
 
 export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
@@ -295,5 +321,5 @@ export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
  */
 export const MIND_TOOL_NAMES: readonly AnimusToolName[] = [
   'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials', 'resolve_tool_approval',
-  'transcribe_audio', 'generate_speech',
+  'transcribe_audio', 'generate_speech', 'send_voice_reply',
 ] as const;

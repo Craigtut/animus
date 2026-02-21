@@ -65,6 +65,12 @@ export interface ConfigUpdateMessage {
   config: Record<string, unknown>;
 }
 
+export interface ActionMessage {
+  type: 'action';
+  id: string;
+  action: { type: string; [key: string]: unknown };
+}
+
 export interface PingMessage {
   type: 'ping';
   id: string;
@@ -78,6 +84,7 @@ export type ParentToChildMessage =
   | ResolveContactResponseMessage
   | MediaDownloadResponseMessage
   | ConfigUpdateMessage
+  | ActionMessage
   | PingMessage;
 
 // ============================================================================
@@ -173,9 +180,24 @@ export interface StopAckMessage {
   type: 'stop_ack';
 }
 
+export interface ActionResponseMessage {
+  type: 'action_response';
+  id: string;
+  ok: boolean;
+  error?: string;
+}
+
 export interface PongMessage {
   type: 'pong';
   id: string;
+}
+
+export interface PresenceUpdateMessage {
+  type: 'presence_update';
+  identifier: string;
+  status: 'online' | 'idle' | 'dnd' | 'offline';
+  statusText?: string;
+  activity?: string;
 }
 
 export type ChildToParentMessage =
@@ -192,7 +214,9 @@ export type ChildToParentMessage =
   | RouteRegisterMessage
   | ErrorMessage
   | StopAckMessage
-  | PongMessage;
+  | ActionResponseMessage
+  | PongMessage
+  | PresenceUpdateMessage;
 
 export type IpcMessage = ParentToChildMessage | ChildToParentMessage;
 

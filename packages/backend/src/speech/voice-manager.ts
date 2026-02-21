@@ -27,8 +27,13 @@ interface VoiceManifest {
   voices: VoiceEntry[];
 }
 
-/** Known built-in voice names from Pocket TTS test_wavs. */
-const BUILTIN_VOICE_NAMES = ['alba', 'marius', 'javert', 'jean', 'fantine', 'cosette', 'eponine', 'azelma'];
+/** Scan WAV files from test_wavs/ directory dynamically. */
+function discoverBuiltinVoiceNames(testWavsDir: string): string[] {
+  if (!fs.existsSync(testWavsDir)) return [];
+  return fs.readdirSync(testWavsDir)
+    .filter((f) => f.endsWith('.wav'))
+    .map((f) => f.replace(/\.wav$/, ''));
+}
 
 export class VoiceManager {
   private voicesDir: string;
@@ -71,8 +76,9 @@ export class VoiceManager {
   /** Scan the TTS model's test_wavs/ directory for built-in voice references. */
   private async scanBuiltinVoices(): Promise<void> {
     const testWavsDir = path.join(this.modelsDir, 'tts', 'test_wavs');
-    if (!fs.existsSync(testWavsDir)) {
-      log.debug('No test_wavs directory found, skipping built-in voice scan');
+    const voiceNames = discoverBuiltinVoiceNames(testWavsDir);
+    if (voiceNames.length === 0) {
+      log.debug('No test_wavs directory or WAV files found, skipping built-in voice scan');
       return;
     }
 
@@ -80,12 +86,10 @@ export class VoiceManager {
       this.manifest.voices.filter((v) => v.type === 'builtin').map((v) => v.id)
     );
 
-    for (const name of BUILTIN_VOICE_NAMES) {
+    for (const name of voiceNames) {
       if (existingBuiltinIds.has(name)) continue;
 
-      // Look for WAV file with this name
       const wavPath = path.join(testWavsDir, `${name}.wav`);
-      if (!fs.existsSync(wavPath)) continue;
 
       // Copy to voices/builtin/ directory
       const destPath = path.join(this.voicesDir, 'builtin', `${name}.wav`);
@@ -116,7 +120,7 @@ export class VoiceManager {
     return this.manifest.voices.find((v) => v.id === id) ?? null;
   }
 
-  /** Load voice reference audio samples. */
+  /** Load voice reference audio samples (parsed PCM). */
   async loadVoiceSamples(id: string): Promise<{ samples: Float32Array; sampleRate: number }> {
     const voice = this.getVoice(id);
     if (!voice) {
@@ -129,6 +133,21 @@ export class VoiceManager {
     }
 
     return readWavSamples(fullPath);
+  }
+
+  /** Load voice reference audio as raw WAV bytes (for native TTS). */
+  async loadVoiceWavBuffer(id: string): Promise<Buffer> {
+    const voice = this.getVoice(id);
+    if (!voice) {
+      throw new Error(`Voice not found: ${id}`);
+    }
+
+    const fullPath = path.join(this.voicesDir, voice.filePath);
+    if (!fs.existsSync(fullPath)) {
+      throw new Error(`Voice file missing: ${fullPath}`);
+    }
+
+    return fs.readFileSync(fullPath);
   }
 
   /** Add a custom voice from a WAV buffer. */

@@ -266,9 +266,12 @@ specific experience, not a generic observation.
 
 Delta magnitudes: ${magnitudes}
 
-IMPORTANT: Do not use energyDelta to control when you sleep or wake. The
-circadian rhythm handles that automatically. Your delta should purely
-reflect how the experience affected you.`;
+IMPORTANT: Your energy delta should honestly reflect your experience. If
+you're narrating tiredness, heaviness, or the pull of sleep in your
+experience, your delta should be negative — that's not controlling sleep,
+that's being truthful about how you feel. The circadian rhythm sets the
+baseline; your delta reflects your lived moment. Coherence between your
+experience narrative and your energy delta matters.`;
 }
 
 function buildDecisionRef(pluginDecisionDescriptions?: string): string {
@@ -309,6 +312,11 @@ TASK DECISIONS:
                    params: { taskId }
   skip_task      — Skip a task's current execution (recurring: advance to next run)
                    params: { taskId }
+
+CHANNEL:
+  send_reaction  — React to the triggering message with a Unicode emoji
+                   params: { emoji }
+                   (Only available when channel supports reactions)
 
 OTHER:
   send_message   — Send a proactive message (prefer reply field for responses)
@@ -421,6 +429,20 @@ resolve_tool_approval — Approve or deny a pending tool approval request.
 
   Input: { requestId: string, approved: boolean }
 
+send_voice_reply — Reply with a voice message.
+  When the user sent you a voice message, reply in kind with this tool.
+  It synthesizes your text into speech and delivers it as audio. The text
+  is preserved in conversation history for future context.
+  Write as natural speech — no emojis, markdown, or URLs.
+
+  IMPORTANT: When you call send_voice_reply, do NOT also write a text
+  reply in your natural language output. Your spoken text would otherwise
+  be sent as a SEPARATE text message, duplicating your voice reply.
+  After calling this tool, skip the reply phase entirely — go straight
+  to record_cognitive_state.
+
+  Input: { text: string, speed?: number, voiceId?: string }
+
 IMPORTANT: These tools add round-trips. Only use them when the pre-loaded
 context is insufficient. Most ticks won't need any tool calls.`;
 
@@ -449,6 +471,57 @@ sentences. Match the energy and length of what was said to you. A casual
 "hey" gets a casual reply, not a paragraph. If someone asks a complex
 question, answer it fully, but prefer clarity over volume. Don't pad with
 pleasantries or filler. Let the conversation breathe.`;
+
+/**
+ * Build channel capabilities section for the user message.
+ * Informs the mind about available rich features (e.g., reactions).
+ */
+function buildChannelCapabilities(channel: string): string | null {
+  if (channel === 'web') return null;
+
+  const manifest = getChannelManager().getChannelManifest(channel);
+  if (!manifest) return null;
+
+  const lines: string[] = [];
+  if (manifest.capabilities.includes('reactions')) {
+    lines.push(
+      '── CHANNEL CAPABILITIES ──',
+      'This channel supports emoji reactions. You may react to the triggering',
+      'message with a Unicode emoji using the send_reaction decision.',
+      'You can react WITHOUT sending a text reply if appropriate (e.g., thumbs',
+      'up to acknowledge, heart to show appreciation). A reaction-only response',
+      'feels natural and human.',
+    );
+  }
+  if (manifest.capabilities.includes('voice-messages')) {
+    if (lines.length === 0) lines.push('── CHANNEL CAPABILITIES ──');
+    lines.push(
+      'This channel supports native voice messages. When you use send_voice_reply,',
+      'your audio will be delivered as a proper voice message (not a file attachment).',
+    );
+  }
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
+/**
+ * Build presence info for a contact from the channel manager.
+ */
+function buildContactPresence(contact: Contact, _channel?: string): string | null {
+  try {
+    const cm = getChannelManager();
+    const presenceInfo = cm.getContactPresenceSummary(contact.id);
+    if (!presenceInfo) return null;
+
+    const lines = ['── CONTACT PRESENCE ──'];
+    lines.push(`${contact.fullName ?? 'This contact'}: ${presenceInfo.status}`);
+    if (presenceInfo.activity) lines.push(`Activity: ${presenceInfo.activity}`);
+    if (presenceInfo.statusText) lines.push(`Status: ${presenceInfo.statusText}`);
+    return lines.join('\n');
+  } catch {
+    // Presence is optional — if DB/channel manager isn't available, skip silently
+    return null;
+  }
+}
 
 /**
  * Get reply guidance for a channel. Web is hardcoded; all others
@@ -503,6 +576,15 @@ function buildTriggerSection(trigger: TriggerContext): string {
         `"${trigger.messageContent || ''}"`,
       ];
 
+      // Annotate voice messages and encourage voice reply
+      if (trigger.metadata?.['wasVoiceMessage']) {
+        lines.push(
+          '(This was originally a voice message, automatically transcribed.)',
+          'Since they spoke to you, reply with send_voice_reply to keep the',
+          'conversation in voice. Do NOT write a text reply when using that tool.',
+        );
+      }
+
       // Annotate media attachments so the mind knows they exist
       const media = trigger.metadata?.['media'];
       if (Array.isArray(media) && media.length > 0) {
@@ -524,7 +606,11 @@ function buildTriggerSection(trigger: TriggerContext): string {
       const elapsed = trigger.elapsedMs
         ? formatElapsedTime(trigger.elapsedMs)
         : 'Some time';
-      return `── THIS MOMENT ──\n${elapsed} has passed since your last tick. No messages arrived.\nThis is a quiet moment — your time.`;
+      return `── THIS MOMENT ──\n${elapsed} has passed since your last tick. You've been given 
+      this time reference to know how much time you should simulate experiencing, you shouldn't 
+      reference this in your thinking or experience.\n You have full agency over how to spend 
+      this time — you can think, feel, remember, and even reach out proactively if you want. 
+      Be alive, it's your time and your life.`;
     }
 
     case 'scheduled_task':
@@ -853,6 +939,22 @@ export function buildUserMessage(params: MindContextParams): string {
     const guidance = getReplyGuidance(params.trigger.channel);
     if (guidance) {
       sections.push(guidance);
+    }
+  }
+
+  // 2b2. Channel capabilities (if message-triggered, for reactions/rich features)
+  if (params.trigger.type === 'message' && params.trigger.channel) {
+    const capSection = buildChannelCapabilities(params.trigger.channel);
+    if (capSection) {
+      sections.push(capSection);
+    }
+  }
+
+  // 2b3. Contact presence (if message-triggered, show who's around)
+  if (params.trigger.type === 'message' && params.contact) {
+    const presenceSection = buildContactPresence(params.contact, params.trigger.channel);
+    if (presenceSection) {
+      sections.push(presenceSection);
     }
   }
 

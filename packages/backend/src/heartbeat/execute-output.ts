@@ -352,13 +352,14 @@ export async function executeOutput(
     decisionCount: output.decisions.length,
   });
 
-  // 4b-4d. Execute decisions (agent, plugin, goal/task) -- outside transaction
+  // 4b-4d. Execute decisions (agent, plugin, goal/task, channel) -- outside transaction
   await executeDecisions(
     hbDb,
     output.decisions,
     tickNumber,
     gathered.contact,
     gathered.trigger.channel,
+    gathered.trigger.metadata as Record<string, unknown> | undefined,
     deps.decisionDeps,
     eventBusRef,
   );

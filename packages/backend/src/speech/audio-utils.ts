@@ -2,7 +2,7 @@
  * Audio conversion utilities for the speech module.
  *
  * Handles format conversion between browser audio (WebM/Opus)
- * and the raw PCM needed by sherpa-onnx engines.
+ * and the raw PCM needed by speech engines.
  */
 
 import { spawn } from 'node:child_process';
@@ -85,6 +85,54 @@ export function pcmToWav(samples: Float32Array, sampleRate: number): Buffer {
   }
 
   return buffer;
+}
+
+/** Convert WAV buffer to OGG/Opus using ffmpeg. */
+export async function wavToOggOpus(wavBuffer: Buffer): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn('ffmpeg', [
+      '-i', 'pipe:0',
+      '-c:a', 'libopus',
+      '-b:a', '64k',
+      '-f', 'ogg',
+      'pipe:1',
+    ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const chunks: Buffer[] = [];
+    ffmpeg.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
+    ffmpeg.stderr.on('data', () => {}); // suppress stderr
+
+    ffmpeg.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`ffmpeg wavToOggOpus exited with code ${code}`));
+        return;
+      }
+      resolve(Buffer.concat(chunks));
+    });
+
+    ffmpeg.on('error', (err) => reject(new Error(`ffmpeg not available: ${err.message}`)));
+    ffmpeg.stdin.write(wavBuffer);
+    ffmpeg.stdin.end();
+  });
+}
+
+/** Compute peak amplitude bytes per bucket and return base64-encoded waveform. */
+export function generateWaveform(samples: Float32Array, numBuckets = 256): string {
+  const bucketSize = Math.max(1, Math.floor(samples.length / numBuckets));
+  const bytes = new Uint8Array(numBuckets);
+
+  for (let i = 0; i < numBuckets; i++) {
+    const start = i * bucketSize;
+    const end = Math.min(start + bucketSize, samples.length);
+    let peak = 0;
+    for (let j = start; j < end; j++) {
+      const abs = Math.abs(samples[j]!);
+      if (abs > peak) peak = abs;
+    }
+    bytes[i] = Math.round(peak * 255);
+  }
+
+  return Buffer.from(bytes).toString('base64');
 }
 
 /** Read a WAV file and return Float32 samples + sample rate. */

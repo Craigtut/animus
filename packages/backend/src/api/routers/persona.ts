@@ -97,6 +97,17 @@ export const personaRouter = router({
     // Start the heartbeat — the moment of "birth"
     startHeartbeat();
 
+    // Trigger speech model downloads (fire-and-forget)
+    import('../../downloads/index.js').then(({ getDownloadManager, getSpeechAssets }) => {
+      try {
+        const dm = getDownloadManager();
+        const missing = getSpeechAssets().filter((a) => !dm.isAssetPresent(a));
+        if (missing.length > 0) dm.enqueue(missing);
+      } catch {
+        // Download manager may not be initialized yet in tests
+      }
+    }).catch(() => {});
+
     return persona;
   }),
 

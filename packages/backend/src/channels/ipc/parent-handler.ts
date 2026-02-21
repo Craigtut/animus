@@ -10,6 +10,7 @@ import type {
   ChildToParentMessage,
   IncomingMessage,
   SendResponseMessage,
+  ActionResponseMessage,
   RouteResponseMessage,
   RouteResponseStreamStartMessage,
   RouteResponseChunkMessage,
@@ -19,6 +20,7 @@ import type {
   RouteRegisterMessage,
   ErrorMessage,
   PongMessage,
+  PresenceUpdateMessage,
 } from './protocol.js';
 
 export interface ParentHandlerDeps {
@@ -34,6 +36,8 @@ export interface ParentHandlerDeps {
   onResolveContact: (msg: ResolveContactMessage) => void;
   onMediaDownload: (msg: MediaDownloadMessage) => void;
   onRouteRegister: (msg: RouteRegisterMessage) => void;
+  onActionResponse: (msg: ActionResponseMessage) => void;
+  onPresenceUpdate: (msg: PresenceUpdateMessage) => void;
   onError: (msg: ErrorMessage) => void;
   onStopAck: () => void;
   onPong: (msg: PongMessage) => void;
@@ -102,6 +106,16 @@ export function createParentHandler(deps: ParentHandlerDeps): (raw: unknown) => 
       case 'route_register':
         log.debug(`Route registered: ${msg.method} ${msg.path}`);
         deps.onRouteRegister(msg);
+        break;
+
+      case 'action_response':
+        log.debug(`Action response [${msg.id}]: ${msg.ok ? 'ok' : msg.error}`);
+        deps.onActionResponse(msg);
+        break;
+
+      case 'presence_update':
+        log.debug(`Presence update: ${msg.identifier} → ${msg.status}`);
+        deps.onPresenceUpdate(msg);
         break;
 
       case 'error':
