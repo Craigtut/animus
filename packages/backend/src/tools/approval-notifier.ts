@@ -141,5 +141,5 @@ export function setupApprovalNotifier(eventBus: IEventBus): void {
     );
   });
 
-  log.info('Approval notifier initialized');
+  log.debug('Approval notifier initialized');
 }

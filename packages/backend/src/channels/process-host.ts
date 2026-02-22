@@ -158,7 +158,7 @@ export class ChannelProcessHost {
       };
     });
 
-    this.log.info(`Forking child process for ${this.config.pkg.name}`);
+    this.log.debug(`Forking child process for ${this.config.pkg.name}`);
     this.childProcess = fork(bootstrapperPath, forkArgs, forkOpts);
 
     // Pipe child stdout/stderr to our logger
@@ -339,7 +339,7 @@ export class ChannelProcessHost {
     // Reset failure count on successful start
     this.consecutiveFailures = 0;
 
-    this.log.info(`Channel ${this.config.pkg.name} process started successfully`);
+    this.log.debug(`Channel ${this.config.pkg.name} process started successfully`);
   }
 
   async stop(): Promise<void> {

@@ -313,7 +313,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - **Frontend Design**: `docs/frontend/design-principles.md`, `docs/frontend/onboarding.md`
 - **Frontend Specs**: `docs/frontend/app-shell.md` (navigation, transitions, routes), `docs/frontend/presence.md` (main space), `docs/frontend/mind.md` (inner life detail), `docs/frontend/people.md` (contacts), `docs/frontend/settings.md` (configuration), `docs/frontend/voice-mode.md` (voice interaction)
 - **Guides**: `docs/guides/getting-started.md`
-- **Skills**: `.claude/skills/build-plugin/` (plugin development guide, invoked automatically when building plugins)
+- **Skills**: `.skills/build-plugin/` (plugin development guide, invoked automatically when building plugins)
 - **Agent SDKs**: `docs/agents/` (per-provider folders: claude/, codex/, opencode/, pi/ + architecture overview + plugin/extension systems)
 
 **When to use `/doc-explorer`:**

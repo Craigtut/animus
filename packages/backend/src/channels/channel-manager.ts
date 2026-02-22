@@ -49,7 +49,7 @@ export class ChannelManager {
     sendFn: (contactId: string, content: string, metadata?: Record<string, unknown>) => Promise<void>,
   ): void {
     this.builtInSenders.set(channelType, sendFn);
-    log.info(`Registered built-in channel: ${channelType}`);
+    log.debug(`Registered built-in channel: ${channelType}`);
   }
 
   /**
@@ -85,7 +85,7 @@ export class ChannelManager {
       }
     }
 
-    log.info(`Loaded ${this.manifests.size} channel packages (${this.processes.size} running)`);
+    log.debug(`Loaded ${this.manifests.size} channel packages (${this.processes.size} running)`);
   }
 
   /**
@@ -102,6 +102,13 @@ export class ChannelManager {
     });
     await Promise.all(stopPromises);
     this.processes.clear();
+  }
+
+  getRuntimeStats(): { installed: number; running: number } {
+    return {
+      installed: this.manifests.size,
+      running: this.processes.size,
+    };
   }
 
   /**
@@ -578,7 +585,7 @@ export class ChannelManager {
       this.processes.set(pkg.channelType, host);
       systemStore.updateChannelPackageStatus(db, pkg.name, 'connected');
       this.emitStatusChange(pkg.name, pkg.channelType, 'connected');
-      log.info(`Channel ${pkg.name} (${pkg.channelType}) started successfully`);
+      log.debug(`Channel ${pkg.name} (${pkg.channelType}) started successfully`);
     } catch (err) {
       log.error(`Failed to start channel ${pkg.name}:`, err);
       // Kill the child process if it was forked but failed to become ready

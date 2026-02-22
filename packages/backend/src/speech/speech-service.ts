@@ -85,7 +85,7 @@ export async function initSpeechService(config: SpeechServiceConfig): Promise<Sp
   await instance.voices.initialize();
 
   const status = instance.getStatus();
-  log.info(`Speech service initialized — STT: ${status.sttAvailable ? 'available' : 'not available'}, TTS: ${status.ttsAvailable ? 'available' : 'not available'}, Voices: ${status.voiceCount}`);
+  log.debug(`Speech service initialized — STT: ${status.sttAvailable ? 'available' : 'not available'}, TTS: ${status.ttsAvailable ? 'available' : 'not available'}, Voices: ${status.voiceCount}`);
 
   return instance;
 }

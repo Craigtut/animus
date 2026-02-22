@@ -83,7 +83,7 @@ export function seedToolPermissions(
   systemDb: Database.Database,
   activeProvider: string = 'claude',
   plugins?: Array<{ name: string; tools?: Array<{ name: string; description?: string }> }>,
-): void {
+): number {
   let seeded = 0;
 
   // 1. Core Animus tools
@@ -152,5 +152,6 @@ export function seedToolPermissions(
     }
   }
 
-  log.info(`Seeded ${seeded} tool permissions (provider: ${activeProvider})`);
+  log.debug(`Seeded ${seeded} tool permissions (provider: ${activeProvider})`);
+  return seeded;
 }

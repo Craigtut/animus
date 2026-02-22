@@ -100,7 +100,11 @@ export function createParentHandler(deps: ParentHandlerDeps): (raw: unknown) => 
         break;
 
       case 'log':
-        log[msg.level](`[child] ${msg.message}`, ...msg.args);
+        if (msg.level === 'info') {
+          log.debug(`[child] ${msg.message}`, ...msg.args);
+        } else {
+          log[msg.level](`[child] ${msg.message}`, ...msg.args);
+        }
         break;
 
       case 'route_register':

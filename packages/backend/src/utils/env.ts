@@ -8,6 +8,11 @@ import { z } from 'zod';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+// Monorepo root: utils/ -> src/ -> backend/ -> packages/ -> root
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+const DEFAULT_DATA_DIR = path.join(PROJECT_ROOT, 'packages', 'backend', 'data');
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(3000),
@@ -15,13 +20,13 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
 
   // Database paths
-  DB_SYSTEM_PATH: z.string().default('./data/system.db'),
-  DB_HEARTBEAT_PATH: z.string().default('./data/heartbeat.db'),
-  DB_MEMORY_PATH: z.string().default('./data/memory.db'),
-  DB_MESSAGES_PATH: z.string().default('./data/messages.db'),
-  DB_AGENT_LOGS_PATH: z.string().default('./data/agent_logs.db'),
-  DB_PERSONA_PATH: z.string().default('./data/persona.db'),
-  LANCEDB_PATH: z.string().default('./data/lancedb'),
+  DB_SYSTEM_PATH: z.string().default(path.join(DEFAULT_DATA_DIR, 'system.db')),
+  DB_HEARTBEAT_PATH: z.string().default(path.join(DEFAULT_DATA_DIR, 'heartbeat.db')),
+  DB_MEMORY_PATH: z.string().default(path.join(DEFAULT_DATA_DIR, 'memory.db')),
+  DB_MESSAGES_PATH: z.string().default(path.join(DEFAULT_DATA_DIR, 'messages.db')),
+  DB_AGENT_LOGS_PATH: z.string().default(path.join(DEFAULT_DATA_DIR, 'agent_logs.db')),
+  DB_PERSONA_PATH: z.string().default(path.join(DEFAULT_DATA_DIR, 'persona.db')),
+  LANCEDB_PATH: z.string().default(path.join(DEFAULT_DATA_DIR, 'lancedb')),
 
   // Auth
   JWT_SECRET: z.string().default('change-me-in-production'),
@@ -50,7 +55,3 @@ function loadEnv() {
 export const env = loadEnv();
 
 export type Env = z.infer<typeof envSchema>;
-
-// Monorepo root: utils/ → src/ → backend/ → packages/ → root
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..', '..');

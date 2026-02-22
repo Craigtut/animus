@@ -60,7 +60,7 @@ export class TaskScheduler {
       this.checkDueTasks();
     }, CHECK_INTERVAL_MS);
 
-    log.info('Started');
+    log.debug('Started');
   }
 
   /**
@@ -177,7 +177,7 @@ export class TaskScheduler {
         }
       }
 
-      log.info(`Loaded ${tasks.length} active tasks: ${registered} registered, ${firedCatchUp} catch-up fired, ${skippedNoNextRun} skipped (no nextRunAt)`);
+      log.debug(`Loaded ${tasks.length} active tasks: ${registered} registered, ${firedCatchUp} catch-up fired, ${skippedNoNextRun} skipped (no nextRunAt)`);
     } catch (err) {
       log.error('Failed to load tasks:', err);
     }

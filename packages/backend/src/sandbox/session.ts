@@ -122,8 +122,12 @@ export class SandboxSession {
       config.allowedTools = [...(config.allowedTools ?? []), ...pluginTools];
 
       // Skill bridge (Claude SDK plugin for skill discovery)
-      const bridgePath = pm.getSkillBridgePath();
-      config.plugins = [{ type: 'local', path: bridgePath }];
+      if (provider === 'claude') {
+        const bridgePath = pm.getSkillBridgePath();
+        config.plugins = [{ type: 'local', path: bridgePath }];
+      } else if (provider === 'codex') {
+        config.env = await pm.buildCodexRuntimeEnv(config.env);
+      }
 
       // Sandbox MCP server for run_with_credentials (Claude only)
       if (provider === 'claude') {
@@ -133,8 +137,10 @@ export class SandboxSession {
         config.allowedTools!.push(...sandboxTools);
       }
 
-      // Always allow Skill tool for skill invocation
-      config.allowedTools!.push('Skill');
+      // Always allow Skill tool for Claude skill invocation
+      if (provider === 'claude') {
+        config.allowedTools!.push('Skill');
+      }
     }
 
     log.info('Creating sandbox session', { provider, model, cognitive: this.cognitiveMode });

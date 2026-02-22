@@ -321,8 +321,13 @@ export class AgentOrchestrator {
         ...filteredPluginTools,
       ];
 
-      // For Claude provider: expose Animus plugin skills via the skill bridge plugin
+      // Provider-specific skill discovery wiring:
+      // - Claude: expose Animus plugin skills via the local bridge plugin.
+      // - Codex: inject generated runtime config via CODEX_HOME.
       let sdkPlugins: Array<{ type: 'local'; path: string }> | undefined;
+      if (provider === 'codex') {
+        sessionEnv = await getPluginManager().buildCodexRuntimeEnv(sessionEnv);
+      }
       if (provider === 'claude') {
         const bridgePath = getPluginManager().getSkillBridgePath();
         sdkPlugins = [{ type: 'local' as const, path: bridgePath }];
@@ -356,7 +361,7 @@ export class AgentOrchestrator {
         ...(mergedAllowedTools.length > 0 ? { allowedTools: mergedAllowedTools } : {}),
         // Disable SDK built-in tools with mode='off' or 'ask' (sub-agents can't do approvals)
         ...(disabledSdkTools.length > 0 ? { disallowedTools: disabledSdkTools } : {}),
-        // Claude SDK plugins for skill discovery (bridge to .claude/skills/)
+        // Claude SDK plugins for skill discovery (bridge to runtime claude/skills/)
         ...(sdkPlugins ? { plugins: sdkPlugins } : {}),
         verbose: verboseAgent,
       });

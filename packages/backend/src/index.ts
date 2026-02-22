@@ -13,7 +13,7 @@ import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { initializeDatabases, closeDatabases, getSystemDb } from './db/index.js';
+import { initializeDatabases, closeDatabases, getSystemDb, DATABASE_COUNT } from './db/index.js';
 import { createTRPCContext, appRouter } from './api/index.js';
 import authPlugin from './plugins/auth.js';
 import { initializeHeartbeat, stopHeartbeat } from './heartbeat/index.js';
@@ -21,6 +21,7 @@ import { loadCredentialsIntoEnv, ensureClaudeOnboardingFile } from './services/c
 import { env } from './utils/env.js';
 import { createLogger, updateCategoryCache } from './lib/logger.js';
 import { isMaintenanceMode, getMaintenanceReason } from './lib/maintenance.js';
+import { formatStartupSummary } from './lib/startup-summary.js';
 import * as systemStore from './db/stores/system-store.js';
 
 const log = createLogger('Server', 'server');
@@ -28,8 +29,9 @@ const log = createLogger('Server', 'server');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
+  const startupStartedAt = Date.now();
+
   // Initialize databases (opens 5 DBs, runs migrations)
-  log.info('Initializing databases...');
   await initializeDatabases();
 
   // Verify encryption key matches what was used to encrypt existing data
@@ -41,8 +43,7 @@ async function main() {
   updateCategoryCache(logCategories);
 
   // Load stored credentials into environment
-  log.info('Loading stored credentials...');
-  loadCredentialsIntoEnv(getSystemDb());
+  const credentialSummary = loadCredentialsIntoEnv(getSystemDb());
   ensureClaudeOnboardingFile();
 
   // Route agents package logs through the backend logger so all output
@@ -75,7 +76,7 @@ async function main() {
       if (errors.length > 0) {
         log.warn('Model registry refresh had errors', { errors });
       } else {
-        log.info(`Model registry initialized (${modelRegistry.size} models, ${updated} pricing updates)`);
+        log.debug(`Model registry initialized (${modelRegistry.size} models, ${updated} pricing updates)`);
       }
     },
     (err) => log.warn('Model registry refresh failed (local data still available)', { error: String(err) }),
@@ -84,7 +85,9 @@ async function main() {
   // Create Fastify instance
   const fastify = Fastify({
     logger: false,
-    maxParamLength: 500,
+    routerOptions: {
+      maxParamLength: 500,
+    },
   });
 
   // Register plugins
@@ -235,13 +238,11 @@ async function main() {
   }
 
   // Initialize plugin manager (must be before heartbeat so plugins are available)
-  log.info('Initializing plugin manager...');
   const { getPluginManager } = await import('./services/plugin-manager.js');
   const pluginManager = getPluginManager();
   await pluginManager.loadAll();
 
   // Seed tool permissions (after migrations + plugins, before heartbeat)
-  log.info('Seeding tool permissions...');
   const { seedToolPermissions } = await import('./tools/permission-seeder.js');
   const settings = systemStore.getSystemSettings(getSystemDb());
 
@@ -265,7 +266,7 @@ async function main() {
     );
   }
 
-  seedToolPermissions(getSystemDb(), settings.defaultAgentProvider ?? 'claude', collectPluginTools());
+  const seededToolPermissions = seedToolPermissions(getSystemDb(), settings.defaultAgentProvider ?? 'claude', collectPluginTools());
 
   // Set up approval notifier (event bus listener for tool approval lifecycle)
   const { setupApprovalNotifier } = await import('./tools/approval-notifier.js');
@@ -275,12 +276,12 @@ async function main() {
   // Re-seed tool permissions when plugins change at runtime
   getEventBus().on('plugin:changed', () => {
     const currentSettings = systemStore.getSystemSettings(getSystemDb());
-    seedToolPermissions(getSystemDb(), currentSettings.defaultAgentProvider ?? 'claude', collectPluginTools());
+    const reseeded = seedToolPermissions(getSystemDb(), currentSettings.defaultAgentProvider ?? 'claude', collectPluginTools());
     log.info('Re-seeded tool permissions after plugin change');
+    log.debug(`Tool permissions count after re-seed: ${reseeded}`);
   });
 
   // Initialize speech service (lazy-loads models on first use)
-  log.info('Initializing speech service...');
   const { initSpeechService } = await import('./speech/index.js');
   const speechService = await initSpeechService({ dataDir: path.dirname(env.DB_SYSTEM_PATH) });
 
@@ -297,7 +298,6 @@ async function main() {
   });
 
   // Initialize channel manager (after plugins, before heartbeat)
-  log.info('Initializing channel manager...');
   const { getChannelManager } = await import('./channels/channel-manager.js');
 
   const channelManager = getChannelManager();
@@ -312,8 +312,7 @@ async function main() {
   await channelManager.loadAll();
 
   // Initialize heartbeat system
-  log.info('Initializing heartbeat system...');
-  await initializeHeartbeat();
+  const heartbeatInit = await initializeHeartbeat();
 
   // Auto-download missing speech models if onboarding is complete
   const onboardingState = systemStore.getOnboardingState(getSystemDb());
@@ -325,6 +324,27 @@ async function main() {
     }
   }
 
+  const pluginStats = pluginManager.getRuntimeStats();
+  const channelStats = channelManager.getRuntimeStats();
+  const startupSummary = formatStartupSummary({
+    dbCount: DATABASE_COUNT,
+    credentialsStored: credentialSummary.storedCount,
+    cliDetectedProviders: credentialSummary.cliDetectedProviders,
+    modelDataCount: modelRegistry.size,
+    pluginsLoaded: pluginStats.loaded,
+    pluginsEnabled: pluginStats.enabled,
+    deployedSkills: pluginStats.deployedSkills,
+    toolsSeeded: seededToolPermissions,
+    channelsInstalled: channelStats.installed,
+    channelsRunning: channelStats.running,
+    resumedAfterRestart: heartbeatInit.resumedAfterRestart,
+    nextTickInMs: heartbeatInit.nextTickInMs,
+    startupMs: Date.now() - startupStartedAt,
+    address: `${env.HOST}:${env.PORT}`,
+    environment: env.NODE_ENV,
+  });
+  log.info(`\n${startupSummary}`);
+
   // Start server
   try {
     const address = await fastify.listen({
@@ -332,7 +352,6 @@ async function main() {
       host: env.HOST,
     });
     log.info(`Listening at ${address}`);
-    log.info(`Environment: ${env.NODE_ENV}`);
   } catch (err) {
     log.error('Server start failed:', err);
     process.exit(1);

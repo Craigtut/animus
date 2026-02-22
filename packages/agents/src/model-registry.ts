@@ -141,7 +141,7 @@ export class ModelRegistry {
       }
     }
 
-    log.info(`Loaded ${this.models.size} models from local data`);
+    log.debug(`Loaded ${this.models.size} models from local data`);
   }
 
   /**
@@ -190,7 +190,7 @@ export class ModelRegistry {
     }
 
     if (errors.length > 0) {
-      log.warn('LiteLLM refresh had errors', { errors });
+      log.debug('LiteLLM refresh had errors', { errors });
     } else {
       log.info(`LiteLLM refresh complete: ${updated} models updated`);
     }
@@ -224,7 +224,7 @@ export class ModelRegistry {
       const raw = fs.readFileSync(cachePath, 'utf-8');
       const data = JSON.parse(raw) as Record<string, LiteLLMModelEntry>;
       const updated = this.mergeLiteLLMPricing(data);
-      log.info(`Loaded LiteLLM cache from disk (${updated} models updated)`);
+      log.debug(`Loaded LiteLLM cache from disk (${updated} models updated)`);
       return true;
     } catch (err) {
       log.debug('Failed to load disk cache', { error: String(err) });

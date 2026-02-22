@@ -39,6 +39,12 @@ export interface ValidationResult {
   message: string;
 }
 
+export interface CredentialLoadSummary {
+  storedCount: number;
+  envLoadedCount: number;
+  cliDetectedProviders: string[];
+}
+
 // ============================================================================
 // Credential Type Inference
 // ============================================================================
@@ -78,17 +84,19 @@ const ENV_MAP: Record<string, string> = {
  * Load all stored credentials into process.env at startup.
  * Called once after database initialization.
  */
-export function loadCredentialsIntoEnv(db: Database.Database): void {
+export function loadCredentialsIntoEnv(db: Database.Database): CredentialLoadSummary {
   let credentials: systemStore.Credential[];
   try {
     credentials = systemStore.getAllCredentials(db);
   } catch (err) {
     // Table may not exist yet on fresh install
     log.info('Could not load credentials:', err instanceof Error ? err.message : err);
-    return;
+    return { storedCount: 0, envLoadedCount: 0, cliDetectedProviders: [] };
   }
 
-  log.info(`Found ${credentials.length} stored credential(s): ${credentials.map(c => `${c.provider}/${c.credentialType}`).join(', ') || 'none'}`);
+  log.debug(`Found ${credentials.length} stored credential(s): ${credentials.map(c => `${c.provider}/${c.credentialType}`).join(', ') || 'none'}`);
+  let envLoadedCount = 0;
+  const cliDetectedProviders = new Set<string>();
 
   for (const cred of credentials) {
     const key = `${cred.provider}:${cred.credentialType}`;
@@ -96,18 +104,28 @@ export function loadCredentialsIntoEnv(db: Database.Database): void {
 
     if (envVar) {
       process.env[envVar] = cred.data;
-      log.info(`Loaded ${cred.provider}/${cred.credentialType} into ${envVar}`);
+      envLoadedCount++;
+      log.debug(`Loaded ${cred.provider}/${cred.credentialType} into ${envVar}`);
     } else if (cred.credentialType === 'codex_oauth') {
       // Set sentinel for Codex OAuth
       process.env['CODEX_OAUTH_CONFIGURED'] = 'true';
-      log.info('Loaded codex/codex_oauth (sentinel set)');
+      envLoadedCount++;
+      log.debug('Loaded codex/codex_oauth (sentinel set)');
     } else if (cred.credentialType === 'cli_detected') {
       // Set sentinel so adapters know CLI auth is available
       const sentinelVar = cred.provider === 'claude' ? 'CLAUDE_CLI_CONFIGURED' : 'CODEX_CLI_CONFIGURED';
       process.env[sentinelVar] = 'true';
-      log.info(`Loaded ${cred.provider}/cli_detected (${sentinelVar} set)`);
+      envLoadedCount++;
+      cliDetectedProviders.add(cred.provider);
+      log.debug(`Loaded ${cred.provider}/cli_detected (${sentinelVar} set)`);
     }
   }
+
+  return {
+    storedCount: credentials.length,
+    envLoadedCount,
+    cliDetectedProviders: Array.from(cliDetectedProviders).sort((a, b) => a.localeCompare(b)),
+  };
 }
 
 // ============================================================================

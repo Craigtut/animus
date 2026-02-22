@@ -33,6 +33,7 @@ let heartbeatDb: Database.Database;
 let memoryDb: Database.Database;
 let messagesDb: Database.Database;
 let agentLogsDb: Database.Database;
+export const DATABASE_COUNT = 6;
 
 export function getSystemDb(): Database.Database {
   if (!systemDb) throw new Error('System database not initialized');

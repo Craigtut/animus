@@ -11,9 +11,8 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
 import { spawn } from 'child_process';
-import { PROJECT_ROOT } from '../utils/env.js';
+import { env } from '../utils/env.js';
 
 import { getSystemDb } from '../db/index.js';
 import * as pluginStore from '../db/stores/plugin-store.js';
@@ -80,6 +79,12 @@ interface WatcherProcess {
   failures: number;
   backoffMs: number;
   stopped: boolean;
+}
+
+export interface PluginRuntimeStats {
+  loaded: number;
+  enabled: number;
+  deployedSkills: number;
 }
 
 // ============================================================================
@@ -199,7 +204,7 @@ class PluginManager {
     // 5. Start watcher triggers
     await this.startTriggers();
 
-    log.info(`Loaded ${this.plugins.size} plugins (${enabledCount} enabled)`);
+    log.debug(`Loaded ${this.plugins.size} plugins (${enabledCount} enabled)`);
   }
 
   async install(source: { type: PluginSource; path: string }): Promise<PluginManifest> {
@@ -356,13 +361,13 @@ class PluginManager {
 
   async deploySkills(provider: string): Promise<void> {
     await this.cleanupSkills();
-    for (const loaded of this.plugins.values()) {
-      if (!loaded.enabled) continue;
-      await this.deploySkillsForPlugin(loaded, provider);
-    }
     // Create/refresh the Claude SDK bridge for skill discovery
     if (provider === 'claude') {
       await this.ensureSkillBridge();
+    }
+    for (const loaded of this.plugins.values()) {
+      if (!loaded.enabled) continue;
+      await this.deploySkillsForPlugin(loaded, provider);
     }
   }
 
@@ -381,30 +386,29 @@ class PluginManager {
    * Get the path to the Claude SDK skill bridge directory.
    *
    * The bridge is a minimal pseudo-plugin that the Claude Agent SDK loads via
-   * its `plugins` config. It contains only a `skills/` symlink pointing to
-   * `.claude/skills/` where all Animus plugin skills are already deployed.
+   * its `plugins` config. It contains a `skills/` directory where Animus
+   * deploys plugin skill symlinks directly.
    * This allows the SDK to discover skills without needing
    * `settingSources: ['project']` (which would also load CLAUDE.md).
    */
   getSkillBridgePath(): string {
-    return path.join(PROJECT_ROOT, '.claude', 'animus-skill-bridge');
+    return path.join(this.getProviderRuntimeDir('claude'), 'animus-skill-bridge');
   }
 
   /**
    * Create or refresh the Claude SDK skill bridge directory.
    *
    * Structure:
-   *   .claude/animus-skill-bridge/
+   *   <data>/runtime/providers/claude/animus-skill-bridge/
    *   ├── .claude-plugin/
    *   │   └── plugin.json          # Minimal manifest for the Claude SDK
-   *   └── skills -> .claude/skills/
+   *   └── skills/
    */
   private async ensureSkillBridge(): Promise<void> {
     const bridgePath = this.getSkillBridgePath();
     const manifestDir = path.join(bridgePath, '.claude-plugin');
     const manifestPath = path.join(manifestDir, 'plugin.json');
-    const bridgeSkillsLink = path.join(bridgePath, 'skills');
-    const skillsDir = path.join(PROJECT_ROOT, '.claude', 'skills');
+    const bridgeSkillsDir = path.join(bridgePath, 'skills');
 
     try {
       // Create bridge directory and .claude-plugin/ manifest dir
@@ -419,15 +423,19 @@ class PluginManager {
       }, null, 2);
       await fs.writeFile(manifestPath, manifest, 'utf-8');
 
-      // Create skills/ symlink pointing to .claude/skills/
+      // Ensure skills/ is a real directory under the bridge plugin.
+      // If an older install left a symlink here, replace it.
       try {
-        await fs.rm(bridgeSkillsLink, { recursive: true, force: true });
+        const existing = await fs.lstat(bridgeSkillsDir);
+        if (existing.isSymbolicLink()) {
+          await fs.rm(bridgeSkillsDir, { recursive: true, force: true });
+        }
       } catch {
         // Doesn't exist — fine
       }
-      await fs.symlink(skillsDir, bridgeSkillsLink, 'dir');
+      await fs.mkdir(bridgeSkillsDir, { recursive: true });
 
-      log.info(`Claude SDK skill bridge created: ${bridgePath} (${bridgeSkillsLink} → ${skillsDir})`);
+      log.debug(`Claude SDK skill bridge ready: ${bridgePath}`);
     } catch (err) {
       log.error('Failed to create Claude SDK skill bridge:', err);
     }
@@ -457,7 +465,7 @@ class PluginManager {
         }
         await fs.symlink(skill.absolutePath, targetPath, 'dir');
         this.deployedSkillPaths.push(targetPath);
-        log.info(`Deployed skill "${skill.name}" → ${targetPath}`);
+        log.debug(`Deployed skill "${skill.name}" → ${targetPath}`);
       } catch (err) {
         log.error(`Failed to deploy skill ${skill.name} (${loaded.manifest.name}):`, err);
       }
@@ -480,16 +488,74 @@ class PluginManager {
   }
 
   private getProviderSkillPath(provider: string, skillName: string): string {
-    switch (provider) {
-      case 'claude':
-        return path.join(PROJECT_ROOT, '.claude', 'skills', skillName);
-      case 'codex':
-        return path.join(PROJECT_ROOT, '.agents', 'skills', skillName);
-      case 'opencode':
-        return path.join(PROJECT_ROOT, '.opencode', 'skills', skillName);
-      default:
-        return path.join(PROJECT_ROOT, '.claude', 'skills', skillName);
+    if (provider === 'claude') {
+      return path.join(this.getSkillBridgePath(), 'skills', skillName);
     }
+    return path.join(this.getProviderRuntimeDir(provider), 'skills', skillName);
+  }
+
+  private getProviderRuntimeRoot(): string {
+    return path.join(path.dirname(env.DB_SYSTEM_PATH), 'runtime', 'providers');
+  }
+
+  private getProviderRuntimeDir(provider: string): string {
+    const name = provider === 'codex' || provider === 'opencode' || provider === 'claude'
+      ? provider
+      : 'claude';
+    return path.join(this.getProviderRuntimeRoot(), name);
+  }
+
+  private getEnabledSkillPaths(): string[] {
+    const paths: string[] = [];
+    for (const loaded of this.plugins.values()) {
+      if (!loaded.enabled) continue;
+      for (const skill of loaded.skills) {
+        paths.push(skill.absolutePath);
+      }
+    }
+    return paths;
+  }
+
+  private escapeToml(str: string): string {
+    return str.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+  }
+
+  /**
+   * Build a Codex runtime env that points to an isolated CODEX_HOME and
+   * writes a generated config.toml with plugin skill paths.
+   *
+   * If an existing env already provides CODEX_HOME (e.g. OAuth temp session),
+   * that path is reused so auth.json and config.toml live together.
+   */
+  async buildCodexRuntimeEnv(
+    existingEnv?: Record<string, string>,
+  ): Promise<Record<string, string>> {
+    const codexHome = existingEnv?.['CODEX_HOME']
+      ?? path.join(this.getProviderRuntimeDir('codex'), 'home');
+
+    await fs.mkdir(codexHome, { recursive: true });
+
+    const skillPaths = this.getEnabledSkillPaths().sort((a, b) => a.localeCompare(b));
+    const lines = [
+      '# Auto-generated by Animus PluginManager. Do not edit.',
+      '# This file controls Codex skill injection for the Animus runtime.',
+      '',
+      ...skillPaths.flatMap((skillPath) => [
+        '[[skills.config]]',
+        `path = "${this.escapeToml(skillPath)}"`,
+        'enabled = true',
+        '',
+      ]),
+    ];
+    const configPath = path.join(codexHome, 'config.toml');
+    await fs.writeFile(configPath, lines.join('\n'), 'utf-8');
+
+    log.debug(`Prepared Codex runtime config: ${configPath} (${skillPaths.length} skills)`);
+
+    return {
+      ...(existingEnv ?? {}),
+      CODEX_HOME: codexHome,
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -798,6 +864,19 @@ class PluginManager {
     return configs;
   }
 
+  getRuntimeStats(): PluginRuntimeStats {
+    let enabled = 0;
+    for (const plugin of this.plugins.values()) {
+      if (plugin.enabled) enabled++;
+    }
+
+    return {
+      loaded: this.plugins.size,
+      enabled,
+      deployedSkills: this.deployedSkillPaths.length,
+    };
+  }
+
   /**
    * Convert resolved plugin MCP configs into the format the Claude SDK expects.
    * Returns mcpServers config objects and wildcard allowedTools patterns.
@@ -1048,55 +1127,17 @@ class PluginManager {
 
   private async scanAllDirectories(): Promise<Array<[string, PluginManifest, PluginSource]>> {
     const results: Array<[string, PluginManifest, PluginSource]> = [];
-
-    // 1. Built-in plugins (relative to project root)
-    const builtInDir = path.join(PROJECT_ROOT, 'packages', 'backend', 'plugins');
-    const builtIn = await this.scanDirectory(builtInDir, 'built-in');
-    results.push(...builtIn);
-
-    // 2. Downloaded plugins (~/.animus/plugins/)
-    const userDir = path.join(os.homedir(), '.animus', 'plugins');
-    const downloaded = await this.scanDirectory(userDir, 'local');
-    results.push(...downloaded);
-
-    // 3. Registered paths from DB (picks up plugins at arbitrary paths)
-    const discoveredPaths = new Set(results.map(([p]) => p));
+    // DB-only loading: plugins must be explicitly installed/registered.
+    // No filesystem discovery for built-ins, downloads, or arbitrary directories.
     const db = getSystemDb();
     const dbPlugins = pluginStore.getAllPlugins(db);
     for (const record of dbPlugins) {
-      if (discoveredPaths.has(record.path)) continue;
       try {
         const manifest = await this.readManifest(record.path);
         results.push([record.path, manifest, record.source]);
       } catch {
         log.warn(`Could not load registered plugin at ${record.path}`);
       }
-    }
-
-    return results;
-  }
-
-  private async scanDirectory(
-    dir: string,
-    source: PluginSource,
-  ): Promise<Array<[string, PluginManifest, PluginSource]>> {
-    const results: Array<[string, PluginManifest, PluginSource]> = [];
-
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        const pluginDir = path.join(dir, entry.name);
-        try {
-          const manifest = await this.readManifest(pluginDir);
-          results.push([pluginDir, manifest, source]);
-        } catch (err) {
-          log.debug(`Skipping ${pluginDir}: ${err instanceof Error ? err.message : err}`);
-        }
-      }
-    } catch {
-      // Directory doesn't exist — that's fine
-      log.debug(`Plugin directory does not exist: ${dir}`);
     }
 
     return results;

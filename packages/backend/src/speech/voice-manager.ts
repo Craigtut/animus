@@ -70,7 +70,7 @@ export class VoiceManager {
     // Save manifest
     this.saveManifest();
 
-    log.info(`Voice manager initialized: ${this.manifest.voices.length} voices available`);
+    log.debug(`Voice manager initialized: ${this.manifest.voices.length} voices available`);
   }
 
   /** Scan the TTS model's test_wavs/ directory for built-in voice references. */

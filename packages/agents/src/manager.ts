@@ -201,7 +201,7 @@ export class AgentManager {
    */
   registerAdapter(adapter: IAgentAdapter): void {
     this.adapters.set(adapter.provider, adapter);
-    this.logger.info('Adapter registered', { provider: adapter.provider });
+    this.logger.debug('Adapter registered', { provider: adapter.provider });
   }
 
   /**

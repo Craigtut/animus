@@ -32,6 +32,8 @@ const mockAccess = vi.fn();
 const mockMkdir = vi.fn();
 const mockSymlink = vi.fn();
 const mockRm = vi.fn();
+const mockWriteFile = vi.fn();
+const mockLstat = vi.fn();
 
 vi.mock('fs/promises', () => ({
   default: {
@@ -41,6 +43,8 @@ vi.mock('fs/promises', () => ({
     mkdir: (...args: unknown[]) => mockMkdir(...args),
     symlink: (...args: unknown[]) => mockSymlink(...args),
     rm: (...args: unknown[]) => mockRm(...args),
+    writeFile: (...args: unknown[]) => mockWriteFile(...args),
+    lstat: (...args: unknown[]) => mockLstat(...args),
   },
   readdir: (...args: unknown[]) => mockReaddir(...args),
   readFile: (...args: unknown[]) => mockReadFile(...args),
@@ -48,6 +52,8 @@ vi.mock('fs/promises', () => ({
   mkdir: (...args: unknown[]) => mockMkdir(...args),
   symlink: (...args: unknown[]) => mockSymlink(...args),
   rm: (...args: unknown[]) => mockRm(...args),
+  writeFile: (...args: unknown[]) => mockWriteFile(...args),
+  lstat: (...args: unknown[]) => mockLstat(...args),
 }));
 
 // Mock child_process.spawn
@@ -103,6 +109,16 @@ function createMockProcess() {
   return proc;
 }
 
+function registerPluginRecord(name: string, pluginPath: string, source: 'built-in' | 'local' | 'git' | 'npm' = 'local') {
+  pluginStore.insertPlugin(mockSysDb, {
+    name,
+    version: '1.0.0',
+    path: pluginPath,
+    source,
+    enabled: true,
+  });
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -119,6 +135,8 @@ describe('PluginManager', () => {
     mockMkdir.mockResolvedValue(undefined);
     mockSymlink.mockResolvedValue(undefined);
     mockRm.mockResolvedValue(undefined);
+    mockWriteFile.mockResolvedValue(undefined);
+    mockLstat.mockRejectedValue(new Error('ENOENT'));
     mockSpawn.mockReset();
   });
 
@@ -145,6 +163,7 @@ describe('PluginManager', () => {
         }
         throw new Error('File not found');
       });
+      registerPluginRecord('minimal-plugin', '/plugins/test-plugin', 'built-in');
 
       const pm = getPluginManager();
       await pm.loadAll();
@@ -170,6 +189,7 @@ describe('PluginManager', () => {
         }
         throw new Error('File not found');
       });
+      registerPluginRecord('bad', '/plugins/bad', 'built-in');
 
       const pm = getPluginManager();
       await pm.loadAll();
@@ -186,6 +206,7 @@ describe('PluginManager', () => {
         return [];
       });
       mockReadFile.mockRejectedValue(new Error('ENOENT'));
+      registerPluginRecord('no-manifest', '/plugins/no-manifest', 'built-in');
 
       const pm = getPluginManager();
       await pm.loadAll();
@@ -228,6 +249,7 @@ describe('PluginManager', () => {
       });
 
       mockAccess.mockResolvedValue(undefined); // SKILL.md exists
+      registerPluginRecord('skill-plugin', '/plugins/skill-plugin', 'built-in');
 
       const pm = getPluginManager();
       await pm.loadAll();
@@ -238,8 +260,8 @@ describe('PluginManager', () => {
         (call: unknown[]) => typeof call[1] === 'string' && (call[1] as string).includes('my-skill')
       );
       expect(symlinkCall).toBeDefined();
-      // Target should be in .claude/skills/ using skill name directly (Agent Skills spec compliant)
-      expect(symlinkCall![1]).toContain('.claude/skills/my-skill');
+      // Target should be under the Claude bridge plugin skills/ directory
+      expect(symlinkCall![1]).toContain('runtime/providers/claude/animus-skill-bridge/skills/my-skill');
     });
 
     it('cleans up skills on cleanupSkills()', async () => {
@@ -269,6 +291,7 @@ describe('PluginManager', () => {
       });
 
       mockAccess.mockResolvedValue(undefined);
+      registerPluginRecord('cleanup-test', '/plugins/cleanup-test', 'built-in');
 
       const pm = getPluginManager();
       await pm.loadAll();
@@ -278,6 +301,49 @@ describe('PluginManager', () => {
       await pm.cleanupSkills();
 
       expect(mockRm).toHaveBeenCalled();
+    });
+
+    it('builds isolated CODEX_HOME config with plugin skill paths', async () => {
+      mockReaddir.mockImplementation(async (dir: string) => {
+        if (dir.endsWith('backend/plugins')) {
+          return [{ name: 'codex-skill-plugin', isDirectory: () => true, isFile: () => false }];
+        }
+        if (dir.includes('codex-skill-plugin') && dir.endsWith('skills')) {
+          return [{ name: 'codex-skill', isDirectory: () => true, isFile: () => false }];
+        }
+        return [];
+      });
+
+      mockReadFile.mockImplementation(async (filePath: string) => {
+        if (filePath.endsWith('plugin.json')) {
+          return JSON.stringify({
+            name: 'codex-skill-plugin',
+            displayName: 'Codex Skill Plugin',
+            version: '1.0.0',
+            description: 'Codex skills',
+            author: { name: 'Test' },
+            components: { skills: './skills/' },
+          });
+        }
+        throw new Error('File not found');
+      });
+
+      mockAccess.mockResolvedValue(undefined); // SKILL.md exists
+      registerPluginRecord('codex-skill-plugin', '/plugins/codex-skill-plugin', 'built-in');
+
+      const pm = getPluginManager();
+      await pm.loadAll();
+
+      mockWriteFile.mockClear();
+      const runtimeEnv = await pm.buildCodexRuntimeEnv();
+
+      expect(runtimeEnv['CODEX_HOME']).toContain('runtime/providers/codex/home');
+      const configWrite = mockWriteFile.mock.calls.find(
+        (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).endsWith('/config.toml')
+      );
+      expect(configWrite).toBeDefined();
+      expect(configWrite![1]).toContain('[[skills.config]]');
+      expect(configWrite![1]).toContain('/codex-skill-plugin/skills/codex-skill');
     });
   });
 
@@ -326,6 +392,7 @@ describe('PluginManager', () => {
         }
         throw new Error('File not found');
       });
+      registerPluginRecord('decision-plugin', '/plugins/decision-plugin', 'built-in');
 
       const pm = getPluginManager();
       await pm.loadAll();
@@ -374,6 +441,7 @@ describe('PluginManager', () => {
         }
         throw new Error('File not found');
       });
+      registerPluginRecord('desc-plugin', '/plugins/desc-plugin', 'built-in');
 
       const pm = getPluginManager();
       await pm.loadAll();
@@ -431,6 +499,8 @@ describe('PluginManager', () => {
         }
         throw new Error('File not found');
       });
+      registerPluginRecord('plugin-a', '/plugins/plugin-a', 'built-in');
+      registerPluginRecord('plugin-b', '/plugins/plugin-b', 'built-in');
 
       const pm = getPluginManager();
       await pm.loadAll();
@@ -475,6 +545,7 @@ describe('PluginManager', () => {
         }
         throw new Error('File not found');
       });
+      registerPluginRecord('hook-plugin', '/plugins/hook-plugin', 'built-in');
 
       // Mock spawn for the handler — simulate exit code 1 (failure = block)
       mockSpawn.mockImplementation(() => {
@@ -525,6 +596,7 @@ describe('PluginManager', () => {
         }
         throw new Error('File not found');
       });
+      registerPluginRecord('post-hook', '/plugins/post-hook', 'built-in');
 
       // Mock spawn — successful execution
       mockSpawn.mockImplementation(() => {
@@ -728,6 +800,7 @@ describe('PluginManager', () => {
         }
         throw new Error('File not found');
       });
+      registerPluginRecord('core-plugin', '/plugins/core-plugin', 'built-in');
 
       const pm = getPluginManager();
       await pm.loadAll();
@@ -814,6 +887,7 @@ describe('PluginManager', () => {
         }
         throw new Error('File not found');
       });
+      registerPluginRecord('mcp-plugin', '/plugins/mcp-plugin', 'built-in');
 
       const pm = getPluginManager();
       await pm.loadAll();
@@ -871,6 +945,7 @@ Check all code for vulnerabilities.`;
         }
         throw new Error('File not found');
       });
+      registerPluginRecord('agent-plugin', '/plugins/agent-plugin', 'built-in');
 
       const pm = getPluginManager();
       await pm.loadAll();
@@ -948,6 +1023,8 @@ Check all code for vulnerabilities.`;
         }
         throw new Error('File not found');
       });
+      registerPluginRecord('built-in-a', '/plugins/built-in-a', 'built-in');
+      registerPluginRecord('downloaded-b', '/plugins/downloaded-b', 'local');
 
       const pm = getPluginManager();
       await pm.loadAll();

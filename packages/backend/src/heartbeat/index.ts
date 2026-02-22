@@ -736,9 +736,11 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
  * Initialize the heartbeat system.
  * Creates the AgentManager, recovers from crashes, and sets up the tick queue.
  */
-export async function initializeHeartbeat(): Promise<void> {
+export async function initializeHeartbeat(): Promise<{ resumedAfterRestart: boolean; nextTickInMs: number | null }> {
   const hbDb = getHeartbeatDb();
   const state = heartbeatStore.getHeartbeatState(hbDb);
+  let resumedAfterRestart = false;
+  let nextTickInMs: number | null = null;
 
   // Recover from interrupted tick
   if (state.currentStage !== 'idle') {
@@ -761,7 +763,7 @@ export async function initializeHeartbeat(): Promise<void> {
   ctx.agentManager = createAgentManager({ maxConcurrentSessions: 8 });
   const configuredProviders = ctx.agentManager.getConfiguredProviders();
   if (configuredProviders.length > 0) {
-    log.info(`Agent providers configured: ${configuredProviders.join(', ')}`);
+    log.debug(`Agent providers configured: ${configuredProviders.join(', ')}`);
   } else {
     log.warn('No agent providers configured. Mind query will use safe defaults.');
   }
@@ -781,7 +783,7 @@ export async function initializeHeartbeat(): Promise<void> {
     ctx.vectorStore = new VectorStore(env.LANCEDB_PATH, ctx.embeddingProvider.dimensions);
     await ctx.vectorStore.initialize();
     ctx.memoryManager = new MemoryManager(memDb, ctx.vectorStore, ctx.embeddingProvider);
-    log.info('Memory system initialized');
+    log.debug('Memory system initialized');
   } catch (err) {
     log.warn('Memory system not available:', err);
   }
@@ -792,7 +794,7 @@ export async function initializeHeartbeat(): Promise<void> {
     if (ctx.embeddingProvider) {
       ctx.seedManager = new SeedManager(hbDb, ctx.embeddingProvider);
     }
-    log.info('Goal system initialized');
+    log.debug('Goal system initialized');
   } catch (err) {
     log.warn('Goal system not available:', err);
   }
@@ -853,7 +855,7 @@ export async function initializeHeartbeat(): Promise<void> {
       });
     });
     taskScheduler.start();
-    log.info('Task scheduler started');
+    log.debug('Task scheduler started');
   } catch (err) {
     log.warn('Task scheduler not available:', err);
   }
@@ -882,8 +884,11 @@ export async function initializeHeartbeat(): Promise<void> {
     const sysDb = getSystemDb();
     const settings = systemStore.getSystemSettings(sysDb);
     tickQueue.startInterval(settings.heartbeatIntervalMs);
-    log.info(`Resumed after restart (next tick in ${settings.heartbeatIntervalMs}ms)`);
+    resumedAfterRestart = true;
+    nextTickInMs = settings.heartbeatIntervalMs;
   }
+
+  return { resumedAfterRestart, nextTickInMs };
 }
 
 /**

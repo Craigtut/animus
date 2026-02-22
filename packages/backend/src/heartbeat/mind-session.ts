@@ -36,6 +36,7 @@ import {
 } from '../db/stores/heartbeat-store.js';
 import { getHeartbeatDb } from '../db/index.js';
 import { getPluginManager } from '../services/plugin-manager.js';
+import { prepareCodexSessionAuth } from '../services/codex-oauth.js';
 import { getChannelRouter } from '../channels/index.js';
 import type { MemoryManager } from '../memory/index.js';
 
@@ -247,9 +248,10 @@ export async function getOrCreateMindSession(
 
   // For Claude provider: use the skill bridge plugin to expose Animus plugin skills
   // without needing settingSources: ['project'] (which would also load CLAUDE.md).
-  // The bridge is a minimal pseudo-plugin whose skills/ symlinks to .claude/skills/.
-  // Also add 'Skill' to allowedTools so the SDK enables its built-in Skill tool.
+  // For Codex provider: inject a generated runtime config.toml via CODEX_HOME.
+  // Also add 'Skill' to allowedTools so Claude SDK enables its built-in Skill tool.
   let sdkPlugins: Array<{ type: 'local'; path: string }> | undefined;
+  let sessionEnv: Record<string, string> | undefined;
   if (provider === 'claude') {
     const bridgePath = pluginMgr.getSkillBridgePath();
     sdkPlugins = [{ type: 'local' as const, path: bridgePath }];
@@ -259,6 +261,19 @@ export async function getOrCreateMindSession(
     log.info('Claude SDK skill bridge plugin configured', {
       bridgePath,
       allowedTools: mergedAllowedTools,
+    });
+  } else if (provider === 'codex') {
+    sessionEnv = await pluginMgr.buildCodexRuntimeEnv();
+    if (process.env['CODEX_OAUTH_CONFIGURED']) {
+      try {
+        sessionEnv = await prepareCodexSessionAuth(getSystemDb(), sessionEnv['CODEX_HOME']!);
+      } catch (err) {
+        log.warn('Codex OAuth session prep failed, continuing without refresh:', err);
+      }
+    }
+    sessionEnv = await pluginMgr.buildCodexRuntimeEnv(sessionEnv);
+    log.info('Codex runtime config prepared for session', {
+      codexHome: sessionEnv['CODEX_HOME'],
     });
   }
 
@@ -305,6 +320,7 @@ export async function getOrCreateMindSession(
       executionMode: 'build',
       approvalLevel: 'normal',
     },
+    ...(sessionEnv ? { env: sessionEnv } : {}),
     canUseTool: canUseToolCallback,
     hooks: {
       onPreToolUse: preToolUseHook,
@@ -320,7 +336,7 @@ export async function getOrCreateMindSession(
     ...(mergedAllowedTools.length > 0 ? { allowedTools: mergedAllowedTools } : {}),
     // Disable SDK built-in tools that have mode='off' in tool_permissions
     ...(disabledSdkTools.length > 0 ? { disallowedTools: disabledSdkTools } : {}),
-    // Claude SDK plugins for skill discovery (bridge to .claude/skills/)
+    // Claude SDK plugins for skill discovery (bridge to runtime claude/skills/)
     ...(sdkPlugins ? { plugins: sdkPlugins } : {}),
     verbose: verboseAgent,
   });
