@@ -106,7 +106,7 @@ animus/
 │   │       ├── heartbeat/ # Heartbeat system
 │   │       └── utils/   # Backend utilities
 │   │
-│   ├── channel-sdk/     # Types-only package for channel adapter authors
+│   ├── channel-sdk/     # Types-only package published as @animus-engine/channel-sdk
 │   │
 │   └── frontend/        # Vite + React SPA
 │       └── src/
@@ -117,7 +117,6 @@ animus/
 │           ├── styles/    # Theme and global styles
 │           └── utils/     # Frontend utilities
 │
-├── channels/           # Reference channel packages (not part of the engine)
 ├── docs/               # Documentation
 ├── CLAUDE.md          # AI assistant context
 └── package.json       # Root package with workspaces

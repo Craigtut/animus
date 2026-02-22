@@ -18,10 +18,11 @@ Animus is an autonomous AI assistant designed to be genuinely helpful while main
   /agents       - Agent SDK abstraction layer (Claude, Codex, OpenCode)
   /backend      - Fastify + tRPC server
   /frontend     - Vite + React 19 SPA
-  /channel-sdk  - Types-only package for channel adapter authors
-/channels       - Reference channel packages (not part of the engine, installed separately)
+  /channel-sdk  - Types-only package published as @animus-engine/channel-sdk
 /docs           - Documentation
 ```
+
+**Note**: Channel adapters and plugins live in the separate [animus-extensions](https://github.com/animus-engine/animus-extensions) repository.
 
 ### Tech Stack
 
@@ -313,7 +314,6 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - **Frontend Design**: `docs/frontend/design-principles.md`, `docs/frontend/onboarding.md`
 - **Frontend Specs**: `docs/frontend/app-shell.md` (navigation, transitions, routes), `docs/frontend/presence.md` (main space), `docs/frontend/mind.md` (inner life detail), `docs/frontend/people.md` (contacts), `docs/frontend/settings.md` (configuration), `docs/frontend/voice-mode.md` (voice interaction)
 - **Guides**: `docs/guides/getting-started.md`
-- **Skills**: `.skills/build-plugin/` (plugin development guide, invoked automatically when building plugins)
 - **Agent SDKs**: `docs/agents/` (per-provider folders: claude/, codex/, opencode/, pi/ + architecture overview + plugin/extension systems)
 
 **When to use `/doc-explorer`:**
@@ -338,7 +338,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on sleep/energy/circadian rhythm → `/doc-explorer sleep-energy`
 - Working on agent SDKs → `/doc-explorer agents`
 - Working on Pi adapter/transformContext → `/doc-explorer pi`
-- Building a new plugin → the `build-plugin` skill is loaded automatically; for architecture context use `/doc-explorer plugin-system`
+- Building a new plugin → see the `build-plugin` skill in the `animus-extensions` repo; for architecture context use `/doc-explorer plugin-system`
 - Working on backend/API → `/doc-explorer architecture`
 - Unsure about project conventions → `/doc-explorer` (no args, see everything)
 

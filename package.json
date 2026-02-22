@@ -14,7 +14,7 @@
     "build": "npm run build --workspaces --if-present",
     "build:frontend": "npm run build -w @animus/frontend",
     "build:backend": "npm run build -w @animus/backend",
-    "build:channels": "for dir in channels/*/; do (cd \"$dir\" && npx tsc); done",
+
     "build:prod": "npm run build -w @animus/shared && npm run build -w @animus/agents && npm run build:frontend && npm run build:backend",
     "build:tauri": "npm run build:prod && npm run prepare:tauri && cd packages/tauri && cargo tauri build",
     "prepare:tauri": "node scripts/prepare-tauri.mjs",

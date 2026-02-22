@@ -1,5 +1,5 @@
 /**
- * @animus/channel-sdk — Public types for channel adapter authors.
+ * @animus-engine/channel-sdk — Public types for channel adapter authors.
  *
  * Channel packages import these types to implement the ChannelAdapter interface.
  * Since adapters only use `import type`, the SDK is erased at compile time

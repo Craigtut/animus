@@ -3,6 +3,8 @@
 > **Status**: Architecture finalized
 > **Date**: 2026-02-13, updated 2026-02-14
 > **Single source of truth** for the Animus channel system — packaging, protocol, isolation, and lifecycle.
+>
+> **Note**: Reference channel implementations (twilio-sms, discord, api-compat) have moved to the [animus-extensions](https://github.com/animus-engine/animus-extensions) repository. The channel SDK is published as `@animus-engine/channel-sdk` on npm.
 
 How Animus receives messages from the outside world and sends responses back through multiple communication channels. The channel adapter layer sits between external protocols (Twilio webhooks, Discord WebSocket, HTTP API endpoints, the web UI) and the heartbeat pipeline, normalizing everything into a common format.
 
@@ -14,9 +16,9 @@ The web channel is built directly into the backend — always on, no installatio
 
 Channel packages are standalone directories that can exist **anywhere on disk**. They are **not part of the Animus engine**. When a user installs a channel, they point the Channel Manager at the directory path — the directory stays where it is.
 
-The `/channels/` directory at the monorepo root contains reference channel implementations (SMS, Discord, API). These are **not bundled into the engine** — they are independent packages that happen to live in the same repository for development convenience. They follow the exact same format and install process as any community-built channel. A user must still install them via Settings > Channels > Install by pointing at the directory path.
+Reference channel implementations (SMS, Discord, API-compat) live in the [animus-extensions](https://github.com/animus-engine/animus-extensions) repository. They are **not bundled into the engine** — they are independent packages that follow the exact same format and install process as any community-built channel. A user must install them via Settings > Channels > Install by pointing at the directory path.
 
-- **`packages/channel-sdk/`** is a types-only workspace package that provides `AdapterContext`, `ChannelAdapter`, and related types for channel adapter authors. It's a `devDependency` — types are erased at compile time, so compiled adapters have zero imports from it.
+- **`packages/channel-sdk/`** is a types-only package published as [`@animus-engine/channel-sdk`](https://www.npmjs.com/package/@animus-engine/channel-sdk) on npm. It provides `AdapterContext`, `ChannelAdapter`, and related types for channel adapter authors. It's a `devDependency` — types are erased at compile time, so compiled adapters have zero imports from it.
 
 ## Relationship to Plugins
 
@@ -377,7 +379,7 @@ The adapter module exports a factory function:
 
 ```typescript
 // adapter.ts (compiled to adapter.js)
-import type { AdapterContext } from '@animus/channel-sdk';
+import type { AdapterContext } from '@animus-engine/channel-sdk';
 
 export default function createAdapter(ctx: AdapterContext) {
   return {
@@ -1103,10 +1105,10 @@ The main Animus process runs the Claude Agent SDK, which requires unrestricted f
 
 ## Channel SDK Package
 
-To help channel developers implement adapters, we provide a `@animus/channel-sdk` package with TypeScript types:
+To help channel developers implement adapters, we provide a `@animus-engine/channel-sdk` package with TypeScript types:
 
 ```typescript
-// @animus/channel-sdk
+// @animus-engine/channel-sdk
 
 export interface AdapterContext {
   readonly config: Readonly<Record<string, unknown>>;
