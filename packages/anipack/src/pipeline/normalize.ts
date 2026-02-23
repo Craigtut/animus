@@ -5,12 +5,18 @@
  * PackageManifest format used inside .anpk archives.
  */
 
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { PackageManifest } from '@animus-labs/shared';
 import { SUPPORTED_FORMAT_VERSION } from '@animus-labs/shared';
 import type { LoadedManifest } from '../utils/manifest.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf-8')) as { version: string };
+
 /** Version of this build tool, injected into distribution metadata. */
-const BUILD_TOOL_VERSION = '0.1.0';
+const BUILD_TOOL_VERSION = pkg.version;
 
 export interface NormalizeOptions {
   sourceRepository?: string | undefined;

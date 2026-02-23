@@ -40,6 +40,7 @@ const DEFAULT_EXCLUDE_DIRS = new Set([
   'test',
   '__tests__',
   '.turbo',
+  'node_modules',
 ]);
 
 /** Patterns that trigger a warning about potential sensitive files. */

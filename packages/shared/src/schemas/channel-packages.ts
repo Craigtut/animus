@@ -98,7 +98,25 @@ export const configFieldSchema = z.object({
   max: z.number().optional(), // for 'number' type
 });
 
+export const setupGuideLinkSchema = z.object({
+  url: z.string().url(),
+  label: z.string().min(1),
+});
+
+export const setupGuideStepSchema = z.object({
+  title: z.string().min(1),
+  body: z.string().min(1),
+  link: setupGuideLinkSchema.optional(),
+  manifest: z.string().optional(), // code block content (e.g., YAML manifest to copy)
+});
+
+export const setupGuideSchema = z.object({
+  description: z.string().optional(),
+  steps: z.array(setupGuideStepSchema),
+});
+
 export const configSchemaSchema = z.object({
+  setupGuide: setupGuideSchema.optional(),
   fields: z.array(configFieldSchema),
 });
 
@@ -127,6 +145,7 @@ export const channelPackageSchema = z.object({
   checksum: z.string().min(1),
   status: channelPackageStatusSchema,
   lastError: z.string().nullable(),
+  installedFrom: z.enum(['local', 'package']).default('local'),
 });
 
 // ============================================================================
@@ -147,6 +166,7 @@ export const channelInfoSchema = z.object({
   status: channelPackageStatusSchema,
   lastError: z.string().nullable(),
   installedAt: z.string(),
+  installedFrom: z.enum(['local', 'package']).default('local'),
 });
 
 // ============================================================================

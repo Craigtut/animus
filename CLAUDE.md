@@ -1,5 +1,7 @@
 # Animus
 
+**Organization**: Animus Labs (`@animus-labs` on npm)
+
 An agentic system with a mind, a spirit, and an inner will that moves with agency to act.
 
 ## Project Overview

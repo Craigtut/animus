@@ -8,14 +8,14 @@ import * as fs from 'node:fs/promises';
 import * as crypto from 'node:crypto';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import extractZip from 'extract-zip';
 import {
   PackageManifestSchema,
   signatureFileSchema,
-  ANIMUS_LABS_PUBLIC_KEY,
 } from '@animus-labs/shared';
 import type { PackageManifest, SignatureFile } from '@animus-labs/shared';
 import * as logger from '../utils/logger.js';
-import { hashBuffer } from '../pipeline/checksum.js';
+import { hashFile } from '../pipeline/checksum.js';
 
 export interface InspectResult {
   manifest: PackageManifest;
@@ -53,7 +53,13 @@ export async function inspectCommand(
     process.exit(1);
   }
 
-  const result = await inspect(absolutePath);
+  let result: InspectResult;
+  try {
+    result = await inspect(absolutePath);
+  } catch (err) {
+    logger.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
 
   if (options.json) {
     console.log(JSON.stringify(result, null, 2));
@@ -182,11 +188,20 @@ export async function inspect(archivePath: string): Promise<InspectResult> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'anipack-inspect-'));
 
   try {
-    await extractZip(archivePath, tmpDir);
+    await extractZip(archivePath, { dir: tmpDir });
 
     // Read manifest
     const manifestPath = path.join(tmpDir, 'manifest.json');
-    const manifestContent = await fs.readFile(manifestPath, 'utf-8');
+    let manifestContent: string;
+    try {
+      manifestContent = await fs.readFile(manifestPath, 'utf-8');
+    } catch {
+      throw new Error(
+        'Invalid package: manifest.json not found at archive root. ' +
+        'This does not appear to be a valid .anpk package.',
+      );
+    }
+
     const manifestRaw = JSON.parse(manifestContent) as unknown;
     const manifestResult = PackageManifestSchema.safeParse(manifestRaw);
 
@@ -223,11 +238,19 @@ export async function inspect(archivePath: string): Promise<InspectResult> {
         signedBy = sig.signedBy;
         signedAt = sig.signedAt;
 
-        // Verify signature against the archive hash (excluding SIGNATURE file)
-        // We need to compute hash of archive without SIGNATURE
-        const archiveData = await fs.readFile(archivePath);
-        const verified = verifySignature(sig, archiveData);
-        signatureStatus = verified ? 'valid' : 'invalid';
+        // Compute canonical hash of all files (excluding SIGNATURE)
+        // This must match the hash used during signing and by the backend verifier
+        const canonicalHash = await computeCanonicalHash(tmpDir, 'SIGNATURE');
+        const expectedPayload = `sha256:${canonicalHash}`;
+
+        // Verify: payload in SIGNATURE must match actual archive contents
+        if (sig.payload !== expectedPayload) {
+          signatureStatus = 'invalid';
+        } else {
+          // Verify Ed25519 cryptographic signature
+          const verified = verifySignature(sig);
+          signatureStatus = verified ? 'valid' : 'invalid';
+        }
       } else {
         signatureStatus = 'invalid';
       }
@@ -254,8 +277,7 @@ export async function inspect(archivePath: string): Promise<InspectResult> {
         const fullPath = path.join(tmpDir, filePath!);
 
         try {
-          const fileContent = await fs.readFile(fullPath);
-          const actualHash = crypto.createHash('sha256').update(fileContent).digest('hex');
+          const actualHash = await hashFile(fullPath);
           if (actualHash === expectedHash) {
             checksumVerified++;
           } else {
@@ -292,9 +314,54 @@ export async function inspect(archivePath: string): Promise<InspectResult> {
   }
 }
 
-function verifySignature(sig: SignatureFile, _archiveData: Buffer): boolean {
+/**
+ * Compute a canonical hash of all files in a directory, excluding a named file.
+ *
+ * Produces a deterministic SHA-256 by sorting file paths alphabetically
+ * and hashing lines of "sha256:<file_hash> <relative_path>\n".
+ *
+ * This matches sign.ts's computeCanonicalHash and the backend
+ * PackageVerifier's computeArchiveHash.
+ */
+async function computeCanonicalHash(dir: string, excludeFile: string): Promise<string> {
+  const files = await collectFilesRecursive(dir);
+  const relativePaths = files
+    .map((f) => path.relative(dir, f).split(path.sep).join('/'))
+    .filter((p) => p !== excludeFile)
+    .sort();
+
+  const hash = crypto.createHash('sha256');
+  for (const relPath of relativePaths) {
+    const fileHash = await hashFile(path.join(dir, relPath));
+    hash.update(`sha256:${fileHash} ${relPath}\n`);
+  }
+
+  return hash.digest('hex');
+}
+
+async function collectFilesRecursive(dir: string): Promise<string[]> {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await collectFilesRecursive(fullPath));
+    } else {
+      files.push(fullPath);
+    }
+  }
+
+  return files;
+}
+
+/**
+ * Verify Ed25519 cryptographic signature.
+ * Checks that the signature was produced by signing the payload
+ * with the private key corresponding to the embedded public key.
+ */
+function verifySignature(sig: SignatureFile): boolean {
   try {
-    // Reconstruct the public key PEM from the base64 content
     const publicKeyPem = `-----BEGIN PUBLIC KEY-----\n${sig.publicKey}\n-----END PUBLIC KEY-----`;
     const publicKey = crypto.createPublicKey(publicKeyPem);
 
@@ -304,20 +371,6 @@ function verifySignature(sig: SignatureFile, _archiveData: Buffer): boolean {
     return crypto.verify(null, payloadBuffer, publicKey, signatureBuffer);
   } catch {
     return false;
-  }
-}
-
-async function extractZip(zipPath: string, destDir: string): Promise<void> {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const execFileAsync = promisify(execFile);
-
-  try {
-    await execFileAsync('unzip', ['-o', '-q', zipPath, '-d', destDir]);
-  } catch {
-    throw new Error(
-      'Failed to extract archive. Ensure "unzip" is available on your system.',
-    );
   }
 }
 

@@ -1,14 +1,18 @@
 /**
  * Compile — TypeScript compilation step for the build pipeline.
  *
- * Checks for TypeScript files in the source directory and compiles them.
- * Currently a stub that reports if TS files are found; actual compilation
- * can be added when needed.
+ * Checks for a tsconfig.json in the source directory and runs tsc if found.
+ * This compiles TypeScript source files in the extension (e.g., channel adapters)
+ * before they are collected into the staging directory.
  */
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import * as logger from '../utils/logger.js';
+
+const execFileAsync = promisify(execFile);
 
 export interface CompileOptions {
   sourceDir: string;
@@ -17,7 +21,7 @@ export interface CompileOptions {
 }
 
 /**
- * Check for TypeScript files and compile them.
+ * Check for TypeScript config and compile if present.
  * Returns true if compilation ran, false if skipped.
  */
 export async function compile(options: CompileOptions): Promise<boolean> {
@@ -25,24 +29,29 @@ export async function compile(options: CompileOptions): Promise<boolean> {
     return false;
   }
 
-  // Check for adapter.ts (channels) or any .ts files that need compilation
-  const adapterTs = path.join(options.sourceDir, 'adapter.ts');
-  let hasTs = false;
+  const tsconfigPath = path.join(options.sourceDir, 'tsconfig.json');
+  let hasTsConfig = false;
   try {
-    await fs.access(adapterTs);
-    hasTs = true;
+    await fs.access(tsconfigPath);
+    hasTsConfig = true;
   } catch {
-    // No adapter.ts found
+    // No tsconfig.json
   }
 
-  if (!hasTs) {
+  if (!hasTsConfig) {
     return false;
   }
 
-  // TypeScript compilation would happen here using the TypeScript compiler API.
-  // For now, we expect pre-compiled .js files to exist alongside .ts files.
-  logger.warn(
-    'TypeScript source files found. Ensure compiled .js files are present.',
-  );
-  return false;
+  logger.info('Compiling TypeScript...');
+  const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  try {
+    await execFileAsync(npxCmd, ['tsc', '--project', tsconfigPath], {
+      cwd: options.sourceDir,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? (err as Error & { stderr?: string }).stderr ?? err.message : String(err);
+    throw new Error(`TypeScript compilation failed:\n${message}`);
+  }
+
+  return true;
 }

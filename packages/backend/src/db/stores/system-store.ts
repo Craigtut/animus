@@ -574,6 +574,7 @@ function rowToChannelPackage(row: Record<string, unknown>): ChannelPackage {
     checksum: raw['checksum'] as string,
     status: raw['status'] as ChannelPackageStatus,
     lastError: (raw['lastError'] as string) ?? null,
+    installedFrom: (raw['installedFrom'] as 'local' | 'package') ?? 'local',
   };
 }
 
@@ -612,13 +613,15 @@ export function createChannelPackage(
     version: string;
     path: string;
     checksum: string;
+    installedFrom?: 'local' | 'package';
   }
 ): ChannelPackage {
   const timestamp = now();
+  const installedFrom = data.installedFrom ?? 'local';
   db.prepare(
-    `INSERT INTO channel_packages (name, channel_type, version, path, checksum, installed_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(data.name, data.channelType, data.version, data.path, data.checksum, timestamp, timestamp);
+    `INSERT INTO channel_packages (name, channel_type, version, path, checksum, installed_from, installed_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(data.name, data.channelType, data.version, data.path, data.checksum, installedFrom, timestamp, timestamp);
   return {
     name: data.name,
     channelType: data.channelType,
@@ -631,6 +634,7 @@ export function createChannelPackage(
     checksum: data.checksum,
     status: 'disabled',
     lastError: null,
+    installedFrom,
   };
 }
 

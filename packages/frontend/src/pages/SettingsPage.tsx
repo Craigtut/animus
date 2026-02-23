@@ -29,8 +29,6 @@ import {
   Plus,
   GearFine,
   FolderOpen,
-  GitBranch,
-  Package,
   ArrowClockwise,
   Plugs,
   FloppyDisk,
@@ -48,6 +46,7 @@ import { SavesSection } from '../components/settings/SavesSection';
 import { ToolsSection } from '../components/settings/ToolsSection';
 import { PackageConsentDialog } from '../components/settings/PackageConsentDialog';
 import { Upload, ArrowCounterClockwise } from '@phosphor-icons/react';
+import { AnpkDropZone } from '../components/settings/AnpkDropZone';
 
 // ============================================================================
 // Types
@@ -1678,7 +1677,7 @@ function ChannelsSection() {
 
   // Local state
   const [showInstallModal, setShowInstallModal] = useState(false);
-  const [installTab, setInstallTab] = useState<'path' | 'package'>('path');
+  const [installTab, setInstallTab] = useState<'package' | 'path'>('package');
   const [installPath, setInstallPath] = useState('');
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
   const [configChannel, setConfigChannel] = useState<string | null>(null);
@@ -1865,6 +1864,7 @@ function ChannelsSection() {
                       <Typography.BodyAlt as="span">{channel.displayName}</Typography.BodyAlt>
                       <Typography.Caption as="span" color="hint">v{channel.version}</Typography.Caption>
                       <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                      {channel.installedFrom === 'local' && <Badge variant="default">local</Badge>}
                     </div>
                     {channel.description && (
                       <Typography.SmallBody color="secondary" css={css`
@@ -2048,11 +2048,11 @@ function ChannelsSection() {
             Add Channel Package
           </Typography.Subtitle>
 
-          {/* Tabs: Path vs Package */}
+          {/* Tabs: Package vs Path */}
           <div css={css`display: flex; gap: ${theme.spacing[1]}; border-bottom: 1px solid ${theme.colors.border.light};`}>
             {([
-              { id: 'path' as const, label: 'Local Path', icon: FolderOpen },
               { id: 'package' as const, label: 'Package', icon: Upload },
+              { id: 'path' as const, label: 'Local Path', icon: FolderOpen },
             ]).map((tab) => (
               <button
                 key={tab.id}
@@ -2111,22 +2111,13 @@ function ChannelsSection() {
 
           {installTab === 'package' && (
             <>
-              <Input
-                label="Path to .anpk package file"
-                value={installPath}
-                onChange={(e) => setInstallPath((e.target as HTMLInputElement).value)}
-                placeholder="/path/to/channel-1.0.0.anpk"
+              <AnpkDropZone
+                onFileReady={(filePath) => handleChannelPackageUpload(filePath)}
+                disabled={verifyPackageMutation.isPending}
+                packageType="channel"
               />
               <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
                 <Button variant="ghost" size="sm" onClick={() => setShowInstallModal(false)}>Cancel</Button>
-                <Button
-                  size="sm"
-                  onClick={() => handleChannelPackageUpload(installPath)}
-                  disabled={!installPath.trim() || !installPath.endsWith('.anpk')}
-                  loading={verifyPackageMutation.isPending}
-                >
-                  Verify &amp; Install
-                </Button>
               </div>
             </>
           )}
@@ -2738,7 +2729,7 @@ function PluginsSection() {
 
   // Local state
   const [showInstallModal, setShowInstallModal] = useState(false);
-  const [installTab, setInstallTab] = useState<'local' | 'git' | 'npm' | 'package'>('local');
+  const [installTab, setInstallTab] = useState<'package' | 'local'>('package');
   const [installPath, setInstallPath] = useState('');
   const [installValidation, setInstallValidation] = useState<{
     valid: boolean;
@@ -2778,7 +2769,7 @@ function PluginsSection() {
   const handleInstall = () => {
     setMutationError(null);
     installMutation.mutate(
-      { source: installTab as 'local' | 'git' | 'npm', path: installPath },
+      { source: 'local' as const, path: installPath },
       {
         onError: (err) => setMutationError(err.message),
       }
@@ -3037,10 +3028,8 @@ function PluginsSection() {
           {/* Tabs */}
           <div css={css`display: flex; gap: ${theme.spacing[1]}; border-bottom: 1px solid ${theme.colors.border.light}; padding-bottom: 0;`}>
             {([
-              { id: 'local' as const, label: 'Local Path', icon: FolderOpen },
               { id: 'package' as const, label: 'Package', icon: Upload },
-              { id: 'git' as const, label: 'Git URL', icon: GitBranch },
-              { id: 'npm' as const, label: 'npm Package', icon: Package },
+              { id: 'local' as const, label: 'Local Path', icon: FolderOpen },
             ]).map((tab) => (
               <button
                 key={tab.id}
@@ -3163,83 +3152,29 @@ function PluginsSection() {
           )}
 
           {/* .anpk package upload form */}
+          {/* .anpk package upload with drag & drop */}
           {installTab === 'package' && (
             <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-              <Input
-                label="Path to .anpk package file"
-                value={installPath}
-                onChange={(e) => { setInstallPath((e.target as HTMLInputElement).value); }}
-                placeholder="/path/to/plugin-1.0.0.anpk"
+              <AnpkDropZone
+                onFileReady={(filePath) => handlePackageUpload(filePath)}
+                disabled={verifyPackageMutation.isPending}
+                packageType="plugin"
               />
               <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
                 <Button variant="ghost" size="sm" onClick={() => setShowInstallModal(false)}>Cancel</Button>
-                <Button
-                  size="sm"
-                  onClick={() => handlePackageUpload(installPath)}
-                  disabled={!installPath.trim() || !installPath.endsWith('.anpk')}
-                  loading={verifyPackageMutation.isPending}
-                >
-                  Verify &amp; Install
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Git URL form */}
-          {installTab === 'git' && (
-            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-              <Input
-                label="Git repository URL"
-                value={installPath}
-                onChange={(e) => setInstallPath((e.target as HTMLInputElement).value)}
-                placeholder="https://github.com/user/animus-plugin.git"
-              />
-              <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
-                <Button variant="ghost" size="sm" onClick={() => setShowInstallModal(false)}>Cancel</Button>
-                <Button
-                  size="sm"
-                  onClick={handleInstall}
-                  disabled={!installPath.trim()}
-                  loading={installMutation.isPending}
-                >
-                  Install
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* npm package form */}
-          {installTab === 'npm' && (
-            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-              <Input
-                label="npm package name"
-                value={installPath}
-                onChange={(e) => setInstallPath((e.target as HTMLInputElement).value)}
-                placeholder="@animus-labs/plugin-example"
-              />
-              <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
-                <Button variant="ghost" size="sm" onClick={() => setShowInstallModal(false)}>Cancel</Button>
-                <Button
-                  size="sm"
-                  onClick={handleInstall}
-                  disabled={!installPath.trim()}
-                  loading={installMutation.isPending}
-                >
-                  Install
-                </Button>
               </div>
             </div>
           )}
 
           {/* Install error */}
-          {installMutation.isError && (
+          {(installMutation.isError || mutationError) && (
             <div css={css`
               padding: ${theme.spacing[2]} ${theme.spacing[4]};
               background: ${theme.colors.error.main}1a;
               border-radius: ${theme.borderRadius.default};
             `}>
               <Typography.SmallBody color={theme.colors.error.main}>
-                {installMutation.error?.message ?? 'Installation failed'}
+                {mutationError ?? installMutation.error?.message ?? 'Installation failed'}
               </Typography.SmallBody>
             </div>
           )}

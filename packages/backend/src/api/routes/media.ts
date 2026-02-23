@@ -122,29 +122,32 @@ setInterval(() => {
 // ============================================================================
 
 export async function registerMediaRoutes(app: FastifyInstance): Promise<void> {
-  await app.register(multipart, {
-    limits: {
-      fileSize: MAX_FILE_SIZE,
-      files: MAX_FILES,
-    },
-  });
+  // Encapsulate multipart registration so it doesn't conflict with other
+  // routes that also need @fastify/multipart (e.g. package-upload).
+  await app.register(async (instance) => {
+    await instance.register(multipart, {
+      limits: {
+        fileSize: MAX_FILE_SIZE,
+        files: MAX_FILES,
+      },
+    });
 
-  // Ensure media directory exists
-  fs.mkdirSync(MEDIA_DIR, { recursive: true });
+    // Ensure media directory exists
+    fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
-  /**
-   * POST /api/media/upload
-   *
-   * Accepts multipart form data with one or more files.
-   * Files are saved to disk and tracked in memory as pending uploads.
-   * Returns an array of pending attachment metadata (id, type, mimeType, etc.).
-   */
-  app.post(
-    '/api/media/upload',
-    {
-      preHandler: (app as any).authenticate,
-    },
-    async (request, reply) => {
+    /**
+     * POST /api/media/upload
+     *
+     * Accepts multipart form data with one or more files.
+     * Files are saved to disk and tracked in memory as pending uploads.
+     * Returns an array of pending attachment metadata (id, type, mimeType, etc.).
+     */
+    instance.post(
+      '/api/media/upload',
+      {
+        preHandler: (instance as any).authenticate,
+      },
+      async (request, reply) => {
       try {
         const parts = request.parts();
         const uploaded: PendingUpload[] = [];
@@ -236,10 +239,10 @@ export async function registerMediaRoutes(app: FastifyInstance): Promise<void> {
    * Serves a media file by its attachment ID.
    * First checks persisted media_attachments table, then falls back to pending uploads.
    */
-  app.get<{ Params: { id: string } }>(
+  instance.get<{ Params: { id: string } }>(
     '/api/media/:id',
     {
-      preHandler: (app as any).authenticate,
+      preHandler: (instance as any).authenticate,
     },
     async (request, reply) => {
       const { id } = request.params;
@@ -288,4 +291,5 @@ export async function registerMediaRoutes(app: FastifyInstance): Promise<void> {
       }
     }
   );
+  }); // end encapsulated multipart scope
 }

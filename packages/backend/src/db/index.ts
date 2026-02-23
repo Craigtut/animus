@@ -89,7 +89,7 @@ export async function initializeDatabases(): Promise<void> {
     env.DB_AGENT_LOGS_PATH,
   ];
   for (const p of paths) {
-    await mkdir(path.dirname(p), { recursive: true });
+    await mkdir(path.dirname(p), { recursive: true, mode: 0o700 });
   }
 
   // Open all databases

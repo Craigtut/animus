@@ -4,6 +4,9 @@
  * anipack — CLI tool for building, validating, signing, and inspecting .anpk packages.
  */
 
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { validateCommand } from './commands/validate.js';
 import { buildCommand } from './commands/build.js';
@@ -11,12 +14,15 @@ import { signCommand } from './commands/sign.js';
 import { inspectCommand } from './commands/inspect.js';
 import { keygenCommand } from './commands/keygen.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8')) as { version: string };
+
 const program = new Command();
 
 program
   .name('anipack')
   .description('Build, validate, sign, and inspect .anpk packages for Animus')
-  .version('0.1.0');
+  .version(pkg.version);
 
 program
   .command('validate <directory>')

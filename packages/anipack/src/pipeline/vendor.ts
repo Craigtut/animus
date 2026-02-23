@@ -54,8 +54,9 @@ export async function vendor(options: VendorOptions): Promise<boolean> {
   await fs.copyFile(pkgJsonPath, stagingPkgJson);
 
   logger.info('Installing production dependencies...');
+  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   try {
-    await execFileAsync('npm', ['install', '--production', '--no-package-lock'], {
+    await execFileAsync(npmCmd, ['install', '--production', '--no-package-lock'], {
       cwd: options.stagingDir,
     });
   } catch (err) {

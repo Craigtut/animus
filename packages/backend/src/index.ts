@@ -7,6 +7,8 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
+import helmet from '@fastify/helmet';
+import rateLimit from '@fastify/rate-limit';
 import staticPlugin from '@fastify/static';
 import websocket from '@fastify/websocket';
 import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
@@ -90,7 +92,42 @@ async function main() {
     },
   });
 
-  // Register plugins
+  // ── Security Hardening ──
+
+  // Security headers (CSP, X-Content-Type-Options, X-Frame-Options, etc.)
+  await fastify.register(helmet, {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+        connectSrc: ["'self'", 'ws:', 'wss:'],
+        fontSrc: ["'self'", 'data:'],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false, // Allow loading cross-origin resources (media, etc.)
+  });
+
+  // Rate limiting — generous for single-user, prevents abuse
+  await fastify.register(rateLimit, {
+    global: true,
+    max: 200,
+    timeWindow: '1 minute',
+    keyGenerator: (request) => {
+      // Use authenticated user ID if available, otherwise IP
+      return (request as any).userId ?? request.ip;
+    },
+  });
+
+  // CORS — In development the frontend runs on a different port (5173) so we
+  // explicitly allow it. In production the backend serves the frontend
+  // statically (same origin), so we accept any origin here and let the
+  // onRequest hook below enforce same-origin via Host header comparison.
+  // This approach naturally supports any deployment: localhost, LAN IP, Docker,
+  // Tailscale — no hardcoded addresses needed.
   await fastify.register(cors, {
     origin: env.NODE_ENV === 'development' ? ['http://localhost:5173'] : true,
     credentials: true,
@@ -99,6 +136,33 @@ async function main() {
   await fastify.register(cookie);
   await fastify.register(websocket);
   await fastify.register(authPlugin);
+
+  // Origin validation — prevents cross-site WebSocket hijacking (same class
+  // of vulnerability as OpenClaw CVE-2026-25253) and cross-origin abuse.
+  //
+  // In production the frontend is served from the same host as the API, so
+  // the browser's Origin header will always match the request's Host header.
+  // This naturally supports any deployment: localhost, LAN IP, Docker, Tailscale, etc.
+  if (env.NODE_ENV === 'production') {
+    fastify.addHook('onRequest', async (request, reply) => {
+      const origin = request.headers['origin'];
+      if (!origin) return; // Non-browser requests (curl, webhooks) have no Origin
+
+      // Compare origin's host against the request's Host header.
+      // The Host header reflects the address the user typed into their browser,
+      // so this is a same-origin check that works for any deployment topology.
+      try {
+        const originHost = new URL(origin).host;     // e.g. "192.168.1.50:3000"
+        const requestHost = request.headers['host']; // e.g. "192.168.1.50:3000"
+        if (originHost === requestHost) return; // Same-origin — allow
+      } catch {
+        // Malformed origin — fall through to reject
+      }
+
+      log.warn(`Rejected request from untrusted origin: ${origin}`);
+      return reply.status(403).send({ error: 'Forbidden: untrusted origin' });
+    });
+  }
 
   // Maintenance mode guard — return 503 for all routes except health check
   fastify.addHook('onRequest', async (request, reply) => {
@@ -135,6 +199,10 @@ async function main() {
   // Register media upload/serve routes
   const { registerMediaRoutes } = await import('./api/routes/media.js');
   await registerMediaRoutes(fastify);
+
+  // Register package upload route (.anpk files)
+  const { registerPackageUploadRoutes } = await import('./api/routes/package-upload.js');
+  await registerPackageUploadRoutes(fastify);
 
   // Register content type parser for binary uploads (save import)
   fastify.addContentTypeParser(

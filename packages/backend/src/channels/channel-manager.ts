@@ -78,9 +78,16 @@ export class ChannelManager {
         const adapterPath = path.join(pkg.path, manifest.adapter);
         const currentChecksum = this.computeChecksum(adapterPath);
         if (currentChecksum !== pkg.checksum) {
-          log.warn(`Checksum mismatch for ${pkg.name} — adapter file modified since install`);
-          systemStore.updateChannelPackageStatus(db, pkg.name, 'error', 'Adapter checksum mismatch');
-          continue;
+          if (pkg.installedFrom === 'package') {
+            // .anpk packages: strict — adapter was tampered with post-install
+            log.warn(`Checksum mismatch for ${pkg.name} — adapter file modified since install`);
+            systemStore.updateChannelPackageStatus(db, pkg.name, 'error', 'Adapter checksum mismatch');
+            continue;
+          } else {
+            // Local dev: permissive — update checksum silently, developer is iterating
+            log.info(`Adapter changed for local channel ${pkg.name}, updating checksum`);
+            systemStore.updateChannelPackage(db, pkg.name, { checksum: currentChecksum });
+          }
         }
 
         if (pkg.enabled) {
@@ -729,6 +736,7 @@ export class ChannelManager {
         status: effectiveStatus,
         lastError: pkg.lastError,
         installedAt: pkg.installedAt,
+        installedFrom: pkg.installedFrom,
       };
     });
   }
