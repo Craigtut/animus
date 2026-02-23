@@ -2,19 +2,19 @@
  * Agent Log Store Adapter
  *
  * Curries the backend's agent-log-store functions (which take `db` as first param)
- * to match the AgentLogStore interface expected by @animus/agents logging hook.
+ * to match the AgentLogStore interface expected by @animus-labs/agents logging hook.
  */
 
 import type Database from 'better-sqlite3';
-import type { AgentLogStore } from '@animus/agents';
+import type { AgentLogStore } from '@animus-labs/agents';
 import * as agentLogStore from '../db/stores/agent-log-store.js';
-import type { AgentEventType } from '@animus/shared';
+import type { AgentEventType } from '@animus-labs/shared';
 import { getEventBus } from '../lib/event-bus.js';
 
 /**
  * Create an AgentLogStore adapter that curries the db parameter.
  *
- * The @animus/agents logging hook expects functions without a db parameter.
+ * The @animus-labs/agents logging hook expects functions without a db parameter.
  * The backend's agent-log-store functions take db as the first parameter.
  * This adapter bridges the gap.
  */

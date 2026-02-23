@@ -1002,7 +1002,7 @@ continue as a quiet interest. There's no pressure either way.
 
 ## Interface
 
-The Context Builder lives in `@animus/backend` (it depends on database access and persona state). It exposes methods for each compilation target.
+The Context Builder lives in `@animus-labs/backend` (it depends on database access and persona state). It exposes methods for each compilation target.
 
 ```typescript
 interface IContextBuilder {

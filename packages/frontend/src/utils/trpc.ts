@@ -7,7 +7,7 @@
 import { createTRPCReact } from '@trpc/react-query';
 import type { CreateTRPCReact } from '@trpc/react-query';
 import { createWSClient, httpBatchLink, splitLink, wsLink } from '@trpc/client';
-import type { AppRouter } from '@animus/backend/src/api';
+import type { AppRouter } from '@animus-labs/backend/src/api';
 
 declare global {
   interface Window {

@@ -6,8 +6,8 @@
  */
 
 import type Database from 'better-sqlite3';
-import { now } from '@animus/shared';
-import type { PluginRecord, PluginSource } from '@animus/shared';
+import { now } from '@animus-labs/shared';
+import type { PluginRecord, PluginSource } from '@animus-labs/shared';
 import { snakeToCamel, boolToInt, intToBool } from '../utils.js';
 
 // ============================================================================

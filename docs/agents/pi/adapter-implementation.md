@@ -28,7 +28,7 @@ This means a user running Animus with Pi configured can switch between providers
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                     @animus/agents                           │
+│                     @animus-labs/agents                           │
 │                                                              │
 │  ┌───────────┐                                               │
 │  │ PiAdapter  │                                              │
@@ -1277,7 +1277,7 @@ vi.mock('@mariozechner/pi-agent-core', () => ({
 }
 ```
 
-These are **optional peer dependencies** in `@animus/agents`, dynamically imported on first use (same pattern as `@anthropic-ai/claude-agent-sdk`, `@openai/codex-sdk`, and `@opencode-ai/sdk`).
+These are **optional peer dependencies** in `@animus-labs/agents`, dynamically imported on first use (same pattern as `@anthropic-ai/claude-agent-sdk`, `@openai/codex-sdk`, and `@opencode-ai/sdk`).
 
 ### Package.json Changes
 

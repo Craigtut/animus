@@ -9,68 +9,69 @@ import {
   CaretDown,
   CaretRight,
   Coins,
+  Brain,
+  Wrench,
+  ChatText,
+  WarningCircle,
+  X,
+  ArrowClockwise,
 } from '@phosphor-icons/react';
 import { trpc } from '../../utils/trpc';
-import { useHeartbeatStore, selectHasRunningAgents } from '../../store/index';
+import { useHeartbeatStore, type SubAgentEventEntry } from '../../store/index';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Typography } from '../ui';
 
 // ============================================================================
-// Active Agents Section
+// Types
 // ============================================================================
 
-function ActiveAgentsSection() {
+interface AgentTask {
+  id: string;
+  tickNumber: number;
+  sessionId: string | null;
+  provider: string;
+  status: string;
+  taskType: string;
+  taskDescription: string;
+  contactId: string | null;
+  sourceChannel: string | null;
+  currentActivity: string | null;
+  result: string | null;
+  error: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+/** Unified entry for the recent activity feed */
+interface ActivityEntry {
+  kind: 'agent' | 'decision';
+  id: string;
+  timestamp: number;
+  // Agent fields
+  task?: AgentTask;
+  // Decision fields
+  tickNumber?: number;
+  decisionType?: string;
+  description?: string;
+  outcome?: string;
+  outcomeDetail?: string | null;
+}
+
+// ============================================================================
+// Active Sub-Agents Section
+// ============================================================================
+
+function ActiveSubAgentsSection() {
   const theme = useTheme();
 
-  // Live events from subscription (via Zustand)
-  const agentEvents = useHeartbeatStore((s) => s.agentEvents);
-  const hasRunning = useHeartbeatStore(selectHasRunningAgents);
-
-  // Persisted active sessions from agent_logs.db
-  const { data: activeSessions } = trpc.agentLogs.listSessions.useQuery(
-    { limit: 10, status: 'active' },
-    { retry: false, refetchInterval: hasRunning ? 10_000 : false },
+  const { data: activeTasks } = trpc.heartbeat.listAgentTasks.useQuery(
+    { activeOnly: true },
+    { refetchInterval: 5_000 },
   );
 
-  // Derive running agents from live events
-  const liveRunning = useMemo(() => {
-    const spawned = new Map<string, (typeof agentEvents)[number]>();
-    const chronological = [...agentEvents].reverse();
-    for (const e of chronological) {
-      if (e.type === 'spawned') spawned.set(e.taskId, e);
-      else spawned.delete(e.taskId);
-    }
-    return Array.from(spawned.values());
-  }, [agentEvents]);
-
-  // Merge: prefer live events (richer timing), fall back to persisted sessions
-  const persistedIds = new Set(activeSessions?.sessions.map((s) => s.id) ?? []);
-  const displayAgents = liveRunning.length > 0
-    ? liveRunning
-    : (activeSessions?.sessions ?? []).map((s) => ({
-        type: 'spawned' as const,
-        taskId: s.id,
-        detail: `${s.provider}${s.model ? ` / ${s.model}` : ''}`,
-        receivedAt: new Date(s.startedAt).getTime(),
-      }));
-
-  // If we have live agents, also add any persisted ones not in live set
-  const mergedAgents = liveRunning.length > 0
-    ? [
-        ...liveRunning,
-        ...(activeSessions?.sessions ?? [])
-          .filter((s) => !liveRunning.some((l) => l.taskId === s.id))
-          .map((s) => ({
-            type: 'spawned' as const,
-            taskId: s.id,
-            detail: `${s.provider}${s.model ? ` / ${s.model}` : ''}`,
-            receivedAt: new Date(s.startedAt).getTime(),
-          })),
-      ]
-    : displayAgents;
-
-  void persistedIds; // consumed in merge logic
+  const tasks = (activeTasks ?? []) as AgentTask[];
 
   return (
     <section>
@@ -88,7 +89,7 @@ function ActiveAgentsSection() {
         </Typography.BodyAlt>
       </div>
 
-      {mergedAgents.length === 0 ? (
+      {tasks.length === 0 ? (
         <Typography.Body serif italic color="hint" css={css`
           text-align: center;
           padding: ${theme.spacing[8]} 0;
@@ -97,44 +98,8 @@ function ActiveAgentsSection() {
         </Typography.Body>
       ) : (
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-          {mergedAgents.map((agent) => (
-            <Card key={agent.taskId} variant="elevated" padding="md">
-              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                <Robot size={14} css={css`color: ${theme.colors.text.secondary};`} />
-                <Typography.BodyAlt as="span" css={css`
-                  font-weight: ${theme.typography.fontWeight.semibold};
-                  overflow: hidden;
-                  text-overflow: ellipsis;
-                  white-space: nowrap;
-                `}>
-                  {agent.taskId}
-                </Typography.BodyAlt>
-                <div css={css`
-                  width: 6px; height: 6px; border-radius: 50%;
-                  background: ${theme.colors.success.main};
-                  animation: agent-pulse 2000ms ease-in-out infinite;
-                  flex-shrink: 0;
-
-                  @keyframes agent-pulse {
-                    0%, 100% { opacity: 1; }
-                    50% { opacity: 0.4; }
-                  }
-                `} />
-                <Badge variant="success">Running</Badge>
-              </div>
-              {agent.detail && (
-                <Typography.SmallBody color="secondary" css={css`
-                  margin-top: ${theme.spacing[2]};
-                `}>
-                  {agent.detail}
-                </Typography.SmallBody>
-              )}
-              <Typography.Caption color="hint" css={css`
-                margin-top: ${theme.spacing[1]};
-              `}>
-                Started {formatRelativeTime(agent.receivedAt)}
-              </Typography.Caption>
-            </Card>
+          {tasks.map((task) => (
+            <SubAgentCard key={task.id} task={task} />
           ))}
         </div>
       )}
@@ -143,66 +108,290 @@ function ActiveAgentsSection() {
 }
 
 // ============================================================================
-// Recent Activity Section (interspersed agent sessions + decisions)
+// Sub-Agent Card (active tasks)
 // ============================================================================
 
-/** Unified entry for the activity feed */
-interface ActivityEntry {
-  kind: 'agent' | 'decision';
-  id: string;
-  timestamp: number;
-  // Agent fields
-  sessionId?: string;
-  provider?: string;
-  model?: string | null;
-  agentStatus?: string;
-  startedAt?: string;
-  endedAt?: string | null;
-  // Decision fields
-  tickNumber?: number;
-  decisionType?: string;
-  description?: string;
-  outcome?: string;
-  outcomeDetail?: string | null;
+function SubAgentCard({ task }: { task: AgentTask }) {
+  const theme = useTheme();
+  const [expanded, setExpanded] = useState(false);
+  const cancelMutation = trpc.heartbeat.cancelAgentTask.useMutation();
+
+  const statusLabel = task.status === 'spawning' ? 'Spawning' : 'Running';
+
+  const handleCancel = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    cancelMutation.mutate({ taskId: task.id });
+  };
+
+  const startedAt = task.startedAt ? new Date(task.startedAt).getTime() : new Date(task.createdAt).getTime();
+
+  return (
+    <Card variant="elevated" padding="md">
+      <div
+        css={css`cursor: pointer;`}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+          <Robot size={14} css={css`color: ${theme.colors.text.secondary};`} />
+          <Typography.SmallBodyAlt as="span" css={css`
+            font-weight: ${theme.typography.fontWeight.semibold};
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          `}>
+            {formatTaskType(task.taskType)}
+          </Typography.SmallBodyAlt>
+          <div css={css`
+            width: 6px; height: 6px; border-radius: 50%;
+            background: ${task.status === 'spawning' ? theme.colors.warning.main : theme.colors.success.main};
+            animation: agent-pulse 2000ms ease-in-out infinite;
+            flex-shrink: 0;
+
+            @keyframes agent-pulse {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0.4; }
+            }
+          `} />
+          <Badge variant={task.status === 'spawning' ? 'warning' : 'success'}>{statusLabel}</Badge>
+          <button
+            onClick={handleCancel}
+            disabled={cancelMutation.isPending}
+            css={css`
+              display: flex; align-items: center; justify-content: center;
+              width: 24px; height: 24px; border: none; border-radius: ${theme.borderRadius.default};
+              background: transparent; cursor: pointer; flex-shrink: 0;
+              color: ${theme.colors.text.hint};
+              &:hover { background: ${theme.colors.error.main}1a; color: ${theme.colors.error.main}; }
+            `}
+            title="Cancel agent"
+          >
+            <X size={14} />
+          </button>
+          {expanded
+            ? <CaretDown size={12} css={css`color: ${theme.colors.text.hint}; flex-shrink: 0;`} />
+            : <CaretRight size={12} css={css`color: ${theme.colors.text.hint}; flex-shrink: 0;`} />
+          }
+        </div>
+
+        <Typography.SmallBody color="secondary" css={css`
+          margin-top: ${theme.spacing[2]};
+        `}>
+          {task.taskDescription}
+        </Typography.SmallBody>
+
+        {task.currentActivity && (
+          <Typography.Caption serif italic color="hint" css={css`
+            margin-top: ${theme.spacing[1]};
+          `}>
+            {task.currentActivity}
+          </Typography.Caption>
+        )}
+
+        <div css={css`
+          display: flex; align-items: center; gap: ${theme.spacing[2]};
+          margin-top: ${theme.spacing[1]};
+        `}>
+          <Typography.Caption color="disabled">
+            {task.provider}
+          </Typography.Caption>
+          <Typography.Caption color="disabled">
+            {formatDuration(startedAt, Date.now())}
+          </Typography.Caption>
+        </div>
+      </div>
+
+      {expanded && task.sessionId && (
+        <SubAgentEventTimeline sessionId={task.sessionId} isActive />
+      )}
+    </Card>
+  );
 }
 
-function RecentActivitySection() {
+// ============================================================================
+// Sub-Agent Event Timeline
+// ============================================================================
+
+/** Event types to exclude from timeline (too noisy) */
+const EXCLUDED_EVENT_TYPES = new Set(['response_chunk']);
+
+function SubAgentEventTimeline({ sessionId, isActive, taskId }: {
+  sessionId: string;
+  isActive: boolean;
+  taskId?: string;
+}) {
   const theme = useTheme();
 
-  // Persisted completed/failed sessions
-  const { data: recentSessions } = trpc.agentLogs.listSessions.useQuery(
-    { limit: 20 },
-    { retry: false },
+  // For active tasks: read live events from the store
+  const liveEvents = useHeartbeatStore((s) => s.subAgentEvents.get(sessionId));
+
+  // For completed tasks: fetch from backend on expand
+  const { data: detail } = trpc.heartbeat.getAgentTaskDetail.useQuery(
+    { taskId: taskId ?? '' },
+    { enabled: !isActive && !!taskId },
   );
 
-  // Recent tick decisions
+  const events = isActive
+    ? (liveEvents ?? [])
+    : (detail?.events ?? []) as SubAgentEventEntry[];
+
+  const filtered = events.filter((e) => !EXCLUDED_EVENT_TYPES.has(e.eventType));
+
+  if (filtered.length === 0) {
+    return (
+      <div css={css`
+        margin-top: ${theme.spacing[3]};
+        padding: ${theme.spacing[2]} ${theme.spacing[3]};
+        background: ${theme.colors.background.elevated};
+        border-radius: ${theme.borderRadius.default};
+      `}>
+        <Typography.Caption serif italic color="hint">
+          {isActive ? 'Waiting for events...' : 'No events recorded.'}
+        </Typography.Caption>
+      </div>
+    );
+  }
+
+  return (
+    <div css={css`
+      margin-top: ${theme.spacing[3]};
+      padding: ${theme.spacing[2]} 0;
+      border-top: 1px solid ${theme.colors.border.light};
+      max-height: 300px;
+      overflow-y: auto;
+    `}>
+      {filtered.map((event) => (
+        <TimelineEventRow key={event.id} event={event} />
+      ))}
+    </div>
+  );
+}
+
+function TimelineEventRow({ event }: { event: SubAgentEventEntry }) {
+  const theme = useTheme();
+
+  const { icon: Icon, label, detail } = getEventDisplay(event);
+
+  return (
+    <div css={css`
+      display: flex; align-items: flex-start; gap: ${theme.spacing[2]};
+      padding: ${theme.spacing[1]} ${theme.spacing[3]};
+      font-size: ${theme.typography.fontSize.xs};
+    `}>
+      <Icon size={12} css={css`
+        color: ${theme.colors.text.hint};
+        margin-top: 2px;
+        flex-shrink: 0;
+      `} />
+      <div css={css`flex: 1; min-width: 0;`}>
+        <Typography.Caption as="span" color="secondary">{label}</Typography.Caption>
+        {detail && (
+          <Typography.Caption as="span" color="hint" css={css`margin-left: ${theme.spacing[1]};`}>
+            {detail}
+          </Typography.Caption>
+        )}
+      </div>
+      <Typography.Caption color="disabled" css={css`flex-shrink: 0; white-space: nowrap;`}>
+        {formatTimeOnly(event.createdAt)}
+      </Typography.Caption>
+    </div>
+  );
+}
+
+function getEventDisplay(event: SubAgentEventEntry): {
+  icon: typeof Brain;
+  label: string;
+  detail: string;
+} {
+  const data = event.data ?? {};
+
+  switch (event.eventType) {
+    case 'thinking':
+      return {
+        icon: Brain,
+        label: 'Thinking',
+        detail: (data['text'] as string)?.slice(0, 80) ?? '',
+      };
+    case 'tool_call':
+      return {
+        icon: Wrench,
+        label: `Tool: ${(data['toolName'] as string) ?? 'unknown'}`,
+        detail: '',
+      };
+    case 'tool_result':
+      return {
+        icon: Wrench,
+        label: `Tool result`,
+        detail: (data['error'] as string) ? `Error: ${(data['error'] as string).slice(0, 60)}` : 'OK',
+      };
+    case 'response':
+      return {
+        icon: ChatText,
+        label: 'Response',
+        detail: (data['text'] as string)?.slice(0, 80) ?? '',
+      };
+    case 'error':
+      return {
+        icon: WarningCircle,
+        label: 'Error',
+        detail: (data['message'] as string)?.slice(0, 80) ?? (data['error'] as string)?.slice(0, 80) ?? '',
+      };
+    case 'tick_input':
+      return {
+        icon: ArrowClockwise,
+        label: 'Tick input',
+        detail: `tick #${data['tickNumber'] ?? '?'}`,
+      };
+    case 'tick_output':
+      return {
+        icon: ArrowClockwise,
+        label: 'Tick output',
+        detail: data['durationMs'] ? `${Math.round(data['durationMs'] as number / 1000)}s` : '',
+      };
+    default:
+      return {
+        icon: Robot,
+        label: formatEventType(event.eventType),
+        detail: '',
+      };
+  }
+}
+
+// ============================================================================
+// Recent Sub-Agents Section (completed/failed/timed_out + decisions)
+// ============================================================================
+
+function RecentSubAgentsSection() {
+  const theme = useTheme();
+
+  const { data: recentTasks } = trpc.heartbeat.listAgentTasks.useQuery(
+    { limit: 20 },
+  );
+
   const { data: recentDecisions } = trpc.heartbeat.getRecentDecisions.useQuery(
     { limit: 30 },
     { retry: false },
   );
 
-  // Merge and sort chronologically (newest first)
   const entries: ActivityEntry[] = useMemo(() => {
     const result: ActivityEntry[] = [];
+    const tasks = (recentTasks ?? []) as AgentTask[];
 
-    // Agent sessions (exclude active -- those are shown above)
-    for (const s of recentSessions?.sessions ?? []) {
-      if (s.status === 'active') continue;
+    // Agent tasks (exclude active statuses — those show above)
+    for (const task of tasks) {
+      if (task.status === 'spawning' || task.status === 'running') continue;
       result.push({
         kind: 'agent',
-        id: `agent-${s.id}`,
-        timestamp: new Date(s.endedAt ?? s.startedAt).getTime(),
-        sessionId: s.id,
-        provider: s.provider,
-        model: s.model,
-        agentStatus: s.status,
-        startedAt: s.startedAt,
-        endedAt: s.endedAt,
+        id: `agent-${task.id}`,
+        timestamp: new Date(task.completedAt ?? task.createdAt).getTime(),
+        task,
       });
     }
 
-    // Decisions
+    // Only show agent-related decisions (not generic mind decisions like no_action, send_reaction)
+    const agentDecisionTypes = new Set(['spawn_agent', 'update_agent', 'cancel_agent']);
     for (const d of recentDecisions ?? []) {
+      if (!agentDecisionTypes.has(d.type)) continue;
       result.push({
         kind: 'decision',
         id: `decision-${d.id}`,
@@ -217,7 +406,7 @@ function RecentActivitySection() {
 
     result.sort((a, b) => b.timestamp - a.timestamp);
     return result;
-  }, [recentSessions, recentDecisions]);
+  }, [recentTasks, recentDecisions]);
 
   return (
     <section>
@@ -245,7 +434,7 @@ function RecentActivitySection() {
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
           {entries.map((entry) =>
             entry.kind === 'agent' ? (
-              <AgentActivityRow key={entry.id} entry={entry} />
+              <SubAgentRow key={entry.id} task={entry.task!} />
             ) : (
               <DecisionActivityRow key={entry.id} entry={entry} />
             ),
@@ -256,24 +445,29 @@ function RecentActivitySection() {
   );
 }
 
-function AgentActivityRow({ entry }: { entry: ActivityEntry }) {
+// ============================================================================
+// Sub-Agent Row (completed tasks)
+// ============================================================================
+
+function SubAgentRow({ task }: { task: AgentTask }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
 
   const statusVariant =
-    entry.agentStatus === 'completed' ? 'success' :
-    entry.agentStatus === 'error' ? 'error' :
-    entry.agentStatus === 'cancelled' ? 'warning' : 'default';
+    task.status === 'completed' ? 'success' :
+    task.status === 'failed' ? 'error' :
+    task.status === 'cancelled' ? 'warning' :
+    task.status === 'timed_out' ? 'error' : 'default';
 
   const statusLabel =
-    entry.agentStatus === 'completed' ? 'Completed' :
-    entry.agentStatus === 'error' ? 'Failed' :
-    entry.agentStatus === 'cancelled' ? 'Cancelled' : (entry.agentStatus ?? 'Unknown');
+    task.status === 'completed' ? 'Completed' :
+    task.status === 'failed' ? 'Failed' :
+    task.status === 'cancelled' ? 'Cancelled' :
+    task.status === 'timed_out' ? 'Timed Out' : task.status;
 
-  // Compute duration if we have both timestamps
-  const duration = entry.startedAt && entry.endedAt
-    ? formatDuration(new Date(entry.startedAt).getTime(), new Date(entry.endedAt).getTime())
-    : null;
+  const startMs = task.startedAt ? new Date(task.startedAt).getTime() : new Date(task.createdAt).getTime();
+  const endMs = task.completedAt ? new Date(task.completedAt).getTime() : Date.now();
+  const duration = formatDuration(startMs, endMs);
 
   return (
     <div
@@ -300,7 +494,7 @@ function AgentActivityRow({ entry }: { entry: ActivityEntry }) {
           <Typography.SmallBodyAlt as="span" css={css`
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
           `}>
-            {entry.sessionId}
+            {formatTaskType(task.taskType)}
           </Typography.SmallBodyAlt>
           <Badge variant={statusVariant}>{statusLabel}</Badge>
           {duration && (
@@ -309,22 +503,31 @@ function AgentActivityRow({ entry }: { entry: ActivityEntry }) {
             </Typography.Caption>
           )}
         </div>
+        <Typography.SmallBody color="secondary" css={css`
+          margin-top: ${theme.spacing[1]};
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        `}>
+          {task.taskDescription}
+        </Typography.SmallBody>
         <div css={css`
           display: flex; align-items: center; gap: ${theme.spacing[2]};
           margin-top: ${theme.spacing[1]};
         `}>
-          {entry.provider && (
-            <Typography.Caption color="disabled">
-              {entry.provider}{entry.model ? ` / ${entry.model}` : ''}
-            </Typography.Caption>
-          )}
           <Typography.Caption color="disabled">
-            {formatRelativeTime(entry.timestamp)}
+            {task.provider}
+          </Typography.Caption>
+          <Typography.Caption color="disabled">
+            {formatRelativeTime(new Date(task.completedAt ?? task.createdAt).getTime())}
           </Typography.Caption>
         </div>
 
-        {expanded && entry.sessionId && (
-          <AgentDetailExpanded sessionId={entry.sessionId} />
+        {expanded && task.sessionId && (
+          <SubAgentEventTimeline sessionId={task.sessionId} isActive={false} taskId={task.id} />
+        )}
+        {expanded && (
+          <TaskUsageDetail taskId={task.id} />
         )}
       </div>
       {expanded
@@ -335,15 +538,16 @@ function AgentActivityRow({ entry }: { entry: ActivityEntry }) {
   );
 }
 
-/** Expanded detail for a single agent session: usage stats */
-function AgentDetailExpanded({ sessionId }: { sessionId: string }) {
+/** Usage stats for a completed sub-agent task */
+function TaskUsageDetail({ taskId }: { taskId: string }) {
   const theme = useTheme();
 
-  const { data: usage } = trpc.agentLogs.getSessionUsage.useQuery(
-    { sessionId },
+  const { data: detail } = trpc.heartbeat.getAgentTaskDetail.useQuery(
+    { taskId },
     { retry: false },
   );
 
+  const usage = detail?.usage;
   if (!usage || usage.length === 0) return null;
 
   const totals = usage.reduce(
@@ -374,18 +578,9 @@ function AgentDetailExpanded({ sessionId }: { sessionId: string }) {
   );
 }
 
-function UsageStat({ label, value, unit }: { label: string; value: string; unit?: string }) {
-  return (
-    <div>
-      <Typography.Caption as="div" color="disabled" css={css`text-transform: uppercase; letter-spacing: 0.5px;`}>
-        {label}
-      </Typography.Caption>
-      <Typography.SmallBody as="div" color="secondary">
-        {value}{unit ? <Typography.Caption as="span" color="hint" css={css`margin-left: 2px;`}>{unit}</Typography.Caption> : null}
-      </Typography.SmallBody>
-    </div>
-  );
-}
+// ============================================================================
+// Decision Activity Row (kept from previous implementation)
+// ============================================================================
 
 function DecisionActivityRow({ entry }: { entry: ActivityEntry }) {
   const theme = useTheme();
@@ -453,14 +648,27 @@ function DecisionActivityRow({ entry }: { entry: ActivityEntry }) {
 }
 
 // ============================================================================
-// Usage Summary Section
+// Usage Summary Section (kept as-is)
 // ============================================================================
+
+function UsageStat({ label, value, unit }: { label: string; value: string; unit?: string }) {
+  return (
+    <div>
+      <Typography.Caption as="div" color="disabled" css={css`text-transform: uppercase; letter-spacing: 0.5px;`}>
+        {label}
+      </Typography.Caption>
+      <Typography.SmallBody as="div" color="secondary">
+        {value}{unit ? <Typography.Caption as="span" color="hint" css={css`margin-left: 2px;`}>{unit}</Typography.Caption> : null}
+      </Typography.SmallBody>
+    </div>
+  );
+}
 
 function UsageSummarySection() {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
 
-  const { data: usage } = trpc.agentLogs.getAggregateUsage.useQuery(undefined, {
+  const { data: usage } = trpc.heartbeat.getSubAgentUsage.useQuery(undefined, {
     retry: false,
   });
 
@@ -518,8 +726,8 @@ export function AgentsSection() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[8]};`}>
-      <ActiveAgentsSection />
-      <RecentActivitySection />
+      <ActiveSubAgentsSection />
+      <RecentSubAgentsSection />
       <UsageSummarySection />
     </div>
   );
@@ -556,4 +764,27 @@ function formatDecisionType(type: string): string {
     .split('_')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
+}
+
+function formatTaskType(type: string): string {
+  return type
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function formatEventType(type: string): string {
+  return type
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function formatTimeOnly(isoString: string): string {
+  try {
+    const d = new Date(isoString);
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch {
+    return '';
+  }
 }

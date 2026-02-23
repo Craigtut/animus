@@ -50,7 +50,7 @@ try {
   console.log(`\x1b[33m[tts-native]\x1b[0m Native TTS addon not built and Rust not installed.`);
   console.log(`\x1b[33m[tts-native]\x1b[0m TTS will be unavailable. To enable:`);
   console.log(`\x1b[33m[tts-native]\x1b[0m   1. Install Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`);
-  console.log(`\x1b[33m[tts-native]\x1b[0m   2. Run: npm run build -w @animus/tts-native`);
+  console.log(`\x1b[33m[tts-native]\x1b[0m   2. Run: npm run build -w @animus-labs/tts-native`);
   process.exit(0);
 }
 
@@ -65,7 +65,7 @@ try {
   console.log(`\x1b[32m[tts-native]\x1b[0m Build complete!`);
 } catch (err) {
   console.error(`\x1b[33m[tts-native]\x1b[0m Build failed. TTS will be unavailable.`);
-  console.error(`\x1b[33m[tts-native]\x1b[0m You can retry manually: npm run build -w @animus/tts-native`);
+  console.error(`\x1b[33m[tts-native]\x1b[0m You can retry manually: npm run build -w @animus-labs/tts-native`);
   // Don't block backend startup
   process.exit(0);
 }

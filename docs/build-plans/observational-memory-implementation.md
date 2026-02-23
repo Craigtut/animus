@@ -115,9 +115,9 @@ export function estimateTokens(text: string): number {
 
 **Modify** `packages/shared/src/index.ts` — export `estimateTokens`
 
-**Modify** `packages/backend/src/heartbeat/persona-compiler.ts` — replace local `estimateTokens` with import from `@animus/shared`:
+**Modify** `packages/backend/src/heartbeat/persona-compiler.ts` — replace local `estimateTokens` with import from `@animus-labs/shared`:
 ```typescript
-import { estimateTokens } from '@animus/shared';
+import { estimateTokens } from '@animus-labs/shared';
 ```
 Remove the local function definition (lines 382-385). Keep all existing call sites unchanged — they'll use the imported version.
 
@@ -540,7 +540,7 @@ Phase 4 (depends on Phase 3):
 | `packages/shared/src/index.ts` | Foundation | 1 | Export `estimateTokens` |
 | `packages/shared/src/event-bus.ts` | Foundation | 1 | Add 6 observation/reflection events |
 | `packages/backend/src/db/stores/memory-store.ts` | Foundation | 1 | Add observation CRUD functions |
-| `packages/backend/src/heartbeat/persona-compiler.ts` | Foundation | 1 | Replace local `estimateTokens` with import from `@animus/shared` |
+| `packages/backend/src/heartbeat/persona-compiler.ts` | Foundation | 1 | Replace local `estimateTokens` with import from `@animus-labs/shared` |
 | `packages/backend/src/heartbeat/index.ts` | Heartbeat | 4 | GATHER + EXECUTE integration |
 | `packages/backend/src/heartbeat/context-builder.ts` | Heartbeat | 4 | Observation context sections |
 
@@ -548,7 +548,7 @@ Phase 4 (depends on Phase 3):
 
 ## Key Implementation Decisions
 
-1. **`estimateTokens()` in shared** — Extracted from `persona-compiler.ts` to `@animus/shared` as a general-purpose utility. All consumers (persona compiler, observation processor, context builder) import from the same place.
+1. **`estimateTokens()` in shared** — Extracted from `persona-compiler.ts` to `@animus-labs/shared` as a general-purpose utility. All consumers (persona compiler, observation processor, context builder) import from the same place.
 
 2. **`loadStreamContext()` queries** — For thoughts/experiences, query `getRecentThoughts`/`getRecentExperiences` without a hard limit, then filter by token budget. For messages, similar approach with `getRecentMessages`. Items newer than the observation watermark (`last_raw_timestamp`) are loaded.
 

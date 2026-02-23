@@ -12,7 +12,7 @@
  * - Cleanup of all active sessions
  */
 
-import type { AgentProvider } from '@animus/shared';
+import type { AgentProvider } from '@animus-labs/shared';
 import type {
   IAgentAdapter,
   IAgentSession,

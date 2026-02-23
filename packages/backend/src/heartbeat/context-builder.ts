@@ -20,7 +20,7 @@ import type {
   EnergyBand,
   Task,
   ToolApprovalRequest,
-} from '@animus/shared';
+} from '@animus-labs/shared';
 import { formatEmotionalState } from './emotion-engine.js';
 import { formatEnergyContext, type WakeUpContext } from './energy-engine.js';
 import { type CompiledPersona, estimateTokens } from './persona-compiler.js';
@@ -121,6 +121,12 @@ export interface MindContextParams {
   pendingApprovals?: ToolApprovalRequest[];
   /** Trust ramp suggestions for tools with repeated approvals (interval ticks only) */
   trustRampContext?: string | null;
+  /** External conversation history from channel adapters */
+  externalHistory?: Map<string, Array<{
+    author: { identifier: string; displayName: string; isBot: boolean };
+    content: string;
+    timestamp: string;
+  }>> | null;
 }
 
 export interface CompiledContext {
@@ -817,6 +823,36 @@ function buildCoreSelfSection(content: string): string {
   return `── CORE SELF ──\n${content}`;
 }
 
+function buildExternalHistorySection(
+  history: Map<string, Array<{
+    author: { identifier: string; displayName: string; isBot: boolean };
+    content: string;
+    timestamp: string;
+  }>>
+): string {
+  const lines = [
+    '── CHANNEL CONVERSATION CONTEXT ──',
+    'Recent messages from external channels you\'re participating in.',
+    'This gives you context about what others are saying in shared spaces.',
+    '',
+  ];
+
+  for (const [convKey, messages] of history) {
+    lines.push(`[${convKey}]`);
+    for (const msg of messages) {
+      const time = new Date(msg.timestamp).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      const botTag = msg.author.isBot ? ' (bot)' : '';
+      lines.push(`  [${time}] ${msg.author.displayName}${botTag}: ${msg.content}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
 function buildPendingApprovalsSection(approvals: ToolApprovalRequest[]): string {
   const lines = [
     '── PENDING TOOL APPROVALS ──',
@@ -930,7 +966,15 @@ export function buildUserMessage(params: MindContextParams): string {
   sections.push(buildTriggerSection(params.trigger));
 
   // 2. Contact & permissions (if message-triggered)
-  if (params.contact && params.trigger.type === 'message') {
+  if (params.trigger.type === 'message' && params.trigger.metadata?.['isRecognizedParticipant']) {
+    const participantName = params.trigger.metadata['participantName'] as string;
+    sections.push(
+      `── RECOGNIZED PARTICIPANT ──\nName: ${participantName}\n` +
+      'This person is not in your contacts. They reached you through a shared\n' +
+      'channel (e.g., a Slack channel or Discord server you\'re both in).\n' +
+      'You can respond naturally — no contact record is needed for this interaction.'
+    );
+  } else if (params.contact && params.trigger.type === 'message') {
     sections.push(buildContactSection(params.contact));
   }
 
@@ -1009,6 +1053,11 @@ export function buildUserMessage(params: MindContextParams): string {
   });
   if (stmSection) {
     sections.push(stmSection);
+  }
+
+  // 6a. External conversation history (Slack, Discord channel context)
+  if (params.externalHistory && params.externalHistory.size > 0) {
+    sections.push(buildExternalHistorySection(params.externalHistory));
   }
 
   // 6b. First-tick story kickstart (only on tick #1, when there's no history)

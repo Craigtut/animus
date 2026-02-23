@@ -62,7 +62,7 @@ Docker is the right choice because Animus is a self-hosted, open-source project 
 │  │  Thin Agent Runner (Node.js)                   │  │
 │  │                                                │  │
 │  │  • Receives task prompt via IPC                │  │
-│  │  • Creates agent session (@animus/agents)      │  │
+│  │  • Creates agent session (@animus-labs/agents)      │  │
 │  │  • Streams events back via IPC                 │  │
 │  │  • Proxies MCP tool calls to host via IPC      │  │
 │  │  • Exits when task completes                   │  │
@@ -140,7 +140,7 @@ This means the container never executes MCP tool handlers. It only sees the tool
 
 A minimal Node.js image containing:
 - Node.js runtime (matching the host version)
-- `@animus/agents` package (the SDK abstraction layer)
+- `@animus-labs/agents` package (the SDK abstraction layer)
 - A thin agent runner script
 - No database drivers, no backend code, no frontend code
 

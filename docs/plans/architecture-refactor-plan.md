@@ -527,7 +527,7 @@ export interface IEncryptionService {
 ```
 2. Export from `packages/shared/src/index.ts`
 3. Have backend implementation `implements IEncryptionService`
-4. Update any consumers to import the interface from `@animus/shared`
+4. Update any consumers to import the interface from `@animus-labs/shared`
 
 **Files changed:**
 - `packages/shared/src/encryption-service.ts` — New (interface only)

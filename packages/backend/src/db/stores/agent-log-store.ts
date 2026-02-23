@@ -5,7 +5,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { generateUUID, now } from '@animus/shared';
+import { generateUUID, now } from '@animus-labs/shared';
 import type {
   AgentSession,
   AgentSessionStatus,
@@ -13,7 +13,7 @@ import type {
   AgentEventType,
   AgentUsage,
   AgentProvider,
-} from '@animus/shared';
+} from '@animus-labs/shared';
 import { snakeToCamel } from '../utils.js';
 
 // ============================================================================
@@ -114,6 +114,40 @@ export function getAggregateUsage(
        FROM agent_usage ${where}`
     )
     .get(...params) as Record<string, number>;
+
+  return {
+    totalInputTokens: row['total_input_tokens'] ?? 0,
+    totalOutputTokens: row['total_output_tokens'] ?? 0,
+    totalTokens: row['total_tokens'] ?? 0,
+    totalCostUsd: row['total_cost_usd'] ?? 0,
+    sessionCount: row['session_count'] ?? 0,
+  };
+}
+
+/**
+ * Get aggregate usage scoped to specific session IDs.
+ * Used to compute sub-agent-only usage by passing session IDs from agent_tasks.
+ */
+export function getAggregateUsageForSessions(
+  db: Database.Database,
+  sessionIds: string[]
+): { totalInputTokens: number; totalOutputTokens: number; totalTokens: number; totalCostUsd: number; sessionCount: number } {
+  if (sessionIds.length === 0) {
+    return { totalInputTokens: 0, totalOutputTokens: 0, totalTokens: 0, totalCostUsd: 0, sessionCount: 0 };
+  }
+
+  const placeholders = sessionIds.map(() => '?').join(', ');
+  const row = db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(input_tokens), 0) as total_input_tokens,
+         COALESCE(SUM(output_tokens), 0) as total_output_tokens,
+         COALESCE(SUM(total_tokens), 0) as total_tokens,
+         COALESCE(SUM(cost_usd), 0) as total_cost_usd,
+         COUNT(DISTINCT session_id) as session_count
+       FROM agent_usage WHERE session_id IN (${placeholders})`
+    )
+    .get(...sessionIds) as Record<string, number>;
 
   return {
     totalInputTokens: row['total_input_tokens'] ?? 0,
@@ -437,6 +471,22 @@ export function getTimelineForTick(
     createdAt: e.createdAt,
     relativeMs: Math.max(0, new Date(e.createdAt).getTime() - baseTime),
   }));
+}
+
+// ============================================================================
+// Orphan Recovery
+// ============================================================================
+
+/**
+ * Mark orphaned sessions (status='active') as 'error'.
+ * Called during startup recovery to clean up sessions from a previous crash.
+ */
+export function markOrphanedSessions(db: Database.Database): number {
+  const timestamp = now();
+  const result = db.prepare(
+    "UPDATE agent_sessions SET ended_at = ?, status = 'error' WHERE status = 'active'"
+  ).run(timestamp);
+  return result.changes;
 }
 
 // ============================================================================

@@ -2,7 +2,7 @@
  * Error types and classes for the agent abstraction layer.
  */
 
-import type { AgentProvider } from '@animus/shared';
+import type { AgentProvider } from '@animus-labs/shared';
 
 /**
  * Classification of agent errors for consistent handling.

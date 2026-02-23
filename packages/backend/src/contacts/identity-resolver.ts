@@ -9,7 +9,7 @@
 
 import { getSystemDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
-import type { Contact, ChannelType, ResolvedContact } from '@animus/shared';
+import type { Contact, ChannelType, ResolvedContact } from '@animus-labs/shared';
 
 // ============================================================================
 // Identity Resolution

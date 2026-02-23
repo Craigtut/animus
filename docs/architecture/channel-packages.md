@@ -4,7 +4,7 @@
 > **Date**: 2026-02-13, updated 2026-02-14
 > **Single source of truth** for the Animus channel system — packaging, protocol, isolation, and lifecycle.
 >
-> **Note**: Reference channel implementations (twilio-sms, discord, api-compat) have moved to the [animus-extensions](https://github.com/animus-engine/animus-extensions) repository. The channel SDK is published as `@animus-engine/channel-sdk` on npm.
+> **Note**: Reference channel implementations (twilio-sms, discord, api-compat) have moved to the [animus-extensions](https://github.com/animus-engine/animus-extensions) repository. The channel SDK is published as `@animus-labs/channel-sdk` on npm.
 
 How Animus receives messages from the outside world and sends responses back through multiple communication channels. The channel adapter layer sits between external protocols (Twilio webhooks, Discord WebSocket, HTTP API endpoints, the web UI) and the heartbeat pipeline, normalizing everything into a common format.
 
@@ -18,7 +18,7 @@ Channel packages are standalone directories that can exist **anywhere on disk**.
 
 Reference channel implementations (SMS, Discord, API-compat) live in the [animus-extensions](https://github.com/animus-engine/animus-extensions) repository. They are **not bundled into the engine** — they are independent packages that follow the exact same format and install process as any community-built channel. A user must install them via Settings > Channels > Install by pointing at the directory path.
 
-- **`packages/channel-sdk/`** is a types-only package published as [`@animus-engine/channel-sdk`](https://www.npmjs.com/package/@animus-engine/channel-sdk) on npm. It provides `AdapterContext`, `ChannelAdapter`, and related types for channel adapter authors. It's a `devDependency` — types are erased at compile time, so compiled adapters have zero imports from it.
+- **`packages/channel-sdk/`** is a types-only package published as [`@animus-labs/channel-sdk`](https://www.npmjs.com/package/@animus-labs/channel-sdk) on npm. It provides `AdapterContext`, `ChannelAdapter`, and related types for channel adapter authors. It's a `devDependency` — types are erased at compile time, so compiled adapters have zero imports from it.
 
 ## Relationship to Plugins
 
@@ -141,6 +141,8 @@ Pending uploads that are never attached to a message expire after 30 minutes and
 
 ## Channel Package Structure
 
+The on-disk structure for a channel package (used during development and after extraction from `.anpk`):
+
 ```
 twilio-sms/
   channel.json            # Channel manifest (required)
@@ -151,6 +153,8 @@ twilio-sms/
   assets/
     icon.png              # Channel icon (required, 256x256 PNG)
 ```
+
+> **Distribution format**: For store distribution, channels are packaged as `.anpk` (ANimus PacKage) files — signed ZIP archives containing a unified `manifest.json` that wraps the channel-specific fields below. See `../../animus-extensions/docs/architecture/package-format.md` for the `.anpk` specification and unified manifest schema. The `channel.json` format described here remains the source format used during development.
 
 ### Channel Manifest (`channel.json`)
 
@@ -379,7 +383,7 @@ The adapter module exports a factory function:
 
 ```typescript
 // adapter.ts (compiled to adapter.js)
-import type { AdapterContext } from '@animus-engine/channel-sdk';
+import type { AdapterContext } from '@animus-labs/channel-sdk';
 
 export default function createAdapter(ctx: AdapterContext) {
   return {
@@ -765,17 +769,18 @@ CREATE TABLE channel_packages (
 
 ## Installation UX
 
-Channel installation follows the same pattern as plugin installation (see `docs/architecture/plugin-system.md`). The user registers a path on disk; Animus validates and loads from that path.
+Channels can be installed via three methods: local path (development), `.anpk` package file, or the in-engine store browser.
 
-### Installation Flow
+> **Full install specification**: See `docs/architecture/package-installation.md` for the complete 12-step installation flow (including signature verification, checksum validation, permissions consent, rollback support, and update checking). The flows below describe the channel-specific UX.
+
+### Installation Flow (Local Path — Development)
 
 ```
 User opens Settings > Channels > "Install Channel"
   │
-  ├─→ Two options:
-  │   ├─→ File picker: select the channel.json manifest file directly
-  │   │   └─→ Channel directory derived from the manifest file's parent directory
-  │   └─→ In Tauri (desktop): native directory picker to select the channel package folder
+  ├─→ File picker: select the channel.json manifest file directly
+  │   └─→ Channel directory derived from the manifest file's parent directory
+  │   └─→ In Tauri (desktop): native directory picker also available
   │
   ├─→ Channel Manager validates:
   │   ├─→ channel.json exists and passes Zod schema validation
@@ -800,7 +805,25 @@ User opens Settings > Channels > "Install Channel"
       └─→ Frontend updates channel list via tRPC subscription
 ```
 
-**File picker approach**: In web browsers, a native file picker opens and the user selects the `channel.json` file. The backend receives the path, reads the parent directory, and validates the full package structure. This works in all environments. In Tauri (desktop), a native directory picker is also available.
+### Installation Flow (Package File or Store)
+
+```
+User uploads .anpk file  — OR —  clicks "Install" in store browser
+  │
+  ├─→ Engine verifies Ed25519 signature
+  ├─→ Engine verifies archive-level SHA-256 checksum
+  ├─→ Extracts manifest.json, checks engine compatibility
+  ├─→ Displays permissions consent screen
+  │
+  ├─→ On approval:
+  │   ├─→ Extracts to ~/.animus/packages/{name}/
+  │   ├─→ Verifies per-file checksums against CHECKSUMS
+  │   ├─→ Registers in channel_packages table
+  │   ├─→ Caches .anpk in ~/.animus/packages/.cache/ (for rollback)
+  │   └─→ Channel appears in Settings > Channels as "Disabled"
+  │
+  └─→ Emit 'channel:installed' on EventBus
+```
 
 ### Enable Flow
 
@@ -1085,6 +1108,7 @@ For a self-hosted, single-user application:
 - SHA-256 checksum of `adapter.js` computed at install time
 - Checksum verified on each engine startup — mismatch prevents loading
 - User is warned if checksum changes (adapter file modified since install)
+- For `.anpk` packages: Ed25519 signature verification + per-file SHA-256 checksums — see `../../docs/architecture/distribution-security.md` for the complete 4-layer security model (integrity → signing → permissions consent → sandboxing)
 
 **4. Permission declaration (transparency + application-level enforcement)**:
 - Manifest declares `permissions.network` as an array of hostname strings (e.g., `["api.twilio.com", "*.twilio.com"]`)
@@ -1105,10 +1129,10 @@ The main Animus process runs the Claude Agent SDK, which requires unrestricted f
 
 ## Channel SDK Package
 
-To help channel developers implement adapters, we provide a `@animus-engine/channel-sdk` package with TypeScript types:
+To help channel developers implement adapters, we provide a `@animus-labs/channel-sdk` package with TypeScript types:
 
 ```typescript
-// @animus-engine/channel-sdk
+// @animus-labs/channel-sdk
 
 export interface AdapterContext {
   readonly config: Readonly<Record<string, unknown>>;
@@ -1290,3 +1314,9 @@ For `/api/generate`, uses `response` field instead of `message`.
 - `docs/architecture/context-builder.md` — Channel reply guidance injection
 - `docs/architecture/tech-stack.md` — Database architecture, Encryption Service, Fastify server
 - `docs/architecture/voice-channel.md` — Voice channel (built on top of the API channel)
+- `docs/architecture/package-installation.md` — Package install flow, rollback, updates, AI self-management
+- `../../docs/architecture/distribution-system.md` — Distribution system master overview
+- `../../docs/architecture/distribution-security.md` — Security model (signing, integrity, threats)
+- `../../animus-extensions/docs/architecture/package-format.md` — `.anpk` format specification (unified manifest)
+- `../../animus-extensions/docs/architecture/anipack-cli.md` — `anipack` CLI tool
+- `../../animus-store/docs/architecture/store-architecture.md` — Store API, Polar.sh payments, CDN

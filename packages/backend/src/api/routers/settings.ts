@@ -6,8 +6,8 @@ import { z } from 'zod';
 import {
   updateSystemSettingsInputSchema,
   updatePersonalitySettingsInputSchema,
-} from '@animus/shared';
-import type { SystemSettings, PersonalitySettings } from '@animus/shared';
+} from '@animus-labs/shared';
+import type { SystemSettings, PersonalitySettings } from '@animus-labs/shared';
 import { router, protectedProcedure } from '../trpc.js';
 import * as systemStore from '../../db/stores/system-store.js';
 import * as personaStore from '../../db/stores/persona-store.js';

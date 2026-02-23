@@ -1044,64 +1044,13 @@ spawn_agent decision
 
 A key differentiator: the Animus mind can discover and install plugins itself.
 
-### Plugin Store MCP Tool
+The engine exposes MCP tools that let the mind browse the store, install packages (with user approval), and manage installed packages. All actions require explicit user consent via the approval system.
 
-The Plugin Manager exposes MCP tools that the mind can use:
-
-```typescript
-// Tool: browse_plugins
-{
-  name: 'browse_plugins',
-  description: 'Search the plugin store for plugins that could help with a task.',
-  inputSchema: z.object({
-    query: z.string().describe('Natural language search query'),
-    category: z.string().optional(),
-    limit: z.number().default(5),
-  }),
-}
-
-// Tool: install_plugin
-{
-  name: 'install_plugin',
-  description: 'Request installation of a plugin. Requires user approval.',
-  inputSchema: z.object({
-    pluginId: z.string().describe('Plugin store ID'),
-    reason: z.string().describe('Why this plugin would be helpful'),
-  }),
-}
-
-// Tool: list_installed_plugins
-{
-  name: 'list_installed_plugins',
-  description: 'List all currently installed plugins and their status.',
-  inputSchema: z.object({}),
-}
-```
-
-### Installation Flow (AI-Initiated)
-
-```
-Mind encounters a task it can't handle well
-  │
-  ├─→ Mind calls browse_plugins("email integration tools")
-  │   └─→ Returns: [{ name: "email-connector", description: "...", price: "free" }]
-  │
-  ├─→ Mind calls install_plugin({ pluginId: "email-connector", reason: "..." })
-  │   └─→ Plugin Manager creates installation request
-  │       └─→ User is notified: "Animus wants to install 'email-connector' because: ..."
-  │           └─→ User approves or denies
-  │
-  └─→ If approved:
-      ├─→ Plugin is downloaded and validated
-      ├─→ Plugin Manager loads components, deploys skills
-      └─→ Mind is informed: "Plugin installed. New capabilities available."
-```
-
-**User always approves.** The mind can suggest, but installation requires explicit user consent. This is non-negotiable for trust and security.
+> **Full specification**: See `docs/architecture/package-installation.md` § AI Self-Management for complete MCP tool definitions (`browse_packages`, `install_package`, `uninstall_package`, `search_packages`), capability discovery examples, and safety constraints.
 
 ### Installation Flow (Human-Initiated)
 
-**Local path (development / pre-store):**
+**Local path (development):**
 ```
 User opens Settings > Plugins > "Add Local Plugin"
   │
@@ -1118,144 +1067,76 @@ User opens Settings > Plugins > "Add Local Plugin"
       └─→ Can enable/disable/configure/uninstall
 ```
 
-**Git / npm (pre-store distribution):**
+**Package file (.anpk):**
 ```
-User opens Settings > Plugins > "Add from Git" or "Add from npm"
+User opens Settings > Plugins > "Add from Package File"
   │
-  ├─→ Enters git URL or npm package name
-  │   └─→ Plugin Manager clones/installs to ~/.animus/plugins/{name}/
+  ├─→ Selects .anpk file (or downloads from store)
+  │   └─→ Engine verifies signature, checksums, extracts manifest
   │
-  ├─→ Validates plugin.json, reviews permissions
+  ├─→ Reviews requested permissions (consent screen)
+  │
+  ├─→ Extracted to ~/.animus/packages/{name}/
+  │   └─→ Plugin loaded, components activated (hot-swap lifecycle)
+  │
+  └─→ .anpk cached for rollback support
+```
+
+**Store (in-engine browser):**
+```
+User opens Settings > Plugins > "Browse Store"
+  │
+  ├─→ Browses/searches store listings
+  │   └─→ Views details, permissions, screenshots
+  │
+  ├─→ Clicks "Install" → downloads .anpk from CDN
+  │   └─→ Full verification chain (signature → checksums → permissions consent)
   │
   └─→ Plugin loaded and appears in Settings > Plugins
 ```
 
-**Store (future):**
-```
-User browses store (web UI)
-  │
-  ├─→ Finds plugin, clicks "Install"
-  │   └─→ Plugin Manager downloads to ~/.animus/plugins/{name}/
-  │
-  ├─→ Reviews requested permissions
-  │
-  └─→ Plugin loaded and appears in Settings > Plugins
-```
+> **Full specification**: See `docs/architecture/package-installation.md` for the complete 12-step install flow, update checking, config migration, and rollback mechanisms.
 
 ---
 
 ## Distribution & Store Architecture
 
-### Plugin Sources & Installation
+> **The distribution system is fully specified in dedicated architecture documents.** This section provides an overview; see the linked documents for complete specifications.
 
-Plugins come from three sources, each with different installation mechanics:
+### Plugin Sources
 
 | Source | Installation | Where It Lands | Use Case |
 |--------|-------------|----------------|----------|
 | **Built-in** | Auto-discovered at startup | `packages/backend/plugins/` (in engine) | Core functionality shipped with Animus |
-| **Local path** | Register path in system.db via Settings | Stays on disk where it is (no copy) | Development, first-party plugins |
-| **Git repository** | `git clone` via Settings or CLI | `~/.animus/plugins/{name}/` | Open source distribution |
-| **npm package** | `npm install` via Settings or CLI | `~/.animus/plugins/{name}/` | Community distribution |
-| **Store** | Download via store UI or AI | `~/.animus/plugins/{name}/` | Future marketplace |
+| **Local path** | Register path in system.db via Settings | Stays on disk where it is (no copy) | Development |
+| **Package file (.anpk)** | Upload via Settings or download from store | `~/.animus/packages/{name}/` | Primary distribution format |
+| **Store** | Browse in-engine or via web, one-click install | `~/.animus/packages/{name}/` | Marketplace distribution |
 
-**Local path registration** is the key pre-store workflow. The plugin stays where it is on disk — Animus just learns where to find it. This is ideal for development because edits to the plugin source take effect on the next tick (after session invalidation). No file copying, no sync issues.
+**Local path registration** remains available for development. The plugin stays where it is on disk — Animus just learns where to find it. Edits take effect on the next tick (after session invalidation).
 
-**Settings > Plugins page** provides:
-1. **Add Local Plugin** — enter or browse for a directory path containing a `plugin.json`
-2. **Add from Git** — enter a git URL, engine clones it to `~/.animus/plugins/`
-3. **Add from npm** — enter a package name, engine installs to `~/.animus/plugins/`
-4. **Browse Store** — future marketplace integration
-
-All installed plugins appear in a list with enable/disable toggles, version info, and uninstall option. Built-in plugins can be disabled but not uninstalled.
+**`.anpk` packages** are the primary distribution format. A `.anpk` file is a signed ZIP archive containing a unified `manifest.json`, all plugin files, SHA-256 checksums, and an Ed25519 signature. Both plugins and channels use the same format.
 
 ### Repository Layout
 
 The engine separates built-in plugins (ship with engine) from first-party plugins (developed separately in [animus-extensions](https://github.com/animus-engine/animus-extensions)):
 
-```
-animus-engine/
-  /packages/
-    /backend/
-      /plugins/                    # Built-in plugins (shipped with engine)
-      │ ├── web-research/          #   Auto-discovered at startup
-      │ │   ├── plugin.json        #   Can be disabled, not uninstalled
-      │ │   ├── skills/
-      │ │   │   └── research/
-      │ │   │       └── SKILL.md
-      │ │   └── tools/
-      │ │       └── mcp.json
-      │ └── ...
-      /src/
-      /...
-    /frontend/
-    /shared/
-    /agents/
+- **Built-in** (`packages/backend/plugins/`): Ship with the engine. Auto-discovered at startup. Can be disabled but not uninstalled.
+- **First-party** ([animus-extensions](https://github.com/animus-engine/animus-extensions) repo): Built by the Animus team, packaged as `.anpk` files via the `anipack` CLI, distributed through the Animus Store. Users must explicitly install them.
 
-animus-extensions/                 # Separate repository
-  /plugins/                        # First-party plugins
-  │ ├── home-assistant/            #   Distributed via store/git/npm/local path
-  │ │   ├── plugin.json
-  │ │   ├── skills/
-  │ │   │   └── home-control/
-  │ │   │       ├── SKILL.md
-  │ │   │       └── scripts/
-  │ │   │           └── ha-cli.sh
-  │ │   ├── tools/
-  │ │   │   └── mcp.json
-  │ │   ├── decisions/
-  │ │   │   └── decisions.json
-  │ │   ├── triggers/
-  │ │   │   └── triggers.json
-  │ │   └── agents/
-  │ │       └── home-automator.md
-  │ ├── weather/
-  │ └── ...
-  /channels/                       # First-party channel packages
-  │ ├── twilio-sms/
-  │ ├── discord/
-  │ └── api-compat/
-```
+First-party plugins are built from source in `animus-extensions/plugins/` using `anipack build`, which produces signed `.anpk` archives for distribution.
 
-**Built-in vs first-party distinction:**
-- **Built-in** (`packages/backend/plugins/`): Ship with the engine binary/distribution. Auto-discovered. Can be disabled but not uninstalled. Examples: web research, core tools.
-- **First-party** ([animus-extensions](https://github.com/animus-engine/animus-extensions) repo): Built by the Animus team, developed in a separate repository, distributed via store/git/npm/local path. Users must explicitly install them. Examples: home-assistant, weather, agent-browser.
+### Distribution Documents
 
-### Store API (Future)
+For complete specifications, see:
 
-The plugin store is a remote service that Animus instances connect to:
-
-```
-┌────────────────────────┐         ┌─────────────────────────┐
-│    Animus Instance      │  HTTPS  │    Plugin Store API      │
-│                         │ ──────→ │                          │
-│  Plugin Manager         │         │  GET /plugins?q=...     │
-│    browse_plugins()     │ ←────── │  GET /plugins/:id       │
-│    installFromStore()   │         │  GET /plugins/:id/dl    │
-│                         │         │  POST /plugins/:id/rate │
-│                         │         │                          │
-│  User approves install  │         │  Auth: API key or        │
-│    ↓                    │         │  anonymous browsing      │
-│  Downloads & validates  │         └─────────────────────────┘
-│  Loads plugin locally   │
-└────────────────────────┘
-```
-
-**Store metadata per listing:**
-- Name, description, version, author
-- Category tags
-- Install count, rating
-- Screenshots
-- Pricing (free / one-time / subscription)
-- Permissions required
-- Engine version compatibility
-- Source code link (if open source)
-- Review/audit status
-
-**Trust model:**
-- All plugins are reviewed before store listing
-- Permission declarations are enforced (plugin can't access more than it declares)
-- User sees permissions before installation
-- Plugin code is auditable (source available or checksummed)
+| Topic | Document |
+|-------|----------|
+| System overview & implementation roadmap | `../../docs/architecture/distribution-system.md` |
+| `.anpk` format, manifest schema, checksums | `../../animus-extensions/docs/architecture/package-format.md` |
+| `anipack` CLI (build, sign, publish) | `../../animus-extensions/docs/architecture/anipack-cli.md` |
+| Security model (signing, threats, verification) | `../../docs/architecture/distribution-security.md` |
+| Store API, Polar.sh payments, CDN | `../../animus-store/docs/architecture/store-architecture.md` |
+| Engine install flow, rollback, updates, AI self-install | `docs/architecture/package-installation.md` |
 
 ---
 
@@ -1306,10 +1187,7 @@ Plugins are trusted (self-hosted, single-user system), but basic isolation exist
 - **Skills**: Pure markdown files + optional scripts (agent decides what to execute)
 - **Context sources**: Provider processes run in isolation
 
-No sandboxing or VM isolation initially. If the store introduces untrusted third-party plugins in the future, we can add:
-- Container-based isolation for MCP servers and handlers
-- Permission enforcement via seccomp/AppArmor
-- Network namespace isolation
+No sandboxing or VM isolation initially. Container-based sandboxing is planned as a future phase of the distribution security model — see `../../docs/architecture/distribution-security.md` for the 4-layer security architecture (integrity verification → cryptographic signing → permissions consent → sandboxing) and threat model.
 
 ### Handler Timeouts & Process Management
 
@@ -1375,7 +1253,7 @@ The Plugin Manager does NOT automatically install dependencies for scripts. Scri
 
 ## Schemas (Zod)
 
-All manifest and component formats are validated with Zod schemas, defined in `@animus/shared`.
+All manifest and component formats are validated with Zod schemas, defined in `@animus-labs/shared`.
 
 ```typescript
 // packages/shared/src/schemas/plugin.ts
@@ -1561,9 +1439,9 @@ Four reference plugins demonstrate the full spectrum of plugin patterns:
 
 | Feature | Priority | Notes |
 |---------|----------|-------|
-| **Plugin store API** | Future | Browse/install from remote marketplace |
-| **AI self-installation** | Future | `browse_plugins` / `install_plugin` MCP tools |
-| **Git/npm source install** | Low | Local path registration works; git/npm is convenience |
+| **Package distribution (.anpk)** | Designed | Full architecture specified — see `docs/architecture/package-installation.md` |
+| **Store API & browser** | Designed | See `../../animus-store/docs/architecture/store-architecture.md` |
+| **AI self-installation** | Designed | `browse_packages` / `install_package` / `uninstall_package` MCP tools — see `docs/architecture/package-installation.md` |
 | **Watcher tick enqueue** | Low | Watcher processes spawn but don't enqueue heartbeat ticks yet (TODO in code) |
 | **Container isolation** | Future | Docker-based sandbox for untrusted plugins |
 | **Dependency resolution** | Future | Check `dependencies.plugins` at install time |
@@ -1737,11 +1615,11 @@ System prompt injection was the previous approach but has critical flaws:
 
 **Rationale**: This is the same pattern used for channel configuration (SMS credentials, Discord bot tokens). Plugins that connect to external services (Home Assistant, email, calendar) need API keys and URLs. The channels system proved this pattern works: typed schemas for validation, encrypted storage for security, dynamic UI forms for usability.
 
-### Plugin Updates: Manual for Now
+### Plugin Updates: Pull-Based for Store, Manual for Local
 
-**Decision**: Plugin updates are manual. For git-sourced plugins, users run `git pull`. For npm-sourced, `npm update`. The plugin system reads from the registered path, so updating the files IS the update. The version in the manifest is for display/tracking only.
+**Decision**: Store-distributed packages use a pull-based update model — the engine periodically checks the store API for newer versions of installed packages and shows "Update Available" badges. Local-path plugins remain manual (edit files on disk, next tick picks up changes). Rollback is supported via cached `.anpk` files.
 
-**Rationale**: Auto-update is a Phase 5+ concern (store infrastructure). For now, the architecture naturally supports manual updates because local-path plugins point directly at the source directory. Changing the files on disk and letting the next tick pick up the changes is simple and sufficient.
+**Rationale**: The pull-based model respects user autonomy (no auto-updates without consent) while surfacing available updates. Local-path plugins don't need update infrastructure because they point directly at the source directory. See `docs/architecture/package-installation.md` for the complete update and rollback flows.
 
 ### Decision Type Names: No Namespacing, Collision Rejected at Install
 
@@ -1768,7 +1646,13 @@ System prompt injection was the previous approach but has critical flaws:
 - `docs/architecture/agent-orchestration.md` — Sub-agent spawning, MCP forwarding
 - `docs/architecture/mcp-tools.md` — 5-layer tool architecture, registry pattern
 - `docs/architecture/channel-packages.md` — Channel system architecture, config pattern (encrypted config, typed schemas, dynamic UI forms)
+- `docs/architecture/package-installation.md` — Package install flow, rollback, updates, AI self-management
 - `docs/agents/architecture-overview.md` — Adapter interface, session lifecycle
+- `../../docs/architecture/distribution-system.md` — Distribution system master overview
+- `../../docs/architecture/distribution-security.md` — Security model (signing, integrity, threats)
+- `../../animus-extensions/docs/architecture/package-format.md` — `.anpk` format specification
+- `../../animus-extensions/docs/architecture/anipack-cli.md` — `anipack` CLI tool
+- `../../animus-store/docs/architecture/store-architecture.md` — Store API, Polar.sh payments, CDN
 
 ### External References
 - [Agent Skills — agentskills.io](https://agentskills.io/home) (cross-vendor standard)

@@ -19,7 +19,7 @@ import { handleIncomingMessage } from '../heartbeat/index.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
 import { getChannelManager } from './channel-manager.js';
-import type { ChannelType, Contact, Message, PermissionTier } from '@animus/shared';
+import type { ChannelType, Contact, Message, PermissionTier } from '@animus-labs/shared';
 
 type IncomingMedia = {
   type: 'image' | 'audio' | 'video' | 'file';
@@ -51,12 +51,17 @@ export class ChannelRouter {
     conversationId?: string;
     media?: IncomingMedia[];
     metadata?: Record<string, unknown>;
+    participant?: { displayName: string; avatarUrl?: string; isBot: boolean };
   }): Promise<Message | null> {
-    const { channel, identifier, content, conversationId, media, metadata } = params;
+    const { channel, identifier, content, conversationId, media, metadata, participant } = params;
 
     // Step 1: Resolve contact
     const resolved = resolveContact(channel, identifier);
     if (!resolved) {
+      // If we have participant info (and they're not a bot), treat as recognized participant
+      if (participant && !participant.isBot) {
+        return this.handleRecognizedParticipant(channel, identifier, content, conversationId, media, metadata, participant);
+      }
       // Unknown caller — send canned response, notify primary
       this.handleUnknownCaller(channel, identifier, content);
       return null;
@@ -263,6 +268,75 @@ export class ChannelRouter {
 
     const text = await speechService.stt.transcribe(samples, sampleRate);
     return text || null;
+  }
+
+  /**
+   * Handle a message from a recognized participant (someone we have display info for
+   * but who isn't in the contacts database). This happens in shared channels (e.g.,
+   * Slack channels, Discord servers) where non-contacts can message.
+   *
+   * We store the message and trigger a tick, but do NOT create a contact record.
+   */
+  private async handleRecognizedParticipant(
+    channel: ChannelType,
+    identifier: string,
+    content: string,
+    conversationId?: string,
+    media?: IncomingMedia[],
+    metadata?: Record<string, unknown>,
+    participant?: { displayName: string; avatarUrl?: string; isBot: boolean },
+  ): Promise<Message | null> {
+    const participantName = participant?.displayName ?? identifier;
+    log.info(`Recognized participant on ${channel}: ${participantName} (${identifier})`);
+
+    // Combine metadata
+    const combinedMetadata = {
+      ...metadata,
+      ...(conversationId ? { externalConversationId: conversationId } : {}),
+      ...(media && media.length > 0 ? { media } : {}),
+      participantName,
+      isRecognizedParticipant: true,
+    };
+
+    // Store message using a synthetic participant-based conversation
+    const msgDb = getMessagesDb();
+    // Use a synthetic contactId for recognized participants: rp:{channel}:{identifier}
+    const syntheticContactId = `rp:${channel}:${identifier}`;
+    let conv = messageStore.getActiveConversation(msgDb, syntheticContactId, channel);
+    if (!conv) {
+      conv = messageStore.createConversation(msgDb, {
+        contactId: syntheticContactId,
+        channel,
+      });
+    }
+
+    const msg = messageStore.createMessage(msgDb, {
+      conversationId: conv.id,
+      contactId: syntheticContactId,
+      direction: 'inbound',
+      channel,
+      content,
+      metadata: combinedMetadata,
+    });
+
+    getEventBus().emit('message:received', msg);
+
+    // Trigger tick with recognized participant metadata
+    handleIncomingMessage({
+      contactId: syntheticContactId,
+      contactName: participantName,
+      channel,
+      content,
+      messageId: msg.id,
+      conversationId: conv.id,
+      metadata: {
+        ...combinedMetadata,
+        participantName,
+        isRecognizedParticipant: true,
+      },
+    });
+
+    return msg;
   }
 
   private handleUnknownCaller(

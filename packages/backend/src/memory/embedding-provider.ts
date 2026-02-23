@@ -1,11 +1,11 @@
 /**
  * Embedding Provider — local implementation using Transformers.js + BGE-small-en-v1.5
  *
- * Implements IEmbeddingProvider from @animus/shared.
+ * Implements IEmbeddingProvider from @animus-labs/shared.
  * Lazy-loads the model on first use to avoid startup delay.
  */
 
-import type { IEmbeddingProvider } from '@animus/shared';
+import type { IEmbeddingProvider } from '@animus-labs/shared';
 
 const MODEL_ID = 'Xenova/bge-small-en-v1.5';
 const DIMENSIONS = 384;

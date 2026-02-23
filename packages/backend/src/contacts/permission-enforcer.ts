@@ -7,7 +7,7 @@
  * See docs/architecture/contacts.md — "Permission Tiers"
  */
 
-import type { Contact, PermissionTier, DecisionType } from '@animus/shared';
+import type { Contact, PermissionTier, DecisionType } from '@animus-labs/shared';
 
 // ============================================================================
 // Actions

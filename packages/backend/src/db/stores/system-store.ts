@@ -6,7 +6,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { generateUUID, now } from '@animus/shared';
+import { generateUUID, now } from '@animus-labs/shared';
 import type {
   User,
   Contact,
@@ -20,7 +20,7 @@ import type {
   ToolPermission,
   RiskTier,
   ToolPermissionMode,
-} from '@animus/shared';
+} from '@animus-labs/shared';
 import { snakeToCamel, boolToInt, intToBool } from '../utils.js';
 import { encrypt, decrypt } from '../../lib/encryption-service.js';
 

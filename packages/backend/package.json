@@ -1,5 +1,5 @@
 {
-  "name": "@animus/backend",
+  "name": "@animus-labs/backend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,9 +13,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@animus/agents": "*",
-    "@animus/shared": "*",
-    "@animus/tts-native": "*",
+    "@animus-labs/agents": "*",
+    "@animus-labs/shared": "*",
+    "@animus-labs/tts-native": "*",
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
     "@fastify/cookie": "^10.0.0",
     "@fastify/cors": "^10.0.0",

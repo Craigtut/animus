@@ -7,7 +7,7 @@
 
 import type { z } from 'zod';
 import type { ToolHandler, ToolResult } from '../types.js';
-import { resolveToolApprovalDef } from '@animus/shared';
+import { resolveToolApprovalDef } from '@animus-labs/shared';
 import { getHeartbeatDb } from '../../db/index.js';
 import {
   getApprovalRequest,

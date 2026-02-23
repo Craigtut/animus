@@ -1,5 +1,5 @@
 {
-  "name": "@animus/agents",
+  "name": "@animus-labs/agents",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -22,7 +22,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
-    "@animus/shared": "*",
+    "@animus-labs/shared": "*",
     "zod": "^3.22.0"
   },
   "peerDependencies": {

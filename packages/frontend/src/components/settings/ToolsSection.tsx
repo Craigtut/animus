@@ -14,7 +14,7 @@ import {
 import { Typography, Badge, Button } from '../ui';
 import { trpc } from '../../utils/trpc';
 import type { Theme } from '../../styles/theme';
-import type { ToolPermission, ToolPermissionMode, RiskTier } from '@animus/shared';
+import type { ToolPermission, ToolPermissionMode, RiskTier } from '@animus-labs/shared';
 
 // ============================================================================
 // Risk tier visual config

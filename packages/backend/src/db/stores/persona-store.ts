@@ -5,8 +5,8 @@
  */
 
 import type Database from 'better-sqlite3';
-import { now } from '@animus/shared';
-import type { PersonalitySettings, Persona } from '@animus/shared';
+import { now } from '@animus-labs/shared';
+import type { PersonalitySettings, Persona } from '@animus-labs/shared';
 import { intToBool } from '../utils.js';
 
 // ============================================================================

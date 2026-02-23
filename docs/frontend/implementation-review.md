@@ -212,14 +212,14 @@ The frontend specs reference 7 distinct tRPC subscriptions. **3 are now implemen
 
 > **Updated 2026-02-09**: The heartbeat pipeline is now fully implemented with:
 > - ✅ Gather stage: loads emotions (with decay), thoughts, experiences, messages, contact context, previous decisions
-> - ✅ Mind stage: builds context via context-builder + persona-compiler (agent session stubbed — returns minimal MindOutput pending @animus/agents wiring)
+> - ✅ Mind stage: builds context via context-builder + persona-compiler (agent session stubbed — returns minimal MindOutput pending @animus-labs/agents wiring)
 > - ✅ Execute stage: atomic transaction for thoughts/experiences/emotion deltas/decisions, reply send with error handling, TTL cleanup, EventBus emissions
 > - ✅ Tick queue: 4-level priority, per-contact debouncing, interval coalescing, overflow management
 > - ✅ Emotion engine: 12 emotions, decay toward baselines, delta application, intensity descriptions
 > - ✅ Persona compiler: all 10 dimensions, traits, values, existence frame, identity
 > - ✅ EventBus events emitted: `heartbeat:tick_start`, `heartbeat:tick_end`, `heartbeat:state_change`, `heartbeat:stage_change`, `thought:created`, `experience:created`, `emotion:updated`, `decision:made`, `message:sent`
 >
-> **Remaining gap**: The mind query returns minimal output — real agent session wiring (via @animus/agents Claude adapter) is needed for thoughts, emotions, and replies to be AI-generated rather than placeholder text.
+> **Remaining gap**: The mind query returns minimal output — real agent session wiring (via @animus-labs/agents Claude adapter) is needed for thoughts, emotions, and replies to be AI-generated rather than placeholder text.
 
 ---
 

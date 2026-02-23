@@ -12,8 +12,8 @@ import { handleIncomingMessage } from '../../heartbeat/index.js';
 import { getEventBus } from '../../lib/event-bus.js';
 import { getMessageService } from '../../services/message-service.js';
 import { consumePendingUpload } from '../routes/media.js';
-import { channelTypeSchema, paginationInputSchema, generateUUID, now } from '@animus/shared';
-import type { Message } from '@animus/shared';
+import { channelTypeSchema, paginationInputSchema, generateUUID, now } from '@animus-labs/shared';
+import type { Message } from '@animus-labs/shared';
 
 export const messagesRouter = router({
   /**
@@ -60,7 +60,7 @@ export const messagesRouter = router({
       });
 
       // Link pending uploads as media attachments
-      const attachments: import('@animus/shared').StoredMediaAttachment[] = [];
+      const attachments: import('@animus-labs/shared').StoredMediaAttachment[] = [];
       if (input.attachmentIds && input.attachmentIds.length > 0) {
         for (const uploadId of input.attachmentIds) {
           const pending = consumePendingUpload(uploadId);

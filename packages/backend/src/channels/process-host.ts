@@ -13,7 +13,7 @@ import { EventEmitter } from 'node:events';
 import { createLogger } from '../lib/logger.js';
 import { generateCorrelationId } from './ipc/protocol.js';
 import { createParentHandler } from './ipc/parent-handler.js';
-import type { ChannelManifest, ChannelPackage } from '@animus/shared';
+import type { ChannelManifest, ChannelPackage } from '@animus-labs/shared';
 import type {
   ParentToChildMessage,
   SendResponseMessage,
@@ -22,6 +22,7 @@ import type {
   RouteResponseChunkMessage,
   RouteResponseEndMessage,
   IncomingMessage,
+  HistoryResponseMessage,
 } from './ipc/protocol.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +37,7 @@ export interface ProcessHostConfig {
     conversationId?: string;
     media?: IncomingMessage['media'];
     metadata?: Record<string, unknown>;
+    participant?: IncomingMessage['participant'];
   }) => void | Promise<void>;
   onStatusChange: (status: string, error?: string) => void;
   onRouteRegister: (method: string, path: string) => void;
@@ -65,6 +67,12 @@ interface PendingAction {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface PendingHistory {
+  resolve: (msg: HistoryResponseMessage) => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 interface PendingRoute {
   resolve: (value: RouteResponseMessage) => void;
   reject: (err: Error) => void;
@@ -80,6 +88,7 @@ const STOP_ACK_TIMEOUT_MS = 10_000;
 const KILL_TIMEOUT_MS = 5_000;
 const SEND_TIMEOUT_MS = 30_000;
 const ACTION_TIMEOUT_MS = 10_000;
+const HISTORY_TIMEOUT_MS = 30_000;
 const ROUTE_TIMEOUT_MS = 30_000;
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
 const PING_TIMEOUT_MS = 5_000;
@@ -93,6 +102,7 @@ export class ChannelProcessHost {
   private pendingSendRequests = new Map<string, PendingSend>();
   private pendingActionRequests = new Map<string, PendingAction>();
   private pendingRouteRequests = new Map<string, PendingRoute>();
+  private pendingHistoryRequests = new Map<string, PendingHistory>();
 
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
   private pendingPing: { id: string; timer: ReturnType<typeof setTimeout> } | null = null;
@@ -186,6 +196,7 @@ export class ChannelProcessHost {
         if (msg.conversationId) incoming.conversationId = msg.conversationId;
         if (msg.media) incoming.media = msg.media;
         if (msg.metadata) incoming.metadata = msg.metadata;
+        if (msg.participant) incoming.participant = msg.participant;
         this.config.onIncoming(incoming);
       },
 
@@ -281,6 +292,15 @@ export class ChannelProcessHost {
             activity: msg.activity,
           }
         );
+      },
+
+      onHistoryResponse: (msg) => {
+        const pending = this.pendingHistoryRequests.get(msg.id);
+        if (pending) {
+          clearTimeout(pending.timer);
+          this.pendingHistoryRequests.delete(msg.id);
+          pending.resolve(msg);
+        }
       },
 
       onActionResponse: (msg) => {
@@ -478,6 +498,47 @@ export class ChannelProcessHost {
       this.pendingActionRequests.set(id, { resolve, reject: () => resolve(false), timer });
 
       this.sendToChild({ type: 'action', id, action });
+    });
+  }
+
+  async getHistory(
+    conversationId: string,
+    limit?: number,
+    before?: string
+  ): Promise<HistoryResponseMessage['messages']> {
+    if (!this.childProcess || this.childProcess.killed) {
+      this.log.warn('Cannot get history: process not running');
+      return undefined;
+    }
+
+    const id = generateCorrelationId();
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingHistoryRequests.delete(id);
+        reject(new Error(`getHistory timeout after ${HISTORY_TIMEOUT_MS}ms`));
+      }, HISTORY_TIMEOUT_MS);
+
+      this.pendingHistoryRequests.set(id, {
+        resolve: (msg) => {
+          if (msg.ok) {
+            resolve(msg.messages);
+          } else {
+            reject(new Error(msg.error ?? 'getHistory failed'));
+          }
+        },
+        reject,
+        timer,
+      });
+
+      const msg: import('./ipc/protocol.js').GetHistoryMessage = {
+        type: 'get_history',
+        id,
+        conversationId,
+      };
+      if (limit != null) msg.limit = limit;
+      if (before != null) msg.before = before;
+      this.sendToChild(msg);
     });
   }
 
@@ -692,5 +753,11 @@ export class ChannelProcessHost {
       pending.reject(error);
     }
     this.pendingRouteRequests.clear();
+
+    for (const [id, pending] of this.pendingHistoryRequests) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+    this.pendingHistoryRequests.clear();
   }
 }

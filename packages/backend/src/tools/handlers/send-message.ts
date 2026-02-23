@@ -7,7 +7,7 @@
 
 import type { z } from 'zod';
 import type { ToolHandler, ToolResult } from '../types.js';
-import { sendMessageDef } from '@animus/shared';
+import { sendMessageDef } from '@animus-labs/shared';
 
 type SendMessageInput = z.infer<typeof sendMessageDef.inputSchema>;
 
@@ -19,7 +19,7 @@ export const sendMessageHandler: ToolHandler<SendMessageInput> = async (
   if (input.media && input.media.length > 0 && context.stores.channels) {
     const result = await context.stores.channels.sendOutbound({
       contactId: context.contactId,
-      channel: context.sourceChannel as import('@animus/shared').ChannelType,
+      channel: context.sourceChannel as import('@animus-labs/shared').ChannelType,
       content: input.content,
       media: input.media,
     });

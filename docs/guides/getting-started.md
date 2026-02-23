@@ -106,7 +106,7 @@ animus/
 │   │       ├── heartbeat/ # Heartbeat system
 │   │       └── utils/   # Backend utilities
 │   │
-│   ├── channel-sdk/     # Types-only package published as @animus-engine/channel-sdk
+│   ├── channel-sdk/     # Types-only package published as @animus-labs/channel-sdk
 │   │
 │   └── frontend/        # Vite + React SPA
 │       └── src/
@@ -332,7 +332,7 @@ ps aux | grep node
 After pulling new changes, rebuild the shared package:
 
 ```bash
-npm run build -w @animus/shared
+npm run build -w @animus-labs/shared
 ```
 
 ### Module Not Found

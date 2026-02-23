@@ -84,6 +84,14 @@ interface PingMessage {
   id: string;
 }
 
+interface GetHistoryMessage {
+  type: 'get_history';
+  id: string;
+  conversationId: string;
+  limit?: number;
+  before?: string;
+}
+
 interface StopMessage {
   type: 'stop';
 }
@@ -97,7 +105,8 @@ type ParentMessage =
   | MediaDownloadResponseMessage
   | ConfigUpdateMessage
   | ActionMessage
-  | PingMessage;
+  | PingMessage
+  | GetHistoryMessage;
 
 // ============================================================================
 // AdapterContext public types (exposed to adapter authors)
@@ -139,6 +148,7 @@ export interface AdapterContext {
     conversationId?: string;
     media?: Array<{ type: 'image' | 'audio' | 'video' | 'file'; mimeType: string; url: string; filename?: string }>;
     metadata?: Record<string, unknown>;
+    participant?: { displayName: string; avatarUrl?: string; isBot: boolean };
   }): void;
   resolveContact(contactId: string): Promise<{ identifier: string; displayName?: string } | null>;
   registerRoute(config: {
@@ -165,11 +175,29 @@ export interface ChannelAction {
   [key: string]: unknown;
 }
 
+export interface ExternalMessage {
+  author: {
+    identifier: string;
+    displayName: string;
+    isBot: boolean;
+  };
+  content: string;
+  timestamp: string;
+  threadTs?: string;
+  reactions?: Array<{ name: string; count: number }>;
+  attachments?: Array<{ type: string; url: string; filename?: string }>;
+}
+
 export interface ChannelAdapter {
   start(): Promise<void>;
   stop(): Promise<void>;
   send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<void>;
   performAction?(action: ChannelAction): Promise<void>;
+  getHistory?(params: {
+    conversationId: string;
+    limit?: number;
+    before?: string;
+  }): Promise<ExternalMessage[]>;
 }
 
 export type CreateAdapterFn = (ctx: AdapterContext) => ChannelAdapter;
@@ -245,6 +273,7 @@ function createAdapterContext(): AdapterContext {
         conversationId: params.conversationId,
         media: params.media,
         metadata: params.metadata,
+        participant: params.participant,
       });
     },
 
@@ -483,6 +512,36 @@ function handleParentMessage(raw: unknown): void {
       } else {
         // Adapter doesn't implement performAction — silent no-op
         sendToParent({ type: 'action_response', id: msg.id, ok: true });
+      }
+      break;
+    }
+
+    case 'get_history': {
+      if (adapter && typeof adapter.getHistory === 'function') {
+        adapter
+          .getHistory({
+            conversationId: msg.conversationId,
+            ...(msg.limit !== undefined && { limit: msg.limit }),
+            ...(msg.before !== undefined && { before: msg.before }),
+          })
+          .then((messages) =>
+            sendToParent({ type: 'history_response', id: msg.id, ok: true, messages })
+          )
+          .catch((err: unknown) =>
+            sendToParent({
+              type: 'history_response',
+              id: msg.id,
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          );
+      } else {
+        sendToParent({
+          type: 'history_response',
+          id: msg.id,
+          ok: false,
+          error: 'Adapter does not implement getHistory',
+        });
       }
       break;
     }

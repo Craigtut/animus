@@ -5,8 +5,8 @@
  */
 
 import type Database from 'better-sqlite3';
-import { now } from '@animus/shared';
-import type { Goal, EmotionName, EmotionState, Plan } from '@animus/shared';
+import { now } from '@animus-labs/shared';
+import type { Goal, EmotionName, EmotionState, Plan } from '@animus-labs/shared';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import { computeSalience, GOAL_VISIBILITY_THRESHOLD, MAX_GOALS_IN_CONTEXT } from './salience.js';
 import type { SalienceResult } from './salience.js';

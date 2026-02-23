@@ -11,8 +11,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { z } from 'zod';
 import type { ToolHandler, ToolResult } from '../types.js';
-import { sendVoiceReplyDef } from '@animus/shared';
-import type { ChannelType } from '@animus/shared';
+import { sendVoiceReplyDef } from '@animus-labs/shared';
+import type { ChannelType } from '@animus-labs/shared';
 
 type SendVoiceReplyInput = z.infer<typeof sendVoiceReplyDef.inputSchema>;
 

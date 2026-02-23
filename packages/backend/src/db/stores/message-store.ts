@@ -5,14 +5,14 @@
  */
 
 import type Database from 'better-sqlite3';
-import { generateUUID, now } from '@animus/shared';
+import { generateUUID, now } from '@animus-labs/shared';
 import type {
   Conversation,
   Message,
   ChannelType,
   MessageDirection,
   StoredMediaAttachment as SharedStoredMediaAttachment,
-} from '@animus/shared';
+} from '@animus-labs/shared';
 import { snakeToCamel, intToBool } from '../utils.js';
 
 // ============================================================================

@@ -8,7 +8,7 @@ import { Card } from '../ui/Card';
 import { Typography } from '../ui';
 import { EmotionSparkline } from './EmotionSparkline';
 import { useHeartbeatStore } from '../../store/heartbeat-store';
-import type { EmotionState, EmotionName, EmotionHistoryEntry } from '@animus/shared';
+import type { EmotionState, EmotionName, EmotionHistoryEntry } from '@animus-labs/shared';
 
 // ============================================================================
 // Annotated Emotional Field (reduced height for Mind page)

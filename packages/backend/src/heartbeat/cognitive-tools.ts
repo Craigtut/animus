@@ -23,8 +23,8 @@
  */
 
 import { z } from 'zod';
-import { emotionNameSchema, decisionTypeSchema, memoryTypeSchema } from '@animus/shared';
-import type { MindOutput, ChannelType } from '@animus/shared';
+import { emotionNameSchema, decisionTypeSchema, memoryTypeSchema } from '@animus-labs/shared';
+import type { MindOutput, ChannelType } from '@animus-labs/shared';
 import { createLogger } from '../lib/logger.js';
 import type { GatherResult } from './gather-context.js';
 

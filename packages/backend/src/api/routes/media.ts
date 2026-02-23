@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import multipart from '@fastify/multipart';
-import { generateUUID } from '@animus/shared';
+import { generateUUID } from '@animus-labs/shared';
 import { getMessagesDb } from '../../db/index.js';
 import * as messageStore from '../../db/stores/message-store.js';
 import { createLogger } from '../../lib/logger.js';

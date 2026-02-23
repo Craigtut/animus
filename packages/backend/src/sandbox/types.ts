@@ -5,8 +5,8 @@
  * for the agent sandbox terminal UI.
  */
 
-import type { AgentProvider } from '@animus/shared';
-import type { AgentEvent, SessionUsage, AgentCost } from '@animus/agents';
+import type { AgentProvider } from '@animus-labs/shared';
+import type { AgentEvent, SessionUsage, AgentCost } from '@animus-labs/agents';
 
 // ============================================================================
 // Display Items

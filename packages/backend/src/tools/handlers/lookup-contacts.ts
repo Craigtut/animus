@@ -7,7 +7,7 @@
 
 import type { z } from 'zod';
 import type { ToolHandler, ToolResult } from '../types.js';
-import { lookupContactsDef } from '@animus/shared';
+import { lookupContactsDef } from '@animus-labs/shared';
 
 type LookupContactsInput = z.infer<typeof lookupContactsDef.inputSchema>;
 

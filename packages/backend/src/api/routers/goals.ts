@@ -9,8 +9,8 @@ import { router, protectedProcedure } from '../trpc.js';
 import { getHeartbeatDb } from '../../db/index.js';
 import * as heartbeatStore from '../../db/stores/heartbeat-store.js';
 import { getEventBus } from '../../lib/event-bus.js';
-import { now } from '@animus/shared';
-import type { Goal, GoalSeed } from '@animus/shared';
+import { now } from '@animus-labs/shared';
+import type { Goal, GoalSeed } from '@animus-labs/shared';
 
 export const goalsRouter = router({
   /**

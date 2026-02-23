@@ -8,7 +8,7 @@
 import { getMessagesDb, getSystemDb } from '../db/index.js';
 import * as messageStore from '../db/stores/message-store.js';
 import * as systemStore from '../db/stores/system-store.js';
-import type { Conversation, Message } from '@animus/shared';
+import type { Conversation, Message } from '@animus-labs/shared';
 
 // ============================================================================
 // Types

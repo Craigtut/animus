@@ -17,7 +17,7 @@ import {
   removeCredential,
   inferCredentialType,
 } from '../../services/credential-service.js';
-import { getModelRegistry } from '@animus/agents';
+import { getModelRegistry } from '@animus-labs/agents';
 
 const providerSchema = z.enum(['claude', 'codex']);
 

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { Typography } from '../../components/ui';
+import { TauriDragRegion } from '../../components/layout/TauriDragRegion';
 import { useOnboardingStore } from '../../store';
 import { trpc } from '../../utils/trpc';
 
@@ -81,6 +82,8 @@ export function BirthPage() {
         overflow: hidden;
       `}
     >
+      <TauriDragRegion />
+
       {/* The orb */}
       <AnimatePresence>
         {(phase === 'stirring' || phase === 'emergence' || phase === 'identity' || phase === 'transition') && (

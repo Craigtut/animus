@@ -11,7 +11,7 @@ import * as systemStore from '../../db/stores/system-store.js';
 import * as heartbeatStore from '../../db/stores/heartbeat-store.js';
 import { getEventBus } from '../../lib/event-bus.js';
 import { triggerTick } from '../../heartbeat/index.js';
-import type { ToolApprovalRequest, ToolPermissionMode } from '@animus/shared';
+import type { ToolApprovalRequest, ToolPermissionMode } from '@animus-labs/shared';
 
 export const toolsRouter = router({
   /**

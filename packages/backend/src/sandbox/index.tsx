@@ -12,7 +12,7 @@
  */
 
 import React from 'react';
-import type { AgentProvider } from '@animus/shared';
+import type { AgentProvider } from '@animus-labs/shared';
 import type { SandboxCliArgs, SandboxState } from './types.js';
 import { createLogger } from '../lib/logger.js';
 
@@ -106,7 +106,7 @@ async function boot(args: SandboxCliArgs) {
   }
 
   // 5. Create agent manager (with silent logger to avoid console noise in TUI)
-  const { createAgentManager, createSilentLogger } = await import('@animus/agents');
+  const { createAgentManager, createSilentLogger } = await import('@animus-labs/agents');
   const manager = createAgentManager({ logger: createSilentLogger() });
 
   // Validate at least one provider is configured

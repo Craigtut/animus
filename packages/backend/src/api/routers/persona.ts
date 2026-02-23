@@ -17,8 +17,8 @@ import {
 import {
   personaDraftInputSchema,
   personaUpdateInputSchema,
-} from '@animus/shared';
-import type { Persona } from '@animus/shared';
+} from '@animus-labs/shared';
+import type { Persona } from '@animus-labs/shared';
 import type { PersonaDimensions } from '../../heartbeat/emotion-engine.js';
 
 type DraftFields = Partial<Omit<Persona, 'isFinalized' | 'communicationStyle'>>;

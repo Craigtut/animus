@@ -11,8 +11,8 @@ import { getHeartbeatDb } from '../db/index.js';
 import * as taskStore from '../db/stores/task-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
-import { now } from '@animus/shared';
-import type { Task, TaskStatus } from '@animus/shared';
+import { now } from '@animus-labs/shared';
+import type { Task, TaskStatus } from '@animus-labs/shared';
 
 const log = createLogger('TaskRunner', 'heartbeat');
 

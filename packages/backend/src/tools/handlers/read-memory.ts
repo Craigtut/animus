@@ -7,7 +7,7 @@
 
 import type { z } from 'zod';
 import type { ToolHandler, ToolResult } from '../types.js';
-import { readMemoryDef } from '@animus/shared';
+import { readMemoryDef } from '@animus-labs/shared';
 
 type ReadMemoryInput = z.infer<typeof readMemoryDef.inputSchema>;
 

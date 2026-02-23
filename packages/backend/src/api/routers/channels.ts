@@ -15,7 +15,8 @@ import { getSystemDb } from '../../db/index.js';
 import * as systemStore from '../../db/stores/system-store.js';
 import { getChannelManager } from '../../channels/channel-manager.js';
 import { getEventBus } from '../../lib/event-bus.js';
-import type { AnimusEventMap } from '@animus/shared';
+import { verifyPackage } from '../../services/package-verifier.js';
+import type { AnimusEventMap } from '@animus-labs/shared';
 
 export const channelsRouter = router({
   /**
@@ -238,4 +239,74 @@ export const channelsRouter = router({
       };
     });
   }),
+
+  /**
+   * Verify an .anpk package file — returns verification result + manifest
+   * for the consent UI. Step 1 of two-step install flow.
+   */
+  verifyPackage: protectedProcedure
+    .input(z.object({ filePath: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      try {
+        const result = await verifyPackage(input.filePath);
+        if (result.manifest && result.manifest.packageType !== 'channel') {
+          return {
+            ...result,
+            valid: false,
+            errors: [...result.errors, 'Package is not a channel'],
+          };
+        }
+        return result;
+      } catch (err) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: err instanceof Error ? err.message : 'Failed to verify package',
+        });
+      }
+    }),
+
+  /**
+   * Install a channel from a verified .anpk package file.
+   * Step 2 — called after user reviews permissions and consents.
+   */
+  installFromPackage: protectedProcedure
+    .input(
+      z.object({
+        filePath: z.string().min(1),
+        grantedPermissions: z.array(z.string()).default([]),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const channelManager = getChannelManager();
+      try {
+        const result = await channelManager.installFromPackage(
+          input.filePath,
+          input.grantedPermissions,
+        );
+        return result;
+      } catch (err) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: err instanceof Error ? err.message : 'Failed to install channel from package',
+        });
+      }
+    }),
+
+  /**
+   * Rollback a channel to its previous cached version.
+   */
+  rollback: protectedProcedure
+    .input(z.object({ name: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      const channelManager = getChannelManager();
+      try {
+        const result = await channelManager.rollback(input.name);
+        return result;
+      } catch (err) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: err instanceof Error ? err.message : 'Failed to rollback channel',
+        });
+      }
+    }),
 });

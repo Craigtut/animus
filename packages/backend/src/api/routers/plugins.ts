@@ -11,7 +11,8 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../trpc.js';
 import { getPluginManager } from '../../services/plugin-manager.js';
-import { PluginManifestSchema, pluginSourceSchema } from '@animus/shared';
+import { verifyPackage } from '../../services/package-verifier.js';
+import { PluginManifestSchema, pluginSourceSchema } from '@animus-labs/shared';
 
 export const pluginsRouter = router({
   /**
@@ -239,6 +240,77 @@ export const pluginsRouter = router({
           valid: false as const,
           error: err instanceof Error ? err.message : 'Failed to read plugin.json',
         };
+      }
+    }),
+
+  /**
+   * Verify an .anpk package file — returns verification result + manifest
+   * for the consent UI. This is step 1 of the two-step install flow.
+   */
+  verifyPackage: protectedProcedure
+    .input(z.object({ filePath: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      try {
+        const result = await verifyPackage(input.filePath);
+        if (result.manifest && result.manifest.packageType !== 'plugin') {
+          return {
+            ...result,
+            valid: false,
+            errors: [...result.errors, 'Package is not a plugin'],
+          };
+        }
+        return result;
+      } catch (err) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: err instanceof Error ? err.message : 'Failed to verify package',
+        });
+      }
+    }),
+
+  /**
+   * Install a plugin from a verified .anpk package file.
+   * This is step 2 of the two-step install flow — called after the user
+   * reviews permissions and clicks "Install" in the consent dialog.
+   */
+  installFromPackage: protectedProcedure
+    .input(
+      z.object({
+        filePath: z.string().min(1),
+        grantedPermissions: z.array(z.string()).default([]),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const pm = getPluginManager();
+      try {
+        const result = await pm.installFromPackage(
+          input.filePath,
+          input.grantedPermissions,
+        );
+        return result;
+      } catch (err) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: err instanceof Error ? err.message : 'Failed to install plugin from package',
+        });
+      }
+    }),
+
+  /**
+   * Rollback a plugin to its previous cached version.
+   */
+  rollback: protectedProcedure
+    .input(z.object({ name: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      const pm = getPluginManager();
+      try {
+        const result = await pm.rollback(input.name);
+        return result;
+      } catch (err) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: err instanceof Error ? err.message : 'Failed to rollback plugin',
+        });
       }
     }),
 });

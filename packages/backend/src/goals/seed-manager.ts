@@ -8,8 +8,8 @@
  */
 
 import type Database from 'better-sqlite3';
-import { DecayEngine, now } from '@animus/shared';
-import type { IEmbeddingProvider, GoalSeed, EmotionName } from '@animus/shared';
+import { DecayEngine, now } from '@animus-labs/shared';
+import type { IEmbeddingProvider, GoalSeed, EmotionName } from '@animus-labs/shared';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 

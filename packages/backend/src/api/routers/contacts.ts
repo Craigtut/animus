@@ -8,7 +8,7 @@
 import { z } from 'zod';
 import { router, protectedProcedure } from '../trpc.js';
 import { getContactService } from '../../services/contact-service.js';
-import { channelTypeSchema } from '@animus/shared';
+import { channelTypeSchema } from '@animus-labs/shared';
 
 export const contactsRouter = router({
   /**

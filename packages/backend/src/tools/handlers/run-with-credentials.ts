@@ -14,7 +14,7 @@
 import { spawn } from 'node:child_process';
 import type { z } from 'zod';
 import type { ToolHandler, ToolResult } from '../types.js';
-import { runWithCredentialsDef } from '@animus/shared';
+import { runWithCredentialsDef } from '@animus-labs/shared';
 import { getPluginManager } from '../../services/plugin-manager.js';
 import { PROJECT_ROOT } from '../../utils/env.js';
 import { createLogger } from '../../lib/logger.js';

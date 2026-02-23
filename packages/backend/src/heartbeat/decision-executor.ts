@@ -14,8 +14,8 @@
  */
 
 import type Database from 'better-sqlite3';
-import type { MindOutput, Contact, IEventBus, EmotionName, ScheduleType } from '@animus/shared';
-import { builtInDecisionTypeSchema, now } from '@animus/shared';
+import type { MindOutput, Contact, IEventBus, EmotionName, ScheduleType } from '@animus-labs/shared';
+import { builtInDecisionTypeSchema, now } from '@animus-labs/shared';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import * as taskStore from '../db/stores/task-store.js';
 import { getPluginManager } from '../services/plugin-manager.js';

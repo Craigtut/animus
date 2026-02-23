@@ -8,7 +8,7 @@
  * @see https://platform.claude.com/docs/en/agent-sdk/overview
  */
 
-import type { AgentProvider } from '@animus/shared';
+import type { AgentProvider } from '@animus-labs/shared';
 import type {
   AgentSessionConfig,
   AdapterCapabilities,

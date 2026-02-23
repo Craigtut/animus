@@ -8,7 +8,7 @@
  * See docs/architecture/context-builder.md — "Persona Section"
  */
 
-import { estimateTokens } from '@animus/shared';
+import { estimateTokens } from '@animus-labs/shared';
 
 // ============================================================================
 // Types
@@ -378,4 +378,4 @@ export function compilePersona(config: PersonaConfig): CompiledPersona {
 }
 
 // Re-export estimateTokens from shared for backward compatibility
-export { estimateTokens } from '@animus/shared';
+export { estimateTokens } from '@animus-labs/shared';

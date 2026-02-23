@@ -1,6 +1,6 @@
 # Agent SDK Documentation
 
-This folder contains comprehensive research and design documentation for the four agent SDKs that the `@animus/agents` package unifies.
+This folder contains comprehensive research and design documentation for the four agent SDKs that the `@animus-labs/agents` package unifies.
 
 ## Structure
 

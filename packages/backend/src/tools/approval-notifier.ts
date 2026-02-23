@@ -12,12 +12,12 @@
  * See docs/architecture/mcp-tools.md — "Tool Permissions"
  */
 
-import type { IEventBus, ToolApprovalRequest } from '@animus/shared';
+import type { IEventBus, ToolApprovalRequest } from '@animus-labs/shared';
 import { createLogger } from '../lib/logger.js';
 import { getChannelRouter } from '../channels/channel-router.js';
 import { getSystemDb } from '../db/index.js';
 import { getToolPermission } from '../db/stores/system-store.js';
-import type { ChannelType } from '@animus/shared';
+import type { ChannelType } from '@animus-labs/shared';
 
 const log = createLogger('ApprovalNotifier', 'heartbeat');
 

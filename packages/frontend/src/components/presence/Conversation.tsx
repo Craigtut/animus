@@ -8,7 +8,7 @@ import { File as FileIcon, DownloadSimple } from '@phosphor-icons/react';
 import { Typography } from '../ui';
 import { trpc } from '../../utils/trpc';
 import { ToolApprovalCard, BatchApprovalCard } from './ToolApprovalCard';
-import type { ToolApprovalRequest } from '@animus/shared';
+import type { ToolApprovalRequest } from '@animus-labs/shared';
 
 // ============================================================================
 // Types

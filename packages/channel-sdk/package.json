@@ -1,6 +1,6 @@
 {
-  "name": "@animus-engine/channel-sdk",
-  "version": "0.1.0",
+  "name": "@animus-labs/channel-sdk",
+  "version": "0.1.1",
   "description": "TypeScript types for building Animus channel adapters",
   "license": "MIT",
   "repository": {

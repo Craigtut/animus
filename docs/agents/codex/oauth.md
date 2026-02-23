@@ -617,7 +617,7 @@ Add Codex authentication section to settings UI with the three states shown abov
 
 ### Phase 5: Session Integration
 
-Update the Codex adapter in `@animus/agents` to:
+Update the Codex adapter in `@animus-labs/agents` to:
 - Check for stored credentials before session creation
 - Write temporary auth.json for each session
 - Handle token refresh transparently

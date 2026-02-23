@@ -1,5 +1,5 @@
 /**
- * @animus/agents
+ * @animus-labs/agents
  *
  * Unified agent SDK abstraction layer for Animus.
  *
@@ -13,7 +13,7 @@
  *
  * @example
  * ```typescript
- * import { createAgentManager } from '@animus/agents';
+ * import { createAgentManager } from '@animus-labs/agents';
  *
  * const manager = createAgentManager();
  *

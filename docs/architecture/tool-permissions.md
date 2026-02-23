@@ -60,7 +60,7 @@ The permission system spans three categories of tools with different enforcement
 
 ### 1. Core Animus MCP Tools (In-Process)
 
-Tools defined in `@animus/shared` and handled in `packages/backend/src/tools/`. These run in-process via `createSdkMcpServer()`. Permission checking happens in `registry.ts:executeTool()` via `checkToolPermission()`.
+Tools defined in `@animus-labs/shared` and handled in `packages/backend/src/tools/`. These run in-process via `createSdkMcpServer()`. Permission checking happens in `registry.ts:executeTool()` via `checkToolPermission()`.
 
 **Exempt tools:** `resolve_tool_approval` and `send_message` bypass the permission gate entirely — the approval tool must always work (otherwise the user can't respond to requests), and `send_message` is the primary communication channel.
 
@@ -571,7 +571,7 @@ interface ToolApprovalRequest {
 - Approval notifier: Delivers prompts via channel router with structured metadata
 - Context builder: Pending approvals section + trust ramp observations
 - tRPC router: Full CRUD + real-time subscriptions
-- SDK adapter: `canUseTool` support in `@animus/agents` Claude adapter
+- SDK adapter: `canUseTool` support in `@animus-labs/agents` Claude adapter
 - Sub-agent filtering: Excludes both `off` and `ask` tools from sub-agent sessions
 - Channel adapters: Discord (embed + buttons), SMS (text), API (JSON) support
 - Frontend: Settings > Tools page + inline approval card in chat

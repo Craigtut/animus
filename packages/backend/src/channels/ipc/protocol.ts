@@ -76,6 +76,14 @@ export interface PingMessage {
   id: string;
 }
 
+export interface GetHistoryMessage {
+  type: 'get_history';
+  id: string;
+  conversationId: string;
+  limit?: number;
+  before?: string;
+}
+
 export type ParentToChildMessage =
   | InitMessage
   | SendMessage
@@ -85,7 +93,8 @@ export type ParentToChildMessage =
   | MediaDownloadResponseMessage
   | ConfigUpdateMessage
   | ActionMessage
-  | PingMessage;
+  | PingMessage
+  | GetHistoryMessage;
 
 // ============================================================================
 // Child -> Main Messages
@@ -107,6 +116,7 @@ export interface IncomingMessage {
     filename?: string;
   }>;
   metadata?: Record<string, unknown>;
+  participant?: { displayName: string; avatarUrl?: string; isBot: boolean };
 }
 
 export interface SendResponseMessage {
@@ -200,6 +210,21 @@ export interface PresenceUpdateMessage {
   activity?: string;
 }
 
+export interface HistoryResponseMessage {
+  type: 'history_response';
+  id: string;
+  ok: boolean;
+  messages?: Array<{
+    author: { identifier: string; displayName: string; isBot: boolean };
+    content: string;
+    timestamp: string;
+    threadTs?: string;
+    reactions?: Array<{ name: string; count: number }>;
+    attachments?: Array<{ type: string; url: string; filename?: string }>;
+  }>;
+  error?: string;
+}
+
 export type ChildToParentMessage =
   | ReadyMessage
   | IncomingMessage
@@ -216,7 +241,8 @@ export type ChildToParentMessage =
   | StopAckMessage
   | ActionResponseMessage
   | PongMessage
-  | PresenceUpdateMessage;
+  | PresenceUpdateMessage
+  | HistoryResponseMessage;
 
 export type IpcMessage = ParentToChildMessage | ChildToParentMessage;
 

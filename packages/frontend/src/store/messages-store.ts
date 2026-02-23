@@ -7,7 +7,7 @@
  */
 
 import { create } from 'zustand';
-import type { Message } from '@animus/shared';
+import type { Message } from '@animus-labs/shared';
 
 interface MessagesStoreState {
   activeConversationId: string | null;

@@ -7,8 +7,8 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Box, useApp, useInput } from 'ink';
-import type { AgentProvider } from '@animus/shared';
-import type { AgentEvent, TurnEndData } from '@animus/agents';
+import type { AgentProvider } from '@animus-labs/shared';
+import type { AgentEvent, TurnEndData } from '@animus-labs/agents';
 import { StatusBar } from './StatusBar.js';
 import { MessageThread } from './MessageThread.js';
 import { CommandInput } from './CommandInput.js';

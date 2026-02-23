@@ -3,10 +3,10 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@animus/shared": ["packages/shared/src"],
-      "@animus/agents": ["packages/agents/src"],
-      "@animus/backend": ["packages/backend/src"],
-      "@animus/frontend": ["packages/frontend/src"]
+      "@animus-labs/shared": ["packages/shared/src"],
+      "@animus-labs/agents": ["packages/agents/src"],
+      "@animus-labs/backend": ["packages/backend/src"],
+      "@animus-labs/frontend": ["packages/frontend/src"]
     }
   },
   "references": [

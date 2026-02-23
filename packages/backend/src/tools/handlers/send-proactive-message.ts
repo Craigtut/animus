@@ -9,7 +9,7 @@
 
 import type { z } from 'zod';
 import type { ToolHandler, ToolResult } from '../types.js';
-import { sendProactiveMessageDef } from '@animus/shared';
+import { sendProactiveMessageDef } from '@animus-labs/shared';
 
 type SendProactiveMessageInput = z.infer<typeof sendProactiveMessageDef.inputSchema>;
 

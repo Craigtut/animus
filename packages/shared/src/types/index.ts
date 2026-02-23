@@ -366,3 +366,9 @@ export interface PaginatedResponse<T> {
   pageSize: number;
   hasMore: boolean;
 }
+
+// ============================================================================
+// Distribution (Package System)
+// ============================================================================
+
+export * from './distribution.js';

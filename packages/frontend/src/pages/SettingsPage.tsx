@@ -46,6 +46,8 @@ import { useAutostart } from '../hooks/useAutostart';
 import type { Theme } from '../styles/theme';
 import { SavesSection } from '../components/settings/SavesSection';
 import { ToolsSection } from '../components/settings/ToolsSection';
+import { PackageConsentDialog } from '../components/settings/PackageConsentDialog';
+import { Upload, ArrowCounterClockwise } from '@phosphor-icons/react';
 
 // ============================================================================
 // Types
@@ -1659,13 +1661,35 @@ function ChannelsSection() {
     onSuccess: () => utils.channels.listPackages.invalidate(),
   });
 
+  // Package install mutations
+  const verifyPackageMutation = trpc.channels.verifyPackage.useMutation();
+  const installFromPackageMutation = trpc.channels.installFromPackage.useMutation({
+    onSuccess: () => {
+      utils.channels.listPackages.invalidate();
+      setShowInstallModal(false);
+      setShowConsentDialog(false);
+      setChannelPackageVerification(null);
+      setSelectedPackagePath(null);
+    },
+  });
+  const rollbackMutation = trpc.channels.rollback.useMutation({
+    onSuccess: () => utils.channels.listPackages.invalidate(),
+  });
+
   // Local state
   const [showInstallModal, setShowInstallModal] = useState(false);
+  const [installTab, setInstallTab] = useState<'path' | 'package'>('path');
   const [installPath, setInstallPath] = useState('');
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
   const [configChannel, setConfigChannel] = useState<string | null>(null);
   const [uninstallConfirm, setUninstallConfirm] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+
+  // Package consent dialog state
+  const [showConsentDialog, setShowConsentDialog] = useState(false);
+  const [channelPackageVerification, setChannelPackageVerification] = useState<(ReturnType<typeof verifyPackageMutation.mutateAsync> extends Promise<infer T> ? T : never) | null>(null);
+  const [selectedPackagePath, setSelectedPackagePath] = useState<string | null>(null);
+  const [rollbackConfirm, setRollbackConfirm] = useState<string | null>(null);
 
   // Real-time status subscription
   trpc.channels.onStatusChange.useSubscription(undefined, {
@@ -1707,6 +1731,43 @@ function ChannelsSection() {
     installMutation.mutate(
       { path: installPath },
       { onError: (err) => setMutationError(err.message) }
+    );
+  };
+
+  const handleChannelPackageUpload = async (filePath: string) => {
+    setMutationError(null);
+    try {
+      const result = await verifyPackageMutation.mutateAsync({ filePath });
+      setChannelPackageVerification(result);
+      setSelectedPackagePath(filePath);
+      setShowConsentDialog(true);
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : 'Failed to verify package');
+    }
+  };
+
+  const handleChannelPackageConfirmInstall = (grantedPermissions: string[]) => {
+    if (!selectedPackagePath) return;
+    setMutationError(null);
+    installFromPackageMutation.mutate(
+      { filePath: selectedPackagePath, grantedPermissions },
+      {
+        onError: (err) => setMutationError(err.message),
+      }
+    );
+  };
+
+  const handleChannelRollback = (name: string) => {
+    setMutationError(null);
+    rollbackMutation.mutate(
+      { name },
+      {
+        onSuccess: () => setRollbackConfirm(null),
+        onError: (err) => {
+          setMutationError(err.message);
+          setRollbackConfirm(null);
+        },
+      }
     );
   };
 
@@ -1986,32 +2047,122 @@ function ChannelsSection() {
           <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
             Add Channel Package
           </Typography.Subtitle>
-          <Input
-            label="Absolute path to channel package directory"
-            value={installPath}
-            onChange={(e) => setInstallPath((e.target as HTMLInputElement).value)}
-            placeholder="/path/to/channel-package"
-          />
-          {installMutation.isError && (
-            <div css={css`
-              padding: ${theme.spacing[2]} ${theme.spacing[4]};
-              background: ${theme.colors.error.main}1a;
-              border-radius: ${theme.borderRadius.default};
-            `}>
-              <Typography.SmallBody color={theme.colors.error.main}>
-                {installMutation.error?.message ?? 'Installation failed'}
-              </Typography.SmallBody>
-            </div>
+
+          {/* Tabs: Path vs Package */}
+          <div css={css`display: flex; gap: ${theme.spacing[1]}; border-bottom: 1px solid ${theme.colors.border.light};`}>
+            {([
+              { id: 'path' as const, label: 'Local Path', icon: FolderOpen },
+              { id: 'package' as const, label: 'Package', icon: Upload },
+            ]).map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => { setInstallTab(tab.id); setInstallPath(''); }}
+                css={css`
+                  display: flex; align-items: center; gap: ${theme.spacing[1.5]};
+                  padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                  font-size: ${theme.typography.fontSize.sm};
+                  font-weight: ${installTab === tab.id ? theme.typography.fontWeight.medium : theme.typography.fontWeight.normal};
+                  color: ${installTab === tab.id ? theme.colors.text.primary : theme.colors.text.secondary};
+                  cursor: pointer;
+                  border-bottom: 2px solid ${installTab === tab.id ? theme.colors.accent : 'transparent'};
+                  margin-bottom: -1px;
+                  transition: all ${theme.transitions.micro};
+                  &:hover { color: ${theme.colors.text.primary}; }
+                `}
+              >
+                <tab.icon size={14} />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {installTab === 'path' && (
+            <>
+              <Input
+                label="Absolute path to channel package directory"
+                value={installPath}
+                onChange={(e) => setInstallPath((e.target as HTMLInputElement).value)}
+                placeholder="/path/to/channel-package"
+              />
+              {installMutation.isError && (
+                <div css={css`
+                  padding: ${theme.spacing[2]} ${theme.spacing[4]};
+                  background: ${theme.colors.error.main}1a;
+                  border-radius: ${theme.borderRadius.default};
+                `}>
+                  <Typography.SmallBody color={theme.colors.error.main}>
+                    {installMutation.error?.message ?? 'Installation failed'}
+                  </Typography.SmallBody>
+                </div>
+              )}
+              <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+                <Button variant="ghost" size="sm" onClick={() => setShowInstallModal(false)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  onClick={handleInstall}
+                  disabled={!installPath.trim()}
+                  loading={installMutation.isPending}
+                >
+                  Install
+                </Button>
+              </div>
+            </>
           )}
+
+          {installTab === 'package' && (
+            <>
+              <Input
+                label="Path to .anpk package file"
+                value={installPath}
+                onChange={(e) => setInstallPath((e.target as HTMLInputElement).value)}
+                placeholder="/path/to/channel-1.0.0.anpk"
+              />
+              <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+                <Button variant="ghost" size="sm" onClick={() => setShowInstallModal(false)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  onClick={() => handleChannelPackageUpload(installPath)}
+                  disabled={!installPath.trim() || !installPath.endsWith('.anpk')}
+                  loading={verifyPackageMutation.isPending}
+                >
+                  Verify &amp; Install
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
+
+      {/* Package Consent Dialog */}
+      <PackageConsentDialog
+        open={showConsentDialog}
+        onClose={() => { setShowConsentDialog(false); setChannelPackageVerification(null); setSelectedPackagePath(null); }}
+        verification={channelPackageVerification}
+        onConfirm={handleChannelPackageConfirmInstall}
+        isInstalling={installFromPackageMutation.isPending}
+      />
+
+      {/* Rollback Confirmation Modal */}
+      <Modal open={rollbackConfirm !== null} onClose={() => setRollbackConfirm(null)}>
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+            <ArrowCounterClockwise size={20} css={css`color: ${theme.colors.warning.main};`} />
+            <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+              Rollback {rollbackConfirm}?
+            </Typography.Subtitle>
+          </div>
+          <Typography.SmallBody color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+            This will revert the channel to its previous version. The current version will be replaced.
+          </Typography.SmallBody>
           <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
-            <Button variant="ghost" size="sm" onClick={() => setShowInstallModal(false)}>Cancel</Button>
+            <Button variant="ghost" size="sm" onClick={() => setRollbackConfirm(null)}>Cancel</Button>
             <Button
+              variant="secondary"
               size="sm"
-              onClick={handleInstall}
-              disabled={!installPath.trim()}
-              loading={installMutation.isPending}
+              onClick={() => rollbackConfirm && handleChannelRollback(rollbackConfirm)}
+              loading={rollbackMutation.isPending}
             >
-              Install
+              Rollback
             </Button>
           </div>
         </div>
@@ -2570,9 +2721,24 @@ function PluginsSection() {
     },
   });
 
+  // Package install mutations
+  const verifyPackageMutation = trpc.plugins.verifyPackage.useMutation();
+  const installFromPackageMutation = trpc.plugins.installFromPackage.useMutation({
+    onSuccess: () => {
+      utils.plugins.list.invalidate();
+      setShowInstallModal(false);
+      setShowConsentDialog(false);
+      setPackageVerification(null);
+      setSelectedPackagePath(null);
+    },
+  });
+  const rollbackMutation = trpc.plugins.rollback.useMutation({
+    onSuccess: () => utils.plugins.list.invalidate(),
+  });
+
   // Local state
   const [showInstallModal, setShowInstallModal] = useState(false);
-  const [installTab, setInstallTab] = useState<'local' | 'git' | 'npm'>('local');
+  const [installTab, setInstallTab] = useState<'local' | 'git' | 'npm' | 'package'>('local');
   const [installPath, setInstallPath] = useState('');
   const [installValidation, setInstallValidation] = useState<{
     valid: boolean;
@@ -2590,6 +2756,12 @@ function PluginsSection() {
   const [uninstallConfirm, setUninstallConfirm] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
 
+  // Package consent dialog state
+  const [showConsentDialog, setShowConsentDialog] = useState(false);
+  const [packageVerification, setPackageVerification] = useState<(ReturnType<typeof verifyPackageMutation.mutateAsync> extends Promise<infer T> ? T : never) | null>(null);
+  const [selectedPackagePath, setSelectedPackagePath] = useState<string | null>(null);
+  const [rollbackConfirm, setRollbackConfirm] = useState<string | null>(null);
+
   // Validate path query (lazy)
   const validateQuery = trpc.plugins.validatePath.useQuery(
     { path: installPath },
@@ -2606,9 +2778,46 @@ function PluginsSection() {
   const handleInstall = () => {
     setMutationError(null);
     installMutation.mutate(
-      { source: installTab, path: installPath },
+      { source: installTab as 'local' | 'git' | 'npm', path: installPath },
       {
         onError: (err) => setMutationError(err.message),
+      }
+    );
+  };
+
+  const handlePackageUpload = async (filePath: string) => {
+    setMutationError(null);
+    try {
+      const result = await verifyPackageMutation.mutateAsync({ filePath });
+      setPackageVerification(result);
+      setSelectedPackagePath(filePath);
+      setShowConsentDialog(true);
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : 'Failed to verify package');
+    }
+  };
+
+  const handlePackageConfirmInstall = (grantedPermissions: string[]) => {
+    if (!selectedPackagePath) return;
+    setMutationError(null);
+    installFromPackageMutation.mutate(
+      { filePath: selectedPackagePath, grantedPermissions },
+      {
+        onError: (err) => setMutationError(err.message),
+      }
+    );
+  };
+
+  const handleRollback = (name: string) => {
+    setMutationError(null);
+    rollbackMutation.mutate(
+      { name },
+      {
+        onSuccess: () => setRollbackConfirm(null),
+        onError: (err) => {
+          setMutationError(err.message);
+          setRollbackConfirm(null);
+        },
       }
     );
   };
@@ -2829,6 +3038,7 @@ function PluginsSection() {
           <div css={css`display: flex; gap: ${theme.spacing[1]}; border-bottom: 1px solid ${theme.colors.border.light}; padding-bottom: 0;`}>
             {([
               { id: 'local' as const, label: 'Local Path', icon: FolderOpen },
+              { id: 'package' as const, label: 'Package', icon: Upload },
               { id: 'git' as const, label: 'Git URL', icon: GitBranch },
               { id: 'npm' as const, label: 'npm Package', icon: Package },
             ]).map((tab) => (
@@ -2952,6 +3162,29 @@ function PluginsSection() {
             </div>
           )}
 
+          {/* .anpk package upload form */}
+          {installTab === 'package' && (
+            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+              <Input
+                label="Path to .anpk package file"
+                value={installPath}
+                onChange={(e) => { setInstallPath((e.target as HTMLInputElement).value); }}
+                placeholder="/path/to/plugin-1.0.0.anpk"
+              />
+              <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+                <Button variant="ghost" size="sm" onClick={() => setShowInstallModal(false)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  onClick={() => handlePackageUpload(installPath)}
+                  disabled={!installPath.trim() || !installPath.endsWith('.anpk')}
+                  loading={verifyPackageMutation.isPending}
+                >
+                  Verify &amp; Install
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* Git URL form */}
           {installTab === 'git' && (
             <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
@@ -2982,7 +3215,7 @@ function PluginsSection() {
                 label="npm package name"
                 value={installPath}
                 onChange={(e) => setInstallPath((e.target as HTMLInputElement).value)}
-                placeholder="@animus/plugin-example"
+                placeholder="@animus-labs/plugin-example"
               />
               <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
                 <Button variant="ghost" size="sm" onClick={() => setShowInstallModal(false)}>Cancel</Button>
@@ -3034,6 +3267,41 @@ function PluginsSection() {
               loading={uninstallMutation.isPending}
             >
               Uninstall
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Package Consent Dialog */}
+      <PackageConsentDialog
+        open={showConsentDialog}
+        onClose={() => { setShowConsentDialog(false); setPackageVerification(null); setSelectedPackagePath(null); }}
+        verification={packageVerification}
+        onConfirm={handlePackageConfirmInstall}
+        isInstalling={installFromPackageMutation.isPending}
+      />
+
+      {/* Rollback Confirmation Modal */}
+      <Modal open={rollbackConfirm !== null} onClose={() => setRollbackConfirm(null)}>
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+            <ArrowCounterClockwise size={20} css={css`color: ${theme.colors.warning.main};`} />
+            <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+              Rollback {rollbackConfirm}?
+            </Typography.Subtitle>
+          </div>
+          <Typography.SmallBody color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+            This will revert the plugin to its previous version. The current version will be replaced.
+          </Typography.SmallBody>
+          <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+            <Button variant="ghost" size="sm" onClick={() => setRollbackConfirm(null)}>Cancel</Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => rollbackConfirm && handleRollback(rollbackConfirm)}
+              loading={rollbackMutation.isPending}
+            >
+              Rollback
             </Button>
           </div>
         </div>

@@ -1,4 +1,4 @@
-# @animus/agents
+# @animus-labs/agents
 
 A unified abstraction layer over multiple agent SDKs for the Animus project.
 
@@ -15,7 +15,7 @@ This package provides a consistent interface for creating agent sessions, stream
 ## Installation
 
 ```bash
-npm install @animus/agents
+npm install @animus-labs/agents
 ```
 
 ### Peer Dependencies
@@ -36,7 +36,7 @@ npm install @opencode-ai/sdk
 ## Quick Start
 
 ```typescript
-import { createAgentManager } from '@animus/agents';
+import { createAgentManager } from '@animus-labs/agents';
 
 // Create the manager (auto-registers all adapters)
 const manager = createAgentManager();
@@ -282,7 +282,7 @@ session.registerHooks({
 ## Provider Capabilities
 
 ```typescript
-import { getCapabilities, hasCapability } from '@animus/agents';
+import { getCapabilities, hasCapability } from '@animus-labs/agents';
 
 const caps = getCapabilities('claude');
 // {
@@ -317,7 +317,7 @@ if (hasCapability('codex', 'canCancel')) {
 ## Error Handling
 
 ```typescript
-import { AgentError } from '@animus/agents';
+import { AgentError } from '@animus-labs/agents';
 
 try {
   const session = await manager.createSession({ provider: 'claude' });
@@ -357,7 +357,7 @@ import {
   createSessionId,
   parseSessionId,
   withRetry,
-} from '@animus/agents';
+} from '@animus-labs/agents';
 
 // Session ID utilities
 const id = createSessionId('claude', 'abc123');  // 'claude:abc123'

@@ -8,15 +8,15 @@
  * See docs/architecture/agent-orchestration.md for the full design.
  */
 
-import type { AgentProvider, PermissionTier } from '@animus/shared';
-import { generateUUID, now } from '@animus/shared';
+import type { AgentProvider, PermissionTier } from '@animus-labs/shared';
+import { generateUUID, now } from '@animus-labs/shared';
 import type {
   AgentManager,
   IAgentSession,
   AgentResponse,
-} from '@animus/agents';
-import { attachSessionLogging, type AgentLogStore } from '@animus/agents';
-import type { IEventBus } from '@animus/shared';
+} from '@animus-labs/agents';
+import { attachSessionLogging, type AgentLogStore } from '@animus-labs/agents';
+import type { IEventBus } from '@animus-labs/shared';
 import { prepareCodexSessionAuth } from '../services/codex-oauth.js';
 import { getSystemDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';

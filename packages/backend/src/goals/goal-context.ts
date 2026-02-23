@@ -5,7 +5,7 @@
  * into prompt sections.
  */
 
-import type { Goal, Plan, GoalSeed, EmotionState } from '@animus/shared';
+import type { Goal, Plan, GoalSeed, EmotionState } from '@animus-labs/shared';
 import type { GoalManager } from './goal-manager.js';
 import type { SeedManager } from './seed-manager.js';
 import type { SalienceResult } from './salience.js';

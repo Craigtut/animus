@@ -7,7 +7,7 @@
  * Built once and cached — reused across session resets.
  */
 
-import { runWithCredentialsDef } from '@animus/shared';
+import { runWithCredentialsDef } from '@animus-labs/shared';
 import { runWithCredentialsHandler } from '../tools/handlers/run-with-credentials.js';
 import { createLogger } from '../lib/logger.js';
 

@@ -10,7 +10,7 @@ import { createLogger } from '../lib/logger.js';
 import { getSystemDb, getMessagesDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
 import * as messageStore from '../db/stores/message-store.js';
-import type { Contact, ContactChannel, ChannelType, Message } from '@animus/shared';
+import type { Contact, ContactChannel, ChannelType, Message } from '@animus-labs/shared';
 
 const log = createLogger('ContactService', 'server');
 

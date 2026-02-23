@@ -9,9 +9,9 @@
  */
 
 import type Database from 'better-sqlite3';
-import type { AgentManager } from '@animus/agents';
-import type { IEventBus, StreamType, Observation } from '@animus/shared';
-import { estimateTokens, generateUUID } from '@animus/shared';
+import type { AgentManager } from '@animus-labs/agents';
+import type { IEventBus, StreamType, Observation } from '@animus-labs/shared';
+import { estimateTokens, generateUUID } from '@animus-labs/shared';
 import { OBSERVATIONAL_MEMORY_CONFIG } from '../../config/observational-memory.config.js';
 import * as memoryStore from '../../db/stores/memory-store.js';
 import { runObserver } from './observer.js';

@@ -463,7 +463,7 @@ The mind's `MindOutputSchema` (defined in `docs/architecture/heartbeat.md`, Comb
 - **`coreSelfUpdate`**: `string | null` — Full replacement of core self content
 - **`memoryCandidate`**: `MemoryCandidate[]` (optional) — Facts/observations to persist to long-term memory, each with `content`, `type`, `importance`, optional `contactId` and `keywords`
 
-All three fields are optional. Most ticks, the mind produces none of them — it only engages with memory when it has something worth updating or storing. This keeps the cognitive load manageable. The canonical Zod schema lives in `@animus/shared` and is documented in heartbeat.md — that is the single source of truth for the MindOutput structure.
+All three fields are optional. Most ticks, the mind produces none of them — it only engages with memory when it has something worth updating or storing. This keeps the cognitive load manageable. The canonical Zod schema lives in `@animus-labs/shared` and is documented in heartbeat.md — that is the single source of truth for the MindOutput structure.
 
 ---
 

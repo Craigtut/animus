@@ -32,6 +32,7 @@ export const channelCapabilitySchema = z.enum([
   'reactions',
   'typing-indicator',
   'voice-messages',
+  'conversation-history',
 ]);
 
 export const channelPermissionsSchema = z.object({
@@ -61,6 +62,7 @@ export const channelManifestSchema = z.object({
   replyGuidance: z.string().min(1),
   permissions: channelPermissionsSchema.optional(),
   store: channelStoreMetadataSchema.optional(),
+  skills: z.string().optional(),
 });
 
 // ============================================================================
@@ -161,6 +163,7 @@ export const ipcMessageTypeSchema = z.enum([
   'media_download_response',
   'config_update',
   'ping',
+  'get_history',
   // Child -> Main
   'ready',
   'incoming',
@@ -176,6 +179,7 @@ export const ipcMessageTypeSchema = z.enum([
   'error',
   'stop_ack',
   'pong',
+  'history_response',
 ]);
 
 export const ipcMessageBaseSchema = z.object({

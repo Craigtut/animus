@@ -11,7 +11,7 @@ import { getSystemDb, getMessagesDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
 import * as messageStore from '../db/stores/message-store.js';
 import { getAvailableToolTypes } from './permission-enforcer.js';
-import type { Contact, ChannelType, PermissionTier } from '@animus/shared';
+import type { Contact, ChannelType, PermissionTier } from '@animus-labs/shared';
 
 // ============================================================================
 // Types

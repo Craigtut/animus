@@ -14,7 +14,7 @@ import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import * as systemStore from '../db/stores/system-store.js';
 import * as messageStore from '../db/stores/message-store.js';
 import * as memoryDbStore from '../db/stores/memory-store.js';
-import { DecayEngine } from '@animus/shared';
+import { DecayEngine } from '@animus-labs/shared';
 import type {
   HeartbeatState,
   Contact,
@@ -24,7 +24,7 @@ import type {
   ContactChannel,
   ChannelType,
   ToolApprovalRequest,
-} from '@animus/shared';
+} from '@animus-labs/shared';
 
 import { MemoryManager, buildMemoryContext } from '../memory/index.js';
 import type { MemoryContext } from '../memory/index.js';
@@ -34,6 +34,7 @@ import { SeedManager, GoalManager, buildGoalContext } from '../goals/index.js';
 import type { GoalContext } from '../goals/index.js';
 import { getDeferredQueue } from '../tasks/index.js';
 
+import { getChannelManager } from '../channels/channel-manager.js';
 import type { TriggerContext } from './context-builder.js';
 import { applyDecay } from './emotion-engine.js';
 import { AgentOrchestrator } from './agent-orchestrator.js';
@@ -87,6 +88,12 @@ export interface GatherResult {
   pendingApprovals: ToolApprovalRequest[];
   /** Trust ramp context for tools with repeated approvals (interval ticks only) */
   trustRampContext: string | null;
+  /** External conversation history from channel adapters (e.g., Slack, Discord) */
+  externalHistory: Map<string, Array<{
+    author: { identifier: string; displayName: string; isBot: boolean };
+    content: string;
+    timestamp: string;
+  }>> | null;
 }
 
 export interface GatherDeps {
@@ -302,6 +309,37 @@ export async function gatherContext(
     }
   }
 
+  // Load external conversation history from channel adapters
+  let externalHistory: GatherResult['externalHistory'] = null;
+  if (recentMessages.length > 0) {
+    try {
+      const channelManager = getChannelManager();
+      // Collect unique external conversation IDs with their channel types
+      const externalConvos = new Map<string, string>(); // conversationId -> channelType
+      for (const msg of recentMessages) {
+        const meta = msg.metadata as Record<string, unknown> | null;
+        const extConvId = meta?.['externalConversationId'] as string | undefined;
+        if (extConvId && msg.channel !== 'web') {
+          externalConvos.set(extConvId, msg.channel);
+        }
+      }
+
+      if (externalConvos.size > 0) {
+        externalHistory = new Map();
+        const historyPromises = [...externalConvos.entries()].map(async ([convId, channelType]) => {
+          const history = await channelManager.getHistory(channelType, convId, 25);
+          if (history && history.length > 0) {
+            externalHistory!.set(`${channelType}:${convId}`, history);
+          }
+        });
+        await Promise.all(historyPromises);
+        if (externalHistory.size === 0) externalHistory = null;
+      }
+    } catch (err) {
+      log.warn('External history fetching failed:', err);
+    }
+  }
+
   // Load previous tick decisions for "previous tick outcomes"
   const prevTickNum = state.tickNumber;
   const previousDecisions = prevTickNum > 0
@@ -454,5 +492,6 @@ export async function gatherContext(
     messageContext,
     pendingApprovals,
     trustRampContext,
+    externalHistory,
   };
 }

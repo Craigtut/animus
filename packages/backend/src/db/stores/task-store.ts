@@ -5,7 +5,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { generateUUID, now } from '@animus/shared';
+import { generateUUID, now } from '@animus-labs/shared';
 import type {
   Task,
   TaskRun,
@@ -13,7 +13,7 @@ import type {
   TaskRunStatus,
   ScheduleType,
   TaskCreatedBy,
-} from '@animus/shared';
+} from '@animus-labs/shared';
 import { snakeToCamel } from '../utils.js';
 
 // ============================================================================

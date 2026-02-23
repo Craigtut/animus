@@ -12,7 +12,7 @@ Think of it like a biological heart pumping blood in a steady rhythm. The heartb
 
 ## The Mind
 
-The mind is a **persistent agent session** — a single, long-lived session using the `@animus/agents` abstraction layer. It is not a series of disconnected LLM calls. It is one continuous conversation with the underlying agent SDK (Claude Agent SDK, Codex, or OpenCode), maintaining full conversational context across ticks.
+The mind is a **persistent agent session** — a single, long-lived session using the `@animus-labs/agents` abstraction layer. It is not a series of disconnected LLM calls. It is one continuous conversation with the underlying agent SDK (Claude Agent SDK, Codex, or OpenCode), maintaining full conversational context across ticks.
 
 The mind serves as the **top-level orchestrator**. It thinks, feels, decides, and replies — but it does not perform long-running work itself. When a complex task needs execution (research, multi-step workflows, code generation), the mind kicks off **sub-agents** to handle that work autonomously. The mind stays fast and responsive, never blocked by heavy operations.
 
@@ -225,7 +225,7 @@ The structured output includes:
 
 This replaces the old sequential THINK → FEEL → DECIDE → REFLECT pipeline. The model handles all of these concerns holistically in a single pass, which is both faster and more natural — a human mind doesn't think, then feel, then decide sequentially. It all happens together.
 
-The mind's output is enforced via **structured output** (JSON schema). The `@animus/agents` abstraction layer exposes an `outputSchema` option that maps to each SDK's native mechanism (Claude's `outputFormat`, Codex's `outputSchema`, or prompt injection + validation for providers without native support). The MindOutput schema is defined as a Zod schema in the shared package and compiled to JSON Schema for SDK consumption. See `docs/architecture/open-questions.md` for open questions about structured output reliability across providers.
+The mind's output is enforced via **structured output** (JSON schema). The `@animus-labs/agents` abstraction layer exposes an `outputSchema` option that maps to each SDK's native mechanism (Claude's `outputFormat`, Codex's `outputSchema`, or prompt injection + validation for providers without native support). The MindOutput schema is defined as a Zod schema in the shared package and compiled to JSON Schema for SDK consumption. See `docs/architecture/open-questions.md` for open questions about structured output reliability across providers.
 
 ### Stage 3: EXECUTE (System)
 
@@ -671,13 +671,13 @@ const output = snapshotToMindOutput(snapshot, replyAccumulated, gathered);
 
 ```
 ┌──────────────────────┐
-│   @animus/agents     │   Adapter streams text chunks via
+│   @animus-labs/agents     │   Adapter streams text chunks via
 │   (SDK Adapter)      │   promptStreaming() onChunk callback
 └──────────┬───────────┘
            │ text chunks + tool calls (MCP)
            ▼
 ┌──────────────────────────────────────┐
-│   @animus/backend (Mind Query Stage) │
+│   @animus-labs/backend (Mind Query Stage) │
 │                                      │
 │   ┌─────────────────────────┐        │
 │   │ Cognitive MCP Server    │        │
@@ -694,7 +694,7 @@ const output = snapshotToMindOutput(snapshot, replyAccumulated, gathered);
 └──────────────────────────────────────┘
 ```
 
-**The cognitive tools live in `@animus/backend`** (`heartbeat/cognitive-tools.ts`), built as an in-process MCP server via the Claude SDK's `createSdkMcpServer()`. The agents package remains a stateless SDK abstraction — it doesn't know about cognitive state or `MindOutput`.
+**The cognitive tools live in `@animus-labs/backend`** (`heartbeat/cognitive-tools.ts`), built as an in-process MCP server via the Claude SDK's `createSdkMcpServer()`. The agents package remains a stateless SDK abstraction — it doesn't know about cognitive state or `MindOutput`.
 
 ### Three-Layer Prompt Architecture
 
@@ -731,7 +731,7 @@ The `snapshotToMindOutput()` converter takes the **last** thought as `MindOutput
 
 ### Turn-Aware Streaming in the Agents Layer
 
-The `@animus/agents` abstraction layer tracks **turns** within a single prompt call. When the agent uses tools, the SDK produces multiple assistant turns — each with its own streamed text. The agents layer exposes this via:
+The `@animus-labs/agents` abstraction layer tracks **turns** within a single prompt call. When the agent uses tools, the SDK produces multiple assistant turns — each with its own streamed text. The agents layer exposes this via:
 
 - **`StreamChunkMeta`** on `onChunk` callbacks — includes `turnIndex` so consumers know which turn a chunk belongs to
 - **`turn_end` events** — emitted when an assistant turn completes (before `tool_call_start`), carrying the full turn text and metadata
@@ -835,7 +835,7 @@ The heartbeat system persists state to survive crashes gracefully. The design pr
    - If the session died: mark as `failed`, let the mind learn about it on the next tick
    - If the session is still running: re-attach event handlers and continue tracking
 
-6. The mind's agent session is resumable via the `@animus/agents` session resume capability (`{provider}:{native_id}` format). On crash recovery, the warm session is lost — the next tick starts cold. This is acceptable; cold starts just inject the full system prompt and GATHER CONTEXT.
+6. The mind's agent session is resumable via the `@animus-labs/agents` session resume capability (`{provider}:{native_id}` format). On crash recovery, the warm session is lost — the next tick starts cold. This is acceptable; cold starts just inject the full system prompt and GATHER CONTEXT.
 
 ### State Schema
 

@@ -119,7 +119,7 @@ Animus is built as a self-contained, self-hosted application. The guiding princi
 | **Codex SDK** | OpenAI's Codex agent |
 | **OpenCode SDK** | OpenCode.ai agent |
 
-All three will be wrapped in a unified abstraction layer in the `@animus/agents` package (`/packages/agents/`). This is a separate package from the backend to maintain clear boundaries.
+All three will be wrapped in a unified abstraction layer in the `@animus-labs/agents` package (`/packages/agents/`). This is a separate package from the backend to maintain clear boundaries.
 
 **Status**: Interface types defined, implementation pending.
 
@@ -260,9 +260,9 @@ In production, the frontend is built and served by Fastify:
 
 ## Shared Abstractions
 
-Eight cross-cutting concerns are formalized as abstractions to prevent duplication and ensure consistency across the codebase. Most live in `@animus/shared` (pure logic, no backend dependencies) or `@animus/backend` (requires database access).
+Eight cross-cutting concerns are formalized as abstractions to prevent duplication and ensure consistency across the codebase. Most live in `@animus-labs/shared` (pure logic, no backend dependencies) or `@animus-labs/backend` (requires database access).
 
-### Embedding Provider (`@animus/shared`)
+### Embedding Provider (`@animus-labs/shared`)
 
 An abstraction over embedding model providers, used by the memory system (write pipeline, retrieval, seed resonance) and any future feature that needs vector similarity.
 
@@ -291,7 +291,7 @@ See `docs/architecture/memory.md` for how embeddings are used in the memory syst
 
 ---
 
-### Context Builder (`@animus/backend`)
+### Context Builder (`@animus-labs/backend`)
 
 The centralized system for assembling all LLM prompts and context across Animus. Every place where the system constructs input for an LLM — the mind's system prompt, GATHER CONTEXT payloads, sub-agent prompts, task tick prompts — flows through the Context Builder.
 
@@ -305,7 +305,7 @@ See `docs/architecture/context-builder.md` for the full design including interfa
 
 ---
 
-### Decay Engine (`@animus/shared`)
+### Decay Engine (`@animus-labs/shared`)
 
 A shared mathematical utility for exponential decay calculations. The same decay pattern appears in five systems with different parameters:
 
@@ -341,7 +341,7 @@ Centralizing this prevents formula bugs (getting the math wrong in one system) a
 
 ---
 
-### Event Bus (`@animus/shared` interface, `@animus/backend` implementation)
+### Event Bus (`@animus-labs/shared` interface, `@animus-labs/backend` implementation)
 
 A typed event emitter that decouples event producers from consumers. This is not a distributed message queue — it's a thin type-safe wrapper around Node.js `EventEmitter` that standardizes the event types flowing through the system.
 
@@ -381,7 +381,7 @@ The tRPC subscription layer becomes a consumer of the event bus rather than bein
 
 ---
 
-### Encryption Service (`@animus/shared`)
+### Encryption Service (`@animus-labs/shared`)
 
 Centralizes all symmetric encryption for secrets stored in the database — channel credentials, API keys, and any future encrypted configuration.
 
@@ -406,7 +406,7 @@ Used by the channel configuration system (see `docs/architecture/channel-package
 
 ---
 
-### Database Stores (`@animus/backend`)
+### Database Stores (`@animus-labs/backend`)
 
 Typed data access modules that encapsulate all SQL operations, organized by database. These are not a full ORM or repository pattern — they're simple functional modules that keep raw SQL centralized and out of business logic code.
 
@@ -445,7 +445,7 @@ Each function accepts the database instance as its first parameter. In productio
 
 ---
 
-### Database Migrations (`@animus/backend`)
+### Database Migrations (`@animus-labs/backend`)
 
 A lightweight, custom migration system for managing schema changes across all five SQLite databases. Zero external dependencies — just ~50 lines of migration runner code.
 

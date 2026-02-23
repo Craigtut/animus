@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Eye, EyeSlash } from '@phosphor-icons/react';
 import { Button, Input, Typography } from '../components/ui';
+import { TauriDragRegion } from '../components/layout/TauriDragRegion';
 import { useAuthStore } from '../store';
 import { trpc } from '../utils/trpc';
 
@@ -73,6 +74,7 @@ export function RegisterPage() {
         background: ${theme.colors.background.default};
       `}
     >
+      <TauriDragRegion />
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}

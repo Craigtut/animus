@@ -5,7 +5,7 @@
  * must implement, regardless of the underlying provider.
  */
 
-import type { AgentProvider, AgentEventType } from '@animus/shared';
+import type { AgentProvider, AgentEventType } from '@animus-labs/shared';
 
 // ============================================================================
 // Permission Configuration

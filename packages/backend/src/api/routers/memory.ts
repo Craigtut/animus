@@ -10,7 +10,7 @@ import { getMemoryDb } from '../../db/index.js';
 import * as memoryStore from '../../db/stores/memory-store.js';
 import { getEventBus } from '../../lib/event-bus.js';
 import { getMemoryManager } from '../../heartbeat/index.js';
-import type { LongTermMemory } from '@animus/shared';
+import type { LongTermMemory } from '@animus-labs/shared';
 
 /** Map a LongTermMemory to the browse response shape (null scores). */
 function toScoredItem(m: LongTermMemory) {

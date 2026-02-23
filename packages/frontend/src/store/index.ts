@@ -15,6 +15,7 @@ export {
   selectEmotion,
   selectHasRunningAgents,
   type AgentStatusEvent,
+  type SubAgentEventEntry,
   type ReplyStreamState,
 } from './heartbeat-store.js';
 export { useMessagesStore } from './messages-store.js';

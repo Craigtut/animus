@@ -608,7 +608,7 @@ Date: Feb 13, 2026 (yesterday)
 
 ### Cold Sessions with Persona
 
-The Observer and Reflector use the existing `@animus/agents` SDK abstraction to create cold sessions:
+The Observer and Reflector use the existing `@animus-labs/agents` SDK abstraction to create cold sessions:
 
 - **New session per invocation** — No warm session reuse, no state carryover
 - **Includes compiled persona** — The Observer and Reflector are the mind reflecting, not generic summarizers. They receive the compiled persona block so observations and reflections carry the mind's perspective and voice.

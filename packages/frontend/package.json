@@ -1,5 +1,5 @@
 {
-  "name": "@animus/frontend",
+  "name": "@animus-labs/frontend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@animus/shared": "*",
+    "@animus-labs/shared": "*",
     "@emotion/react": "^11.13.0",
     "@phosphor-icons/react": "^2.1.0",
     "@tauri-apps/api": "^2.0.0",

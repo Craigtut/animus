@@ -42,9 +42,9 @@
 **Resolution:** MCP protocol is the cross-provider standard — all three SDKs support it.
 
 - **MCP is the common ground**: Claude (native in-process + stdio), Codex (stdio), and OpenCode (via config) all support MCP servers
-- **Tool definitions in `@animus/shared`**: Provider-agnostic tool schemas (name, description, input/output Zod schemas)
-- **Tool handlers in `@animus/backend`**: Where DB access lives — the backend IS the host process for all SDK subprocesses/servers
-- **MCP server in `@animus/backend`**: Wraps tool handlers as MCP tools. Runs as stdio server that all SDK adapters can connect to
+- **Tool definitions in `@animus-labs/shared`**: Provider-agnostic tool schemas (name, description, input/output Zod schemas)
+- **Tool handlers in `@animus-labs/backend`**: Where DB access lives — the backend IS the host process for all SDK subprocesses/servers
+- **MCP server in `@animus-labs/backend`**: Wraps tool handlers as MCP tools. Runs as stdio server that all SDK adapters can connect to
 - **Claude optimization**: Can use `createSdkMcpServer()` for efficient in-process tools (no subprocess overhead)
 - **Permission filtering**: `allowedTools` list filtered by contact permission tier before session creation
 - **Extensible**: Users can add custom MCP servers in the future via configuration
@@ -64,7 +64,7 @@
 - **Validation**: Zod schemas on MCP tool inputs — validated at tool call time, not post-hoc JSON parsing
 - **Streaming**: Phase-based — natural language between `record_thought` and `record_cognitive_state` streams to the frontend via `reply:chunk` events. No JSON path subscriptions needed.
 - **Internal type**: Tool outputs accumulate into a `CognitiveSnapshot`, converted to `MindOutput` via `snapshotToMindOutput()` for the EXECUTE stage
-- **Tool location**: In-process MCP server in `@animus/backend` (`heartbeat/cognitive-tools.ts`), built via Claude SDK's `createSdkMcpServer()`. Agents package remains a stateless SDK abstraction.
+- **Tool location**: In-process MCP server in `@animus-labs/backend` (`heartbeat/cognitive-tools.ts`), built via Claude SDK's `createSdkMcpServer()`. Agents package remains a stateless SDK abstraction.
 - **Cross-provider**: Claude and Pi support in-process MCP tools natively. Codex/OpenCode fall back to `safeMindOutput()`.
 - **Mid-tick re-entry**: Tools support multiple cycles (thought→reply→state→thought→reply→state) with accumulation semantics for mid-tick message injection
 

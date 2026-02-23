@@ -1,5 +1,5 @@
 {
-  "name": "@animus/tts-native",
+  "name": "@animus-labs/tts-native",
   "version": "0.1.0",
   "private": true,
   "main": "index.js",

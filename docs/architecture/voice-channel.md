@@ -101,10 +101,10 @@ Total: ~630 MB on disk. Model files are stored in `./data/models/stt/` and downl
 
 ---
 
-### Text-to-Speech: Pocket TTS via @animus/tts-native (napi-rs)
+### Text-to-Speech: Pocket TTS via @animus-labs/tts-native (napi-rs)
 
 **Model**: Pocket TTS (~225MB safetensors)
-**Runtime**: `@animus/tts-native` — a napi-rs native Node.js addon wrapping the [pocket-tts](https://github.com/babybirdprd/pocket-tts) Rust crate (Candle-based inference)
+**Runtime**: `@animus-labs/tts-native` — a napi-rs native Node.js addon wrapping the [pocket-tts](https://github.com/babybirdprd/pocket-tts) Rust crate (Candle-based inference)
 
 Pocket TTS is a zero-shot voice cloning model that uses reference audio to reproduce any voice. Given a short WAV sample (5-15 seconds), it generates speech that mimics the speaker's voice characteristics. The Rust port runs the original safetensors weights natively via Candle, producing near-identical quality to the original Python implementation at 3-7x faster speeds. No Python sidecar, no separate process.
 
@@ -112,7 +112,7 @@ Pocket TTS is a zero-shot voice cloning model that uses reference audio to repro
 
 | Criterion | Decision |
 |-----------|----------|
-| **Runtime** | `@animus/tts-native` napi-rs addon (Rust, compiled per-platform) |
+| **Runtime** | `@animus-labs/tts-native` napi-rs addon (Rust, compiled per-platform) |
 | **Voice cloning** | Zero-shot cloning from 5-15 seconds of reference audio |
 | **Speed** | ~3.2x realtime on Apple Silicon (e.g., 5.2s audio in 1.6s) |
 | **Quality** | Near-identical to original Python implementation. sherpa-onnx ONNX version produced garbled audio. |
@@ -376,7 +376,7 @@ class VoiceChannelAdapter implements IChannelAdapter {
 4. PCM is fed to **sherpa-onnx** offline recognizer with the Parakeet TDT v3 model (STT)
 5. Transcribed text is wrapped in an `IncomingMessage` with `channel: 'voice'`
 6. Message enters the **heartbeat pipeline** (same path as all other channels)
-7. Reply text from the mind is synthesized via **native Pocket TTS** (`@animus/tts-native`) through the shared speech service (in-process)
+7. Reply text from the mind is synthesized via **native Pocket TTS** (`@animus-labs/tts-native`) through the shared speech service (in-process)
 8. WAV audio buffer is sent back to the frontend via tRPC subscription
 9. **Frontend** plays audio through Web Audio API
 
@@ -511,12 +511,12 @@ VOICE_TTS_SPEED=1.0
 
 The voice channel requires:
 1. **sherpa-onnx npm package** installed (`npm install sherpa-onnx`) — for STT only
-2. **@animus/tts-native** built (`npm run build -w @animus/tts-native`, requires Rust toolchain) — for TTS. Auto-built on `npm run dev` if Rust is available.
+2. **@animus-labs/tts-native** built (`npm run build -w @animus-labs/tts-native`, requires Rust toolchain) — for TTS. Auto-built on `npm run dev` if Rust is available.
 3. **Parakeet TDT v3 model files** downloaded to `./data/models/stt/`
 4. **Pocket TTS model files** (safetensors) downloaded to `./data/models/tts/`
 5. **ffmpeg** installed on the system (for audio format conversion)
 
-No Python required. STT runs via sherpa-onnx native Node.js addon, TTS runs via @animus/tts-native napi-rs addon (Rust).
+No Python required. STT runs via sherpa-onnx native Node.js addon, TTS runs via @animus-labs/tts-native napi-rs addon (Rust).
 
 If any prerequisite is missing, the voice channel shows as "unavailable" in settings with a message about what's needed. The web text channel continues to work regardless.
 
@@ -642,6 +642,6 @@ interface VoiceReplyChunk {
 - [sherpa-onnx npm](https://www.npmjs.com/package/sherpa-onnx) — Node.js package (STT)
 - [Parakeet TDT v3 (HuggingFace)](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) — STT model
 - `docs/architecture/speech-engine.md` — Shared speech engine architecture, voice system
-- [pocket-tts Rust crate](https://github.com/babybirdprd/pocket-tts) — Rust port of Pocket TTS (used by @animus/tts-native)
+- [pocket-tts Rust crate](https://github.com/babybirdprd/pocket-tts) — Rust port of Pocket TTS (used by @animus-labs/tts-native)
 - [Pocket TTS model weights (HuggingFace)](https://huggingface.co/kyutai/pocket-tts) — Original model (CC-BY-4.0, gated)
 - `docs/architecture/tts-licensing-and-distribution.md` — TTS model licensing and redistribution details

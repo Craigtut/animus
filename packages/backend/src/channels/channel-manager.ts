@@ -6,8 +6,10 @@
  */
 
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import extractZip from 'extract-zip';
 import { createLogger } from '../lib/logger.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { env } from '../utils/env.js';
@@ -21,8 +23,13 @@ import type {
   ChannelInfo,
   ConfigSchema,
   ChannelPackageStatus,
-} from '@animus/shared';
-import { channelManifestSchema, configSchemaSchema } from '@animus/shared';
+  InstallResult,
+  RollbackResult,
+  VerificationResult,
+  PackageManifest,
+} from '@animus-labs/shared';
+import { channelManifestSchema, configSchemaSchema } from '@animus-labs/shared';
+import { verifyPackage } from '../services/package-verifier.js';
 
 const log = createLogger('ChannelManager', 'channels');
 
@@ -189,6 +196,15 @@ export class ChannelManager {
       this.processes.delete(pkg.channelType);
     }
 
+    // Clean up channel-provided skills
+    const manifest = this.manifests.get(pkg.channelType);
+    if (manifest) {
+      await this.cleanupChannelSkills(pkg, manifest);
+      if (manifest.skills) {
+        getEventBus().emit('plugin:changed', { pluginName: pkg.name, action: 'uninstalled' });
+      }
+    }
+
     // Clean up contact_channels for this channel type
     const removedChannels = systemStore.deleteContactChannelsByChannel(db, pkg.channelType);
     if (removedChannels > 0) {
@@ -250,6 +266,12 @@ export class ChannelManager {
 
     await this.startProcess(pkg, manifest);
 
+    // Deploy channel-provided skills
+    await this.deployChannelSkills(pkg, manifest);
+    if (manifest.skills) {
+      getEventBus().emit('plugin:changed', { pluginName: pkg.name, action: 'enabled' });
+    }
+
     systemStore.updateChannelPackage(db, name, { enabled: true });
   }
 
@@ -263,10 +285,20 @@ export class ChannelManager {
       throw new Error(`Channel package "${name}" not found`);
     }
 
+    const manifest = this.manifests.get(pkg.channelType);
+
     const host = this.processes.get(pkg.channelType);
     if (host) {
       await host.stop();
       this.processes.delete(pkg.channelType);
+    }
+
+    // Clean up channel-provided skills
+    if (manifest) {
+      await this.cleanupChannelSkills(pkg, manifest);
+      if (manifest.skills) {
+        getEventBus().emit('plugin:changed', { pluginName: pkg.name, action: 'disabled' });
+      }
     }
 
     systemStore.updateChannelPackage(db, name, { enabled: false, status: 'disabled' });
@@ -280,6 +312,266 @@ export class ChannelManager {
   async restart(name: string): Promise<void> {
     await this.disable(name);
     await this.enable(name);
+  }
+
+  // ---- Package Distribution — install from .anpk and rollback ----
+
+  /**
+   * Install a channel from a .anpk package file.
+   *
+   * Flow: verify → extract to ~/.animus/packages/{name}/ → cache .anpk →
+   * register in DB → delegate to existing installFromPath flow.
+   */
+  async installFromPackage(
+    anpkPath: string,
+    grantedPermissions: string[] = [],
+  ): Promise<InstallResult> {
+    log.info(`Installing channel from package: ${anpkPath}`);
+
+    // 1. Verify the package
+    const verification = await verifyPackage(anpkPath);
+    if (!verification.valid || !verification.manifest) {
+      throw new Error(
+        `Package verification failed: ${verification.errors.join('; ')}`,
+      );
+    }
+
+    const manifest = verification.manifest;
+    if (manifest.packageType !== 'channel') {
+      throw new Error(`Expected channel package but got "${manifest.packageType}"`);
+    }
+
+    // 2. Conflict check
+    const db = getSystemDb();
+    const existingByType = systemStore.getChannelPackageByType(db, manifest.channelType);
+    if (existingByType) {
+      throw new Error(
+        `Channel type "${manifest.channelType}" is already installed as "${existingByType.name}"`,
+      );
+    }
+
+    const existingByName = systemStore.getChannelPackage(db, manifest.name);
+    if (existingByName) {
+      throw new Error(`Channel "${manifest.name}" is already installed`);
+    }
+
+    // 3. Extract to packages directory
+    const dataDir = path.dirname(env.DB_SYSTEM_PATH);
+    const packagesDir = path.join(dataDir, 'packages');
+    const extractDir = path.join(packagesDir, manifest.name);
+
+    await fsp.mkdir(extractDir, { recursive: true });
+    try {
+      await extractZip(anpkPath, { dir: extractDir });
+    } catch (err) {
+      await fsp.rm(extractDir, { recursive: true, force: true });
+      throw new Error(`Failed to extract package: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // 4. Cache the .anpk file for rollback
+    const cacheDir = path.join(packagesDir, '.cache');
+    await fsp.mkdir(cacheDir, { recursive: true });
+    const cachePath = path.join(cacheDir, `${manifest.name}-${manifest.version}.anpk`);
+    await fsp.copyFile(anpkPath, cachePath);
+
+    // 5. Load channel manifest from extracted directory
+    const channelManifest = this.loadManifest(extractDir);
+
+    // 6. Check adapter file exists
+    const adapterPath = path.join(extractDir, channelManifest.adapter);
+    if (!fs.existsSync(adapterPath)) {
+      await fsp.rm(extractDir, { recursive: true, force: true });
+      throw new Error(`Adapter file not found: ${channelManifest.adapter}`);
+    }
+
+    // 7. Compute adapter checksum
+    const checksum = this.computeChecksum(adapterPath);
+
+    // 8. Load and store config schema
+    const configSchema = this.loadConfigSchema(extractDir);
+    if (configSchema) this.configSchemas.set(channelManifest.type, configSchema);
+
+    const needsConfig = configSchema &&
+      configSchema.fields.some(f => f.required);
+
+    // 9. Register in DB
+    systemStore.createChannelPackage(db, {
+      name: manifest.name,
+      channelType: channelManifest.type,
+      version: manifest.version,
+      path: extractDir,
+      checksum,
+    });
+
+    // Update distribution-specific columns via raw SQL
+    db.prepare(
+      `UPDATE channel_packages SET
+        package_version = ?,
+        package_checksum = ?,
+        signature_status = ?,
+        installed_from = ?,
+        package_cache_path = ?,
+        permissions_granted = ?
+      WHERE name = ?`,
+    ).run(
+      manifest.version,
+      verification.checksums.verified > 0 ? 'verified' : null,
+      verification.signature.status,
+      'package',
+      cachePath,
+      grantedPermissions.length > 0 ? JSON.stringify(grantedPermissions) : null,
+      manifest.name,
+    );
+
+    // Store manifest in memory
+    this.manifests.set(channelManifest.type, channelManifest);
+
+    getEventBus().emit('channel:installed', { name: manifest.name, channelType: channelManifest.type });
+    log.info(`Installed channel from package: ${manifest.name} (${channelManifest.type}) v${manifest.version}${needsConfig ? ' (needs configuration)' : ''}`);
+
+    return {
+      success: true,
+      manifest,
+      needsConfig: !!needsConfig,
+      verification,
+      installedPath: extractDir,
+    };
+  }
+
+  /**
+   * Rollback a channel to its previous version using the cached .anpk.
+   */
+  async rollback(packageName: string): Promise<RollbackResult> {
+    log.info(`Rolling back channel: ${packageName}`);
+
+    const db = getSystemDb();
+    const pkg = systemStore.getChannelPackage(db, packageName);
+    if (!pkg) {
+      return {
+        success: false,
+        previousVersion: '',
+        restoredVersion: '',
+        error: `Channel "${packageName}" not found`,
+      };
+    }
+
+    // Read previous_version from DB
+    const row = db.prepare(
+      'SELECT previous_version, package_cache_path FROM channel_packages WHERE name = ?',
+    ).get(packageName) as { previous_version: string | null; package_cache_path: string | null } | undefined;
+
+    if (!row?.previous_version) {
+      return {
+        success: false,
+        previousVersion: '',
+        restoredVersion: '',
+        error: `No previous version available for "${packageName}"`,
+      };
+    }
+
+    const previousVersion = row.previous_version;
+    const currentVersion = pkg.version;
+
+    // Find the cached .anpk for the previous version
+    const dataDir = path.dirname(env.DB_SYSTEM_PATH);
+    const cacheDir = path.join(dataDir, 'packages', '.cache');
+    const previousCachePath = path.join(cacheDir, `${packageName}-${previousVersion}.anpk`);
+
+    if (!fs.existsSync(previousCachePath)) {
+      return {
+        success: false,
+        previousVersion,
+        restoredVersion: '',
+        error: `Cached package not found for ${packageName} v${previousVersion}`,
+      };
+    }
+
+    try {
+      // 1. Stop running process if any
+      const host = this.processes.get(pkg.channelType);
+      if (host) {
+        await host.stop();
+        this.processes.delete(pkg.channelType);
+      }
+
+      // Clean up skills
+      const oldManifest = this.manifests.get(pkg.channelType);
+      if (oldManifest) {
+        await this.cleanupChannelSkills(pkg, oldManifest);
+      }
+
+      // 2. Remove current extracted directory
+      const extractDir = path.join(dataDir, 'packages', packageName);
+      await fsp.rm(extractDir, { recursive: true, force: true });
+
+      // 3. Re-extract from cached .anpk
+      await fsp.mkdir(extractDir, { recursive: true });
+      await extractZip(previousCachePath, { dir: extractDir });
+
+      // 4. Re-read channel manifest
+      const channelManifest = this.loadManifest(extractDir);
+      this.manifests.set(pkg.channelType, channelManifest);
+
+      // Update config schema
+      const configSchema = this.loadConfigSchema(extractDir);
+      if (configSchema) {
+        this.configSchemas.set(pkg.channelType, configSchema);
+      }
+
+      // 5. Update DB record
+      const adapterPath = path.join(extractDir, channelManifest.adapter);
+      const checksum = this.computeChecksum(adapterPath);
+
+      systemStore.updateChannelPackage(db, packageName, {
+        version: previousVersion,
+        path: extractDir,
+        checksum,
+      });
+
+      // Swap version tracking
+      db.prepare(
+        `UPDATE channel_packages SET
+          previous_version = ?,
+          package_version = ?,
+          package_cache_path = ?
+        WHERE name = ?`,
+      ).run(
+        currentVersion,
+        previousVersion,
+        previousCachePath,
+        packageName,
+      );
+
+      // 6. Re-enable if it was previously enabled
+      if (pkg.enabled) {
+        const updatedPkg = systemStore.getChannelPackage(db, packageName);
+        if (updatedPkg && this.hasRequiredConfig(updatedPkg)) {
+          await this.startProcess(updatedPkg, channelManifest);
+          await this.deployChannelSkills(updatedPkg, channelManifest);
+          systemStore.updateChannelPackage(db, packageName, { enabled: true });
+        } else {
+          systemStore.updateChannelPackage(db, packageName, { enabled: false, status: 'disabled' });
+        }
+      }
+
+      getEventBus().emit('channel:installed', { name: packageName, channelType: pkg.channelType });
+      log.info(`Rolled back channel "${packageName}" from v${currentVersion} to v${previousVersion}`);
+
+      return {
+        success: true,
+        previousVersion: currentVersion,
+        restoredVersion: previousVersion,
+      };
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      log.error(`Rollback failed for channel "${packageName}":`, err);
+      return {
+        success: false,
+        previousVersion,
+        restoredVersion: '',
+        error: `Rollback failed: ${errorMsg}`,
+      };
+    }
   }
 
   /**
@@ -329,7 +621,7 @@ export class ChannelManager {
     // Check capability if mapping exists
     if (requiredCapability) {
       const manifest = this.manifests.get(channelType);
-      if (!manifest || !manifest.capabilities.includes(requiredCapability)) {
+      if (!manifest || !manifest.capabilities.includes(requiredCapability as typeof manifest.capabilities[number])) {
         return false;
       }
     }
@@ -351,6 +643,44 @@ export class ChannelManager {
     } catch (err) {
       log.error(`performAction failed on channel ${channelType}:`, err);
       return false;
+    }
+  }
+
+  /**
+   * Fetch conversation history from a channel that supports it.
+   * Returns null if the channel doesn't support conversation-history or isn't running.
+   */
+  async getHistory(
+    channelType: string,
+    conversationId: string,
+    limit?: number,
+    before?: string
+  ): Promise<Array<{
+    author: { identifier: string; displayName: string; isBot: boolean };
+    content: string;
+    timestamp: string;
+    threadTs?: string;
+    reactions?: Array<{ name: string; count: number }>;
+    attachments?: Array<{ type: string; url: string; filename?: string }>;
+  }> | null> {
+    // Check capability
+    const manifest = this.manifests.get(channelType);
+    if (!manifest || !manifest.capabilities.includes('conversation-history')) {
+      return null;
+    }
+
+    const host = this.processes.get(channelType);
+    if (!host || !host.isRunning) {
+      log.warn(`Cannot get history from channel ${channelType}: not running`);
+      return null;
+    }
+
+    try {
+      const messages = await host.getHistory(conversationId, limit, before);
+      return messages ?? null;
+    } catch (err) {
+      log.error(`getHistory failed for channel ${channelType}:`, err);
+      return null;
     }
   }
 
@@ -499,6 +829,73 @@ export class ChannelManager {
     return { status: bestStatus, statusText: bestStatusText, activity: bestActivity };
   }
 
+  // ---- Skills Deployment ----
+
+  /**
+   * Deploy channel-provided skills (symlinks to the skill bridge directory).
+   * Reuses the same discovery path as the plugin system.
+   */
+  private async deployChannelSkills(pkg: ChannelPackage, manifest: ChannelManifest): Promise<void> {
+    if (!manifest.skills) return;
+
+    const skillsDir = path.join(pkg.path, manifest.skills);
+    if (!fs.existsSync(skillsDir)) {
+      log.warn(`Channel ${pkg.name} declares skills at "${manifest.skills}" but directory not found`);
+      return;
+    }
+
+    const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+    const { getPluginManager } = await import('../services/plugin-manager.js');
+    const pluginManager = getPluginManager();
+    const bridgePath = pluginManager.getSkillBridgePath();
+    const targetSkillsDir = path.join(bridgePath, 'skills');
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const skillMdPath = path.join(skillsDir, entry.name, 'SKILL.md');
+      if (!fs.existsSync(skillMdPath)) continue;
+
+      const sourcePath = path.join(skillsDir, entry.name);
+      const targetPath = path.join(targetSkillsDir, entry.name);
+
+      try {
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        try {
+          fs.rmSync(targetPath, { recursive: true, force: true });
+        } catch { /* doesn't exist */ }
+        fs.symlinkSync(sourcePath, targetPath, 'dir');
+        log.info(`Deployed channel skill "${entry.name}" from ${pkg.name}`);
+      } catch (err) {
+        log.error(`Failed to deploy channel skill ${entry.name} (${pkg.name}):`, err);
+      }
+    }
+  }
+
+  /**
+   * Remove channel-provided skill symlinks.
+   */
+  private async cleanupChannelSkills(pkg: ChannelPackage, manifest: ChannelManifest): Promise<void> {
+    if (!manifest.skills) return;
+
+    const skillsDir = path.join(pkg.path, manifest.skills);
+    if (!fs.existsSync(skillsDir)) return;
+
+    const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+    const { getPluginManager } = await import('../services/plugin-manager.js');
+    const pluginManager = getPluginManager();
+    const bridgePath = pluginManager.getSkillBridgePath();
+    const targetSkillsDir = path.join(bridgePath, 'skills');
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const targetPath = path.join(targetSkillsDir, entry.name);
+      try {
+        fs.rmSync(targetPath, { recursive: true, force: true });
+        log.debug(`Removed channel skill "${entry.name}" from ${pkg.name}`);
+      } catch { /* ignore */ }
+    }
+  }
+
   // ---- Internal ----
 
   private async startProcess(pkg: ChannelPackage, manifest: ChannelManifest): Promise<void> {
@@ -528,6 +925,7 @@ export class ChannelManager {
           ...(msg.conversationId ? { conversationId: msg.conversationId } : {}),
           ...(msg.media ? { media: msg.media } : {}),
           ...(msg.metadata ? { metadata: msg.metadata } : {}),
+          ...(msg.participant ? { participant: msg.participant } : {}),
         });
       },
       onStatusChange: (status, error) => {

@@ -8,8 +8,8 @@
  * See docs/architecture/sleep-energy.md
  */
 
-import { DecayEngine, clamp } from '@animus/shared';
-import type { EnergyBand } from '@animus/shared';
+import { DecayEngine, clamp } from '@animus-labs/shared';
+import type { EnergyBand } from '@animus-labs/shared';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('EnergyEngine', 'heartbeat');

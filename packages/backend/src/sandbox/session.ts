@@ -6,14 +6,14 @@
  * via commands before any session exists.
  */
 
-import type { AgentProvider } from '@animus/shared';
+import type { AgentProvider } from '@animus-labs/shared';
 import type {
   AgentEvent,
   AgentResponse,
   AgentSessionConfig,
   IAgentSession,
   AgentManager,
-} from '@animus/agents';
+} from '@animus-labs/agents';
 import { getPluginManager } from '../services/plugin-manager.js';
 import { buildSandboxMcpServer } from './mcp-server.js';
 import { buildCognitiveMcpServer, type CognitiveSnapshot } from './cognitive-tools.js';
@@ -167,7 +167,7 @@ export class SandboxSession {
     model?: string,
     systemPrompt?: string,
     verbose?: boolean,
-    onChunk?: (chunk: string, meta: import('@animus/agents').StreamChunkMeta) => void,
+    onChunk?: (chunk: string, meta: import('@animus-labs/agents').StreamChunkMeta) => void,
   ): Promise<AgentResponse> {
     if (!this.session || !this.session.isActive) {
       await this.create(provider, model, systemPrompt, verbose);

@@ -22,7 +22,7 @@ import {
   type AgentLogStore,
   type HookResult,
   type PreToolUseEvent,
-} from '@animus/agents';
+} from '@animus-labs/agents';
 
 import { buildMindMcpServer, type MutableToolContext, type ToolPermissionLookup } from '../tools/index.js';
 import type { ToolHandlerContext } from '../tools/index.js';
@@ -97,7 +97,7 @@ export function buildMindToolContext(
   // Resolve conversation for the triggering contact
   let conversationId = '';
   if (gathered.contact && gathered.trigger.channel) {
-    const channel = (gathered.trigger.channel || 'web') as import('@animus/shared').ChannelType;
+    const channel = (gathered.trigger.channel || 'web') as import('@animus-labs/shared').ChannelType;
     const conv = messageStore.getConversationByContactAndChannel(
       msgDb, gathered.contact.id, channel
     );
@@ -464,7 +464,7 @@ function getPluginMcpPermissionKey(toolName: string): string | null {
  */
 function resolveToolPermission(toolName: string): {
   permKey: string;
-  permission: import('@animus/shared').ToolPermission | null;
+  permission: import('@animus-labs/shared').ToolPermission | null;
 } | null {
   const sysDb = getSystemDb();
 

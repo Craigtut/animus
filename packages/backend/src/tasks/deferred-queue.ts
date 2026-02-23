@@ -10,8 +10,8 @@
 
 import { getHeartbeatDb } from '../db/index.js';
 import * as taskStore from '../db/stores/task-store.js';
-import { now } from '@animus/shared';
-import type { Task } from '@animus/shared';
+import { now } from '@animus-labs/shared';
+import type { Task } from '@animus-labs/shared';
 
 // ============================================================================
 // Constants (from docs/architecture/tasks-system.md)

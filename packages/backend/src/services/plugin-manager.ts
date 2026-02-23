@@ -10,8 +10,10 @@
  */
 
 import fs from 'fs/promises';
+import fsSync from 'node:fs';
 import path from 'path';
 import { spawn } from 'child_process';
+import extractZip from 'extract-zip';
 import { env } from '../utils/env.js';
 
 import { getSystemDb } from '../db/index.js';
@@ -29,7 +31,8 @@ import {
   PluginMcpServerSchema,
   AgentFrontmatterSchema,
   configSchemaSchema,
-} from '@animus/shared';
+  PackageManifestSchema,
+} from '@animus-labs/shared';
 import type {
   PluginManifest,
   PluginSource,
@@ -41,8 +44,13 @@ import type {
   PluginMcpServer,
   AgentFrontmatter,
   ConfigSchema,
-} from '@animus/shared';
+  InstallResult,
+  RollbackResult,
+  VerificationResult,
+  PackageManifest,
+} from '@animus-labs/shared';
 import { z } from 'zod';
+import { verifyPackage } from './package-verifier.js';
 
 const log = createLogger('PluginManager', 'plugins');
 
@@ -353,6 +361,321 @@ class PluginManager {
 
     getEventBus().emit('plugin:changed', { pluginName: name, action: 'disabled' });
     log.info(`Disabled plugin: ${name}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Package Distribution — install from .anpk and rollback
+  // -------------------------------------------------------------------------
+
+  /**
+   * Install a plugin from a .anpk package file.
+   *
+   * Flow: verify → extract to ~/.animus/packages/{name}/ → cache .anpk →
+   * register in DB → enable if no config needed.
+   */
+  async installFromPackage(
+    anpkPath: string,
+    grantedPermissions: string[] = [],
+  ): Promise<InstallResult> {
+    log.info(`Installing plugin from package: ${anpkPath}`);
+
+    // 1. Verify the package
+    const verification = await verifyPackage(anpkPath);
+    if (!verification.valid || !verification.manifest) {
+      throw new Error(
+        `Package verification failed: ${verification.errors.join('; ')}`,
+      );
+    }
+
+    const manifest = verification.manifest;
+    if (manifest.packageType !== 'plugin') {
+      throw new Error(`Expected plugin package but got "${manifest.packageType}"`);
+    }
+
+    // 2. Conflict check
+    const db = getSystemDb();
+    const existing = pluginStore.getPlugin(db, manifest.name);
+    if (existing) {
+      throw new Error(`Plugin "${manifest.name}" is already installed`);
+    }
+
+    // 3. Extract to packages directory
+    const dataDir = path.dirname(env.DB_SYSTEM_PATH);
+    const packagesDir = path.join(dataDir, 'packages');
+    const extractDir = path.join(packagesDir, manifest.name);
+
+    await fs.mkdir(extractDir, { recursive: true });
+    try {
+      await extractZip(anpkPath, { dir: extractDir });
+    } catch (err) {
+      await fs.rm(extractDir, { recursive: true, force: true });
+      throw new Error(`Failed to extract package: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // 4. Cache the .anpk file for rollback
+    const cacheDir = path.join(packagesDir, '.cache');
+    await fs.mkdir(cacheDir, { recursive: true });
+    const cachePath = path.join(cacheDir, `${manifest.name}-${manifest.version}.anpk`);
+    await fs.copyFile(anpkPath, cachePath);
+
+    // 5. Read plugin.json from the extracted directory to get the native PluginManifest
+    //    (the .anpk contains manifest.json which is the unified format — the extracted
+    //    dir may also contain plugin.json for backward compatibility)
+    let pluginManifest: PluginManifest;
+    const pluginJsonPath = path.join(extractDir, 'plugin.json');
+    if (fsSync.existsSync(pluginJsonPath)) {
+      const raw = await fs.readFile(pluginJsonPath, 'utf-8');
+      pluginManifest = PluginManifestSchema.parse(JSON.parse(raw));
+    } else {
+      // Synthesize a PluginManifest from the unified PackageManifest
+      pluginManifest = {
+        name: manifest.name,
+        displayName: manifest.displayName ?? manifest.name,
+        version: manifest.version,
+        description: manifest.description,
+        author: manifest.author,
+        license: manifest.license,
+        engine: manifest.engineVersion,
+        icon: manifest.icon,
+        components: manifest.components,
+        dependencies: manifest.dependencies,
+        permissions: manifest.permissions ? {
+          tools: manifest.permissions.tools,
+          network: Array.isArray(manifest.permissions.network)
+            ? manifest.permissions.network.length > 0
+            : manifest.permissions.network,
+          filesystem: manifest.permissions.filesystem,
+          contacts: manifest.permissions.contacts,
+          memory: manifest.permissions.memory,
+        } : undefined,
+        configSchema: manifest.configSchema,
+        setup: manifest.setup,
+      } as PluginManifest;
+    }
+
+    // 6. Load and register
+    const loaded: LoadedPlugin = {
+      manifest: pluginManifest,
+      absolutePath: extractDir,
+      source: 'store',
+      enabled: true,
+      configSchema: null,
+      iconSvg: null,
+      skills: [],
+      mcpServers: {},
+      contextSources: [],
+      hooks: [],
+      decisionTypes: [],
+      triggers: [],
+      agents: [],
+    };
+
+    await this.loadComponents(loaded);
+
+    const needsConfig = loaded.configSchema &&
+      loaded.configSchema.fields.some(f => f.required);
+
+    if (needsConfig) {
+      loaded.enabled = false;
+    }
+
+    // 7. Register in DB with distribution columns
+    pluginStore.insertPlugin(db, {
+      name: manifest.name,
+      version: manifest.version,
+      path: extractDir,
+      source: 'store',
+      enabled: !needsConfig,
+    });
+
+    // Update distribution-specific columns via raw SQL
+    db.prepare(
+      `UPDATE plugins SET
+        package_version = ?,
+        package_checksum = ?,
+        signature_status = ?,
+        installed_from = ?,
+        package_cache_path = ?,
+        permissions_granted = ?
+      WHERE name = ?`,
+    ).run(
+      manifest.version,
+      verification.checksums.verified > 0 ? 'verified' : null,
+      verification.signature.status,
+      'package',
+      cachePath,
+      grantedPermissions.length > 0 ? JSON.stringify(grantedPermissions) : null,
+      manifest.name,
+    );
+
+    this.plugins.set(manifest.name, loaded);
+
+    // 8. Enable if no config needed
+    if (!needsConfig) {
+      this.registerHooks(loaded);
+      this.registerDecisionTypes(loaded);
+
+      const settings = systemStore.getSystemSettings(db);
+      await this.deploySkillsForPlugin(loaded, settings.defaultAgentProvider);
+      await this.startTriggersForPlugin(loaded);
+      log.info(`Installed and enabled plugin from package: ${manifest.name} v${manifest.version}`);
+    } else {
+      log.info(`Installed plugin from package: ${manifest.name} v${manifest.version} (disabled — needs configuration)`);
+    }
+
+    getEventBus().emit('plugin:changed', { pluginName: manifest.name, action: 'installed' });
+
+    return {
+      success: true,
+      manifest,
+      needsConfig: !!needsConfig,
+      verification,
+      installedPath: extractDir,
+    };
+  }
+
+  /**
+   * Rollback a plugin to its previous version using the cached .anpk.
+   */
+  async rollback(packageName: string): Promise<RollbackResult> {
+    log.info(`Rolling back plugin: ${packageName}`);
+
+    const db = getSystemDb();
+    const record = pluginStore.getPlugin(db, packageName);
+    if (!record) {
+      return {
+        success: false,
+        previousVersion: '',
+        restoredVersion: '',
+        error: `Plugin "${packageName}" not found`,
+      };
+    }
+
+    // Read previous_version from DB
+    const row = db.prepare(
+      'SELECT previous_version, package_cache_path FROM plugins WHERE name = ?',
+    ).get(packageName) as { previous_version: string | null; package_cache_path: string | null } | undefined;
+
+    if (!row?.previous_version) {
+      return {
+        success: false,
+        previousVersion: '',
+        restoredVersion: '',
+        error: `No previous version available for "${packageName}"`,
+      };
+    }
+
+    const previousVersion = row.previous_version;
+    const currentVersion = record.version;
+
+    // Find the cached .anpk for the previous version
+    const dataDir = path.dirname(env.DB_SYSTEM_PATH);
+    const cacheDir = path.join(dataDir, 'packages', '.cache');
+    const previousCachePath = path.join(cacheDir, `${packageName}-${previousVersion}.anpk`);
+
+    if (!fsSync.existsSync(previousCachePath)) {
+      return {
+        success: false,
+        previousVersion,
+        restoredVersion: '',
+        error: `Cached package not found for ${packageName} v${previousVersion}`,
+      };
+    }
+
+    try {
+      // 1. Disable current version
+      const loaded = this.plugins.get(packageName);
+      if (loaded?.enabled) {
+        await this.stopTriggersForPlugin(packageName);
+        this.deregisterHooks(packageName);
+        this.deregisterDecisionTypes(packageName);
+        await this.removeSkillsForPlugin(loaded);
+      }
+
+      // 2. Remove current extracted directory
+      const extractDir = path.join(dataDir, 'packages', packageName);
+      await fs.rm(extractDir, { recursive: true, force: true });
+
+      // 3. Re-extract from cached .anpk
+      await fs.mkdir(extractDir, { recursive: true });
+      await extractZip(previousCachePath, { dir: extractDir });
+
+      // 4. Re-read plugin manifest
+      const pluginManifest = await this.readManifest(extractDir);
+
+      // 5. Update DB record
+      pluginStore.updatePlugin(db, packageName, {
+        version: previousVersion,
+        path: extractDir,
+      });
+
+      // Swap version tracking: current becomes previous, previous becomes current
+      db.prepare(
+        `UPDATE plugins SET
+          previous_version = ?,
+          package_version = ?,
+          package_cache_path = ?
+        WHERE name = ?`,
+      ).run(
+        currentVersion,
+        previousVersion,
+        previousCachePath,
+        packageName,
+      );
+
+      // 6. Re-load and re-enable
+      const reloaded: LoadedPlugin = {
+        manifest: pluginManifest,
+        absolutePath: extractDir,
+        source: loaded?.source ?? 'store',
+        enabled: true,
+        configSchema: null,
+        iconSvg: null,
+        skills: [],
+        mcpServers: {},
+        contextSources: [],
+        hooks: [],
+        decisionTypes: [],
+        triggers: [],
+        agents: [],
+      };
+
+      await this.loadComponents(reloaded);
+
+      if (this.hasRequiredConfig(packageName)) {
+        reloaded.enabled = true;
+        pluginStore.updatePlugin(db, packageName, { enabled: true });
+        this.registerHooks(reloaded);
+        this.registerDecisionTypes(reloaded);
+
+        const settings = systemStore.getSystemSettings(db);
+        await this.deploySkillsForPlugin(reloaded, settings.defaultAgentProvider);
+        await this.startTriggersForPlugin(reloaded);
+      } else {
+        reloaded.enabled = false;
+        pluginStore.updatePlugin(db, packageName, { enabled: false });
+      }
+
+      this.plugins.set(packageName, reloaded);
+
+      getEventBus().emit('plugin:changed', { pluginName: packageName, action: 'installed' });
+      log.info(`Rolled back plugin "${packageName}" from v${currentVersion} to v${previousVersion}`);
+
+      return {
+        success: true,
+        previousVersion: currentVersion,
+        restoredVersion: previousVersion,
+      };
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      log.error(`Rollback failed for "${packageName}":`, err);
+      return {
+        success: false,
+        previousVersion,
+        restoredVersion: '',
+        error: `Rollback failed: ${errorMsg}`,
+      };
+    }
   }
 
   // -------------------------------------------------------------------------

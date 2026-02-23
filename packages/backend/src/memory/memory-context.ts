@@ -6,7 +6,7 @@
  */
 
 import type { MemoryManager, ScoredMemory } from './memory-manager.js';
-import { DecayEngine } from '@animus/shared';
+import { DecayEngine } from '@animus-labs/shared';
 
 export interface MemoryContext {
   workingMemorySection: string | null;

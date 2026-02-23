@@ -10,7 +10,7 @@ import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';
 import { getDownloadManager, getSpeechAssets } from '../../downloads/index.js';
 import { getEventBus } from '../../lib/event-bus.js';
-import type { AnimusEventMap } from '@animus/shared';
+import type { AnimusEventMap } from '@animus-labs/shared';
 
 // Discriminated union of all download events for the subscription
 type DownloadUpdate =

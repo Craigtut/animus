@@ -18,7 +18,7 @@ Animus is an autonomous AI assistant designed to be genuinely helpful while main
   /agents       - Agent SDK abstraction layer (Claude, Codex, OpenCode)
   /backend      - Fastify + tRPC server
   /frontend     - Vite + React 19 SPA
-  /channel-sdk  - Types-only package published as @animus-engine/channel-sdk
+  /channel-sdk  - Types-only package published as @animus-labs/channel-sdk
 /docs           - Documentation
 ```
 
@@ -96,7 +96,7 @@ The heartbeat is the core tick system that drives Animus's inner life. The mind 
 
 The mind is a top-level orchestrator. It does not perform long-running work — it delegates to sub-agents for complex tasks (research, multi-step workflows, code generation). Sub-agents are independent agent sessions managed by a custom orchestration layer. They carry the full Animus personality and can message the user directly. The mind can forward new information to running sub-agents via `update_agent` decisions. See `docs/architecture/agent-orchestration.md` for the full design. Pipeline state is persisted to SQLite for crash recovery.
 
-### The Agents Package (`@animus/agents`)
+### The Agents Package (`@animus-labs/agents`)
 
 A separate package providing a unified abstraction over multiple agent SDKs:
 
@@ -144,11 +144,11 @@ npm run dev            # Runs backend + frontend in parallel
 npm run dev:backend   # http://localhost:3000
 npm run dev:frontend  # http://localhost:5173
 
-# NOTE: In dev mode, the backend imports @animus/shared and @animus/agents
+# NOTE: In dev mode, the backend imports @animus-labs/shared and @animus-labs/agents
 # source (.ts) directly via the "source" export condition (--conditions source).
 # This means changes to shared/agents source are picked up immediately —
 # no need to rebuild their dist. The dist is only used for production builds.
-# If you need dist for any reason: npm run build -w @animus/shared
+# If you need dist for any reason: npm run build -w @animus-labs/shared
 ```
 
 ### Testing Requirements
@@ -245,12 +245,12 @@ const { data } = trpc.onHeartbeat.useSubscription();
 
 ### Agent Integration
 
-The `@animus/agents` package provides a unified interface for all agent SDKs.
+The `@animus-labs/agents` package provides a unified interface for all agent SDKs.
 
 **Status**: Types defined, implementation pending.
 
 ```typescript
-import { IAgentSession, AgentSessionConfig } from '@animus/agents';
+import { IAgentSession, AgentSessionConfig } from '@animus-labs/agents';
 
 // Future API (not yet implemented):
 const session = await adapter.createSession({
@@ -309,6 +309,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - **Architecture**: `docs/architecture/observational-memory.md` (observational memory — three-stream compression, Observer/Reflector agents, token-based thresholds, async processing, memory.db schema)
 - **Architecture**: `docs/architecture/reflex-system.md` (reflex fast-response layer — Vercel AI SDK, dual-path voice architecture, lightweight context, heartbeat integration, provider configuration)
 - **Architecture**: `docs/architecture/tts-licensing-and-distribution.md` (TTS model licensing, CC-BY-4.0 redistribution, weight bundling approach, voice cloning consent flow, attribution requirements)
+- **Architecture**: `docs/architecture/package-installation.md` (package distribution — .anpk install flow, verification chain, rollback, update checking, config migration, store browser UI, AI self-management MCP tools)
 - **Open Questions**: `docs/architecture/open-questions.md` (all 7 resolved)
 - **Open Concerns**: `docs/architecture/open-concerns.md` (known acceptable concerns)
 - **Frontend Design**: `docs/frontend/design-principles.md`, `docs/frontend/onboarding.md`
@@ -339,6 +340,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on agent SDKs → `/doc-explorer agents`
 - Working on Pi adapter/transformContext → `/doc-explorer pi`
 - Building a new plugin → see the `build-plugin` skill in the `animus-extensions` repo; for architecture context use `/doc-explorer plugin-system`
+- Working on package distribution/packaging/.anpk format → `/doc-explorer package-installation` and see `docs/architecture/distribution-system.md` (workspace root) for the master overview
 - Working on backend/API → `/doc-explorer architecture`
 - Unsure about project conventions → `/doc-explorer` (no args, see everything)
 

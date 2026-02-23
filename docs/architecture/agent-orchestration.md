@@ -4,7 +4,7 @@ How the mind delegates work to sub-agents, tracks their lifecycle, and delivers 
 
 ## Decision: Custom Orchestration Layer
 
-We evaluated four approaches (native SDK sub-agents, custom orchestration, hybrid, Claude Agent Teams) and chose to **build our own sub-agent management system on top of `@animus/agents`**. Sub-agents are independent agent sessions that we create, track, and coordinate ourselves.
+We evaluated four approaches (native SDK sub-agents, custom orchestration, hybrid, Claude Agent Teams) and chose to **build our own sub-agent management system on top of `@animus-labs/agents`**. Sub-agents are independent agent sessions that we create, track, and coordinate ourselves.
 
 **Why not native SDK sub-agents?** Codex has no SDK-level sub-agent API. OpenCode's REST API has known bugs with programmatic sub-agent invocation. Only Claude has a mature system. Building our own gives us one code path that works identically across all three providers.
 

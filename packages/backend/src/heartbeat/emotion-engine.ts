@@ -7,8 +7,8 @@
  * See docs/architecture/heartbeat.md — "The Emotion Engine"
  */
 
-import { DecayEngine, clamp } from '@animus/shared';
-import type { EmotionName, EmotionState } from '@animus/shared';
+import { DecayEngine, clamp } from '@animus-labs/shared';
+import type { EmotionName, EmotionState } from '@animus-labs/shared';
 
 // ============================================================================
 // Constants

@@ -11,7 +11,7 @@
  */
 
 import { createRequire } from 'node:module';
-import type { AgentProvider } from '@animus/shared';
+import type { AgentProvider } from '@animus-labs/shared';
 import type { SessionUsage, AgentCost } from './types.js';
 import { createTaggedLogger } from './logger.js';
 

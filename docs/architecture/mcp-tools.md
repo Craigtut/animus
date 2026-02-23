@@ -62,7 +62,7 @@ We use a **hybrid architecture** that optimizes for each provider:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                        @animus/shared                                │
+│                        @animus-labs/shared                                │
 │                                                                      │
 │  ┌────────────────────────────────────────────────────────────────┐  │
 │  │  Tool Definitions (tool-definitions.ts)                       │  │
@@ -86,7 +86,7 @@ We use a **hybrid architecture** that optimizes for each provider:
                ┌──────────────┼──────────────┐
                ▼              │              ▼
 ┌──────────────────────┐      │    ┌──────────────────────────────────┐
-│   @animus/backend    │      │    │       @animus/agents             │
+│   @animus-labs/backend    │      │    │       @animus-labs/agents             │
 │                      │      │    │                                  │
 │ ┌──────────────────┐ │      │    │ ┌──────────────────────────────┐ │
 │ │  Tool Handlers   │ │      │    │ │  McpServerConfig in session  │ │
@@ -139,9 +139,9 @@ We use a **hybrid architecture** that optimizes for each provider:
 
 ---
 
-## Layer 1: Tool Definitions (`@animus/shared`)
+## Layer 1: Tool Definitions (`@animus-labs/shared`)
 
-Tool definitions are pure data structures — no handlers, no side effects, no dependencies on backend infrastructure. They live in `@animus/shared` because both the backend (which implements handlers) and the frontend (which may display available tools in the UI) need access to them.
+Tool definitions are pure data structures — no handlers, no side effects, no dependencies on backend infrastructure. They live in `@animus-labs/shared` because both the backend (which implements handlers) and the frontend (which may display available tools in the UI) need access to them.
 
 ### Type Definitions
 
@@ -244,7 +244,7 @@ Standard contacts don't trigger sub-agent spawning (enforced in EXECUTE), so the
 
 ---
 
-## Layer 2: Tool Handlers (`@animus/backend`)
+## Layer 2: Tool Handlers (`@animus-labs/backend`)
 
 Handlers live in the backend because they need access to databases, the event bus, channel adapters, and other infrastructure. Each handler is a pure async function that receives typed input and a context object, and returns an MCP-compatible result.
 
@@ -253,7 +253,7 @@ Handlers live in the backend because they need access to databases, the event bu
 ```typescript
 // packages/backend/src/tools/types.ts
 
-import type { AnimusToolName } from '@animus/shared';
+import type { AnimusToolName } from '@animus-labs/shared';
 
 /**
  * Context provided to every tool handler invocation.
@@ -351,9 +351,9 @@ This means media arrives before the text reply — a natural ordering for chat p
 
 ---
 
-## Layer 3: Tool Registry (`@animus/backend`)
+## Layer 3: Tool Registry (`@animus-labs/backend`)
 
-The registry combines definitions (from `@animus/shared`) with handlers (from the backend) and provides methods to create provider-specific MCP server configurations.
+The registry combines definitions (from `@animus-labs/shared`) with handlers (from the backend) and provides methods to create provider-specific MCP server configurations.
 
 The registry (`packages/backend/src/tools/registry.ts`) maps every `AnimusToolName` to its definition + handler. Key functions:
 
@@ -366,7 +366,7 @@ All 7 tools are registered in the single `TOOL_REGISTRY` record. The distinction
 
 ---
 
-## Layer 4: MCP Server Factories (`@animus/backend`)
+## Layer 4: MCP Server Factories (`@animus-labs/backend`)
 
 Two factory functions produce MCP servers for different providers, both consuming the same registry.
 
@@ -376,7 +376,7 @@ Two factory functions produce MCP servers for different providers, both consumin
 // packages/backend/src/tools/servers/claude-mcp.ts
 
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
-import type { PermissionTier } from '@animus/shared';
+import type { PermissionTier } from '@animus-labs/shared';
 import type { ToolHandlerContext } from '../types.js';
 import { getToolsForTier } from '../registry.js';
 
@@ -453,7 +453,7 @@ For Codex and OpenCode, we run a lightweight Node.js subprocess that serves tool
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import type { PermissionTier } from '@animus/shared';
+import type { PermissionTier } from '@animus-labs/shared';
 import type { ToolHandlerContext } from '../types.js';
 import { getToolsForTier } from '../registry.js';
 
@@ -655,13 +655,13 @@ await server.connect(transport);
 
 ## Layer 5: Orchestrator Integration
 
-The Agent Orchestrator (in `@animus/backend`) assembles the MCP server configuration when spawning sub-agents. This is where the per-contact permission filtering happens.
+The Agent Orchestrator (in `@animus-labs/backend`) assembles the MCP server configuration when spawning sub-agents. This is where the per-contact permission filtering happens.
 
 ```typescript
 // packages/backend/src/heartbeat/orchestrator.ts (relevant section)
 
-import type { AgentProvider, PermissionTier } from '@animus/shared';
-import type { AgentSessionConfig } from '@animus/agents';
+import type { AgentProvider, PermissionTier } from '@animus-labs/shared';
+import type { AgentSessionConfig } from '@animus-labs/agents';
 import type { ToolHandlerContext } from '../tools/types.js';
 import { buildClaudeMcpConfig, buildClaudeAllowedTools } from '../tools/servers/claude-mcp.js';
 import { createStdioMcpConfig } from '../tools/servers/stdio-mcp.js';
@@ -723,7 +723,7 @@ function buildMcpConfig(
 
 ## MCP Server Configuration Mapping
 
-Each SDK receives the same tools but through different configuration formats. The adapters in `@animus/agents` pass these through to the SDKs unchanged.
+Each SDK receives the same tools but through different configuration formats. The adapters in `@animus-labs/agents` pass these through to the SDKs unchanged.
 
 ### Claude Agent SDK
 
@@ -910,7 +910,7 @@ Users can also add external MCP servers (GitHub, Postgres, Slack, etc.) via conf
 }
 ```
 
-This is already supported by the existing `McpServerConfig` type in `@animus/agents`. The orchestrator merges built-in tools with any user-configured MCP servers.
+This is already supported by the existing `McpServerConfig` type in `@animus-labs/agents`. The orchestrator merges built-in tools with any user-configured MCP servers.
 
 ---
 
@@ -971,20 +971,20 @@ Plugin-defined MCP servers are loaded via the plugin system and merged into the 
 
 | Package | Used By | Purpose |
 |---------|---------|---------|
-| `zod` | `@animus/shared` | Tool input schema definitions |
-| `@anthropic-ai/claude-agent-sdk` | `@animus/backend` | `createSdkMcpServer()`, `tool()` for in-process server |
-| `@modelcontextprotocol/sdk` | `@animus/backend` | `McpServer`, `StdioServerTransport` for stdio subprocess |
+| `zod` | `@animus-labs/shared` | Tool input schema definitions |
+| `@anthropic-ai/claude-agent-sdk` | `@animus-labs/backend` | `createSdkMcpServer()`, `tool()` for in-process server |
+| `@modelcontextprotocol/sdk` | `@animus-labs/backend` | `McpServer`, `StdioServerTransport` for stdio subprocess |
 
 ### Package Boundary Summary
 
 | What | Where | Why |
 |------|-------|-----|
-| Tool definitions (name, description, schema) | `@animus/shared` | Reusable across frontend and backend |
-| Permission map | `@animus/shared` | Shared knowledge of who can use what |
-| Tool handlers (implementation) | `@animus/backend` | Need DB access, event bus, embeddings |
-| Tool registry (defs + handlers) | `@animus/backend` | Combines shared defs with backend handlers |
-| MCP server factories | `@animus/backend` | Creates provider-specific MCP configs |
-| MCP config passthrough | `@animus/agents` | Passes mcpServers to SDK unchanged |
+| Tool definitions (name, description, schema) | `@animus-labs/shared` | Reusable across frontend and backend |
+| Permission map | `@animus-labs/shared` | Shared knowledge of who can use what |
+| Tool handlers (implementation) | `@animus-labs/backend` | Need DB access, event bus, embeddings |
+| Tool registry (defs + handlers) | `@animus-labs/backend` | Combines shared defs with backend handlers |
+| MCP server factories | `@animus-labs/backend` | Creates provider-specific MCP configs |
+| MCP config passthrough | `@animus-labs/agents` | Passes mcpServers to SDK unchanged |
 
 ---
 

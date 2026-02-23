@@ -22,8 +22,8 @@ import * as personaStore from '../db/stores/persona-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
 import { env } from '../utils/env.js';
-import { now } from '@animus/shared';
-import type { HeartbeatState, MindOutput } from '@animus/shared';
+import { now } from '@animus-labs/shared';
+import type { HeartbeatState, MindOutput } from '@animus-labs/shared';
 
 import { MemoryManager, LocalEmbeddingProvider, VectorStore } from '../memory/index.js';
 import { SeedManager, GoalManager } from '../goals/index.js';
@@ -33,7 +33,7 @@ import {
   createAgentManager,
   type AgentManager,
   type AgentLogStore,
-} from '@animus/agents';
+} from '@animus-labs/agents';
 
 import { TickQueue, type QueuedTick } from './tick-queue.js';
 import { type TriggerContext, type CompiledContext, buildMindContext, buildSystemPrompt } from './context-builder.js';
@@ -88,7 +88,7 @@ const tickQueue = new TickQueue();
  * Convert the full Persona from the DB into a PersonaConfig for the compiler.
  */
 function buildPersonaConfig(
-  persona: import('@animus/shared').Persona
+  persona: import('@animus-labs/shared').Persona
 ): PersonaConfig {
   return {
     name: persona.name || 'Animus',
@@ -203,6 +203,7 @@ async function mindQuery(
     ...(gathered.messageContext ? { messageContext: gathered.messageContext } : {}),
     ...(gathered.pendingApprovals.length > 0 ? { pendingApprovals: gathered.pendingApprovals } : {}),
     ...(gathered.trustRampContext ? { trustRampContext: gathered.trustRampContext } : {}),
+    ...(gathered.externalHistory ? { externalHistory: gathered.externalHistory } : {}),
   });
 
   const triggerInfo = {
@@ -371,9 +372,9 @@ async function mindQuery(
     eventBus.on('message:received', messageInjectionHandler);
 
     // Turn-end handler: persist each turn's reply text as a separate message
-    const turnEndHandler = async (event: import('@animus/agents').AgentEvent) => {
+    const turnEndHandler = async (event: import('@animus-labs/agents').AgentEvent) => {
       if (event.type !== 'turn_end') return;
-      const turnData = event.data as import('@animus/agents').TurnEndData;
+      const turnData = event.data as import('@animus-labs/agents').TurnEndData;
       const turnText = turnTextMap.get(turnData.turnIndex);
       if (!turnText?.trim()) return;
       if (isNonResponse(turnText)) {
@@ -418,7 +419,7 @@ async function mindQuery(
     // For non-message ticks, still accumulate text (for logging/snapshot) but don't stream to frontend.
     await session.promptStreaming(
       context.userMessage,
-      (chunk: string, meta: import('@animus/agents').StreamChunkMeta) => {
+      (chunk: string, meta: import('@animus-labs/agents').StreamChunkMeta) => {
         if (cogServer && cogServer.getPhase() === 'replying') {
           replyAccumulated += chunk;
 
@@ -772,6 +773,12 @@ export async function initializeHeartbeat(): Promise<{ resumedAfterRestart: bool
   try {
     const agentLogsDb = getAgentLogsDb();
     ctx.agentLogStoreAdapter = createAgentLogStoreAdapter(agentLogsDb);
+
+    // Mark orphaned agent sessions from previous crash
+    const orphanedSessions = agentLogStore.markOrphanedSessions(agentLogsDb);
+    if (orphanedSessions > 0) {
+      log.info(`Marked ${orphanedSessions} orphaned agent sessions as error`);
+    }
   } catch (err) {
     log.warn('Agent log store not available:', err);
   }
@@ -1026,6 +1033,14 @@ export async function triggerTick(trigger?: TriggerContext): Promise<void> {
 export function getHeartbeatStatus(): HeartbeatState {
   const hbDb = getHeartbeatDb();
   return heartbeatStore.getHeartbeatState(hbDb);
+}
+
+/**
+ * Get the AgentOrchestrator instance (if initialized).
+ * Used by heartbeat router for sub-agent management.
+ */
+export function getAgentOrchestrator(): AgentOrchestrator | null {
+  return ctx.agentOrchestrator ?? null;
 }
 
 /**

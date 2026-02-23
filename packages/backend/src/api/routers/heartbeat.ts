@@ -15,9 +15,10 @@ import {
   triggerTick,
   updateHeartbeatInterval,
   recompilePersona,
+  getAgentOrchestrator,
 } from '../../heartbeat/index.js';
 import { getEventBus } from '../../lib/event-bus.js';
-import type { HeartbeatState, EmotionState, Thought, Experience, TickDecision, EnergyBand, EnergyHistoryEntry, AgentEventType } from '@animus/shared';
+import type { HeartbeatState, EmotionState, Thought, Experience, TickDecision, EnergyBand, EnergyHistoryEntry, AgentEventType } from '@animus-labs/shared';
 import * as systemStore from '../../db/stores/system-store.js';
 import { getSystemDb } from '../../db/index.js';
 import { getEnergyBand, computeCircadianBaseline } from '../../heartbeat/energy-engine.js';
@@ -305,8 +306,8 @@ export const heartbeatRouter = router({
     )
     .query(({ input }) => {
       const db = getHeartbeatDb();
-      const opts: { emotion?: import('@animus/shared').EmotionName; since?: string; limit?: number } = {};
-      if (input?.emotion) opts.emotion = input.emotion as import('@animus/shared').EmotionName;
+      const opts: { emotion?: import('@animus-labs/shared').EmotionName; since?: string; limit?: number } = {};
+      if (input?.emotion) opts.emotion = input.emotion as import('@animus-labs/shared').EmotionName;
       if (input?.since) opts.since = input.since;
       opts.limit = input?.limit ?? 100;
       return heartbeatStore.getEmotionHistory(db, opts);
@@ -710,4 +711,85 @@ export const heartbeatRouter = router({
       };
     });
   }),
+
+  // ========================================================================
+  // Sub-Agent Tasks (Agents tab)
+  // ========================================================================
+
+  /**
+   * List sub-agent tasks from heartbeat.db.
+   * Returns active tasks only, or recent tasks (most recent N).
+   */
+  listAgentTasks: protectedProcedure
+    .input(
+      z.object({
+        activeOnly: z.boolean().default(false),
+        limit: z.number().int().positive().max(100).default(20),
+      }).optional()
+    )
+    .query(({ input }) => {
+      const hbDb = getHeartbeatDb();
+      if (input?.activeOnly) {
+        return heartbeatStore.getRunningAgentTasks(hbDb);
+      }
+      return heartbeatStore.getRecentAgentTasks(hbDb, input?.limit ?? 20);
+    }),
+
+  /**
+   * Get detail for a single sub-agent task, including its events and usage
+   * from agent_logs.db (joined via sessionId).
+   */
+  getAgentTaskDetail: protectedProcedure
+    .input(z.object({ taskId: z.string() }))
+    .query(({ input }) => {
+      const hbDb = getHeartbeatDb();
+      const task = heartbeatStore.getAgentTask(hbDb, input.taskId);
+      if (!task) return null;
+
+      const sessionId = (task as Record<string, unknown>)['sessionId'] as string | null;
+      let events: ReturnType<typeof agentLogStore.getSessionEvents> = [];
+      let usage: ReturnType<typeof agentLogStore.getSessionUsage> = [];
+
+      if (sessionId) {
+        const agentLogsDb = getAgentLogsDb();
+        events = agentLogStore.getSessionEvents(agentLogsDb, sessionId);
+        usage = agentLogStore.getSessionUsage(agentLogsDb, sessionId);
+      }
+
+      return { task, events, usage };
+    }),
+
+  /**
+   * Get aggregate usage scoped to sub-agent sessions only.
+   * Cross-references agent_tasks (heartbeat.db) session IDs with agent_usage (agent_logs.db).
+   */
+  getSubAgentUsage: protectedProcedure.query(() => {
+    const hbDb = getHeartbeatDb();
+    const sessionIds = heartbeatStore.getAgentTaskSessionIds(hbDb);
+    if (sessionIds.length === 0) {
+      return { totalInputTokens: 0, totalOutputTokens: 0, totalTokens: 0, totalCostUsd: 0, sessionCount: 0 };
+    }
+    const agentLogsDb = getAgentLogsDb();
+    return agentLogStore.getAggregateUsageForSessions(agentLogsDb, sessionIds);
+  }),
+
+  /**
+   * Cancel a running sub-agent via the orchestrator.
+   */
+  cancelAgentTask: protectedProcedure
+    .input(z.object({
+      taskId: z.string(),
+      reason: z.string().default('Cancelled by user'),
+    }))
+    .mutation(async ({ input }) => {
+      const orchestrator = getAgentOrchestrator();
+      if (!orchestrator) {
+        throw new Error('Agent orchestrator not available');
+      }
+      await orchestrator.cancelAgent({
+        agentId: input.taskId,
+        reason: input.reason,
+      });
+      return { success: true };
+    }),
 });

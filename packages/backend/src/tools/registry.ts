@@ -1,7 +1,7 @@
 /**
  * Tool Registry — combines definitions with handlers.
  *
- * The registry is the single place where tool definitions (from @animus/shared)
+ * The registry is the single place where tool definitions (from @animus-labs/shared)
  * are married to their handler implementations (from the backend).
  *
  * See docs/architecture/mcp-tools.md
@@ -13,7 +13,7 @@ import {
   getAllowedTools,
   type AnimusToolName,
   type PermissionTier,
-} from '@animus/shared';
+} from '@animus-labs/shared';
 import type { AnimusTool, ToolHandlerContext, ToolResult } from './types.js';
 import { sendMessageHandler } from './handlers/send-message.js';
 import { updateProgressHandler } from './handlers/update-progress.js';

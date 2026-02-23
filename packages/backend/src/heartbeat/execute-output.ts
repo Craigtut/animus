@@ -15,10 +15,10 @@ import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import * as agentLogStore from '../db/stores/agent-log-store.js';
 import * as systemStore from '../db/stores/system-store.js';
 import * as taskStore from '../db/stores/task-store.js';
-import { expiresIn, now, clamp, builtInDecisionTypeSchema } from '@animus/shared';
-import type { MindOutput, IEventBus, AgentEventType } from '@animus/shared';
+import { expiresIn, now, clamp, builtInDecisionTypeSchema } from '@animus-labs/shared';
+import type { MindOutput, IEventBus, AgentEventType } from '@animus-labs/shared';
 
-import type { AgentManager } from '@animus/agents';
+import type { AgentManager } from '@animus-labs/agents';
 import type { MemoryManager } from '../memory/index.js';
 import { processAllStreams } from '../memory/observational-memory/index.js';
 import { OBSERVATIONAL_MEMORY_CONFIG } from '../config/observational-memory.config.js';

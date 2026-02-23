@@ -23,10 +23,10 @@ COPY packages/channel-sdk/ packages/channel-sdk/
 COPY tsconfig.json ./
 
 # Build in dependency order: shared → agents → frontend → backend
-RUN npm run build -w @animus/shared && \
-    npm run build -w @animus/agents && \
-    npm run build -w @animus/frontend && \
-    npm run build -w @animus/backend
+RUN npm run build -w @animus-labs/shared && \
+    npm run build -w @animus-labs/agents && \
+    npm run build -w @animus-labs/frontend && \
+    npm run build -w @animus-labs/backend
 
 # Stage 2: Production runtime
 FROM node:24-slim AS runtime

@@ -7,8 +7,8 @@
  */
 
 import type Database from 'better-sqlite3';
-import { ANIMUS_TOOL_DEFS } from '@animus/shared';
-import type { RiskTier, ToolPermissionMode } from '@animus/shared';
+import { ANIMUS_TOOL_DEFS } from '@animus-labs/shared';
+import type { RiskTier, ToolPermissionMode } from '@animus-labs/shared';
 import { upsertToolPermission } from '../db/stores/system-store.js';
 import { createLogger } from '../lib/logger.js';
 

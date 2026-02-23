@@ -3,6 +3,7 @@ import { css, useTheme } from '@emotion/react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { FluidBackground } from '../../components/effects/FluidBackground';
+import { TauriDragRegion } from '../../components/layout/TauriDragRegion';
 import { Typography } from '../../components/ui';
 import type { OnboardingStep } from '../../store';
 
@@ -44,6 +45,8 @@ export function OnboardingLayout() {
         background: ${theme.colors.background.default};
       `}
     >
+      <TauriDragRegion />
+
       {/* Fluid WebGL background — persists across all onboarding steps */}
       <FluidBackground mode={theme.mode} />
 

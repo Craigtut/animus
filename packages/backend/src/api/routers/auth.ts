@@ -6,7 +6,7 @@
 
 import { TRPCError } from '@trpc/server';
 import * as argon2 from 'argon2';
-import { loginInputSchema, registerInputSchema } from '@animus/shared';
+import { loginInputSchema, registerInputSchema } from '@animus-labs/shared';
 import { router, publicProcedure, protectedProcedure } from '../trpc.js';
 import * as systemStore from '../../db/stores/system-store.js';
 import { getSystemDb } from '../../db/index.js';

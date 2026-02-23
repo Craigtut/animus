@@ -7,7 +7,7 @@
 
 import type { z } from 'zod';
 import type { ToolHandler, ToolResult } from '../types.js';
-import { updateProgressDef } from '@animus/shared';
+import { updateProgressDef } from '@animus-labs/shared';
 
 type UpdateProgressInput = z.infer<typeof updateProgressDef.inputSchema>;
 

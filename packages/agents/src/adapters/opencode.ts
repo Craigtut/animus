@@ -10,7 +10,7 @@
  * @see https://opencode.ai/docs/sdk/
  */
 
-import type { AgentProvider } from '@animus/shared';
+import type { AgentProvider } from '@animus-labs/shared';
 import type {
   AgentSessionConfig,
   AdapterCapabilities,

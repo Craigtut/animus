@@ -1,5 +1,5 @@
 /**
- * TTSEngine -- lazy-loaded native Pocket TTS via @animus/tts-native (napi-rs).
+ * TTSEngine -- lazy-loaded native Pocket TTS via @animus-labs/tts-native (napi-rs).
  *
  * Uses zero-shot voice cloning from reference audio (WAV files).
  * Model files expected at {modelsPath}/tts/:
@@ -31,9 +31,9 @@ export interface TTSEngineConfig {
   defaultSpeed: number;
 }
 
-// Re-exported from @animus/tts-native — opaque handle
-type NativeVoiceState = import('@animus/tts-native').VoiceState;
-type NativePocketTTS = import('@animus/tts-native').PocketTTS;
+// Re-exported from @animus-labs/tts-native — opaque handle
+type NativeVoiceState = import('@animus-labs/tts-native').VoiceState;
+type NativePocketTTS = import('@animus-labs/tts-native').PocketTTS;
 
 export class TTSEngine {
   private config: TTSEngineConfig;
@@ -67,12 +67,12 @@ export class TTSEngine {
     const ttsDir = path.join(this.config.modelsPath, 'tts');
     log.info('Loading TTS model (native Pocket TTS)...');
 
-    let PocketTTS: typeof import('@animus/tts-native').PocketTTS;
+    let PocketTTS: typeof import('@animus-labs/tts-native').PocketTTS;
     try {
-      ({ PocketTTS } = await import('@animus/tts-native'));
+      ({ PocketTTS } = await import('@animus-labs/tts-native'));
     } catch (err) {
       throw new Error(
-        'Native TTS addon not built. Run: npm run build -w @animus/tts-native (requires Rust toolchain)',
+        'Native TTS addon not built. Run: npm run build -w @animus-labs/tts-native (requires Rust toolchain)',
       );
     }
 

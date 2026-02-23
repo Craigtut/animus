@@ -69,7 +69,7 @@ The voice samples are drawn from multiple sources. The VCTK and EAR corpora have
 | **License** | MIT (code only — model weights retain CC-BY-4.0) |
 | **Author** | babybirdprd |
 
-This is the Rust/Candle port we use via `@animus/tts-native`. The code is MIT but it loads the same Kyutai model weights, which remain CC-BY-4.0.
+This is the Rust/Candle port we use via `@animus-labs/tts-native`. The code is MIT but it loads the same Kyutai model weights, which remain CC-BY-4.0.
 
 ---
 

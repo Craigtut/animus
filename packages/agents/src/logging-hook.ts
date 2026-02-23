@@ -4,12 +4,12 @@
  * Provides a hook that can be attached to any agent session to automatically
  * log all events to agent_logs.db via the agent-log-store functions.
  *
- * This bridges the @animus/agents package with the backend's logging store.
+ * This bridges the @animus-labs/agents package with the backend's logging store.
  * The backend passes in its store functions; this module knows nothing about
  * better-sqlite3 or the database directly.
  */
 
-import type { AgentProvider } from '@animus/shared';
+import type { AgentProvider } from '@animus-labs/shared';
 import type {
   AgentEvent,
   AgentEventHandler,

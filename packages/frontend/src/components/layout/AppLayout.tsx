@@ -1,12 +1,11 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
-import { useCallback } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { NavigationPill } from './NavigationPill';
 import { CommandPalette } from './CommandPalette';
+import { TauriDragRegion } from './TauriDragRegion';
 import { useSubscriptionManager } from '../../hooks/useSubscriptionManager';
-import { isTauri } from '../../utils/tauri';
 
 export function AppLayout() {
   // Wire all tRPC subscriptions into Zustand stores once at the shell level.
@@ -26,15 +25,6 @@ export function AppLayout() {
     return 'presence';
   };
 
-  const handleDragRegionMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.buttons === 1) {
-      e.preventDefault();
-      import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
-        getCurrentWindow().startDragging();
-      });
-    }
-  }, []);
-
   return (
     <div
       css={css`
@@ -42,43 +32,7 @@ export function AppLayout() {
         background: ${theme.colors.background.default};
       `}
     >
-      {/* Tauri: frosted glass titlebar with drag region */}
-      {isTauri() && (
-        <>
-          {/* Visual titlebar strip: frosted glass behind traffic lights */}
-          <div
-            onMouseDown={handleDragRegionMouseDown}
-            css={css`
-              position: fixed;
-              top: 0;
-              left: 0;
-              right: 0;
-              height: var(--titlebar-area-height, 0px);
-              z-index: ${theme.zIndex.navPill + 1};
-              background: ${theme.mode === 'light'
-                ? 'rgba(0, 0, 0, 0.04)'
-                : 'rgba(0, 0, 0, 0.2)'};
-              backdrop-filter: blur(12px);
-              -webkit-backdrop-filter: blur(12px);
-              border-bottom: 1px solid ${theme.mode === 'light'
-                ? 'rgba(0, 0, 0, 0.06)'
-                : 'rgba(255, 255, 255, 0.06)'};
-            `}
-          />
-          {/* Extended drag region: invisible, sits behind nav pill for wider drag target */}
-          <div
-            onMouseDown={handleDragRegionMouseDown}
-            css={css`
-              position: fixed;
-              top: var(--titlebar-area-height, 0px);
-              left: 0;
-              right: 0;
-              height: 40px;
-              z-index: ${theme.zIndex.navPill - 1};
-            `}
-          />
-        </>
-      )}
+      <TauriDragRegion />
       <NavigationPill />
       <CommandPalette />
 

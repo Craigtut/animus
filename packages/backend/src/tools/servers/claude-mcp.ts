@@ -13,7 +13,7 @@
  * See docs/architecture/mcp-tools.md
  */
 
-import { getMindTools, getAllowedTools, ANIMUS_TOOL_DEFS, type AnimusToolName, type PermissionTier, type ToolPermissionMode } from '@animus/shared';
+import { getMindTools, getAllowedTools, ANIMUS_TOOL_DEFS, type AnimusToolName, type PermissionTier, type ToolPermissionMode } from '@animus-labs/shared';
 import type { ToolHandlerContext, ToolResult } from '../types.js';
 import { executeTool } from '../registry.js';
 import { createLogger } from '../../lib/logger.js';

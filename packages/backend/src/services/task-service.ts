@@ -18,7 +18,7 @@ import type {
   TaskRun,
   TaskStatus,
   ScheduleType,
-} from '@animus/shared';
+} from '@animus-labs/shared';
 
 const log = createLogger('TaskService', 'heartbeat');
 

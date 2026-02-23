@@ -1,5 +1,5 @@
 /**
- * @animus-engine/channel-sdk — Public types for channel adapter authors.
+ * @animus-labs/channel-sdk — Public types for channel adapter authors.
  *
  * Channel packages import these types to implement the ChannelAdapter interface.
  * Since adapters only use `import type`, the SDK is erased at compile time
@@ -42,6 +42,7 @@ export interface AdapterContext {
     conversationId?: string;
     media?: Array<{ type: 'image' | 'audio' | 'video' | 'file'; mimeType: string; url: string; filename?: string }>;
     metadata?: Record<string, unknown>;
+    participant?: { displayName: string; avatarUrl?: string; isBot: boolean };
   }): void;
   resolveContact(contactId: string): Promise<{ identifier: string; displayName?: string } | null>;
   registerRoute(config: {
@@ -68,11 +69,29 @@ export interface ChannelAction {
   [key: string]: unknown;
 }
 
+export interface ExternalMessage {
+  author: {
+    identifier: string;
+    displayName: string;
+    isBot: boolean;
+  };
+  content: string;
+  timestamp: string;
+  threadTs?: string;
+  reactions?: Array<{ name: string; count: number }>;
+  attachments?: Array<{ type: string; url: string; filename?: string }>;
+}
+
 export interface ChannelAdapter {
   start(): Promise<void>;
   stop(): Promise<void>;
   send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<void>;
   performAction?(action: ChannelAction): Promise<void>;
+  getHistory?(params: {
+    conversationId: string;
+    limit?: number;
+    before?: string;
+  }): Promise<ExternalMessage[]>;
 }
 
 export type CreateAdapterFn = (ctx: AdapterContext) => ChannelAdapter;

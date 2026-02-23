@@ -7,7 +7,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { generateUUID, now } from '@animus/shared';
+import { generateUUID, now } from '@animus-labs/shared';
 import type {
   HeartbeatState,
   HeartbeatStage,
@@ -30,7 +30,7 @@ import type {
   ToolApprovalRequest,
   ToolApprovalAgentContext,
   ToolApprovalStatus,
-} from '@animus/shared';
+} from '@animus-labs/shared';
 import { snakeToCamel, intToBool } from '../utils.js';
 
 // ============================================================================
@@ -735,6 +735,17 @@ export function getRecentAgentTasks(db: Database.Database, limit: number = 20): 
     'SELECT * FROM agent_tasks ORDER BY created_at DESC LIMIT ?'
   ).all(limit) as Array<Record<string, unknown>>;
   return rows.map((row) => snakeToCamel<Record<string, unknown>>(row));
+}
+
+/**
+ * Get all non-null session IDs from agent_tasks.
+ * Used to scope usage queries to sub-agent sessions only.
+ */
+export function getAgentTaskSessionIds(db: Database.Database): string[] {
+  const rows = db.prepare(
+    'SELECT DISTINCT session_id FROM agent_tasks WHERE session_id IS NOT NULL'
+  ).all() as Array<{ session_id: string }>;
+  return rows.map((r) => r.session_id);
 }
 
 /**

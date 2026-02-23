@@ -5,7 +5,7 @@
  * This allows routing to the correct adapter when resuming sessions.
  */
 
-import type { AgentProvider } from '@animus/shared';
+import type { AgentProvider } from '@animus-labs/shared';
 
 /**
  * Parsed session ID components.

@@ -7,7 +7,7 @@ import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';
 import { getTaskService } from '../../services/task-service.js';
 import { getEventBus } from '../../lib/event-bus.js';
-import type { Task } from '@animus/shared';
+import type { Task } from '@animus-labs/shared';
 
 export const tasksRouter = router({
   /**

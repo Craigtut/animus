@@ -7,7 +7,7 @@
  * @see docs/agents/codex/oauth.md
  */
 
-import { generateUUID } from '@animus/shared';
+import { generateUUID } from '@animus-labs/shared';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';

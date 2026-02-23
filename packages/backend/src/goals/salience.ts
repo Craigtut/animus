@@ -8,8 +8,8 @@
  * See docs/architecture/goals.md — "Goal Salience"
  */
 
-import { clamp, DecayEngine } from '@animus/shared';
-import type { Goal, EmotionState } from '@animus/shared';
+import { clamp, DecayEngine } from '@animus-labs/shared';
+import type { Goal, EmotionState } from '@animus-labs/shared';
 
 // ============================================================================
 // Constants

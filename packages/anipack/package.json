@@ -1,0 +1,32 @@
+{
+  "name": "@animus-labs/anipack",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "anipack": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@animus-labs/shared": "*",
+    "archiver": "^7.0.0",
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/archiver": "^6.0.0"
+  }
+}

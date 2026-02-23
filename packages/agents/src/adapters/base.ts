@@ -4,7 +4,7 @@
  * Provides shared logic for all provider-specific adapters.
  */
 
-import type { AgentProvider, AgentEventType } from '@animus/shared';
+import type { AgentProvider, AgentEventType } from '@animus-labs/shared';
 import type {
   IAgentAdapter,
   IAgentSession,

@@ -25,7 +25,7 @@ import type {
   ResponseChunkData,
   TurnEndData,
   ErrorData,
-} from '@animus/agents';
+} from '@animus-labs/agents';
 
 interface Props {
   items: DisplayItem[];

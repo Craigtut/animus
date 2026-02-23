@@ -7,8 +7,8 @@
  * See docs/architecture/mcp-tools.md
  */
 
-import type { AnimusToolName, ChannelType, Contact, ContactChannel } from '@animus/shared';
-import type { IEventBus } from '@animus/shared';
+import type { AnimusToolName, ChannelType, Contact, ContactChannel } from '@animus-labs/shared';
+import type { IEventBus } from '@animus-labs/shared';
 
 /**
  * Context provided to every tool handler invocation.

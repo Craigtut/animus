@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { z } from 'zod';
 import type { ToolHandler, ToolResult } from '../types.js';
-import { transcribeAudioDef } from '@animus/shared';
+import { transcribeAudioDef } from '@animus-labs/shared';
 
 type TranscribeAudioInput = z.infer<typeof transcribeAudioDef.inputSchema>;
 

@@ -14,7 +14,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@animus/shared': path.resolve(__dirname, '../shared/src'),
+      '@animus-labs/shared': path.resolve(__dirname, '../shared/src'),
     },
   },
   server: {

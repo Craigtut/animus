@@ -80,6 +80,8 @@ export function useSubscriptionManager() {
   trpc.heartbeat.onAgentStatus.useSubscription(undefined, {
     onData: (event) => {
       useHeartbeatStore.getState().addAgentEvent(event);
+      // Invalidate listAgentTasks so the Agents tab refreshes on spawn/complete/fail
+      queryClient.invalidateQueries({ queryKey: [['heartbeat', 'listAgentTasks']] });
     },
   });
 
@@ -187,7 +189,16 @@ export function useSubscriptionManager() {
   });
 
   // ========================================================================
-  // 15. Tool approval requests
+  // 15. Sub-agent live events (for Agents tab event timeline)
+  // ========================================================================
+  trpc.heartbeat.onAgentEvent.useSubscription(undefined, {
+    onData: (event) => {
+      useHeartbeatStore.getState().addSubAgentEvent(event);
+    },
+  });
+
+  // ========================================================================
+  // 16. Tool approval requests
   // ========================================================================
   trpc.tools.onApprovalRequest.useSubscription(undefined, {
     onData: () => {
@@ -196,7 +207,7 @@ export function useSubscriptionManager() {
   });
 
   // ========================================================================
-  // 16. Tool approval resolutions
+  // 17. Tool approval resolutions
   // ========================================================================
   trpc.tools.onApprovalResolved.useSubscription(undefined, {
     onData: () => {
@@ -206,7 +217,7 @@ export function useSubscriptionManager() {
   });
 
   // ========================================================================
-  // 17. Download progress
+  // 18. Download progress
   // ========================================================================
   trpc.downloads.onProgress.useSubscription(undefined, {
     onData: (data) => {

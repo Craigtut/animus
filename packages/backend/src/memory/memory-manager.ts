@@ -10,8 +10,8 @@
  */
 
 import type Database from 'better-sqlite3';
-import { DecayEngine } from '@animus/shared';
-import type { IEmbeddingProvider, LongTermMemory, MemoryType, MemorySourceType } from '@animus/shared';
+import { DecayEngine } from '@animus-labs/shared';
+import type { IEmbeddingProvider, LongTermMemory, MemoryType, MemorySourceType } from '@animus-labs/shared';
 import * as memoryStore from '../db/stores/memory-store.js';
 import type { VectorStore, SearchResult } from './vector-store.js';
 import { getEventBus } from '../lib/event-bus.js';

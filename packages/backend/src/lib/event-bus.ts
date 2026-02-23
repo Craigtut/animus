@@ -3,7 +3,7 @@
  */
 
 import { EventEmitter } from 'events';
-import type { AnimusEventMap, IEventBus } from '@animus/shared';
+import type { AnimusEventMap, IEventBus } from '@animus-labs/shared';
 
 class AnimusEventBus implements IEventBus {
   private emitter = new EventEmitter();

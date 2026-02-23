@@ -15,7 +15,7 @@ import {
 import { Typography, Badge, Button } from '../ui';
 import { trpc } from '../../utils/trpc';
 import type { Theme } from '../../styles/theme';
-import type { ToolApprovalRequest, RiskTier } from '@animus/shared';
+import type { ToolApprovalRequest, RiskTier } from '@animus-labs/shared';
 
 // ============================================================================
 // Risk tier colors

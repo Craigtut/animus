@@ -7,7 +7,7 @@
  * See docs/architecture/heartbeat.md — "Tick Triggers" & "Tick Queuing"
  */
 
-import type { TriggerType } from '@animus/shared';
+import type { TriggerType } from '@animus-labs/shared';
 import { createLogger } from '../lib/logger.js';
 import type { TriggerContext } from './context-builder.js';
 

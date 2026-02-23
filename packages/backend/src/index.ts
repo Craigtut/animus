@@ -48,7 +48,7 @@ async function main() {
 
   // Route agents package logs through the backend logger so all output
   // uses the same format (timestamps, level labels, file logging, categories).
-  const { setDefaultLogger, initModelRegistry } = await import('@animus/agents');
+  const { setDefaultLogger, initModelRegistry } = await import('@animus-labs/agents');
   const agentsLog = createLogger('Agents', 'agents');
   setDefaultLogger({
     debug(msg: string, ctx?: Record<string, unknown>) {

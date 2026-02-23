@@ -10,7 +10,7 @@ name = "animus_desktop_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [[bin]]
-name = "animus-desktop"
+name = "Animus"
 path = "src/main.rs"
 
 [build-dependencies]

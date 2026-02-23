@@ -359,12 +359,12 @@ type AgentErrorCategory =
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      Animus Heartbeat                        │
-│              (Uses @animus/agents unified API)               │
+│              (Uses @animus-labs/agents unified API)               │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    @animus/agents                            │
+│                    @animus-labs/agents                            │
 │  ┌─────────────────────────────────────────────────────────┐│
 │  │              AgentManager (Factory)                     ││
 │  │  - getAdapter(provider): IAgentAdapter                  ││
@@ -1133,4 +1133,4 @@ Building a unified abstraction layer is feasible but requires careful handling o
 4. **Document limitations** clearly (e.g., Codex cancel)
 5. **Test extensively** with real SDK behavior
 
-The existing type definitions in `@animus/agents` are a solid foundation. Implementation should start with Claude (most mature SDK), then adapt patterns for Codex and OpenCode.
+The existing type definitions in `@animus-labs/agents` are a solid foundation. Implementation should start with Claude (most mature SDK), then adapt patterns for Codex and OpenCode.

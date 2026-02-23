@@ -14,8 +14,8 @@ import * as taskStore from '../db/stores/task-store.js';
 import * as systemStore from '../db/stores/system-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
-import { now } from '@animus/shared';
-import type { Task } from '@animus/shared';
+import { now } from '@animus-labs/shared';
+import type { Task } from '@animus-labs/shared';
 
 const log = createLogger('TaskScheduler', 'heartbeat');
 

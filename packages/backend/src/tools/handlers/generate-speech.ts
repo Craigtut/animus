@@ -11,7 +11,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { z } from 'zod';
 import type { ToolHandler, ToolResult } from '../types.js';
-import { generateSpeechDef } from '@animus/shared';
+import { generateSpeechDef } from '@animus-labs/shared';
 
 type GenerateSpeechInput = z.infer<typeof generateSpeechDef.inputSchema>;
 

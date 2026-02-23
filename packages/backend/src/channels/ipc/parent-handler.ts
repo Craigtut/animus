@@ -21,6 +21,7 @@ import type {
   ErrorMessage,
   PongMessage,
   PresenceUpdateMessage,
+  HistoryResponseMessage,
 } from './protocol.js';
 
 export interface ParentHandlerDeps {
@@ -38,6 +39,7 @@ export interface ParentHandlerDeps {
   onRouteRegister: (msg: RouteRegisterMessage) => void;
   onActionResponse: (msg: ActionResponseMessage) => void;
   onPresenceUpdate: (msg: PresenceUpdateMessage) => void;
+  onHistoryResponse: (msg: HistoryResponseMessage) => void;
   onError: (msg: ErrorMessage) => void;
   onStopAck: () => void;
   onPong: (msg: PongMessage) => void;
@@ -120,6 +122,11 @@ export function createParentHandler(deps: ParentHandlerDeps): (raw: unknown) => 
       case 'presence_update':
         log.debug(`Presence update: ${msg.identifier} → ${msg.status}`);
         deps.onPresenceUpdate(msg);
+        break;
+
+      case 'history_response':
+        log.debug(`History response [${msg.id}]: ${msg.ok ? 'ok' : msg.error}`);
+        deps.onHistoryResponse(msg);
         break;
 
       case 'error':

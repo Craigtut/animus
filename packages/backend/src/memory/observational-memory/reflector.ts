@@ -10,9 +10,9 @@
  * See docs/architecture/observational-memory.md — The Reflector Agent.
  */
 
-import type { AgentManager } from '@animus/agents';
-import type { SessionUsage } from '@animus/agents';
-import { estimateTokens } from '@animus/shared';
+import type { AgentManager } from '@animus-labs/agents';
+import type { SessionUsage } from '@animus-labs/agents';
+import { estimateTokens } from '@animus-labs/shared';
 import type { StreamType } from '../../config/observational-memory.config.js';
 import { OBSERVATIONAL_MEMORY_CONFIG } from '../../config/observational-memory.config.js';
 import { createLogger } from '../../lib/logger.js';

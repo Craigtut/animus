@@ -1,5 +1,5 @@
 {
-  "name": "@animus/shared",
+  "name": "@animus-labs/shared",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -20,6 +20,11 @@
       "source": "./src/types/index.ts",
       "types": "./dist/types/index.d.ts",
       "import": "./dist/types/index.js"
+    },
+    "./constants": {
+      "source": "./src/constants/index.ts",
+      "types": "./dist/constants/index.d.ts",
+      "import": "./dist/constants/index.js"
     }
   },
   "scripts": {
