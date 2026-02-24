@@ -89,12 +89,16 @@ Animus is built as a self-contained, self-hosted application. The guiding princi
 - ACID compliance
 - WAL mode for concurrent reads
 
-**Why five separate SQLite databases?**
+**Why six separate SQLite databases?**
+
+All databases live under `data/databases/` (see `docs/architecture/data-directory.md`).
+
 1. **system.db** - Core config that should never be accidentally deleted (users, contacts, contact channels, settings, API keys)
-2. **heartbeat.db** - AI state that might be reset for fresh start (thoughts, emotions, experiences, agent tasks)
-3. **memory.db** - Accumulated knowledge: working memory (per-contact notepad), core self (agent self-knowledge), long-term memories (extracted knowledge metadata). Reset with heartbeat for full AI reset, or preserved independently for soft reset.
-4. **messages.db** - Conversation history that persists across heartbeat resets (messages tagged with contact_id, conversations)
-5. **agent_logs.db** - High-volume logs with aggressive TTL cleanup (sessions, events, usage)
+2. **persona.db** - Personality settings with a separate lifecycle from system.db
+3. **heartbeat.db** - AI state that might be reset for fresh start (thoughts, emotions, experiences, agent tasks)
+4. **memory.db** - Accumulated knowledge: working memory (per-contact notepad), core self (agent self-knowledge), long-term memories (extracted knowledge metadata). Reset with heartbeat for full AI reset, or preserved independently for soft reset.
+5. **messages.db** - Conversation history that persists across heartbeat resets (messages tagged with contact_id, conversations)
+6. **agent_logs.db** - High-volume logs with aggressive TTL cleanup (sessions, events, usage)
 
 **Why LanceDB?**
 - Embedded (no external server)
@@ -447,9 +451,9 @@ Each function accepts the database instance as its first parameter. In productio
 
 ### Database Migrations (`@animus-labs/backend`)
 
-A lightweight, custom migration system for managing schema changes across all five SQLite databases. Zero external dependencies — just ~50 lines of migration runner code.
+A lightweight, custom migration system for managing schema changes across all six SQLite databases. Zero external dependencies — just ~50 lines of migration runner code.
 
-**Why not an ORM migration tool (Drizzle, Kysely, Knex)?** Animus uses raw SQL by design (no ORM). Adding an ORM's migration runner purely for migrations introduces a heavy dependency for a narrow use case. The five separate databases also make ORM migration tools awkward — they typically assume a single database connection.
+**Why not an ORM migration tool (Drizzle, Kysely, Knex)?** Animus uses raw SQL by design (no ORM). Adding an ORM's migration runner purely for migrations introduces a heavy dependency for a narrow use case. The six separate databases also make ORM migration tools awkward — they typically assume a single database connection.
 
 **Why not Umzug?** Viable option, but for SQLite with better-sqlite3, the migration problem is simple enough that a dependency isn't justified. Our runner is ~50 lines.
 
@@ -503,12 +507,12 @@ function runMigrations(db: Database, migrationsDir: string): void {
 - Migration files are **append-only** — never edit or delete an applied migration
 - Each migration runs in a **transaction** — if it fails, nothing is applied (SQLite DDL is transactional)
 - Version numbers are extracted from the filename prefix (e.g., `001`, `002`)
-- The runner processes each of the five databases independently
+- The runner processes each of the six databases independently
 - Migrations are **forward-only** — no rollback support (if needed, write a new migration that reverses the change)
 
 **Startup sequence:**
 ```
-1. Open all 5 database connections (WAL mode, pragmas)
+1. Open all 6 database connections (WAL mode, pragmas)
 2. Run migrations for each database
 3. Initialize services (auth, heartbeat, channels, etc.)
 4. Start HTTP server
@@ -613,7 +617,7 @@ The existing architecture is already well-suited for desktop packaging:
 
 - **Self-contained**: SQLite + LanceDB, no external infrastructure to bundle
 - **Single-user**: One instance per user is the desktop app model
-- **Configurable paths**: Data directory paths are set via environment variables (`DB_SYSTEM_PATH`, etc.) — Tauri's Rust shell resolves `app_data_dir()` and passes them to the sidecar
+- **Configurable paths**: All data paths derive from a single `ANIMUS_DATA_DIR` env var — Tauri's Rust shell resolves `app_data_dir()` and passes it to the sidecar
 - **Configurable binding**: `HOST` and `PORT` env vars allow switching to `127.0.0.1:{dynamic_port}` at launch
 - **Frontend is a standard SPA**: Vite-built React app loads in Tauri's webview with no changes
 
@@ -621,7 +625,7 @@ The existing architecture is already well-suited for desktop packaging:
 
 These are all configuration-level concerns, not architectural changes:
 
-1. **Data directory** — Tauri resolves the platform-specific app data path (e.g., `~/Library/Application Support/com.animus.app/` on macOS) and passes it to the sidecar via env vars
+1. **Data directory** — Tauri resolves the platform-specific app data path (e.g., `~/Library/Application Support/com.animus.app/` on macOS) and passes it as `ANIMUS_DATA_DIR` to the sidecar. Secrets are auto-generated by the backend on first run.
 2. **Localhost binding** — Sidecar binds to `127.0.0.1` with a dynamic port (not `0.0.0.0:3000`)
 3. **Backend URL** — Tauri passes the sidecar's port to the webview so the frontend knows where to connect
 4. **Process lifecycle** — Tauri starts the sidecar on launch and sends a graceful shutdown signal on quit

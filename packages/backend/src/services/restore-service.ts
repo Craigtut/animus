@@ -21,7 +21,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { tmpdir } from 'os';
-import { env } from '../utils/env.js';
+import { DATA_DIR, DB_PERSONA_PATH, DB_HEARTBEAT_PATH, DB_MEMORY_PATH, DB_MESSAGES_PATH, DB_AGENT_LOGS_PATH, LANCEDB_PATH } from '../utils/env.js';
 import { createLogger } from '../lib/logger.js';
 import { setMaintenanceMode } from '../lib/maintenance.js';
 import { operationInProgress, getSave, extractArchive } from './save-service.js';
@@ -32,16 +32,15 @@ const log = createLogger('RestoreService', 'saves');
 // Constants
 // ---------------------------------------------------------------------------
 
-const DATA_DIR = path.dirname(env.DB_SYSTEM_PATH);
 const SAVES_DIR = path.join(DATA_DIR, 'saves');
 const ROLLBACK_DIR = path.join(DATA_DIR, '.restore-backup');
 
 const AI_DB_FILES = [
-  { name: 'persona.db', envPath: env.DB_PERSONA_PATH },
-  { name: 'heartbeat.db', envPath: env.DB_HEARTBEAT_PATH },
-  { name: 'memory.db', envPath: env.DB_MEMORY_PATH },
-  { name: 'messages.db', envPath: env.DB_MESSAGES_PATH },
-  { name: 'agent_logs.db', envPath: env.DB_AGENT_LOGS_PATH },
+  { name: 'persona.db', envPath: DB_PERSONA_PATH },
+  { name: 'heartbeat.db', envPath: DB_HEARTBEAT_PATH },
+  { name: 'memory.db', envPath: DB_MEMORY_PATH },
+  { name: 'messages.db', envPath: DB_MESSAGES_PATH },
+  { name: 'agent_logs.db', envPath: DB_AGENT_LOGS_PATH },
 ];
 
 // ---------------------------------------------------------------------------
@@ -92,7 +91,7 @@ async function createRollbackBackup(): Promise<void> {
   }
 
   try {
-    await fs.cp(env.LANCEDB_PATH, path.join(ROLLBACK_DIR, 'lancedb'), { recursive: true });
+    await fs.cp(LANCEDB_PATH, path.join(ROLLBACK_DIR, 'lancedb'), { recursive: true });
   } catch {
     // LanceDB may not exist yet
   }
@@ -112,8 +111,8 @@ async function restoreFromRollback(): Promise<void> {
   }
 
   try {
-    await fs.rm(env.LANCEDB_PATH, { recursive: true, force: true });
-    await fs.cp(path.join(ROLLBACK_DIR, 'lancedb'), env.LANCEDB_PATH, { recursive: true });
+    await fs.rm(LANCEDB_PATH, { recursive: true, force: true });
+    await fs.cp(path.join(ROLLBACK_DIR, 'lancedb'), LANCEDB_PATH, { recursive: true });
   } catch {
     log.error('Could not restore LanceDB from rollback backup');
   }
@@ -228,11 +227,11 @@ export async function restoreFromSave(saveId: string): Promise<void> {
       }
 
       // Copy LanceDB
-      await fs.rm(env.LANCEDB_PATH, { recursive: true, force: true });
+      await fs.rm(LANCEDB_PATH, { recursive: true, force: true });
       try {
-        await fs.cp(path.join(extractDir, 'lancedb'), env.LANCEDB_PATH, { recursive: true });
+        await fs.cp(path.join(extractDir, 'lancedb'), LANCEDB_PATH, { recursive: true });
       } catch {
-        await fs.mkdir(env.LANCEDB_PATH, { recursive: true });
+        await fs.mkdir(LANCEDB_PATH, { recursive: true });
       }
 
       // Delete stale WAL/SHM files (save DBs are clean, no WAL)

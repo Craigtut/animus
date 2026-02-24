@@ -42,7 +42,7 @@ export const pluginsRouter = router({
         version: p.manifest.version,
         description: p.manifest.description,
         iconSvg: loaded?.iconSvg ?? null,
-        source: p.source,
+        installedFrom: p.source,
         enabled: p.enabled,
         status,
         components: {
@@ -82,7 +82,7 @@ export const pluginsRouter = router({
         iconSvg: loaded.iconSvg,
         author: loaded.manifest.author,
         license: loaded.manifest.license,
-        source: loaded.source,
+        installedFrom: loaded.source,
         enabled: loaded.enabled,
         manifest: loaded.manifest,
         components: {
@@ -103,7 +103,7 @@ export const pluginsRouter = router({
   install: protectedProcedure
     .input(
       z.object({
-        source: pluginSourceSchema.exclude(['built-in', 'store']),
+        source: pluginSourceSchema.exclude(['built-in', 'store', 'package']),
         path: z.string(),
       })
     )

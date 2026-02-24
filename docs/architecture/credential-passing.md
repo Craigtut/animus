@@ -47,7 +47,7 @@ All secrets use the same encryption service. There is a single master encryption
 |-----------|-------|
 | Algorithm | AES-256-GCM (authenticated encryption) |
 | Key derivation | PBKDF2, SHA-256, 100,000 iterations |
-| Key source | `ANIMUS_ENCRYPTION_KEY` environment variable (mandatory) |
+| Key source | `ANIMUS_ENCRYPTION_KEY` (auto-generated, or env var override) |
 | Salt | Static `'animus-encryption-salt'` (uniqueness from env var) |
 | IV | 16 bytes, randomly generated per encryption |
 | Auth tag | 16 bytes |
@@ -89,17 +89,18 @@ verifyEncryptionKey(db): void         // Sentinel check — throws on mismatch
 
 The derived key is cached in memory after first derivation. PBKDF2 only runs once per server startup.
 
-### Environment Requirement
+### Secret Resolution
 
-**File:** `packages/backend/src/utils/env.ts`
+**File:** `packages/backend/src/lib/secrets-manager.ts`
 
-```typescript
-ANIMUS_ENCRYPTION_KEY: z.string().min(1,
-  'ANIMUS_ENCRYPTION_KEY is required. Set any secret string to encrypt stored credentials.'
-)
-```
+The encryption key is resolved automatically at startup via `resolveSecrets()`:
 
-The server will not start without this environment variable. Zod validation runs before any database initialization.
+1. `ANIMUS_ENCRYPTION_KEY` env var (if set explicitly) → use it
+2. `data/.secrets` file → load from it
+3. Legacy Tauri files (`.encryption_key`) → migrate
+4. Generate via `crypto.randomBytes(32).toString('hex')`
+
+The resolved key is stored in `data/.secrets` (file permissions `0o600`) and scrubbed from `process.env` after loading. No manual configuration is required — secrets are auto-generated on first startup. See `docs/architecture/data-directory.md` for the full secrets lifecycle.
 
 ---
 
@@ -173,10 +174,12 @@ const ENV_MAP: Record<string, string> = {
 **File:** `packages/backend/src/index.ts`
 
 ```
-1. initializeDatabases()           — open 5 DBs, run migrations
-2. verifyEncryptionKey(systemDb)   — sentinel check
-3. loadCredentialsIntoEnv(systemDb) — decrypt all → set process.env
-4. Start Fastify server + heartbeat
+1. resolveSecrets()                — auto-generate or load encryption key + JWT secret
+2. initializeDatabases()           — open 6 DBs, run migrations
+3. verifyEncryptionKey(systemDb)   — sentinel check
+4. persistSecretsIfNeeded()        — write .secrets file if first run
+5. loadCredentialsIntoEnv(systemDb) — decrypt all → set process.env
+6. Start Fastify server + heartbeat
 ```
 
 `loadCredentialsIntoEnv()` iterates all rows in `credentials`, decrypts each, and sets the corresponding `process.env` variable. Special handling:
@@ -607,14 +610,14 @@ All three credential types (providers, plugins, channels) follow the same UI pat
 | **Malicious skill exfiltrates key** | Key never in LLM context; skill can't instruct mind to leak what it doesn't have |
 | **Filesystem access to DB** | Encrypted at rest with AES-256-GCM |
 | **Subprocess credential leakage** | Agent provider keys and encryption key stripped from `run_with_credentials` child env |
-| **Plugin subprocess reads encryption key** | Decision/hook handlers inherit `process.env` including `ANIMUS_ENCRYPTION_KEY`. Mitigated by trust model: users install only vetted plugins. |
-| **`ANIMUS_ENCRYPTION_KEY` compromised** | All credentials compromised — inherent to any single-key system. Mitigated by file permissions and never storing the key in DB. |
+| **Plugin subprocess reads encryption key** | Decision/hook handlers inherit `process.env`, but `ANIMUS_ENCRYPTION_KEY` is scrubbed from `process.env` after secret resolution (see `secrets-manager.ts`). The key exists only in module-scoped variables. Mitigated by trust model: users install only vetted plugins. |
+| **`ANIMUS_ENCRYPTION_KEY` compromised** | All credentials compromised — inherent to any single-key system. Mitigated by file permissions (`0o600` on `.secrets`), process.env scrubbing, and never storing the key in DB. |
 | **Credential hint reduces entropy** | Last 4 chars exposed. Minimal brute-force advantage in practice. |
 
 ### Trust Assumptions
 
-- **Self-hosted, single-user:** The user controls the machine, the encryption key, and which plugins/channels are installed.
-- **Plugin trust:** Plugins run as subprocesses with inherited `process.env`. A malicious plugin could theoretically read `ANIMUS_ENCRYPTION_KEY` and decrypt all credentials. This is acceptable because plugin installation is a user-initiated, trusted action.
+- **Self-hosted, single-user:** The user controls the machine, the data directory, and which plugins/channels are installed. Secrets are auto-generated and stored in `data/.secrets` with `0o600` permissions.
+- **Plugin trust:** Plugins run as subprocesses with inherited `process.env`. The encryption key is scrubbed from `process.env` after startup (exists only in module-scoped variables). However, a malicious plugin with filesystem access could theoretically read `data/.secrets`. This is acceptable because plugin installation is a user-initiated, trusted action.
 - **No remote storage:** All data is local SQLite. No network transmission of credentials except to the provider API for validation and to the intended third-party services.
 
 ---
@@ -626,8 +629,9 @@ All three credential types (providers, plugins, channels) follow the same UI pat
 | File | Purpose |
 |------|---------|
 | `packages/backend/src/lib/encryption-service.ts` | AES-256-GCM encrypt/decrypt, key verification |
-| `packages/backend/src/utils/env.ts` | `ANIMUS_ENCRYPTION_KEY` requirement |
-| `packages/backend/src/index.ts` | Startup order: migrations → key verify → credential load |
+| `packages/backend/src/lib/secrets-manager.ts` | Auto-generate, load, persist encryption key + JWT secret |
+| `packages/backend/src/utils/env.ts` | `DATA_DIR` resolution, derived database paths |
+| `packages/backend/src/index.ts` | Startup order: secrets → migrations → key verify → credential load |
 
 ### Agent Provider Keys
 

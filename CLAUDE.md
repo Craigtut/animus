@@ -41,41 +41,42 @@ Animus is an autonomous AI assistant designed to be genuinely helpful while main
 **Backend:**
 - Node.js + Fastify
 - tRPC for type-safe API
-- Five SQLite databases (see below)
+- Six SQLite databases (see below)
 - LanceDB for vector storage/semantic search
 - Transformers.js + BGE-small-en-v1.5 for local embeddings
 - Agent SDKs: Claude (default), Codex, OpenCode
 
 ### Database Architecture
 
-Five separate SQLite databases with distinct purposes and lifecycles:
+Six separate SQLite databases with distinct purposes and lifecycles, all stored under `data/databases/`:
 
 1. **system.db** - Core configuration (rarely reset)
    - Users and authentication
    - Contacts and contact channels (identity resolution)
    - System settings
-   - Personality configuration
    - API keys (encrypted)
 
-2. **heartbeat.db** - AI life state (occasional reset)
+2. **persona.db** - Personality settings (separate lifecycle from system.db)
+
+3. **heartbeat.db** - AI life state (occasional reset)
    - Heartbeat state and tick tracking
    - Thoughts, experiences, emotions
    - Tasks and actions
    - TTL-based cleanup
 
-3. **memory.db** - Accumulated knowledge (reset with heartbeat or preserved independently)
+4. **memory.db** - Accumulated knowledge (reset with heartbeat or preserved independently)
    - Working memory (per-contact notepad)
    - Core self (agent's self-knowledge, singleton)
    - Long-term memories (extracted knowledge metadata)
-   - LanceDB stores vector embeddings (search index)
+   - LanceDB stores vector embeddings (search index, at `data/databases/lancedb/`)
 
-4. **messages.db** - Conversation history (long-term retention)
+5. **messages.db** - Conversation history (long-term retention)
    - Messages (user and Animus, both directions)
    - Conversations / threads
    - Channel metadata
    - Persists across heartbeat resets
 
-5. **agent_logs.db** - SDK logs (frequent cleanup)
+6. **agent_logs.db** - SDK logs (frequent cleanup)
    - Agent sessions
    - Events (input, thinking, tool calls, responses)
    - Token usage and costs
@@ -201,17 +202,17 @@ log.debug('Verbose details');
 - Existing categories: `server`, `heartbeat`, `agents`, `channels`, `auth`, `database`
 - Categories are toggled via `settings.updateLogCategories` tRPC endpoint, stored in `system_settings.log_categories`
 - Level filtering respects `LOG_LEVEL` env var (`debug < info < warn < error`)
-- **Log file**: All log output is also written to `logs/animus.log` at debug level (captures everything regardless of console `LOG_LEVEL` or category filters). The file rotates at 5MB (`animus.log.1`). The `logs/` directory is gitignored.
+- **Log file**: All log output is also written to `data/logs/animus.log` at debug level (captures everything regardless of console `LOG_LEVEL` or category filters). The file rotates at 5MB (`animus.log.1`). The `data/logs/` directory is gitignored (under `data/`).
 
 ```bash
 # Tail logs in real-time during development
-tail -f logs/animus.log
+tail -f data/logs/animus.log
 
 # Search for errors
-grep "ERROR" logs/animus.log
+grep "ERROR" data/logs/animus.log
 
 # Claude Code can read logs directly via the Read tool:
-# logs/animus.log
+# data/logs/animus.log
 ```
 
 ### API Design
@@ -311,6 +312,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - **Architecture**: `docs/architecture/observational-memory.md` (observational memory — three-stream compression, Observer/Reflector agents, token-based thresholds, async processing, memory.db schema)
 - **Architecture**: `docs/architecture/reflex-system.md` (reflex fast-response layer — Vercel AI SDK, dual-path voice architecture, lightweight context, heartbeat integration, provider configuration)
 - **Architecture**: `docs/architecture/tts-licensing-and-distribution.md` (TTS model licensing, CC-BY-4.0 redistribution, weight bundling approach, voice cloning consent flow, attribution requirements)
+- **Architecture**: `docs/architecture/data-directory.md` (data directory layout, `ANIMUS_DATA_DIR` resolution, secrets lifecycle, deployment modes)
 - **Architecture**: `docs/architecture/package-installation.md` (package distribution — .anpk install flow, verification chain, rollback, update checking, config migration, store browser UI, AI self-management MCP tools)
 - **Open Questions**: `docs/architecture/open-questions.md` (all 7 resolved)
 - **Open Concerns**: `docs/architecture/open-concerns.md` (known acceptable concerns)
@@ -332,6 +334,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on context assembly/prompt building → `/doc-explorer context-builder`
 - Working on shared abstractions (embedding, decay, encryption, auth, migrations) → `/doc-explorer tech-stack`
 - Working on secrets/credentials/encryption/API keys → `/doc-explorer credential-passing`
+- Working on data directory layout/paths/env vars/secrets → `/doc-explorer data-directory`
 - Working on MCP tools/custom tools → `/doc-explorer mcp-tools`
 - Working on tool permissions/approval flow/trust ramp → `/doc-explorer tool-permissions`
 - Working on voice/speech/STT/TTS/audio → `/doc-explorer voice` and `/doc-explorer speech-engine`

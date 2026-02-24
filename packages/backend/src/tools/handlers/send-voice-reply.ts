@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { DATA_DIR } from '../../utils/env.js';
 import type { z } from 'zod';
 import type { ToolHandler, ToolResult } from '../types.js';
 import { sendVoiceReplyDef } from '@animus-labs/shared';
@@ -62,7 +63,7 @@ export const sendVoiceReplyHandler: ToolHandler<SendVoiceReplyInput> = async (
     });
 
     // 2. Save WAV to data/media/speech/
-    const speechDir = path.resolve('data', 'media', 'speech');
+    const speechDir = path.join(DATA_DIR, 'media', 'speech');
     fs.mkdirSync(speechDir, { recursive: true });
 
     const filename = `${randomUUID()}.wav`;

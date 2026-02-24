@@ -163,7 +163,7 @@ export const PluginMcpServerSchema = z.object({
 // Plugin Record (DB row shape)
 // ============================================================================
 
-export const pluginSourceSchema = z.enum(['built-in', 'local', 'git', 'npm', 'store']);
+export const pluginSourceSchema = z.enum(['built-in', 'local', 'git', 'npm', 'store', 'package']);
 
 export const PluginRecordSchema = z.object({
   name: z.string(),

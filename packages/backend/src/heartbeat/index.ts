@@ -21,7 +21,7 @@ import * as systemStore from '../db/stores/system-store.js';
 import * as personaStore from '../db/stores/persona-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
-import { env } from '../utils/env.js';
+import { env, LANCEDB_PATH } from '../utils/env.js';
 import { now } from '@animus-labs/shared';
 import type { HeartbeatState, MindOutput } from '@animus-labs/shared';
 
@@ -179,6 +179,7 @@ async function mindQuery(
     goalContext: gathered.goalContext?.goalSection ?? null,
     graduatingSeedsContext: gathered.goalContext?.graduatingSeedsSection ?? null,
     proposedGoalsContext: gathered.goalContext?.proposedGoalsSection ?? null,
+    planningPromptsContext: gathered.goalContext?.planningPromptsSection ?? null,
     memoryFlushPending,
     spawnBudgetNote: gathered.spawnBudgetNote,
     contacts: gathered.contacts,
@@ -381,7 +382,9 @@ async function mindQuery(
         log.info(`Filtered non-response turn ${turnData.turnIndex}: "${turnText.trim()}"`);
         return;
       }
-      if (!isMessageTrigger || !gathered.contact || !gathered.trigger.channel) return;
+      // Allow replies for both full contacts and recognized participants (synthetic contactId)
+      const turnContactId = gathered.contact?.id ?? gathered.trigger.contactId;
+      if (!isMessageTrigger || !turnContactId || !gathered.trigger.channel) return;
 
       try {
         // Strip 'media' from trigger metadata — incoming attachments shouldn't be re-sent.
@@ -394,7 +397,7 @@ async function mindQuery(
         const { getChannelRouter } = await import('../channels/channel-router.js');
         const router = getChannelRouter();
         await router.sendOutbound({
-          contactId: gathered.contact.id,
+          contactId: turnContactId,
           channel: gathered.trigger.channel,
           content: turnText.trim(),
           ...(hasReplyMetadata ? { metadata: replyMetadata } : {}),
@@ -464,7 +467,9 @@ async function mindQuery(
 
     // If no turns were sent during streaming (single-turn or turn_end handler didn't fire),
     // send the full accumulated reply as one message (fallback to monolithic behavior).
-    if (!replySentEarly && isMessageTrigger && replyAccumulated.trim() && !isNonResponse(replyAccumulated) && gathered.contact && gathered.trigger.channel) {
+    // Allow replies for both full contacts and recognized participants (synthetic contactId)
+    const fallbackContactId = gathered.contact?.id ?? gathered.trigger.contactId;
+    if (!replySentEarly && isMessageTrigger && replyAccumulated.trim() && !isNonResponse(replyAccumulated) && fallbackContactId && gathered.trigger.channel) {
       try {
         // Strip 'media' from trigger metadata — incoming attachments shouldn't be re-sent.
         // Keep other metadata like channelId for Discord reply routing.
@@ -476,7 +481,7 @@ async function mindQuery(
         const { getChannelRouter } = await import('../channels/channel-router.js');
         const router = getChannelRouter();
         await router.sendOutbound({
-          contactId: gathered.contact.id,
+          contactId: fallbackContactId,
           channel: gathered.trigger.channel,
           content: replyAccumulated.trim(),
           ...(hasFallbackMetadata ? { metadata: fallbackMetadata } : {}),
@@ -787,7 +792,7 @@ export async function initializeHeartbeat(): Promise<{ resumedAfterRestart: bool
   try {
     const memDb = getMemoryDb();
     ctx.embeddingProvider = new LocalEmbeddingProvider();
-    ctx.vectorStore = new VectorStore(env.LANCEDB_PATH, ctx.embeddingProvider.dimensions);
+    ctx.vectorStore = new VectorStore(LANCEDB_PATH, ctx.embeddingProvider.dimensions);
     await ctx.vectorStore.initialize();
     ctx.memoryManager = new MemoryManager(memDb, ctx.vectorStore, ctx.embeddingProvider);
     log.debug('Memory system initialized');

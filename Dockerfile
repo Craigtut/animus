@@ -28,20 +28,26 @@ RUN npm run build -w @animus-labs/shared && \
     npm run build -w @animus-labs/frontend && \
     npm run build -w @animus-labs/backend
 
+# Prune dev dependencies after build (keeps native addons intact)
+RUN npm prune --omit=dev
+
 # Stage 2: Production runtime
 FROM node:24-slim AS runtime
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files (needed for Node module resolution)
 COPY package.json package-lock.json* ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/agents/package.json packages/agents/
 COPY packages/backend/package.json packages/backend/
 COPY packages/channel-sdk/package.json packages/channel-sdk/
 
-# Install production dependencies only
-RUN npm ci --omit=dev
+# Copy pruned node_modules from builder (preserves native addons)
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/shared/node_modules packages/shared/node_modules
+COPY --from=builder /app/packages/agents/node_modules packages/agents/node_modules
+COPY --from=builder /app/packages/backend/node_modules packages/backend/node_modules
 
 # Copy built artifacts
 COPY --from=builder /app/packages/shared/dist packages/shared/dist
@@ -56,12 +62,7 @@ RUN mkdir -p /app/data
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
-ENV DB_SYSTEM_PATH=/app/data/system.db
-ENV DB_HEARTBEAT_PATH=/app/data/heartbeat.db
-ENV DB_MEMORY_PATH=/app/data/memory.db
-ENV DB_MESSAGES_PATH=/app/data/messages.db
-ENV DB_AGENT_LOGS_PATH=/app/data/agent_logs.db
-ENV LANCEDB_PATH=/app/data/lancedb
+ENV ANIMUS_DATA_DIR=/app/data
 
 EXPOSE 3000
 

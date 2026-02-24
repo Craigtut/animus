@@ -136,7 +136,7 @@ async function boot(args: SandboxCliArgs) {
   });
 
   // Suppress all console logging — TUI takes over stdout.
-  // File logging (logs/animus.log) continues unaffected.
+  // File logging (data/logs/animus.log) continues unaffected.
   const { suppressConsole } = await import('../lib/logger.js');
   suppressConsole();
 

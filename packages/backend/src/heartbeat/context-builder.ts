@@ -83,6 +83,8 @@ export interface MindContextParams {
   graduatingSeedsContext?: string | null;
   /** Proposed goals awaiting approval */
   proposedGoalsContext?: string | null;
+  /** Planning prompts for active goals without plans */
+  planningPromptsContext?: string | null;
   /** Session approaching context limit */
   memoryFlushPending?: boolean;
   /** Spawn budget warning/exhaustion note for the mind */
@@ -458,7 +460,7 @@ Your mind persists across ticks within a session. When your session is warm,
 continue naturally — don't reintroduce yourself. When your session is cold,
 take a moment to orient using the context provided.
 
-Your server writes detailed logs to logs/animus.log. These capture your
+Your server writes detailed logs to data/logs/animus.log. These capture your
 heartbeat pipeline, agent sessions, channel activity, and all system
 operations at debug level — a complete record of your runtime behavior.
 If something seems off or you want to understand what happened, these
@@ -1098,6 +1100,11 @@ export function buildUserMessage(params: MindContextParams): string {
 
   if (params.proposedGoalsContext) {
     sections.push('── PENDING GOALS ──\n' + params.proposedGoalsContext);
+  }
+
+  // 8a. Planning prompts for active goals without plans
+  if (params.planningPromptsContext) {
+    sections.push(params.planningPromptsContext);
   }
 
   // 8b. Deferred tasks (shown during interval ticks)

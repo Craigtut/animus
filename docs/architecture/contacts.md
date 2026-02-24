@@ -474,4 +474,4 @@ The contacts system uses several shared abstractions (see `docs/architecture/tec
 - `docs/architecture/heartbeat.md` — Heartbeat pipeline where contact context flows through
 - `docs/architecture/context-builder.md` — How contact context is assembled into the mind's prompt
 - `docs/architecture/agent-orchestration.md` — Sub-agent prompt template and delegation
-- `docs/architecture/tech-stack.md` — Database architecture (five databases), shared abstractions
+- `docs/architecture/tech-stack.md` — Database architecture (six databases), shared abstractions

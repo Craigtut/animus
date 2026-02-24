@@ -21,7 +21,7 @@ import archiver from 'archiver';
 import extractZip from 'extract-zip';
 import { saveManifestSchema } from '@animus-labs/shared';
 import type { SaveManifest, SaveInfo } from '@animus-labs/shared';
-import { env } from '../utils/env.js';
+import { DATA_DIR, LANCEDB_PATH } from '../utils/env.js';
 import { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb, getAgentLogsDb } from '../db/index.js';
 import { createLogger } from '../lib/logger.js';
 
@@ -31,7 +31,7 @@ const log = createLogger('SaveService', 'saves');
 // Constants
 // ---------------------------------------------------------------------------
 
-const SAVES_DIR = path.join(path.dirname(env.DB_SYSTEM_PATH), 'saves');
+const SAVES_DIR = path.join(DATA_DIR, 'saves');
 
 const DB_NAMES = ['persona', 'heartbeat', 'memory', 'messages', 'agent_logs'] as const;
 type DbName = (typeof DB_NAMES)[number];
@@ -39,11 +39,7 @@ type DbName = (typeof DB_NAMES)[number];
 /** Read root package.json version. */
 async function getAnimusVersion(): Promise<string> {
   try {
-    const pkgPath = path.resolve(
-      path.dirname(env.DB_SYSTEM_PATH),
-      '..',
-      'package.json',
-    );
+    const pkgPath = path.resolve(DATA_DIR, '..', 'package.json');
     const raw = await fs.readFile(pkgPath, 'utf-8');
     return JSON.parse(raw).version ?? '0.0.0';
   } catch {
@@ -223,7 +219,7 @@ export async function createSave(name: string, description?: string): Promise<Sa
 
     // Copy LanceDB directory
     try {
-      await fs.cp(env.LANCEDB_PATH, path.join(stageDir, 'lancedb'), { recursive: true });
+      await fs.cp(LANCEDB_PATH, path.join(stageDir, 'lancedb'), { recursive: true });
     } catch {
       await fs.mkdir(path.join(stageDir, 'lancedb'), { recursive: true });
       log.warn('LanceDB directory not found, created empty directory');

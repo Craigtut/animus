@@ -49,7 +49,8 @@ Use this index to find the right files to read. Each entry includes the file pat
 |------|------|--------|
 | `docs/architecture/heartbeat.md` | 24 KB | The heartbeat tick system, mind session lifecycle (cold/active/warm states), 3-stage pipeline (GATHER CONTEXT → MIND QUERY → EXECUTE), emotion engine (12 emotions, decay, baselines), MindOutput schema, streaming structured output (llm-json-stream), tick queuing & concurrency, crash recovery, TTL cleanup, API, real-time monitoring |
 | `docs/architecture/persona.md` | 12 KB | Persona system design - 8-step creation flow, archetypes, personality dimensions (10 sliders), trait chips, ranked values, existence paradigm (Simulated Life vs Digital Consciousness), prompt compilation system, onboarding gate |
-| `docs/architecture/tech-stack.md` | 14 KB | Full technology overview - Frontend (Vite, React 19, Zustand, Emotion, Motion), Backend (Fastify, tRPC, SQLite), five databases, LanceDB, agent SDKs, deployment. Shared Abstractions section: Embedding Provider, Context Builder, Decay Engine, Event Bus, Encryption Service, Database Stores |
+| `docs/architecture/data-directory.md` | 3 KB | Data directory layout (`ANIMUS_DATA_DIR`), directory structure, secrets lifecycle (auto-generated encryption key + JWT), deployment modes (dev, Docker, Tauri, custom) |
+| `docs/architecture/tech-stack.md` | 14 KB | Full technology overview - Frontend (Vite, React 19, Zustand, Emotion, Motion), Backend (Fastify, tRPC, SQLite), six databases, LanceDB, agent SDKs, deployment. Shared Abstractions section: Embedding Provider, Context Builder, Decay Engine, Event Bus, Encryption Service, Database Stores |
 | `docs/architecture/agent-orchestration.md` | 14 KB | Sub-agent delegation, custom orchestration layer, prompt template, channel-aware formatting, agent lifecycle, MCP tools, result delivery through heartbeat, failure handling, configuration |
 | `docs/architecture/mcp-tools.md` | 28 KB | Cross-provider MCP tool architecture - tool definitions (shared), handlers (backend), registry, permission filtering by contact tier, hybrid in-process/stdio strategy, Claude createSdkMcpServer optimization, extensibility, user-defined tools |
 | `docs/architecture/tool-permissions.md` | 18 KB | Tool permission & approval system - three permission states (off/ask/always_allow), four risk tiers, two-tick approval pattern, canUseTool callback, permission seeder, approval notifier, context builder integration, trust ramp, sub-agent filtering, channel-specific approval rendering, tRPC API |
@@ -130,6 +131,7 @@ When you need context for a task, follow this approach:
 11b. **For speech engine/shared STT/TTS/voice management**: Read `docs/architecture/speech-engine.md`
 12. **For reflex/fast-response/voice-latency**: Read `docs/architecture/reflex-system.md`, `docs/architecture/voice-channel.md`, and `docs/architecture/heartbeat.md`
 13. **For secrets/credentials/encryption/API keys**: Read `docs/architecture/credential-passing.md`
+14. **For data directory layout/paths/env vars/secrets lifecycle**: Read `docs/architecture/data-directory.md`
 
 ## Topic Keyword Guide
 
@@ -176,4 +178,5 @@ Use this to quickly map user questions to the right docs:
 - **onboarding, auth, signup, login, first time, birth animation, persona creation UI** -> `docs/frontend/onboarding.md`
 - **voice mode UI, voice UX, voice surface, listening, speaking, barge-in, continuous conversation, voice visualization, transcription** -> `docs/frontend/voice-mode.md`
 - **reflex, fast response, voice latency, TTFT, dual path, Vercel AI SDK, direct LLM, reflex context, reflex provider, fast path, slow path** -> `docs/architecture/reflex-system.md`
+- **data directory, ANIMUS_DATA_DIR, DATA_DIR, data layout, database paths, secrets, .secrets, auto-generated secrets, deployment modes, Docker data, Tauri data** -> `docs/architecture/data-directory.md`
 - **credential, API key, secret, encryption, credential passing, agent-blind, credential manifest, credential injection, plugin credentials, MCP env vars, sensitive config, AES-256-GCM, ANIMUS_ENCRYPTION_KEY, run_with_credentials, channel credentials, IPC credentials, encrypted storage, PBKDF2** -> `docs/architecture/credential-passing.md`

@@ -488,21 +488,24 @@ export function createGoal(
     basePriority?: number;
     completionCriteria?: string | null;
     deadline?: string | null;
+    activatedAtTick?: number | null;
   }
 ): Goal {
   const id = generateUUID();
   const timestamp = now();
   const status = data.status ?? 'proposed';
   const basePriority = data.basePriority ?? 0.5;
+  const activatedAtTick = status === 'active' ? (data.activatedAtTick ?? null) : null;
   db.prepare(
-    `INSERT INTO goals (id, title, description, motivation, origin, seed_id, linked_emotion, created_by_contact_id, status, base_priority, current_salience, completion_criteria, deadline, created_at, updated_at, activated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO goals (id, title, description, motivation, origin, seed_id, linked_emotion, created_by_contact_id, status, base_priority, current_salience, completion_criteria, deadline, created_at, updated_at, activated_at, activated_at_tick)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id, data.title, data.description ?? null, data.motivation ?? null,
     data.origin, data.seedId ?? null, data.linkedEmotion ?? null,
     data.createdByContactId ?? null, status, basePriority, basePriority,
     data.completionCriteria ?? null, data.deadline ?? null,
-    timestamp, timestamp, status === 'active' ? timestamp : null
+    timestamp, timestamp, status === 'active' ? timestamp : null,
+    activatedAtTick
   );
   return {
     id, title: data.title, description: data.description ?? null,
@@ -515,6 +518,7 @@ export function createGoal(
     activatedAt: status === 'active' ? timestamp : null,
     completedAt: null, abandonedAt: null, abandonedReason: null,
     lastProgressAt: null, lastUserMentionAt: null,
+    activatedAtTick, planPromptUrgency: null,
   };
 }
 
@@ -536,7 +540,7 @@ export function getActiveGoals(db: Database.Database, limit: number = 10): Goal[
 export function updateGoal(
   db: Database.Database,
   id: string,
-  data: Partial<Pick<Goal, 'title' | 'description' | 'motivation' | 'status' | 'basePriority' | 'currentSalience' | 'completionCriteria' | 'deadline' | 'activatedAt' | 'completedAt' | 'abandonedAt' | 'abandonedReason' | 'lastProgressAt' | 'lastUserMentionAt'>>
+  data: Partial<Pick<Goal, 'title' | 'description' | 'motivation' | 'status' | 'basePriority' | 'currentSalience' | 'completionCriteria' | 'deadline' | 'activatedAt' | 'completedAt' | 'abandonedAt' | 'abandonedReason' | 'lastProgressAt' | 'lastUserMentionAt' | 'activatedAtTick'>>
 ): void {
   const fields: string[] = ['updated_at = ?'];
   const values: unknown[] = [now()];
@@ -547,6 +551,7 @@ export function updateGoal(
     activatedAt: 'activated_at', completedAt: 'completed_at',
     abandonedAt: 'abandoned_at', abandonedReason: 'abandoned_reason',
     lastProgressAt: 'last_progress_at', lastUserMentionAt: 'last_user_mention_at',
+    activatedAtTick: 'activated_at_tick',
   };
   for (const [camelKey, snakeKey] of Object.entries(mapping)) {
     const value = (data as Record<string, unknown>)[camelKey];

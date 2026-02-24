@@ -41,6 +41,7 @@ vi.mock('../../src/lib/event-bus.js', () => ({
 
 vi.mock('../../src/utils/env.js', () => ({
   PROJECT_ROOT: '/tmp/animus-test',
+  DATA_DIR: '/tmp/animus-test/data',
 }));
 
 vi.mock('../../src/channels/channel-router.js', () => ({

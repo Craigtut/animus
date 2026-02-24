@@ -197,6 +197,7 @@ A system-level operation that assembles the input for the mind query. No LLM inf
 - Load recent experiences (last ~10, timestamped)
 - Load recent conversation messages — **filtered to the triggering contact only** (last ~10, from messages.db)
 - Load active goals and pending tasks
+- Generate escalating **planning prompts** for active goals without plans, based on ticks elapsed since activation (see `docs/architecture/goals.md`)
 - Load information about running sub-agents (status, current activity)
 - Load any environmental context (time of day, pending calendar events, etc.)
 - Load outcomes from previous tick's decisions (what was decided, what actually happened)

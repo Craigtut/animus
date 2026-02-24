@@ -33,6 +33,7 @@ export function createTestHeartbeatDb(): Database.Database {
   db.pragma('foreign_keys = ON');
   applySql(db, path.join(MIGRATIONS_DIR, 'heartbeat', '001_initial.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'heartbeat', '003_tool_approvals.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'heartbeat', '004_goal_planning_prompts.sql'));
   return db;
 }
 

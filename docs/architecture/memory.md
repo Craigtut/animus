@@ -407,7 +407,7 @@ Vector embeddings live in LanceDB, linked by memory `id`. LanceDB is the search 
 
 ## The memory.db Database
 
-A new 5th SQLite database dedicated to persistent memory state. Like `heartbeat.db`, it may be reset when doing a full AI reset — but it can also be preserved independently if the user only wants to clear ephemeral state (thoughts, emotions, goals).
+A dedicated SQLite database for persistent memory state. Like `heartbeat.db`, it may be reset when doing a full AI reset — but it can also be preserved independently if the user only wants to clear ephemeral state (thoughts, emotions, goals). Stored at `data/databases/memory.db`.
 
 ```sql
 -- memory.db contains:

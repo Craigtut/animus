@@ -19,7 +19,7 @@ const COOKIE_NAME = 'animus_session';
 
 async function authPlugin(fastify: FastifyInstance): Promise<void> {
   await fastify.register(fastifyJwt, {
-    secret: env.JWT_SECRET,
+    secret: env.JWT_SECRET!,
     cookie: {
       cookieName: COOKIE_NAME,
       signed: false,

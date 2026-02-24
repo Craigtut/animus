@@ -1,9 +1,10 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import { initTitlebarInset } from './utils/tauri';
+import { initTitlebarInset, initExternalLinkHandler } from './utils/tauri';
 
 initTitlebarInset();
+initExternalLinkHandler();
 
 const rootElement = document.getElementById('root');
 

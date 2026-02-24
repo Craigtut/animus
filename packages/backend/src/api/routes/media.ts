@@ -20,7 +20,7 @@ import { generateUUID } from '@animus-labs/shared';
 import { getMessagesDb } from '../../db/index.js';
 import * as messageStore from '../../db/stores/message-store.js';
 import { createLogger } from '../../lib/logger.js';
-import { env } from '../../utils/env.js';
+import { DATA_DIR } from '../../utils/env.js';
 
 const log = createLogger('MediaRoutes', 'server');
 
@@ -28,7 +28,7 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB
 const MAX_FILES = 10;
 const PENDING_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
-export const MEDIA_DIR = path.resolve(path.dirname(env.DB_SYSTEM_PATH), 'media');
+export const MEDIA_DIR = path.join(DATA_DIR, 'media');
 
 const ALLOWED_MIME_TYPES = new Set([
   // Images

@@ -84,6 +84,11 @@ export const configFieldOptionSchema = z.object({
   label: z.string(),
 });
 
+export const configFieldHelpLinkSchema = z.object({
+  url: z.string().url(),
+  label: z.string(),
+});
+
 export const configFieldSchema = z.object({
   key: z.string().min(1),
   label: z.string().min(1),
@@ -96,6 +101,8 @@ export const configFieldSchema = z.object({
   default: z.unknown().optional(),
   min: z.number().optional(), // for 'number' type
   max: z.number().optional(), // for 'number' type
+  group: z.string().optional(), // visual grouping label (e.g., "Authentication")
+  helpLink: configFieldHelpLinkSchema.optional(), // external link shown alongside helpText
 });
 
 export const setupGuideLinkSchema = z.object({
@@ -108,6 +115,7 @@ export const setupGuideStepSchema = z.object({
   body: z.string().min(1),
   link: setupGuideLinkSchema.optional(),
   manifest: z.string().optional(), // code block content (e.g., YAML manifest to copy)
+  fieldRef: z.string().optional(), // links step to a config field key for "Fill in → {field}" buttons
 });
 
 export const setupGuideSchema = z.object({

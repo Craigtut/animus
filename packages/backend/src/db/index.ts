@@ -17,7 +17,15 @@ import { mkdir } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { env } from '../utils/env.js';
+import {
+  DATA_DIR,
+  DB_SYSTEM_PATH,
+  DB_PERSONA_PATH,
+  DB_HEARTBEAT_PATH,
+  DB_MEMORY_PATH,
+  DB_MESSAGES_PATH,
+  DB_AGENT_LOGS_PATH,
+} from '../utils/env.js';
 import { createLogger } from '../lib/logger.js';
 import { runMigrations } from './migrate.js';
 
@@ -79,26 +87,16 @@ function openDb(dbPath: string): Database.Database {
  * Initialize all databases: open connections, run migrations.
  */
 export async function initializeDatabases(): Promise<void> {
-  // Ensure data directories exist
-  const paths = [
-    env.DB_SYSTEM_PATH,
-    env.DB_PERSONA_PATH,
-    env.DB_HEARTBEAT_PATH,
-    env.DB_MEMORY_PATH,
-    env.DB_MESSAGES_PATH,
-    env.DB_AGENT_LOGS_PATH,
-  ];
-  for (const p of paths) {
-    await mkdir(path.dirname(p), { recursive: true, mode: 0o700 });
-  }
+  // Ensure databases directory exists
+  await mkdir(path.dirname(DB_SYSTEM_PATH), { recursive: true, mode: 0o700 });
 
   // Open all databases
-  systemDb = openDb(env.DB_SYSTEM_PATH);
-  personaDb = openDb(env.DB_PERSONA_PATH);
-  heartbeatDb = openDb(env.DB_HEARTBEAT_PATH);
-  memoryDb = openDb(env.DB_MEMORY_PATH);
-  messagesDb = openDb(env.DB_MESSAGES_PATH);
-  agentLogsDb = openDb(env.DB_AGENT_LOGS_PATH);
+  systemDb = openDb(DB_SYSTEM_PATH);
+  personaDb = openDb(DB_PERSONA_PATH);
+  heartbeatDb = openDb(DB_HEARTBEAT_PATH);
+  memoryDb = openDb(DB_MEMORY_PATH);
+  messagesDb = openDb(DB_MESSAGES_PATH);
+  agentLogsDb = openDb(DB_AGENT_LOGS_PATH);
 
   // Run migrations
   runMigrations(systemDb, path.join(MIGRATIONS_DIR, 'system'), 'system.db');

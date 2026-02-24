@@ -9,11 +9,18 @@ import type { Goal, Plan, GoalSeed, EmotionState } from '@animus-labs/shared';
 import type { GoalManager } from './goal-manager.js';
 import type { SeedManager } from './seed-manager.js';
 import type { SalienceResult } from './salience.js';
+import {
+  GOAL_PLANNING_PROMPT_STRONGER_TICKS,
+  GOAL_PLANNING_PROMPT_FORCEFUL_TICKS,
+  PLANNING_PROMPT_MESSAGES,
+  type PlanningPromptUrgency,
+} from './planning.js';
 
 export interface GoalContext {
   goalSection: string | null;
   graduatingSeedsSection: string | null;
   proposedGoalsSection: string | null;
+  planningPromptsSection: string | null;
   tokenEstimate: number;
 }
 
@@ -24,6 +31,7 @@ export function buildGoalContext(
   goalManager: GoalManager,
   seedManager: SeedManager,
   emotionStates: EmotionState[],
+  currentTickNumber: number,
   tokenBudget: number = 1500,
 ): GoalContext {
   let tokenEstimate = 0;
@@ -32,12 +40,20 @@ export function buildGoalContext(
   const salientGoals = goalManager.computeAndUpdateSalience(emotionStates);
   let goalSection: string | null = null;
 
+  // Track which goals have plans for planning prompt generation
+  const goalsWithPlanStatus: Array<{ goal: Goal; hasPlan: boolean }> = [];
+
   if (salientGoals.length > 0 && tokenEstimate < tokenBudget) {
-    goalSection = formatGoalSection(salientGoals.map(({ goal }) => ({
+    const goalsAndPlans = salientGoals.map(({ goal }) => ({
       goal,
       plan: goalManager.getActivePlan(goal.id),
-    })));
+    }));
+    goalSection = formatGoalSection(goalsAndPlans);
     tokenEstimate += Math.ceil(goalSection.split(/\s+/).length * 1.3);
+
+    for (const { goal, plan } of goalsAndPlans) {
+      goalsWithPlanStatus.push({ goal, hasPlan: plan !== null });
+    }
   }
 
   // 2. Check for graduating seeds
@@ -58,7 +74,29 @@ export function buildGoalContext(
     tokenEstimate += Math.ceil(proposedGoalsSection.split(/\s+/).length * 1.3);
   }
 
-  return { goalSection, graduatingSeedsSection, proposedGoalsSection, tokenEstimate };
+  // 4. Generate planning prompts for active goals without plans
+  let planningPromptsSection: string | null = null;
+
+  if (goalsWithPlanStatus.length > 0 && tokenEstimate < tokenBudget) {
+    const prompts = generatePlanningPrompts(
+      goalsWithPlanStatus.map(({ goal, hasPlan }) => ({
+        id: goal.id,
+        title: goal.title,
+        activatedAtTick: goal.activatedAtTick ?? null,
+        hasPlan,
+      })),
+      currentTickNumber,
+    );
+
+    if (prompts.length > 0) {
+      planningPromptsSection = prompts
+        .map((p) => `── NOTE ──\n${p.message}`)
+        .join('\n\n');
+      tokenEstimate += Math.ceil(planningPromptsSection.split(/\s+/).length * 1.3);
+    }
+  }
+
+  return { goalSection, graduatingSeedsSection, proposedGoalsSection, planningPromptsSection, tokenEstimate };
 }
 
 // ============================================================================
@@ -106,4 +144,44 @@ function formatProposedGoals(goals: Goal[]): string {
     (g.motivation ? ` — ${g.motivation}` : '') +
     ` → To activate: update_goal { goalId: "${g.id}", status: "active" } | To reject: update_goal { goalId: "${g.id}", status: "abandoned" }`
   ).join('\n');
+}
+
+// ============================================================================
+// Planning Prompts
+// ============================================================================
+
+function computePlanningPromptUrgency(ticksSinceActivation: number): PlanningPromptUrgency {
+  if (ticksSinceActivation >= GOAL_PLANNING_PROMPT_FORCEFUL_TICKS) {
+    return 'forceful';
+  } else if (ticksSinceActivation >= GOAL_PLANNING_PROMPT_STRONGER_TICKS) {
+    return 'stronger';
+  }
+  return 'soft';
+}
+
+export function generatePlanningPrompts(
+  goals: Array<{ id: string; title: string; activatedAtTick: number | null; hasPlan: boolean }>,
+  currentTickNumber: number,
+): Array<{ goalId: string; goalTitle: string; urgency: PlanningPromptUrgency; message: string }> {
+  const prompts: Array<{ goalId: string; goalTitle: string; urgency: PlanningPromptUrgency; message: string }> = [];
+
+  for (const goal of goals) {
+    // Only generate prompts for active goals without plans
+    if (goal.hasPlan || goal.activatedAtTick === null) continue;
+
+    const ticksSinceActivation = currentTickNumber - goal.activatedAtTick;
+    if (ticksSinceActivation < 0) continue;
+
+    const urgency = computePlanningPromptUrgency(ticksSinceActivation);
+    const message = PLANNING_PROMPT_MESSAGES[urgency].replace('{title}', goal.title);
+
+    prompts.push({
+      goalId: goal.id,
+      goalTitle: goal.title,
+      urgency,
+      message,
+    });
+  }
+
+  return prompts;
 }

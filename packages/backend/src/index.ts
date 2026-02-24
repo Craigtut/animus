@@ -20,7 +20,8 @@ import { createTRPCContext, appRouter } from './api/index.js';
 import authPlugin from './plugins/auth.js';
 import { initializeHeartbeat, stopHeartbeat } from './heartbeat/index.js';
 import { loadCredentialsIntoEnv, ensureClaudeOnboardingFile } from './services/credential-service.js';
-import { env } from './utils/env.js';
+import { env, DATA_DIR } from './utils/env.js';
+import { resolveSecrets, persistSecretsIfNeeded } from './lib/secrets-manager.js';
 import { createLogger, updateCategoryCache } from './lib/logger.js';
 import { isMaintenanceMode, getMaintenanceReason } from './lib/maintenance.js';
 import { formatStartupSummary } from './lib/startup-summary.js';
@@ -33,12 +34,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 async function main() {
   const startupStartedAt = Date.now();
 
-  // Initialize databases (opens 5 DBs, runs migrations)
+  // Resolve encryption key + JWT secret (auto-generate if needed)
+  resolveSecrets();
+
+  // Create workspace directory for future agent use
+  const fsMod = await import('node:fs');
+  fsMod.mkdirSync(path.join(DATA_DIR, 'workspace'), { recursive: true });
+
+  // Initialize databases (opens 6 DBs, runs migrations)
   await initializeDatabases();
 
   // Verify encryption key matches what was used to encrypt existing data
   const { verifyEncryptionKey } = await import('./lib/encryption-service.js');
   verifyEncryptionKey(getSystemDb());
+
+  // Persist .secrets file now that the key is verified
+  persistSecretsIfNeeded();
 
   // Load log category settings into logger cache
   const logCategories = systemStore.getLogCategories(getSystemDb());
@@ -68,9 +79,8 @@ async function main() {
   });
 
   // Initialize model registry with disk cache for LiteLLM pricing data
-  const dataDir = path.dirname(env.DB_SYSTEM_PATH);
   const modelRegistry = initModelRegistry({
-    cacheDir: path.join(dataDir, 'cache'),
+    cacheDir: path.join(DATA_DIR, 'cache'),
     cacheTtlMs: 24 * 60 * 60 * 1000,
   });
   modelRegistry.refresh().then(
@@ -351,11 +361,11 @@ async function main() {
 
   // Initialize speech service (lazy-loads models on first use)
   const { initSpeechService } = await import('./speech/index.js');
-  const speechService = await initSpeechService({ dataDir: path.dirname(env.DB_SYSTEM_PATH) });
+  const speechService = await initSpeechService({ dataDir: DATA_DIR });
 
   // Initialize download manager
   const { initDownloadManager, getSpeechAssets } = await import('./downloads/index.js');
-  const downloadManager = initDownloadManager(dataDir);
+  const downloadManager = initDownloadManager(DATA_DIR);
 
   // Re-initialize voice manager when speech models finish downloading
   getEventBus().on('download:completed', async (payload) => {

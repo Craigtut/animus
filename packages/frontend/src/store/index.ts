@@ -19,3 +19,4 @@ export {
   type ReplyStreamState,
 } from './heartbeat-store.js';
 export { useMessagesStore } from './messages-store.js';
+export { useToastStore, toast, type ToastVariant, type Toast, type ToastAction, type ToastOptions } from './toast-store.js';

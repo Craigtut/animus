@@ -44,9 +44,11 @@ import { MindPage } from './pages/MindPage';
 import { PeoplePage } from './pages/PeoplePage';
 import { PersonaPage } from './pages/PersonaPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { ConfigurationPage } from './pages/ConfigurationPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { MaintenanceOverlay } from './components/MaintenanceOverlay';
 import { DownloadToast } from './components/DownloadToast';
+import { ToastContainer } from './components/ToastContainer';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -191,6 +193,8 @@ export function App() {
                 <Route path="/people/*" element={<PeoplePage />} />
                 <Route path="/persona" element={<PersonaPage />} />
                 <Route path="/persona/*" element={<PersonaPage />} />
+                <Route path="/settings/channels/:name/configure" element={<ConfigurationPage extensionType="channel" />} />
+                <Route path="/settings/plugins/:name/configure" element={<ConfigurationPage extensionType="plugin" />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/settings/*" element={<SettingsPage />} />
               </Route>
@@ -201,6 +205,7 @@ export function App() {
           </BrowserRouter>
           <MaintenanceOverlay />
           <DownloadToast />
+          <ToastContainer />
         </ThemeSelector>
       </QueryClientProvider>
     </trpc.Provider>

@@ -266,6 +266,10 @@ export const goalSchema = z.object({
   abandonedReason: z.string().nullable(),
   lastProgressAt: timestampSchema.nullable(),
   lastUserMentionAt: timestampSchema.nullable(),
+
+  // Planning prompt escalation
+  activatedAtTick: z.number().nullable().default(null),
+  planPromptUrgency: z.string().nullable().default(null),
 });
 
 // ============================================================================

@@ -95,9 +95,11 @@ export const goalsRouter = router({
           message: `Cannot activate a goal with status '${goal.status}'. Must be 'proposed' or 'paused'.`,
         });
       }
+      const state = heartbeatStore.getHeartbeatState(db);
       heartbeatStore.updateGoal(db, input.goalId, {
         status: 'active',
         activatedAt: now(),
+        activatedAtTick: state.tickNumber,
       });
       const updated = heartbeatStore.getGoal(db, input.goalId)!;
       getEventBus().emit('goal:updated', updated);
@@ -144,9 +146,11 @@ export const goalsRouter = router({
           message: `Cannot resume a goal with status '${goal.status}'. Must be 'paused'.`,
         });
       }
+      const state = heartbeatStore.getHeartbeatState(db);
       heartbeatStore.updateGoal(db, input.goalId, {
         status: 'active',
         activatedAt: now(),
+        activatedAtTick: state.tickNumber,
       });
       const updated = heartbeatStore.getGoal(db, input.goalId)!;
       getEventBus().emit('goal:updated', updated);

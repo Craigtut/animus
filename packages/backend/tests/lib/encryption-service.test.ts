@@ -7,6 +7,7 @@ vi.mock('../../src/utils/env.js', () => ({
     NODE_ENV: 'test',
   },
   PROJECT_ROOT: '/tmp/animus-test',
+  DATA_DIR: '/tmp/animus-test/data',
 }));
 
 describe('EncryptionService', () => {
@@ -80,13 +81,14 @@ describe('EncryptionService (unconfigured)', () => {
         NODE_ENV: 'test',
       },
       PROJECT_ROOT: '/tmp/animus-test',
+      DATA_DIR: '/tmp/animus-test/data',
     }));
   });
 
   it('throws on encrypt when key not set', async () => {
     const mod = await import('../../src/lib/encryption-service.js');
     expect(mod.isConfigured()).toBe(false);
-    expect(() => mod.encrypt('my-key')).toThrow('ANIMUS_ENCRYPTION_KEY is not configured');
+    expect(() => mod.encrypt('my-key')).toThrow('resolveSecrets()');
   });
 
   it('still decrypts legacy plain: format for migration', async () => {

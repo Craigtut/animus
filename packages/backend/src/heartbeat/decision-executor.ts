@@ -497,9 +497,9 @@ async function executeChannelDecisions(
     const emoji = String(params['emoji'] ?? '');
     if (!emoji || !triggerChannel) continue;
 
-    // Resolve external IDs from trigger metadata
-    const channelId = String(triggerMetadata?.['channelId'] ?? '');
-    const messageId = String(triggerMetadata?.['messageId'] ?? '');
+    // Resolve external IDs from trigger metadata (channel adapters use different key names)
+    const channelId = String(triggerMetadata?.['channelId'] ?? triggerMetadata?.['slackChannel'] ?? '');
+    const messageId = String(triggerMetadata?.['messageId'] ?? triggerMetadata?.['slackTs'] ?? '');
     if (!channelId || !messageId) {
       log.warn('send_reaction: missing channelId or messageId in trigger metadata');
       continue;

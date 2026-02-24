@@ -27,7 +27,13 @@ This will install dependencies for all packages (shared, agents, backend, fronte
 
 ### 3. Environment Configuration
 
-Create a `.env` file in the root directory:
+Copy the environment template:
+
+```bash
+cp .env.example .env
+```
+
+The `.env` file configures server settings and optional API keys:
 
 ```bash
 # Server
@@ -36,28 +42,15 @@ PORT=3000
 HOST=0.0.0.0
 LOG_LEVEL=info
 
-# Database paths (relative to backend package)
-DB_SYSTEM_PATH=./data/system.db
-DB_HEARTBEAT_PATH=./data/heartbeat.db
-DB_MESSAGES_PATH=./data/messages.db
-DB_AGENT_LOGS_PATH=./data/agent_logs.db
-LANCEDB_PATH=./data/lancedb
+# Data directory (optional — defaults to ./data/ relative to project root)
+# ANIMUS_DATA_DIR=/custom/path/to/data
 
-# Heartbeat
-HEARTBEAT_INTERVAL_MS=300000
-
-# Auth
-JWT_SECRET=your-secret-key-change-in-production
-SESSION_EXPIRY_DAYS=7
-
-# Encryption (REQUIRED — server won't start without this)
-# Set to any secret string. Do NOT change after first run.
-ANIMUS_ENCRYPTION_KEY=your-secret-encryption-key
-
-# Agent API Keys (optional for development)
+# Agent API Keys (optional — configure via Settings UI or here)
 ANTHROPIC_API_KEY=your-anthropic-key
 OPENAI_API_KEY=your-openai-key
 ```
+
+Secrets (`ANIMUS_ENCRYPTION_KEY`, `JWT_SECRET`) are **auto-generated** on first startup and stored in `data/.secrets`. You do not need to set them manually. See `docs/architecture/data-directory.md` for the full data layout.
 
 ### 4. Start Development Servers
 
@@ -179,9 +172,7 @@ This serves both the API and the built frontend at `http://localhost:3000`.
 
 For self-hosted servers, use Docker:
 
-**Prerequisites:** Ensure your `.env` file includes at minimum:
-- `ANIMUS_ENCRYPTION_KEY` — Required for encrypting secrets at rest. Set to any secret string. Do NOT change after first run.
-- `JWT_SECRET` — Required for authentication tokens. Set to any secret string.
+No special configuration needed — secrets are auto-generated on first run.
 
 ```bash
 # Quick start (builds and runs in one step)
@@ -253,14 +244,18 @@ Secrets (`ANIMUS_ENCRYPTION_KEY`, `JWT_SECRET`) are auto-generated on first laun
 
 ## Database Management
 
-Animus uses four SQLite databases that are created automatically on first run:
+Animus uses six SQLite databases stored under `data/databases/`, created automatically on first run:
 
 | Database | Location | Purpose | Lifecycle |
 |----------|----------|---------|-----------|
-| system.db | `./data/system.db` | Users, settings, API keys | Rarely reset |
-| heartbeat.db | `./data/heartbeat.db` | Thoughts, emotions, tasks | Occasional reset |
-| messages.db | `./data/messages.db` | Conversations, messages, channels | Long-term history |
-| agent_logs.db | `./data/agent_logs.db` | Agent sessions, events | Frequent cleanup |
+| system.db | `data/databases/system.db` | Users, contacts, settings, API keys | Rarely reset |
+| persona.db | `data/databases/persona.db` | Personality settings | Separate lifecycle |
+| heartbeat.db | `data/databases/heartbeat.db` | Thoughts, emotions, tasks | Occasional reset |
+| memory.db | `data/databases/memory.db` | Working memory, core self, long-term memories | Knowledge |
+| messages.db | `data/databases/messages.db` | Conversations, messages, channels | Long-term history |
+| agent_logs.db | `data/databases/agent_logs.db` | Agent sessions, events | Frequent cleanup |
+
+Vector embeddings are stored in `data/databases/lancedb/`. All data paths derive from `ANIMUS_DATA_DIR` (defaults to `./data/`). See `docs/architecture/data-directory.md` for the full directory structure.
 
 ### Resetting Databases
 
@@ -268,7 +263,7 @@ To start fresh:
 
 ```bash
 # Remove all databases
-rm -rf packages/backend/data/*.db
+rm -rf data/databases/*.db
 
 # Restart the server to recreate
 npm run dev:backend
@@ -277,7 +272,7 @@ npm run dev:backend
 To reset only the heartbeat state (gives Animus a "fresh mind" without losing conversation history):
 
 ```bash
-rm packages/backend/data/heartbeat.db
+rm data/databases/heartbeat.db
 ```
 
 ## Configuring Agent Providers

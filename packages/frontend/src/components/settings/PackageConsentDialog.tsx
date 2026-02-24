@@ -7,7 +7,13 @@ import {
   CheckCircle,
   XCircle,
   Package,
+  Wrench,
+  Globe,
+  FolderSimple,
+  AddressBook,
+  Brain,
 } from '@phosphor-icons/react';
+import type { ReactNode } from 'react';
 import { Modal, Button, Badge, Typography } from '../ui';
 import type { Theme } from '../../styles/theme';
 
@@ -101,6 +107,11 @@ export function PackageConsentDialog({
   // Block install if signature is invalid
   const canInstall = verification.valid && signature.status !== 'invalid';
 
+  // Filter out redundant signature warnings already shown by the inline banner
+  const filteredWarnings = signature.status === 'unsigned'
+    ? warnings.filter(w => !w.toLowerCase().includes('not signed'))
+    : warnings;
+
   return (
     <Modal open={open} onClose={onClose}>
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
@@ -111,7 +122,10 @@ export function PackageConsentDialog({
             <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
               Install "{manifest.displayName || manifest.name}"?
             </Typography.Subtitle>
-            <Typography.Caption color="hint">
+            <Typography.Caption css={css`
+              font-size: ${theme.typography.fontSize.tiny};
+              opacity: 0.7;
+            `} color="hint">
               v{manifest.version} by {manifest.author.name}
             </Typography.Caption>
           </div>
@@ -170,39 +184,44 @@ export function PackageConsentDialog({
             border-radius: ${theme.borderRadius.default};
             display: flex;
             flex-direction: column;
-            gap: ${theme.spacing[2]};
+            gap: ${theme.spacing[3]};
           `}>
             <Typography.SmallBodyAlt css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
               Requested Permissions
             </Typography.SmallBodyAlt>
-            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
-              <PermissionRow
+            <div css={css`display: flex; flex-direction: column;`}>
+              <PermissionCategory
+                icon={<Wrench size={13} />}
                 label="Tools"
-                value={permissions.tools?.length ? permissions.tools.join(', ') : 'None'}
+                values={permissions.tools?.length ? permissions.tools : null}
                 theme={theme}
               />
-              <PermissionRow
+              <PermissionCategory
+                icon={<Globe size={13} />}
                 label="Network"
-                value={
+                values={
                   typeof permissions.network === 'boolean'
-                    ? (permissions.network ? 'Unrestricted' : 'None')
-                    : (permissions.network?.length ? permissions.network.join(', ') : 'None')
+                    ? (permissions.network ? ['Unrestricted'] : null)
+                    : (permissions.network?.length ? permissions.network : null)
                 }
                 theme={theme}
               />
-              <PermissionRow
+              <PermissionCategory
+                icon={<FolderSimple size={13} />}
                 label="Filesystem"
-                value={permissions.filesystem || 'None'}
+                values={permissions.filesystem && permissions.filesystem !== 'none' ? [permissions.filesystem] : null}
                 theme={theme}
               />
-              <PermissionRow
+              <PermissionCategory
+                icon={<AddressBook size={13} />}
                 label="Contacts"
-                value={permissions.contacts ? 'Read access' : 'No access'}
+                values={permissions.contacts ? ['Read access'] : null}
                 theme={theme}
               />
-              <PermissionRow
+              <PermissionCategory
+                icon={<Brain size={13} />}
                 label="Memory"
-                value={permissions.memory || 'None'}
+                values={permissions.memory && permissions.memory !== 'none' ? [permissions.memory] : null}
                 theme={theme}
               />
             </div>
@@ -232,14 +251,14 @@ export function PackageConsentDialog({
           </div>
         )}
 
-        {/* Warnings */}
-        {warnings.length > 0 && (
+        {/* Warnings (filtered to avoid duplicating the signature banner) */}
+        {filteredWarnings.length > 0 && (
           <div css={css`
             padding: ${theme.spacing[2]} ${theme.spacing[3]};
             background: ${theme.colors.warning.main}1a;
             border-radius: ${theme.borderRadius.default};
           `}>
-            {warnings.map((warn, i) => (
+            {filteredWarnings.map((warn, i) => (
               <Typography.SmallBody key={i} color={theme.colors.warning.main}>
                 {warn}
               </Typography.SmallBody>
@@ -270,15 +289,68 @@ export function PackageConsentDialog({
 // Helpers
 // ============================================================================
 
-function PermissionRow({ label, value, theme }: { label: string; value: string; theme: Theme }) {
+function PermissionCategory({
+  icon,
+  label,
+  values,
+  theme,
+}: {
+  icon: ReactNode;
+  label: string;
+  values: string[] | null;
+  theme: Theme;
+}) {
+  const hasValues = values && values.length > 0;
+
   return (
-    <div css={css`display: flex; justify-content: space-between; align-items: center;`}>
-      <Typography.Caption color="hint">{label}</Typography.Caption>
-      <Typography.Caption css={css`
-        color: ${value === 'None' || value === 'No access' ? theme.colors.text.disabled : theme.colors.text.secondary};
+    <div css={css`
+      display: flex;
+      align-items: ${hasValues && values.length > 1 ? 'flex-start' : 'center'};
+      gap: ${theme.spacing[2]};
+      padding: ${theme.spacing[1.5]} 0;
+      border-bottom: 1px solid ${theme.colors.border.light};
+      &:last-child { border-bottom: none; }
+    `}>
+      <div css={css`
+        display: flex;
+        align-items: center;
+        gap: ${theme.spacing[1.5]};
+        min-width: 100px;
+        flex-shrink: 0;
+        color: ${theme.colors.text.hint};
       `}>
-        {value}
-      </Typography.Caption>
+        {icon}
+        <Typography.Caption color="hint">{label}</Typography.Caption>
+      </div>
+      <div css={css`
+        flex: 1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: ${theme.spacing[1]};
+        justify-content: flex-end;
+      `}>
+        {hasValues ? (
+          values.map((val, i) => (
+            <span key={i} css={css`
+              display: inline-flex;
+              align-items: center;
+              padding: ${theme.spacing[0.5]} ${theme.spacing[2]};
+              font-size: ${theme.typography.fontSize.tiny};
+              font-family: ${theme.typography.fontFamily.mono};
+              background: ${theme.colors.accent}08;
+              border: 1px solid ${theme.colors.border.default};
+              border-radius: ${theme.borderRadius.full};
+              color: ${theme.colors.text.secondary};
+              line-height: ${theme.typography.lineHeight.tight};
+              white-space: nowrap;
+            `}>
+              {val}
+            </span>
+          ))
+        ) : (
+          <Typography.Caption color="disabled">None</Typography.Caption>
+        )}
+      </div>
     </div>
   );
 }

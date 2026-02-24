@@ -191,7 +191,7 @@ Semantically retrieved memories from LanceDB, scored by relevance + importance +
 
 ### Goals & Tasks Section
 
-Salient goals (above visibility threshold) with plans and recent task progress. Deferred tasks shown during idle ticks. Framed as "things on your mind," not assignments. See `docs/architecture/goals.md` and `docs/architecture/tasks-system.md`.
+Salient goals (above visibility threshold) with plans and recent task progress. Deferred tasks shown during idle ticks. Framed as "things on your mind," not assignments. For active goals without plans, escalating planning prompts are injected via Session Notes (see below). See `docs/architecture/goals.md` and `docs/architecture/tasks-system.md`.
 
 ### Agent Status Section
 
@@ -997,6 +997,32 @@ This has come up naturally several times. You might consider whether
 this is something you want to pursue as a goal — or simply let it
 continue as a quiet interest. There's no pressure either way.
 ```
+
+**Goal planning prompts** (when an active goal lacks a plan, with escalating urgency based on ticks since activation):
+
+*Soft prompt (ticks 0-3):*
+```
+── NOTE ──
+Your goal "{goalTitle}" has no plan yet. You might consider how
+you'd approach it.
+```
+
+*Stronger prompt (ticks 3-10):*
+```
+── NOTE ──
+Your goal "{goalTitle}" still lacks a strategy. It would help to
+sketch out an approach — even a simple one.
+```
+
+*Forceful prompt (ticks 10+):*
+```
+── NOTE ──
+Your goal "{goalTitle}" needs a plan. Take a moment now to outline
+how you'd pursue it — whether that's a simple strategy you create
+directly, or delegating to a planning agent for something more complex.
+```
+
+The planning prompt urgency thresholds are configurable (`GOAL_PLANNING_PROMPT_STRONGER_TICKS`, `GOAL_PLANNING_PROMPT_FORCEFUL_TICKS`). The mind retains full agency: it can create a plan directly via `create_plan`, spawn a planning sub-agent for complex goals, pause or abandon the goal, or simply continue without a formal plan if the goal is simple enough not to need one.
 
 ---
 

@@ -78,7 +78,11 @@ export class GoalManager {
     completionCriteria?: string;
     deadline?: string;
   }): Goal {
-    const goal = heartbeatStore.createGoal(this.db, data);
+    // If creating with active status, record the current tick for planning prompts
+    const storeData = data.status === 'active'
+      ? { ...data, activatedAtTick: heartbeatStore.getHeartbeatState(this.db).tickNumber }
+      : data;
+    const goal = heartbeatStore.createGoal(this.db, storeData);
     getEventBus().emit('goal:created', goal);
     return goal;
   }
@@ -106,11 +110,14 @@ export class GoalManager {
 
   /**
    * Activate a proposed goal.
+   * Records the current tick number for planning prompt escalation.
    */
   activateGoal(goalId: string): void {
+    const state = heartbeatStore.getHeartbeatState(this.db);
     heartbeatStore.updateGoal(this.db, goalId, {
       status: 'active',
       activatedAt: now(),
+      activatedAtTick: state.tickNumber,
     });
     const goal = heartbeatStore.getGoal(this.db, goalId);
     if (goal) getEventBus().emit('goal:updated', goal);
@@ -127,11 +134,14 @@ export class GoalManager {
 
   /**
    * Resume a paused goal.
+   * Resets the activated_at_tick for planning prompt escalation.
    */
   resumeGoal(goalId: string): void {
+    const state = heartbeatStore.getHeartbeatState(this.db);
     heartbeatStore.updateGoal(this.db, goalId, {
       status: 'active',
       activatedAt: now(),
+      activatedAtTick: state.tickNumber,
     });
     const goal = heartbeatStore.getGoal(this.db, goalId);
     if (goal) getEventBus().emit('goal:updated', goal);

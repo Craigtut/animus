@@ -11,12 +11,7 @@ services:
       - NODE_ENV=production
       - HOST=0.0.0.0
       - PORT=3000
-      - DB_SYSTEM_PATH=/app/data/system.db
-      - DB_HEARTBEAT_PATH=/app/data/heartbeat.db
-      - DB_MEMORY_PATH=/app/data/memory.db
-      - DB_MESSAGES_PATH=/app/data/messages.db
-      - DB_AGENT_LOGS_PATH=/app/data/agent_logs.db
-      - LANCEDB_PATH=/app/data/lancedb
+      - ANIMUS_DATA_DIR=/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]

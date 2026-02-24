@@ -47,6 +47,7 @@ import { ToolsSection } from '../components/settings/ToolsSection';
 import { PackageConsentDialog } from '../components/settings/PackageConsentDialog';
 import { Upload, ArrowCounterClockwise } from '@phosphor-icons/react';
 import { AnpkDropZone } from '../components/settings/AnpkDropZone';
+import { toast } from '../store/toast-store';
 
 // ============================================================================
 // Types
@@ -1669,6 +1670,7 @@ function ChannelsSection() {
       setShowConsentDialog(false);
       setChannelPackageVerification(null);
       setSelectedPackagePath(null);
+      toast.success('Channel installed successfully');
     },
   });
   const rollbackMutation = trpc.channels.rollback.useMutation({
@@ -1680,9 +1682,8 @@ function ChannelsSection() {
   const [installTab, setInstallTab] = useState<'package' | 'path'>('package');
   const [installPath, setInstallPath] = useState('');
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
-  const [configChannel, setConfigChannel] = useState<string | null>(null);
   const [uninstallConfirm, setUninstallConfirm] = useState<string | null>(null);
-  const [mutationError, setMutationError] = useState<string | null>(null);
+  const navigateToConfig = useNavigate();
 
   // Package consent dialog state
   const [showConsentDialog, setShowConsentDialog] = useState(false);
@@ -1698,27 +1699,26 @@ function ChannelsSection() {
   });
 
   const handleToggleEnabled = (name: string, currentlyEnabled: boolean) => {
-    setMutationError(null);
-    if (currentlyEnabled) {
-      disableMutation.mutate({ name }, { onError: (err) => setMutationError(err.message) });
-    } else {
-      enableMutation.mutate({ name }, { onError: (err) => setMutationError(err.message) });
-    }
+    const action = currentlyEnabled ? 'disable' : 'enable';
+    const mutation = currentlyEnabled ? disableMutation : enableMutation;
+    mutation.mutate({ name }, {
+      onError: (err) => toast.error(`Failed to ${action} channel "${name}"`, { detail: err.message }),
+    });
   };
 
   const handleRestart = (name: string) => {
-    setMutationError(null);
-    restartMutation.mutate({ name }, { onError: (err) => setMutationError(err.message) });
+    restartMutation.mutate({ name }, {
+      onError: (err) => toast.error(`Failed to restart channel "${name}"`, { detail: err.message }),
+    });
   };
 
   const handleUninstall = (name: string) => {
-    setMutationError(null);
     uninstallMutation.mutate(
       { name },
       {
         onSuccess: () => setUninstallConfirm(null),
         onError: (err) => {
-          setMutationError(err.message);
+          toast.error(`Failed to uninstall channel "${name}"`, { detail: err.message });
           setUninstallConfirm(null);
         },
       }
@@ -1726,44 +1726,49 @@ function ChannelsSection() {
   };
 
   const handleInstall = () => {
-    setMutationError(null);
     installMutation.mutate(
       { path: installPath },
-      { onError: (err) => setMutationError(err.message) }
+      { onError: (err) => toast.error('Channel installation failed', { detail: err.message }) }
     );
   };
 
   const handleChannelPackageUpload = async (filePath: string) => {
-    setMutationError(null);
     try {
       const result = await verifyPackageMutation.mutateAsync({ filePath });
       setChannelPackageVerification(result);
       setSelectedPackagePath(filePath);
       setShowConsentDialog(true);
     } catch (err) {
-      setMutationError(err instanceof Error ? err.message : 'Failed to verify package');
+      const detail = err instanceof Error ? err.message : String(err);
+      toast.error('Could not verify this package. It may be corrupted or incompatible.', { detail });
     }
   };
 
   const handleChannelPackageConfirmInstall = (grantedPermissions: string[]) => {
     if (!selectedPackagePath) return;
-    setMutationError(null);
     installFromPackageMutation.mutate(
       { filePath: selectedPackagePath, grantedPermissions },
       {
-        onError: (err) => setMutationError(err.message),
+        onError: (err) => {
+          setShowConsentDialog(false);
+          setChannelPackageVerification(null);
+          setSelectedPackagePath(null);
+          const msg = err.message.includes('already installed')
+            ? 'This channel is already installed.'
+            : 'Channel installation failed';
+          toast.error(msg, { detail: err.message });
+        },
       }
     );
   };
 
   const handleChannelRollback = (name: string) => {
-    setMutationError(null);
     rollbackMutation.mutate(
       { name },
       {
         onSuccess: () => setRollbackConfirm(null),
         onError: (err) => {
-          setMutationError(err.message);
+          toast.error(`Failed to rollback channel "${name}"`, { detail: err.message });
           setRollbackConfirm(null);
         },
       }
@@ -1797,35 +1802,6 @@ function ChannelsSection() {
         </Button>
       </div>
 
-      {/* Error banner */}
-      <AnimatePresence>
-        {mutationError && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            css={css`
-              padding: ${theme.spacing[3]} ${theme.spacing[4]};
-              background: ${theme.colors.error.main}1a;
-              border-radius: ${theme.borderRadius.default};
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-            `}
-          >
-            <Typography.SmallBody color={theme.colors.error.main}>
-              {mutationError}
-            </Typography.SmallBody>
-            <button
-              onClick={() => setMutationError(null)}
-              css={css`cursor: pointer; padding: ${theme.spacing[1]}; color: ${theme.colors.error.main}; &:hover { opacity: 0.7; }`}
-            >
-              <X size={14} />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Channel list */}
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
         {/* Built-in Web Channel */}
@@ -1848,6 +1824,7 @@ function ChannelsSection() {
         {channelList.map((channel) => {
           const isExpanded = expandedChannel === channel.name;
           const statusInfo = channelStatusBadge[channel.status] ?? { variant: 'default' as const, label: channel.status };
+          const channelSource = sourceBadgeConfig[channel.installedFrom] ?? { variant: 'default' as const, label: channel.installedFrom };
           const IconComponent = channelIconMap[channel.channelType] ?? Plugs;
           const hasError = channel.status === 'error' || channel.status === 'failed';
 
@@ -1864,7 +1841,7 @@ function ChannelsSection() {
                       <Typography.BodyAlt as="span">{channel.displayName}</Typography.BodyAlt>
                       <Typography.Caption as="span" color="hint">v{channel.version}</Typography.Caption>
                       <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
-                      {channel.installedFrom === 'local' && <Badge variant="default">local</Badge>}
+                      <Badge variant={channelSource.variant}>{channelSource.label}</Badge>
                     </div>
                     {channel.description && (
                       <Typography.SmallBody color="secondary" css={css`
@@ -1881,13 +1858,19 @@ function ChannelsSection() {
                         display: flex;
                         align-items: center;
                         gap: ${theme.spacing[2]};
-                        margin-top: ${theme.spacing[1]};
-                        padding: ${theme.spacing[1.5]} ${theme.spacing[2]};
-                        background: ${theme.colors.error.main}0d;
-                        border-radius: ${theme.borderRadius.sm};
+                        margin-top: ${theme.spacing[1.5]};
+                        padding: ${theme.spacing[1]} ${theme.spacing[2]};
+                        background: ${theme.colors.error.main}08;
+                        border-left: 2px solid ${theme.colors.error.main}66;
+                        border-radius: 0 ${theme.borderRadius.sm} ${theme.borderRadius.sm} 0;
                       `}>
-                        <Warning size={14} css={css`color: ${theme.colors.error.main}; flex-shrink: 0;`} />
-                        <Typography.Caption color={theme.colors.error.main} css={css`flex: 1; word-break: break-word;`}>
+                        <Warning size={16} weight="fill" css={css`color: ${theme.colors.error.main}80; flex-shrink: 0;`} />
+                        <Typography.Caption color={theme.colors.error.main} css={css`
+                          flex: 1;
+                          overflow: hidden;
+                          text-overflow: ellipsis;
+                          white-space: nowrap;
+                        `} title={channel.lastError}>
                           {channel.lastError}
                         </Typography.Caption>
                         <button
@@ -1896,15 +1879,19 @@ function ChannelsSection() {
                             display: inline-flex;
                             align-items: center;
                             gap: ${theme.spacing[1]};
-                            padding: ${theme.spacing[0.5]} ${theme.spacing[2]};
+                            padding: ${theme.spacing[0.5]} ${theme.spacing[1.5]};
                             font-size: ${theme.typography.fontSize.xs};
                             color: ${theme.colors.error.main};
-                            border: 1px solid ${theme.colors.error.main}33;
+                            border: 1px solid ${theme.colors.error.main}22;
                             border-radius: ${theme.borderRadius.sm};
                             cursor: pointer;
                             background: transparent;
                             white-space: nowrap;
-                            &:hover { background: ${theme.colors.error.main}0d; }
+                            transition: all ${theme.transitions.fast};
+                            &:hover {
+                              background: ${theme.colors.error.main}0d;
+                              border-color: ${theme.colors.error.main}44;
+                            }
                           `}
                         >
                           <ArrowClockwise size={12} />
@@ -1993,7 +1980,7 @@ function ChannelsSection() {
                         <Button
                           variant="secondary"
                           size="sm"
-                          onClick={(e: React.MouseEvent) => { e.stopPropagation(); setConfigChannel(channel.name); }}
+                          onClick={(e: React.MouseEvent) => { e.stopPropagation(); navigateToConfig(`/settings/channels/${channel.name}/configure`); }}
                         >
                           <GearFine size={14} css={css`margin-right: ${theme.spacing[1]};`} />
                           Configure
@@ -2185,396 +2172,7 @@ function ChannelsSection() {
         </div>
       </Modal>
 
-      {/* Channel Config Modal */}
-      {configChannel && (
-        <ChannelConfigModal
-          channelName={configChannel}
-          onClose={() => setConfigChannel(null)}
-        />
-      )}
     </div>
-  );
-}
-
-// ============================================================================
-// Channel Config Modal
-// ============================================================================
-
-function ChannelConfigModal({
-  channelName,
-  onClose,
-}: {
-  channelName: string;
-  onClose: () => void;
-}) {
-  const theme = useTheme();
-  const utils = trpc.useUtils();
-
-  const { data: configSchema, isLoading: schemaLoading } = trpc.channels.getConfigSchema.useQuery({ name: channelName });
-  const { data: currentConfig, isLoading: configLoading } = trpc.channels.getConfig.useQuery({ name: channelName });
-  const configureMutation = trpc.channels.configure.useMutation({
-    onSuccess: () => {
-      utils.channels.getConfig.invalidate({ name: channelName });
-      utils.channels.listPackages.invalidate();
-      onClose();
-    },
-  });
-
-  const [configValues, setConfigValues] = useState<Record<string, unknown>>({});
-  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
-  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
-  const [initialized, setInitialized] = useState(false);
-
-  const fields = configSchema?.fields ?? [];
-
-  // Initialize form values from current config
-  useEffect(() => {
-    if (initialized || configLoading || schemaLoading) return;
-    if (currentConfig !== undefined) {
-      const cfg = currentConfig ?? {};
-      // Set defaults for fields not in config
-      const values: Record<string, unknown> = { ...cfg };
-      for (const field of fields) {
-        if (values[field.key] === undefined && field.default !== undefined) {
-          values[field.key] = field.default;
-        }
-        // Convert comma-separated strings to arrays for text-list fields
-        if (field.type === 'text-list' && typeof values[field.key] === 'string') {
-          values[field.key] = (values[field.key] as string).split(',').map((s) => s.trim()).filter(Boolean);
-        }
-      }
-      setConfigValues(values);
-      setInitialized(true);
-    }
-  }, [currentConfig, configLoading, schemaLoading, fields, initialized]);
-
-  // Client-side validation (Bug #20)
-  function validateConfig(): boolean {
-    const errors: Record<string, string> = {};
-
-    for (const field of fields) {
-      const value = configValues[field.key];
-
-      // Required check
-      if (field.required) {
-        const isEmpty = value === undefined || value === null || value === '' ||
-          (Array.isArray(value) && value.length === 0);
-        if (isEmpty) {
-          errors[field.key] = `${field.label} is required`;
-          continue;
-        }
-      }
-
-      // Skip further validation if empty and not required
-      if (value === undefined || value === null || value === '') continue;
-
-      // Regex validation
-      if (field.validation && typeof value === 'string') {
-        try {
-          if (!new RegExp(field.validation).test(value)) {
-            errors[field.key] = `Invalid format for ${field.label}`;
-          }
-        } catch { /* invalid regex, skip */ }
-      }
-
-      // URL validation
-      if (field.type === 'url' && typeof value === 'string') {
-        try {
-          new URL(value);
-        } catch {
-          errors[field.key] = 'Must be a valid URL';
-        }
-      }
-
-      // Number validation with min/max
-      if (field.type === 'number' && value !== undefined && value !== '') {
-        const num = Number(value);
-        if (isNaN(num)) {
-          errors[field.key] = 'Must be a number';
-        } else {
-          if (field.min !== undefined && num < field.min) {
-            errors[field.key] = `Must be at least ${field.min}`;
-          }
-          if (field.max !== undefined && num > field.max) {
-            errors[field.key] = `Must be at most ${field.max}`;
-          }
-        }
-      }
-    }
-
-    setValidationErrors(errors);
-    return Object.keys(errors).length === 0;
-  }
-
-  const handleSave = () => {
-    if (!validateConfig()) return;
-    configureMutation.mutate({ name: channelName, config: configValues });
-  };
-
-  const isLoading = schemaLoading || configLoading;
-
-  return (
-    <Modal open onClose={onClose} maxWidth="520px">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          handleSave();
-        }}
-        css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}
-      >
-        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
-          Configure: {channelName}
-        </Typography.Subtitle>
-
-        {isLoading ? (
-          <Typography.SmallBody color="hint">Loading configuration...</Typography.SmallBody>
-        ) : fields.length === 0 ? (
-          <Typography.SmallBody color="secondary">
-            This channel has no configurable settings.
-          </Typography.SmallBody>
-        ) : (
-          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-            {fields.map((field) => {
-              const value = configValues[field.key];
-              const fieldError = validationErrors[field.key];
-
-              if (field.type === 'toggle') {
-                return (
-                  <div key={field.key} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
-                    <Toggle
-                      checked={!!value}
-                      onChange={(checked) => setConfigValues({ ...configValues, [field.key]: checked })}
-                      label={field.label}
-                    />
-                    {field.helpText && (
-                      <Typography.Caption as="p" color="hint" css={css`margin-left: ${theme.spacing[12]};`}>
-                        {field.helpText}
-                      </Typography.Caption>
-                    )}
-                    {fieldError && (
-                      <span css={css`color: ${theme.colors.error.main}; font-size: 12px; margin-top: 4px; display: block;`}>
-                        {fieldError}
-                      </span>
-                    )}
-                  </div>
-                );
-              }
-
-              if (field.type === 'select' && field.options) {
-                return (
-                  <div key={field.key} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
-                    <label css={css`
-                      font-size: ${theme.typography.fontSize.sm};
-                      font-weight: ${theme.typography.fontWeight.medium};
-                      color: ${theme.colors.text.secondary};
-                    `}>
-                      {field.label}{field.required && <span css={css`color: ${theme.colors.error.main}; margin-left: 2px;`}>*</span>}
-                    </label>
-                    <select
-                      value={value != null ? String(value) : ''}
-                      onChange={(e) => setConfigValues({ ...configValues, [field.key]: e.target.value })}
-                      css={css`
-                        width: 100%;
-                        padding: ${theme.spacing[3]};
-                        background: ${theme.colors.background.paper};
-                        border: 1px solid ${fieldError ? theme.colors.error.main : theme.colors.border.default};
-                        border-radius: ${theme.borderRadius.default};
-                        color: ${theme.colors.text.primary};
-                        font-size: ${theme.typography.fontSize.base};
-                        outline: none;
-                        cursor: pointer;
-                        &:focus { border-color: ${fieldError ? theme.colors.error.main : theme.colors.border.focus}; }
-                      `}
-                    >
-                      <option value="">Select...</option>
-                      {field.options.map((opt) => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </select>
-                    {field.helpText && (
-                      <Typography.Caption as="p" color="hint">{field.helpText}</Typography.Caption>
-                    )}
-                    {fieldError && (
-                      <span css={css`color: ${theme.colors.error.main}; font-size: 12px; margin-top: 4px; display: block;`}>
-                        {fieldError}
-                      </span>
-                    )}
-                  </div>
-                );
-              }
-
-              if (field.type === 'secret') {
-                return (
-                  <div key={field.key} css={css`display: flex; flex-direction: column;`}>
-                    <Input
-                      label={`${field.label}${field.required ? ' *' : ''}`}
-                      type={showSecrets[field.key] ? 'text' : 'password'}
-                      value={value != null ? String(value) : ''}
-                      onChange={(e) => setConfigValues({ ...configValues, [field.key]: (e.target as HTMLInputElement).value })}
-                      placeholder={field.placeholder}
-                      helperText={field.helpText}
-                      error={fieldError}
-                      rightElement={
-                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[1.5]};`}>
-                          <Tooltip content="Encrypted at rest and injected securely at runtime" position="top" align="right">
-                            <ShieldCheck size={16} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                          </Tooltip>
-                          <button
-                            type="button"
-                            onClick={() => setShowSecrets({ ...showSecrets, [field.key]: !showSecrets[field.key] })}
-                            css={css`cursor: pointer; padding: 0; color: ${theme.colors.text.hint}; &:hover { color: ${theme.colors.text.primary}; }`}
-                          >
-                            {showSecrets[field.key] ? <EyeSlash size={16} /> : <Eye size={16} />}
-                          </button>
-                        </div>
-                      }
-                    />
-                  </div>
-                );
-              }
-
-              // text-list: tag-style input (Bug #18)
-              if (field.type === 'text-list') {
-                const tags = (Array.isArray(value) ? value : []) as string[];
-                return (
-                  <div key={field.key} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
-                    <label css={css`
-                      font-size: ${theme.typography.fontSize.sm};
-                      font-weight: ${theme.typography.fontWeight.medium};
-                      color: ${theme.colors.text.secondary};
-                    `}>
-                      {field.label}{field.required && <span css={css`color: ${theme.colors.error.main}; margin-left: 2px;`}>*</span>}
-                    </label>
-                    <div>
-                      {tags.length > 0 && (
-                        <div css={css`
-                          display: flex;
-                          flex-wrap: wrap;
-                          gap: 6px;
-                          margin-bottom: 8px;
-                        `}>
-                          {tags.map((tag, i) => (
-                            <span key={i} css={css`
-                              display: inline-flex;
-                              align-items: center;
-                              gap: 4px;
-                              padding: 2px 8px;
-                              background: ${theme.colors.background.elevated};
-                              border: 1px solid ${theme.colors.border.default};
-                              border-radius: 4px;
-                              font-size: 13px;
-                              color: ${theme.colors.text.secondary};
-                            `}>
-                              {tag}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setConfigValues((prev) => ({
-                                    ...prev,
-                                    [field.key]: tags.filter((_, idx) => idx !== i),
-                                  }));
-                                }}
-                                css={css`
-                                  background: none;
-                                  border: none;
-                                  cursor: pointer;
-                                  padding: 0 2px;
-                                  color: ${theme.colors.text.hint};
-                                  font-size: 14px;
-                                  line-height: 1;
-                                  &:hover { color: ${theme.colors.text.primary}; }
-                                `}
-                              >
-                                &times;
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      <input
-                        type="text"
-                        placeholder={field.placeholder || 'Type and press Enter to add'}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            const val = e.currentTarget.value.trim();
-                            if (val) {
-                              setConfigValues((prev) => ({
-                                ...prev,
-                                [field.key]: [...tags, val],
-                              }));
-                              e.currentTarget.value = '';
-                            }
-                          }
-                        }}
-                        css={css`
-                          width: 100%;
-                          padding: ${theme.spacing[3]};
-                          background: ${theme.colors.background.paper};
-                          border: 1px solid ${fieldError ? theme.colors.error.main : theme.colors.border.default};
-                          border-radius: ${theme.borderRadius.default};
-                          color: ${theme.colors.text.primary};
-                          font-size: ${theme.typography.fontSize.base};
-                          outline: none;
-                          &:focus { border-color: ${fieldError ? theme.colors.error.main : theme.colors.border.focus}; }
-                          &::placeholder { color: ${theme.colors.text.hint}; }
-                        `}
-                      />
-                    </div>
-                    {field.helpText && (
-                      <Typography.Caption as="p" color="hint">{field.helpText}</Typography.Caption>
-                    )}
-                    {fieldError && (
-                      <span css={css`color: ${theme.colors.error.main}; font-size: 12px; margin-top: 4px; display: block;`}>
-                        {fieldError}
-                      </span>
-                    )}
-                  </div>
-                );
-              }
-
-              // text, url, number
-              return (
-                <Input
-                  key={field.key}
-                  label={`${field.label}${field.required ? ' *' : ''}`}
-                  type={field.type === 'number' ? 'number' : 'text'}
-                  value={value != null ? String(value) : ''}
-                  onChange={(e) => {
-                    const raw = (e.target as HTMLInputElement).value;
-                    const parsed = field.type === 'number' ? (raw === '' ? '' : Number(raw)) : raw;
-                    setConfigValues({ ...configValues, [field.key]: parsed });
-                  }}
-                  placeholder={field.placeholder}
-                  helperText={field.helpText}
-                  error={fieldError}
-                />
-              );
-            })}
-          </div>
-        )}
-
-        {configureMutation.isError && (
-          <div css={css`
-            padding: ${theme.spacing[2]} ${theme.spacing[4]};
-            background: ${theme.colors.error.main}1a;
-            border-radius: ${theme.borderRadius.default};
-          `}>
-            <Typography.SmallBody color={theme.colors.error.main}>
-              {configureMutation.error?.message ?? 'Configuration failed'}
-            </Typography.SmallBody>
-          </div>
-        )}
-
-        <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
-          <Button variant="ghost" size="sm" onClick={onClose} type="button">Cancel</Button>
-          <Button size="sm" type="submit" loading={configureMutation.isPending} disabled={fields.length === 0}>
-            Save
-          </Button>
-        </div>
-      </form>
-    </Modal>
   );
 }
 
@@ -2671,6 +2269,8 @@ const sourceBadgeConfig: Record<string, { variant: 'default' | 'info' | 'success
   local: { variant: 'info', label: 'local' },
   git: { variant: 'success', label: 'git' },
   npm: { variant: 'warning', label: 'npm' },
+  package: { variant: 'info', label: 'package' },
+  store: { variant: 'success', label: 'store' },
 };
 
 // Status → Badge variant mapping for plugins (mirrors channelStatusBadge)
@@ -2705,13 +2305,6 @@ function PluginsSection() {
   const disableMutation = trpc.plugins.disable.useMutation({
     onSuccess: () => utils.plugins.list.invalidate(),
   });
-  const setConfigMutation = trpc.plugins.setConfig.useMutation({
-    onSuccess: () => {
-      utils.plugins.list.invalidate();
-      setConfigPlugin(null);
-    },
-  });
-
   // Package install mutations
   const verifyPackageMutation = trpc.plugins.verifyPackage.useMutation();
   const installFromPackageMutation = trpc.plugins.installFromPackage.useMutation({
@@ -2721,6 +2314,7 @@ function PluginsSection() {
       setShowConsentDialog(false);
       setPackageVerification(null);
       setSelectedPackagePath(null);
+      toast.success('Plugin installed successfully');
     },
   });
   const rollbackMutation = trpc.plugins.rollback.useMutation({
@@ -2743,9 +2337,8 @@ function PluginsSection() {
     error?: string;
   } | null>(null);
   const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null);
-  const [configPlugin, setConfigPlugin] = useState<string | null>(null);
   const [uninstallConfirm, setUninstallConfirm] = useState<string | null>(null);
-  const [mutationError, setMutationError] = useState<string | null>(null);
+  const navigateToConfig = useNavigate();
 
   // Package consent dialog state
   const [showConsentDialog, setShowConsentDialog] = useState(false);
@@ -2767,46 +2360,51 @@ function PluginsSection() {
   };
 
   const handleInstall = () => {
-    setMutationError(null);
     installMutation.mutate(
       { source: 'local' as const, path: installPath },
       {
-        onError: (err) => setMutationError(err.message),
+        onError: (err) => toast.error('Plugin installation failed', { detail: err.message }),
       }
     );
   };
 
   const handlePackageUpload = async (filePath: string) => {
-    setMutationError(null);
     try {
       const result = await verifyPackageMutation.mutateAsync({ filePath });
       setPackageVerification(result);
       setSelectedPackagePath(filePath);
       setShowConsentDialog(true);
     } catch (err) {
-      setMutationError(err instanceof Error ? err.message : 'Failed to verify package');
+      const detail = err instanceof Error ? err.message : String(err);
+      toast.error('Could not verify this package. It may be corrupted or incompatible.', { detail });
     }
   };
 
   const handlePackageConfirmInstall = (grantedPermissions: string[]) => {
     if (!selectedPackagePath) return;
-    setMutationError(null);
     installFromPackageMutation.mutate(
       { filePath: selectedPackagePath, grantedPermissions },
       {
-        onError: (err) => setMutationError(err.message),
+        onError: (err) => {
+          setShowConsentDialog(false);
+          setPackageVerification(null);
+          setSelectedPackagePath(null);
+          const msg = err.message.includes('already installed')
+            ? 'This plugin is already installed.'
+            : 'Plugin installation failed';
+          toast.error(msg, { detail: err.message });
+        },
       }
     );
   };
 
   const handleRollback = (name: string) => {
-    setMutationError(null);
     rollbackMutation.mutate(
       { name },
       {
         onSuccess: () => setRollbackConfirm(null),
         onError: (err) => {
-          setMutationError(err.message);
+          toast.error(`Failed to rollback plugin "${name}"`, { detail: err.message });
           setRollbackConfirm(null);
         },
       }
@@ -2814,22 +2412,20 @@ function PluginsSection() {
   };
 
   const handleToggleEnabled = (name: string, currentlyEnabled: boolean) => {
-    setMutationError(null);
-    if (currentlyEnabled) {
-      disableMutation.mutate({ name }, { onError: (err) => setMutationError(err.message) });
-    } else {
-      enableMutation.mutate({ name }, { onError: (err) => setMutationError(err.message) });
-    }
+    const action = currentlyEnabled ? 'disable' : 'enable';
+    const mutation = currentlyEnabled ? disableMutation : enableMutation;
+    mutation.mutate({ name }, {
+      onError: (err) => toast.error(`Failed to ${action} plugin "${name}"`, { detail: err.message }),
+    });
   };
 
   const handleUninstall = (name: string) => {
-    setMutationError(null);
     uninstallMutation.mutate(
       { name },
       {
         onSuccess: () => setUninstallConfirm(null),
         onError: (err) => {
-          setMutationError(err.message);
+          toast.error(`Failed to uninstall plugin "${name}"`, { detail: err.message });
           setUninstallConfirm(null);
         },
       }
@@ -2854,40 +2450,12 @@ function PluginsSection() {
             <Badge variant="default">{pluginList.length}</Badge>
           )}
         </div>
-        <Button size="sm" onClick={() => { setShowInstallModal(true); setInstallPath(''); setInstallValidation(null); setInstallTab('local'); }}>
+        <Button size="sm" onClick={() => { setShowInstallModal(true); setInstallPath(''); setInstallValidation(null); setInstallTab('package'); }}>
           <Plus size={14} css={css`margin-right: ${theme.spacing[1]};`} />
           Add Plugin
         </Button>
       </div>
 
-      {/* Error banner */}
-      <AnimatePresence>
-        {mutationError && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            css={css`
-              padding: ${theme.spacing[3]} ${theme.spacing[4]};
-              background: ${theme.colors.error.main}1a;
-              border-radius: ${theme.borderRadius.default};
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-            `}
-          >
-            <Typography.SmallBody color={theme.colors.error.main}>
-              {mutationError}
-            </Typography.SmallBody>
-            <button
-              onClick={() => setMutationError(null)}
-              css={css`cursor: pointer; padding: ${theme.spacing[1]}; color: ${theme.colors.error.main}; &:hover { opacity: 0.7; }`}
-            >
-              <X size={14} />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Plugin list */}
       {pluginList.length === 0 ? (
@@ -2904,7 +2472,7 @@ function PluginsSection() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => { setShowInstallModal(true); setInstallPath(''); setInstallValidation(null); setInstallTab('local'); }}
+            onClick={() => { setShowInstallModal(true); setInstallPath(''); setInstallValidation(null); setInstallTab('package'); }}
           >
             Add Plugin
           </Button>
@@ -2913,7 +2481,7 @@ function PluginsSection() {
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
           {pluginList.map((plugin) => {
             const isExpanded = expandedPlugin === plugin.name;
-            const source = sourceBadgeConfig[plugin.source] ?? { variant: 'default' as const, label: plugin.source };
+            const source = sourceBadgeConfig[plugin.installedFrom] ?? { variant: 'default' as const, label: plugin.installedFrom };
             const statusInfo = pluginStatusBadge[plugin.status] ?? { variant: 'default' as const, label: plugin.status };
             const componentBadges = Object.entries(plugin.components)
               .filter(([, count]) => (count as number) > 0)
@@ -3004,9 +2572,9 @@ function PluginsSection() {
                     >
                       <PluginDetail
                         pluginName={plugin.name}
-                        source={plugin.source}
+                        installedFrom={plugin.installedFrom}
                         hasConfig={plugin.hasConfig}
-                        onConfigure={() => setConfigPlugin(plugin.name)}
+                        onConfigure={() => navigateToConfig(`/settings/plugins/${plugin.name}/configure`)}
                         onUninstall={() => setUninstallConfirm(plugin.name)}
                       />
                     </motion.div>
@@ -3166,15 +2734,15 @@ function PluginsSection() {
             </div>
           )}
 
-          {/* Install error */}
-          {(installMutation.isError || mutationError) && (
+          {/* Install error (local path only — package errors use toasts) */}
+          {installMutation.isError && (
             <div css={css`
               padding: ${theme.spacing[2]} ${theme.spacing[4]};
               background: ${theme.colors.error.main}1a;
               border-radius: ${theme.borderRadius.default};
             `}>
               <Typography.SmallBody color={theme.colors.error.main}>
-                {mutationError ?? installMutation.error?.message ?? 'Installation failed'}
+                {installMutation.error?.message ?? 'Installation failed'}
               </Typography.SmallBody>
             </div>
           )}
@@ -3242,17 +2810,6 @@ function PluginsSection() {
         </div>
       </Modal>
 
-      {/* Configure Plugin Modal */}
-      {configPlugin && (
-        <PluginConfigModal
-          pluginName={configPlugin}
-          onClose={() => setConfigPlugin(null)}
-          onSave={(config) => {
-            setConfigMutation.mutate({ name: configPlugin, config });
-          }}
-          isSaving={setConfigMutation.isPending}
-        />
-      )}
     </div>
   );
 }
@@ -3263,13 +2820,13 @@ function PluginsSection() {
 
 function PluginDetail({
   pluginName,
-  source,
+  installedFrom,
   hasConfig,
   onConfigure,
   onUninstall,
 }: {
   pluginName: string;
-  source: string;
+  installedFrom: string;
   hasConfig: boolean;
   onConfigure: () => void;
   onUninstall: () => void;
@@ -3386,7 +2943,7 @@ function PluginDetail({
             Configure
           </Button>
         )}
-        {source !== 'built-in' && (
+        {installedFrom !== 'built-in' && (
           <Button
             variant="ghost"
             size="sm"
@@ -3398,194 +2955,6 @@ function PluginDetail({
         )}
       </div>
     </div>
-  );
-}
-
-// ============================================================================
-// Plugin Config Modal
-// ============================================================================
-
-function PluginConfigModal({
-  pluginName,
-  onClose,
-  onSave,
-  isSaving,
-}: {
-  pluginName: string;
-  onClose: () => void;
-  onSave: (config: Record<string, unknown>) => void;
-  isSaving: boolean;
-}) {
-  const theme = useTheme();
-  const { data: configData, isLoading: configLoading } = trpc.plugins.getConfig.useQuery({ name: pluginName });
-  const { data: detail } = trpc.plugins.get.useQuery({ name: pluginName });
-
-  const [configValues, setConfigValues] = useState<Record<string, unknown>>({});
-  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
-  const [rawJson, setRawJson] = useState('');
-  const [jsonError, setJsonError] = useState('');
-  const [initialized, setInitialized] = useState(false);
-
-  // Schema comes from the getConfig response
-  const schema = configData?.schema;
-  const hasSchema = schema && schema.fields.length > 0;
-
-  // Initialize values from current config
-  useEffect(() => {
-    if (initialized) return;
-    if (configData !== undefined) {
-      const cfg = configData?.values ?? {};
-      if (hasSchema) {
-        setConfigValues(cfg as Record<string, unknown>);
-      } else {
-        setRawJson(JSON.stringify(cfg, null, 2));
-      }
-      setInitialized(true);
-    }
-  }, [configData, hasSchema, initialized]);
-
-  const handleSave = () => {
-    if (hasSchema) {
-      onSave(configValues);
-    } else {
-      try {
-        const parsed = JSON.parse(rawJson || '{}');
-        setJsonError('');
-        onSave(parsed);
-      } catch {
-        setJsonError('Invalid JSON');
-      }
-    }
-  };
-
-  const displayName = detail?.displayName ?? pluginName;
-
-  // Map config field type to HTML input type
-  const inputTypeForField = (fieldType: string) => {
-    switch (fieldType) {
-      case 'secret': return 'password';
-      case 'url': return 'url';
-      case 'number': return 'number';
-      default: return 'text';
-    }
-  };
-
-  return (
-    <Modal open onClose={onClose}>
-      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
-          Configure: {displayName}
-        </Typography.Subtitle>
-
-        {configLoading ? (
-          <Typography.SmallBody color="hint">Loading configuration...</Typography.SmallBody>
-        ) : hasSchema ? (
-          // Schema-based form using typed fields
-          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-            {schema.fields.map((field) => {
-              const value = configValues[field.key];
-              const isMasked = field.type === 'secret' && value === '••••••••';
-
-              if (field.type === 'toggle') {
-                return (
-                  <div key={field.key} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
-                    <Toggle
-                      checked={!!value}
-                      onChange={(checked) => setConfigValues({ ...configValues, [field.key]: checked })}
-                      label={field.label}
-                    />
-                    {field.helpText && (
-                      <Typography.Caption as="p" color="hint">{field.helpText}</Typography.Caption>
-                    )}
-                  </div>
-                );
-              }
-
-              if (field.type === 'secret') {
-                return (
-                  <div key={field.key}>
-                    <Input
-                      label={field.label}
-                      type={showSecrets[field.key] ? 'text' : 'password'}
-                      value={isMasked ? '' : (value != null ? String(value) : '')}
-                      onChange={(e) => setConfigValues({ ...configValues, [field.key]: (e.target as HTMLInputElement).value })}
-                      helperText={field.helpText}
-                      placeholder={isMasked ? '••••••••  (saved, enter new value to change)' : (field.placeholder ?? (field.default != null ? String(field.default) : undefined))}
-                      rightElement={
-                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[1.5]};`}>
-                          <Tooltip content="Encrypted at rest and injected securely at runtime" position="top" align="right">
-                            <ShieldCheck size={16} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                          </Tooltip>
-                          <button
-                            type="button"
-                            onClick={() => setShowSecrets({ ...showSecrets, [field.key]: !showSecrets[field.key] })}
-                            css={css`cursor: pointer; padding: 0; color: ${theme.colors.text.hint}; &:hover { color: ${theme.colors.text.primary}; }`}
-                          >
-                            {showSecrets[field.key] ? <EyeSlash size={16} /> : <Eye size={16} />}
-                          </button>
-                        </div>
-                      }
-                    />
-                  </div>
-                );
-              }
-
-              return (
-                <div key={field.key}>
-                  <Input
-                    label={field.label}
-                    type={inputTypeForField(field.type)}
-                    value={value != null ? String(value) : ''}
-                    onChange={(e) => setConfigValues({ ...configValues, [field.key]: (e.target as HTMLInputElement).value })}
-                    helperText={field.helpText}
-                    placeholder={field.placeholder ?? (field.default != null ? String(field.default) : undefined)}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          // Raw JSON editor
-          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-            <Typography.SmallBody color="secondary">
-              This plugin does not define a config schema. Edit the raw JSON below.
-            </Typography.SmallBody>
-            <textarea
-              value={rawJson}
-              onChange={(e) => { setRawJson(e.target.value); setJsonError(''); }}
-              rows={10}
-              css={css`
-                font-family: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;
-                font-size: ${theme.typography.fontSize.sm};
-                padding: ${theme.spacing[3]};
-                border-radius: ${theme.borderRadius.default};
-                border: 1px solid ${jsonError ? theme.colors.error.main : theme.colors.border.default};
-                background: ${theme.colors.background.paper};
-                color: ${theme.colors.text.primary};
-                resize: vertical;
-                width: 100%;
-                box-sizing: border-box;
-
-                &:focus {
-                  outline: none;
-                  border-color: ${jsonError ? theme.colors.error.main : theme.colors.border.focus};
-                }
-              `}
-            />
-            {jsonError && (
-              <Typography.Caption color={theme.colors.error.main}>{jsonError}</Typography.Caption>
-            )}
-          </div>
-        )}
-
-        <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
-          <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" onClick={handleSave} loading={isSaving}>
-            Save
-          </Button>
-        </div>
-      </div>
-    </Modal>
   );
 }
 

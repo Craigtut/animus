@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../../../src/utils/env.js', () => ({
   env: { ANIMUS_ENCRYPTION_KEY: 'test-key', NODE_ENV: 'test', LOG_LEVEL: 'error' },
   PROJECT_ROOT: '/tmp/animus-test',
+  DATA_DIR: '/tmp/animus-test/data',
 }));
 
 import {

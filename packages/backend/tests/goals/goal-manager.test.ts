@@ -7,8 +7,12 @@ import type Database from 'better-sqlite3';
 import { createTestHeartbeatDb } from '../helpers.js';
 import { GoalManager } from '../../src/goals/goal-manager.js';
 import { SeedManager, cosineSimilarity, SEED_GRADUATION_THRESHOLD, SEED_CLEANUP_THRESHOLD, SEED_RESONANCE_THRESHOLD, SEED_DECAY_RATE, SEED_BOOST_MULTIPLIER } from '../../src/goals/seed-manager.js';
-import { buildGoalContext } from '../../src/goals/goal-context.js';
+import { buildGoalContext, generatePlanningPrompts } from '../../src/goals/goal-context.js';
 import * as heartbeatStore from '../../src/db/stores/heartbeat-store.js';
+import {
+  GOAL_PLANNING_PROMPT_STRONGER_TICKS,
+  GOAL_PLANNING_PROMPT_FORCEFUL_TICKS,
+} from '../../src/goals/planning.js';
 import type { IEmbeddingProvider, EmotionState } from '@animus/shared';
 
 // --------------------------------------------------------------------------
@@ -107,6 +111,35 @@ describe('GoalManager', () => {
       const updated = manager.getGoal(goal.id)!;
       expect(updated.status).toBe('active');
       expect(updated.activatedAt).not.toBeNull();
+    });
+
+    it('sets activatedAtTick when activating a goal', () => {
+      // Set heartbeat state to a known tick number
+      heartbeatStore.updateHeartbeatState(db, { tickNumber: 5 });
+
+      const goal = manager.createGoal({ title: 'Test', origin: 'ai_internal' });
+      manager.activateGoal(goal.id);
+      const updated = manager.getGoal(goal.id)!;
+      expect(updated.activatedAtTick).toBe(5);
+    });
+
+    it('sets activatedAtTick when creating a goal with active status', () => {
+      heartbeatStore.updateHeartbeatState(db, { tickNumber: 7 });
+
+      const goal = manager.createGoal({ title: 'Direct Active', origin: 'user_directed', status: 'active' });
+      expect(goal.activatedAtTick).toBe(7);
+    });
+
+    it('resets activatedAtTick when resuming a paused goal', () => {
+      heartbeatStore.updateHeartbeatState(db, { tickNumber: 3 });
+      const goal = manager.createGoal({ title: 'Test', origin: 'ai_internal', status: 'active' });
+
+      manager.pauseGoal(goal.id);
+
+      heartbeatStore.updateHeartbeatState(db, { tickNumber: 10 });
+      manager.resumeGoal(goal.id);
+      const resumed = manager.getGoal(goal.id)!;
+      expect(resumed.activatedAtTick).toBe(10);
     });
 
     it('pauses and resumes a goal', () => {
@@ -649,7 +682,7 @@ describe('buildGoalContext', () => {
   });
 
   it('returns null sections when no goals or seeds', () => {
-    const context = buildGoalContext(goalManager, seedManager, []);
+    const context = buildGoalContext(goalManager, seedManager, [], 1);
     expect(context.goalSection).toBeNull();
     expect(context.graduatingSeedsSection).toBeNull();
     expect(context.proposedGoalsSection).toBeNull();
@@ -659,7 +692,7 @@ describe('buildGoalContext', () => {
   it('includes salient goals', () => {
     goalManager.createGoal({ title: 'Important Goal', origin: 'ai_internal', status: 'active', basePriority: 0.8 });
 
-    const context = buildGoalContext(goalManager, seedManager, []);
+    const context = buildGoalContext(goalManager, seedManager, [], 1);
     expect(context.goalSection).not.toBeNull();
     expect(context.goalSection).toContain('Important Goal');
     expect(context.tokenEstimate).toBeGreaterThan(0);
@@ -669,7 +702,7 @@ describe('buildGoalContext', () => {
     const seed = await seedManager.createSeed({ content: 'Emerging interest', source: 'internal' });
     heartbeatStore.updateSeed(db, seed.id, { status: 'graduating' });
 
-    const context = buildGoalContext(goalManager, seedManager, []);
+    const context = buildGoalContext(goalManager, seedManager, [], 1);
     expect(context.graduatingSeedsSection).not.toBeNull();
     expect(context.graduatingSeedsSection).toContain('Emerging interest');
   });
@@ -677,8 +710,99 @@ describe('buildGoalContext', () => {
   it('includes proposed goals', () => {
     goalManager.createGoal({ title: 'Proposed Goal', origin: 'ai_internal' });
 
-    const context = buildGoalContext(goalManager, seedManager, []);
+    const context = buildGoalContext(goalManager, seedManager, [], 1);
     expect(context.proposedGoalsSection).not.toBeNull();
     expect(context.proposedGoalsSection).toContain('Proposed Goal');
+  });
+
+  it('includes planning prompts for active goals without plans', () => {
+    heartbeatStore.updateHeartbeatState(db, { tickNumber: 5 });
+
+    goalManager.createGoal({ title: 'Planless Goal', origin: 'user_directed', status: 'active' });
+
+    // At tick 8, goal activated at tick 5 → 3 ticks since activation → 'stronger'
+    const context = buildGoalContext(goalManager, seedManager, [], 8);
+    expect(context.planningPromptsSection).not.toBeNull();
+    expect(context.planningPromptsSection).toContain('Planless Goal');
+  });
+
+  it('excludes planning prompts for goals with plans', () => {
+    heartbeatStore.updateHeartbeatState(db, { tickNumber: 1 });
+
+    const goal = goalManager.createGoal({ title: 'Planned Goal', origin: 'user_directed', status: 'active' });
+    goalManager.createPlan(goal.id, { strategy: 'Step by step', createdBy: 'mind' });
+
+    const context = buildGoalContext(goalManager, seedManager, [], 10);
+    // Should not have planning prompts since the goal has a plan
+    if (context.planningPromptsSection) {
+      expect(context.planningPromptsSection).not.toContain('Planned Goal');
+    }
+  });
+});
+
+// --------------------------------------------------------------------------
+// Planning Prompt Tests
+// --------------------------------------------------------------------------
+
+describe('generatePlanningPrompts', () => {
+  it('returns empty array when all goals have plans', () => {
+    const prompts = generatePlanningPrompts([
+      { id: '1', title: 'Goal A', activatedAtTick: 1, hasPlan: true },
+    ], 10);
+    expect(prompts).toHaveLength(0);
+  });
+
+  it('returns empty array when activatedAtTick is null', () => {
+    const prompts = generatePlanningPrompts([
+      { id: '1', title: 'Goal A', activatedAtTick: null, hasPlan: false },
+    ], 10);
+    expect(prompts).toHaveLength(0);
+  });
+
+  it('returns soft urgency for recently activated goals', () => {
+    const prompts = generatePlanningPrompts([
+      { id: '1', title: 'New Goal', activatedAtTick: 5, hasPlan: false },
+    ], 6); // 1 tick since activation
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]!.urgency).toBe('soft');
+    expect(prompts[0]!.message).toContain('New Goal');
+  });
+
+  it('returns stronger urgency after STRONGER threshold ticks', () => {
+    const activatedAtTick = 1;
+    const currentTick = activatedAtTick + GOAL_PLANNING_PROMPT_STRONGER_TICKS;
+    const prompts = generatePlanningPrompts([
+      { id: '1', title: 'Lingering Goal', activatedAtTick, hasPlan: false },
+    ], currentTick);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]!.urgency).toBe('stronger');
+  });
+
+  it('returns forceful urgency after FORCEFUL threshold ticks', () => {
+    const activatedAtTick = 1;
+    const currentTick = activatedAtTick + GOAL_PLANNING_PROMPT_FORCEFUL_TICKS;
+    const prompts = generatePlanningPrompts([
+      { id: '1', title: 'Stale Goal', activatedAtTick, hasPlan: false },
+    ], currentTick);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]!.urgency).toBe('forceful');
+  });
+
+  it('generates prompts for multiple planless goals', () => {
+    const prompts = generatePlanningPrompts([
+      { id: '1', title: 'Goal A', activatedAtTick: 1, hasPlan: false },
+      { id: '2', title: 'Goal B', activatedAtTick: 5, hasPlan: false },
+      { id: '3', title: 'Goal C', activatedAtTick: 3, hasPlan: true }, // has plan
+    ], 12);
+    expect(prompts).toHaveLength(2);
+    expect(prompts.map(p => p.goalId)).toEqual(['1', '2']);
+  });
+
+  it('skips goals with negative ticks since activation', () => {
+    // Edge case: activated_at_tick is in the future (shouldn't happen, but be safe)
+    const prompts = generatePlanningPrompts([
+      { id: '1', title: 'Future Goal', activatedAtTick: 100, hasPlan: false },
+    ], 5);
+    expect(prompts).toHaveLength(0);
   });
 });

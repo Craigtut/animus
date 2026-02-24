@@ -83,6 +83,8 @@ Sub-agents are extensions of the mind. They carry the same personality, emotiona
 
 **6. Mind processes the result.** The next heartbeat tick's GATHER CONTEXT loads the sub-agent's result. The MIND QUERY processes it — updating thoughts, experiences, and emotions based on what was found — and produces a reply to deliver to the user. The mind doesn't rewrite or transform the result; it delivers the sub-agent's answer, since the sub-agent was already speaking as Animus and formatting for the right channel.
 
+> **Note on planning agents:** Planning sub-agents are **not automatically spawned** when a goal activates. Instead, goals without plans receive escalating context prompts reminding the mind to consider planning (see `docs/architecture/goals.md`). The mind retains full agency — it may spawn a planning sub-agent via `spawn_agent` if the goal is complex, create a plan directly for simpler goals, or decide the goal doesn't need a formal plan. Planning agents are treated like any other delegated work: the mind chooses when and whether to use them.
+
 ---
 
 ## Prompt Template

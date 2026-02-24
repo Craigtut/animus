@@ -293,6 +293,10 @@ CREATE TABLE goals (
   completion_criteria TEXT,                 -- What "done" looks like (optional, freeform)
   deadline TEXT,                            -- Optional ISO timestamp
 
+  -- Planning prompt tracking
+  activated_at_tick INTEGER,                -- Tick number when goal became active (for escalation)
+  plan_prompt_urgency TEXT DEFAULT 'soft',  -- 'soft' | 'stronger' | 'forceful' (computed from elapsed ticks)
+
   -- Timestamps
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -448,16 +452,25 @@ Plans are the strategy layer between goals and tasks. A goal says *what* to achi
 
 ### Plan Creation
 
-When a goal becomes active, the mind produces a `create_plan` decision. EXECUTE spawns a **planning sub-agent** that:
+When a goal becomes active and lacks a plan, the system guides the mind toward planning through **context-injected prompts with escalating urgency**. This approach preserves the mind's full agency — it can create a plan directly, spawn a planning sub-agent for complex goals, or decide the goal no longer feels relevant.
 
-1. Receives the goal's title, description, motivation, and any relevant context
-2. Develops a phased strategy with milestones
-3. Returns the plan as structured output
-4. The plan is stored and associated with the goal
+**How it works:**
+- During GATHER CONTEXT, goals without plans are detected
+- A planning prompt is injected into the session notes, reminding the mind
+- Urgency escalates based on how many ticks have passed since activation:
+  - **Ticks 0-3 (soft):** "This goal has no plan yet. You might consider how you'd approach it."
+  - **Ticks 3-10 (stronger):** "This goal still lacks a strategy. It would help to sketch out an approach."
+  - **Ticks 10+ (forceful):** "This goal needs a plan. Take a moment now to outline how you'd pursue it."
 
-The planning agent is a regular sub-agent — it carries the Animus personality and has access to tools (for research, if needed). It returns a plan, not a list of tasks. The mind creates tasks from the plan as appropriate.
+The mind can respond to these prompts in several ways:
+- **Create a plan directly** via the `create_plan` decision — appropriate for straightforward goals
+- **Spawn a planning sub-agent** via `spawn_agent` — appropriate for complex goals requiring research or multi-step strategizing
+- **Abandon or pause the goal** — if the goal no longer feels relevant after reflection
+- **Ignore the prompt** — the mind always retains the freedom to simply exist
 
-**Simple goals may not need a sub-agent.** If the mind determines a goal is straightforward enough, it can create a plan directly in its structured output without spawning a planning agent. The mind makes this judgment naturally.
+**Simple goals may not need formal plans.** A goal like "check in with Craig once a week" might not benefit from a structured plan with milestones. The mind decides what level of planning serves each goal. The prompts are nudges, not demands.
+
+This design follows the same pattern as seed graduation prompts and deferred task pickup: the system guides without forcing, the mind retains agency, and the organic feel of goal pursuit is preserved.
 
 ### Plan Revision
 
@@ -629,6 +642,7 @@ The cleanup process deliberately does not consult the mind. Feeding dormant goal
 // 1. Compute salience for all active goals
 const activeGoals = await db.getGoalsByStatus('active');
 const goalContexts = [];
+const planningPrompts = [];
 
 for (const goal of activeGoals) {
   const salience = computeSalience(goal, currentEmotions, recentMessages, now);
@@ -639,7 +653,29 @@ for (const goal of activeGoals) {
     const plan = await db.getActivePlan(goal.id);
     const recentTasks = await db.getRecentTasksForGoal(goal.id);
     goalContexts.push({ goal, plan, recentTasks, salience });
+
+    // 1a. Generate planning prompts for goals without plans
+    if (!plan && goal.activated_at_tick !== null) {
+      const ticksSinceActivation = currentTickNumber - goal.activated_at_tick;
+      const urgency = computePlanningPromptUrgency(ticksSinceActivation);
+      planningPrompts.push({ goal, urgency });
+
+      // Update cached urgency for UI/debugging
+      if (goal.plan_prompt_urgency !== urgency) {
+        await db.updateGoalPlanningUrgency(goal.id, urgency);
+      }
+    }
   }
+}
+
+// Helper: determine planning prompt urgency based on ticks elapsed
+function computePlanningPromptUrgency(ticksSinceActivation: number): 'soft' | 'stronger' | 'forceful' {
+  if (ticksSinceActivation >= GOAL_PLANNING_PROMPT_FORCEFUL_TICKS) {
+    return 'forceful';
+  } else if (ticksSinceActivation >= GOAL_PLANNING_PROMPT_STRONGER_TICKS) {
+    return 'stronger';
+  }
+  return 'soft';
 }
 
 // Sort by salience, take top N
@@ -652,6 +688,9 @@ const proposedGoals = await db.getGoalsByStatus('proposed');
 
 // 3. Check for seeds graduating (one-time graduation events)
 const graduatingSeeds = await db.getSeedsByStatus('graduating');
+
+// 4. Planning prompts are included in Session Notes (conditional)
+// See context-builder.md for the prompt templates
 ```
 
 ### MIND QUERY: Goal-Related Structured Output
@@ -679,22 +718,27 @@ The EXECUTE stage gains these operations (in order):
               - create_seed → insert seed record, embed content
               - propose_goal → insert goal in 'proposed' status
               - update_goal → update status, priority, milestones
-              - create_plan → insert plan (or spawn planning agent)
-              - revise_plan → spawn planning sub-agent
-[NEW]      6. Seed resonance check:
+                (when activating: set activated_at_tick to current tick number)
+              - create_plan → insert plan record directly (does NOT auto-spawn agent)
+              - revise_plan → spawn planning sub-agent with revision context
+[NEW]      6. Track planning context for goals without plans:
+              - For active goals missing plans, increment ticks-since-activation count
+              - This is tracked via activated_at_tick field, used by GATHER CONTEXT
+                to compute escalating urgency for planning prompts
+[NEW]      7. Seed resonance check:
               - Compare new thought embeddings against active seed embeddings
               - Boost matching seeds
-[NEW]      7. Seed decay pass:
+[NEW]      8. Seed decay pass:
               - Apply time-based decay to all active seeds
               - Mark seeds below SEED_CLEANUP_THRESHOLD as 'decayed'
-[NEW]      8. Seed graduation check:
+[NEW]      9. Seed graduation check:
               - Flag seeds above SEED_GRADUATION_THRESHOLD as 'graduating'
               - (Graduation prompt included in next tick's GATHER CONTEXT)
-[NEW]      9. Log goal salience (already computed in GATHER CONTEXT)
-[NEW]      10. Periodic: goal cleanup (delete goals with avg salience < 0.05 over 30 days)
-[NEW]      11. Periodic: seed cleanup (delete decayed seeds older than 7 days)
-[existing] 12. TTL cleanup on thoughts, experiences, emotion history
-[existing] 13. Persist heartbeat state for crash recovery
+[NEW]      10. Log goal salience (already computed in GATHER CONTEXT)
+[NEW]      11. Periodic: goal cleanup (delete goals with avg salience < 0.05 over 30 days)
+[NEW]      12. Periodic: seed cleanup (delete decayed seeds older than 7 days)
+[existing] 13. TTL cleanup on thoughts, experiences, emotion history
+[existing] 14. Persist heartbeat state for crash recovery
 ```
 
 ---
@@ -732,6 +776,8 @@ The mind's system prompt (see `docs/architecture/context-builder.md`) must inclu
 | `GOAL_CLEANUP_INTERVAL_TICKS` | 50 | How often cleanup runs |
 | `COMPLETED_GOAL_RETENTION_DAYS` | 90 | TTL for completed/abandoned goals |
 | `SALIENCE_LOG_RETENTION_DAYS` | 90 | TTL for salience history entries |
+| `GOAL_PLANNING_PROMPT_STRONGER_TICKS` | 3 | Ticks after activation before escalating to "stronger" planning prompt |
+| `GOAL_PLANNING_PROMPT_FORCEFUL_TICKS` | 10 | Ticks after activation before escalating to "forceful" planning prompt |
 | `SEED_RESONANCE_THRESHOLD` | 0.7 | Cosine similarity for seed reinforcement |
 | `SEED_BOOST_MULTIPLIER` | 0.15 | Strength boost per resonance match |
 | `SEED_DECAY_RATE` | 0.027 | Decay rate per hour (~7 day full reset) |

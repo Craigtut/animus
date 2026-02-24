@@ -17,8 +17,15 @@ import { env } from '../utils/env.js';
 
 const COOKIE_NAME = 'animus_session';
 
-/** Verifier for WebSocket connections where Fastify decorations aren't available */
-const verifyJwt = createVerifier({ key: env.JWT_SECRET });
+/** Verifier for WebSocket connections where Fastify decorations aren't available.
+ *  Lazy-initialized because JWT_SECRET is resolved at startup by secrets-manager. */
+let _verifyJwt: ReturnType<typeof createVerifier> | null = null;
+function verifyJwt(token: string) {
+  if (!_verifyJwt) {
+    _verifyJwt = createVerifier({ key: env.JWT_SECRET! });
+  }
+  return _verifyJwt(token);
+}
 
 function extractCookieValue(cookieHeader: string | undefined, name: string): string | null {
   if (!cookieHeader) return null;

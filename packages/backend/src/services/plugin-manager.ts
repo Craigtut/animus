@@ -14,7 +14,7 @@ import fsSync from 'node:fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import extractZip from 'extract-zip';
-import { env } from '../utils/env.js';
+import { env, DATA_DIR } from '../utils/env.js';
 
 import { getSystemDb } from '../db/index.js';
 import * as pluginStore from '../db/stores/plugin-store.js';
@@ -167,7 +167,18 @@ class PluginManager {
       }
 
       const disc = discovered.find(([, m]) => m.name === record.name);
-      if (!disc) continue;
+      if (!disc) {
+        if (record.source === 'package' || record.source === 'store') {
+          // Package-installed plugin directory missing — remove stale DB record
+          // so it doesn't block reinstallation. These paths are system-managed
+          // (extracted to ~/.animus/packages/), so if gone they're unrecoverable.
+          log.warn(`Plugin "${record.name}" installed from ${record.source} but not found on disk at "${record.path}" — removing stale record`);
+          pluginStore.deletePlugin(db, record.name);
+        } else {
+          log.warn(`Plugin "${record.name}" not found on disk at "${record.path}" — skipping`);
+        }
+        continue;
+      }
 
       const [pluginPath, manifest, source] = disc;
       const loaded: LoadedPlugin = {
@@ -400,10 +411,11 @@ class PluginManager {
     }
 
     // 3. Extract to packages directory
-    const dataDir = path.dirname(env.DB_SYSTEM_PATH);
-    const packagesDir = path.join(dataDir, 'packages');
+    const packagesDir = path.join(DATA_DIR, 'packages');
     const extractDir = path.join(packagesDir, manifest.name);
 
+    // Clean any leftover files from a previous failed install before extracting
+    await fs.rm(extractDir, { recursive: true, force: true });
     await fs.mkdir(extractDir, { recursive: true });
     try {
       await extractZip(anpkPath, { dir: extractDir });
@@ -457,7 +469,7 @@ class PluginManager {
     const loaded: LoadedPlugin = {
       manifest: pluginManifest,
       absolutePath: extractDir,
-      source: 'store',
+      source: 'package',
       enabled: true,
       configSchema: null,
       iconSvg: null,
@@ -484,7 +496,7 @@ class PluginManager {
       name: manifest.name,
       version: manifest.version,
       path: extractDir,
-      source: 'store',
+      source: 'package',
       enabled: !needsConfig,
     });
 
@@ -494,7 +506,6 @@ class PluginManager {
         package_version = ?,
         package_checksum = ?,
         signature_status = ?,
-        installed_from = ?,
         package_cache_path = ?,
         permissions_granted = ?
       WHERE name = ?`,
@@ -502,7 +513,6 @@ class PluginManager {
       manifest.version,
       verification.checksums.verified > 0 ? 'verified' : null,
       verification.signature.status,
-      'package',
       cachePath,
       grantedPermissions.length > 0 ? JSON.stringify(grantedPermissions) : null,
       manifest.name,
@@ -569,8 +579,7 @@ class PluginManager {
     const currentVersion = record.version;
 
     // Find the cached .anpk for the previous version
-    const dataDir = path.dirname(env.DB_SYSTEM_PATH);
-    const cacheDir = path.join(dataDir, 'packages', '.cache');
+    const cacheDir = path.join(DATA_DIR, 'packages', '.cache');
     const previousCachePath = path.join(cacheDir, `${packageName}-${previousVersion}.anpk`);
 
     if (!fsSync.existsSync(previousCachePath)) {
@@ -627,7 +636,7 @@ class PluginManager {
       const reloaded: LoadedPlugin = {
         manifest: pluginManifest,
         absolutePath: extractDir,
-        source: loaded?.source ?? 'store',
+        source: loaded?.source ?? 'package',
         enabled: true,
         configSchema: null,
         iconSvg: null,
@@ -818,7 +827,7 @@ class PluginManager {
   }
 
   private getProviderRuntimeRoot(): string {
-    return path.join(path.dirname(env.DB_SYSTEM_PATH), 'runtime', 'providers');
+    return path.join(DATA_DIR, 'runtime', 'providers');
   }
 
   private getProviderRuntimeDir(provider: string): string {
@@ -1456,8 +1465,18 @@ class PluginManager {
     const dbPlugins = pluginStore.getAllPlugins(db);
     for (const record of dbPlugins) {
       try {
-        const manifest = await this.readManifest(record.path);
-        results.push([record.path, manifest, record.source]);
+        // Normalize stored path — if it doesn't exist, try DATA_DIR/packages/<name>
+        let pluginPath = record.path;
+        if (!fsSync.existsSync(pluginPath)) {
+          const corrected = path.join(DATA_DIR, 'packages', record.name);
+          if (fsSync.existsSync(corrected)) {
+            log.info(`Correcting stored path for plugin ${record.name} → ${corrected}`);
+            pluginPath = corrected;
+            pluginStore.updatePlugin(db, record.name, { path: corrected });
+          }
+        }
+        const manifest = await this.readManifest(pluginPath);
+        results.push([pluginPath, manifest, record.source]);
       } catch {
         log.warn(`Could not load registered plugin at ${record.path}`);
       }

@@ -32,6 +32,7 @@ vi.mock('../../src/lib/logger.js', () => ({
 // Mock the env module
 vi.mock('../../src/utils/env.js', () => ({
   PROJECT_ROOT: '/tmp/animus-test',
+  DATA_DIR: '/tmp/animus-test/data',
 }));
 
 // Track spawn calls so we can inspect env and command

@@ -367,7 +367,7 @@ export async function gatherContext(
   let goalCtx: GoalContext | null = null;
   if (deps.goalManager && deps.seedManager) {
     try {
-      goalCtx = buildGoalContext(deps.goalManager, deps.seedManager, emotions);
+      goalCtx = buildGoalContext(deps.goalManager, deps.seedManager, emotions, state.tickNumber);
     } catch (err) {
       log.warn('Goal context failed:', err);
     }

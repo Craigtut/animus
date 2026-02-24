@@ -391,11 +391,13 @@ export function snapshotToMindOutput(
     }
     replyText = '';
   }
-  const hasReply = replyText.trim().length > 0 && gathered.contact;
+  // Allow replies for both full contacts and recognized participants (synthetic contactId).
+  const replyContactId = gathered.contact?.id ?? gathered.trigger.contactId;
+  const hasReply = replyText.trim().length > 0 && !!replyContactId;
   const reply: MindOutput['reply'] = hasReply
     ? {
         content: replyText.trim(),
-        contactId: gathered.contact!.id,
+        contactId: replyContactId!,
         channel: (gathered.trigger.channel || 'web') as ChannelType,
         replyToMessageId: gathered.trigger.messageId || null,
       }

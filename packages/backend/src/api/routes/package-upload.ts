@@ -16,12 +16,12 @@ import type { FastifyInstance } from 'fastify';
 import multipart from '@fastify/multipart';
 import { generateUUID } from '@animus-labs/shared';
 import { createLogger } from '../../lib/logger.js';
-import { env } from '../../utils/env.js';
+import { DATA_DIR } from '../../utils/env.js';
 
 const log = createLogger('PackageUpload', 'server');
 
 const MAX_PACKAGE_SIZE = 100 * 1024 * 1024; // 100 MB
-const UPLOAD_DIR = path.resolve(path.dirname(env.DB_SYSTEM_PATH), 'package-uploads');
+const UPLOAD_DIR = path.join(DATA_DIR, 'package-uploads');
 
 export async function registerPackageUploadRoutes(app: FastifyInstance): Promise<void> {
   // Register multipart in an encapsulated context so it doesn't conflict

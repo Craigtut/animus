@@ -1,8 +1,8 @@
 /**
  * Encryption Service — AES-256-GCM encryption for secrets.
  *
- * Key derived from ANIMUS_ENCRYPTION_KEY env var via PBKDF2.
- * ANIMUS_ENCRYPTION_KEY is required — the server won't start without it.
+ * Key derived from ANIMUS_ENCRYPTION_KEY via PBKDF2.
+ * The key is resolved by secrets-manager at startup (auto-generated if needed).
  */
 
 import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync } from 'crypto';
@@ -24,7 +24,11 @@ let derivedKey: Buffer | null = null;
 
 function getKey(): Buffer | null {
   if (derivedKey) return derivedKey;
-  if (!env.ANIMUS_ENCRYPTION_KEY) return null;
+  if (!env.ANIMUS_ENCRYPTION_KEY) {
+    throw new Error(
+      'Encryption key not available. Ensure resolveSecrets() was called before using encryption.'
+    );
+  }
   derivedKey = pbkdf2Sync(env.ANIMUS_ENCRYPTION_KEY, SALT, ITERATIONS, KEY_LENGTH, 'sha256');
   return derivedKey;
 }

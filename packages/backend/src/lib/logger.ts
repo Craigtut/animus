@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import pc from 'picocolors';
-import { env, PROJECT_ROOT } from '../utils/env.js';
+import { env, DATA_DIR } from '../utils/env.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,7 +65,7 @@ const MIN_LEVEL = getMinLevel();
 // File Logging — always writes at debug level, plain text (no ANSI codes)
 // ---------------------------------------------------------------------------
 
-const LOG_DIR = path.join(PROJECT_ROOT, 'logs');
+const LOG_DIR = path.join(DATA_DIR, 'logs');
 /** Absolute path to the log file. Exported for external reference (e.g. MCP tools). */
 export const LOG_FILE_PATH = path.join(LOG_DIR, 'animus.log');
 

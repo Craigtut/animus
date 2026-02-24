@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import extractZip from 'extract-zip';
 import { createLogger } from '../lib/logger.js';
 import { getEventBus } from '../lib/event-bus.js';
-import { env } from '../utils/env.js';
+import { env, DATA_DIR } from '../utils/env.js';
 import { getSystemDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
 import { ChannelProcessHost } from './process-host.js';
@@ -68,6 +68,16 @@ export class ChannelManager {
 
     for (const pkg of packages) {
       try {
+        // Normalize stored path — if it doesn't exist, try DATA_DIR/packages/<name>
+        if (!fs.existsSync(pkg.path)) {
+          const corrected = path.join(DATA_DIR, 'packages', pkg.name);
+          if (fs.existsSync(corrected)) {
+            log.info(`Correcting stored path for channel ${pkg.name} → ${corrected}`);
+            pkg.path = corrected;
+            systemStore.updateChannelPackage(db, pkg.name, { path: corrected });
+          }
+        }
+
         const manifest = this.loadManifest(pkg.path);
         this.manifests.set(pkg.channelType, manifest);
 
@@ -363,10 +373,11 @@ export class ChannelManager {
     }
 
     // 3. Extract to packages directory
-    const dataDir = path.dirname(env.DB_SYSTEM_PATH);
-    const packagesDir = path.join(dataDir, 'packages');
+    const packagesDir = path.join(DATA_DIR, 'packages');
     const extractDir = path.join(packagesDir, manifest.name);
 
+    // Clean any leftover files from a previous failed install before extracting
+    await fsp.rm(extractDir, { recursive: true, force: true });
     await fsp.mkdir(extractDir, { recursive: true });
     try {
       await extractZip(anpkPath, { dir: extractDir });
@@ -480,8 +491,7 @@ export class ChannelManager {
     const currentVersion = pkg.version;
 
     // Find the cached .anpk for the previous version
-    const dataDir = path.dirname(env.DB_SYSTEM_PATH);
-    const cacheDir = path.join(dataDir, 'packages', '.cache');
+    const cacheDir = path.join(DATA_DIR, 'packages', '.cache');
     const previousCachePath = path.join(cacheDir, `${packageName}-${previousVersion}.anpk`);
 
     if (!fs.existsSync(previousCachePath)) {
@@ -750,8 +760,20 @@ export class ChannelManager {
 
   /**
    * Get config schema for a channel type.
+   * Re-reads from disk to pick up any changes to config.schema.json.
    */
   getConfigSchema(channelType: string): ConfigSchema | undefined {
+    // Find the package path for this channel type
+    const db = getSystemDb();
+    const packages = systemStore.getChannelPackages(db);
+    const pkg = packages.find((p) => p.channelType === channelType);
+    if (pkg) {
+      const fresh = this.loadConfigSchema(pkg.path);
+      if (fresh) {
+        this.configSchemas.set(channelType, fresh);
+        return fresh;
+      }
+    }
     return this.configSchemas.get(channelType);
   }
 
@@ -960,7 +982,7 @@ export class ChannelManager {
       downloadMedia: async (params) => {
         const ext = params.filename?.split('.').pop() ?? 'bin';
         const id = crypto.randomUUID();
-        const localPath = path.join(path.dirname(env.DB_SYSTEM_PATH), 'media', `${id}.${ext}`);
+        const localPath = path.join(DATA_DIR, 'media', `${id}.${ext}`);
 
         fs.mkdirSync(path.dirname(localPath), { recursive: true });
 
@@ -1016,12 +1038,26 @@ export class ChannelManager {
   }
 
   private loadManifest(pkgPath: string): ChannelManifest {
-    const manifestPath = path.join(pkgPath, 'channel.json');
-    if (!fs.existsSync(manifestPath)) {
-      throw new Error(`channel.json not found at ${manifestPath}`);
+    const channelJsonPath = path.join(pkgPath, 'channel.json');
+    const manifestJsonPath = path.join(pkgPath, 'manifest.json');
+
+    if (fs.existsSync(channelJsonPath)) {
+      // Development / local install — native channel.json format
+      const raw = JSON.parse(fs.readFileSync(channelJsonPath, 'utf-8'));
+      return channelManifestSchema.parse(raw);
     }
-    const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-    return channelManifestSchema.parse(raw);
+
+    if (fs.existsSync(manifestJsonPath)) {
+      // Package install — unified manifest.json from .anpk extraction
+      const raw = JSON.parse(fs.readFileSync(manifestJsonPath, 'utf-8'));
+      // Map unified manifest fields to channel.json format
+      return channelManifestSchema.parse({
+        ...raw,
+        type: raw.channelType ?? raw.type,
+      });
+    }
+
+    throw new Error(`No channel.json or manifest.json found at ${pkgPath}`);
   }
 
   private loadConfigSchema(pkgPath: string): ConfigSchema | null {

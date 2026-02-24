@@ -582,8 +582,12 @@ async function bootstrap(): Promise<void> {
   const ctx = createAdapterContext();
 
   // Load the channel manifest to find the adapter entry point
-  const { readFileSync } = await import('node:fs');
-  const manifestRaw = JSON.parse(readFileSync(path.join(pkgPath, 'channel.json'), 'utf-8')) as Record<string, unknown>;
+  // Supports both channel.json (local dev) and manifest.json (.anpk package installs)
+  const { readFileSync, existsSync } = await import('node:fs');
+  const channelJsonPath = path.join(pkgPath, 'channel.json');
+  const manifestJsonPath = path.join(pkgPath, 'manifest.json');
+  const manifestFilePath = existsSync(channelJsonPath) ? channelJsonPath : manifestJsonPath;
+  const manifestRaw = JSON.parse(readFileSync(manifestFilePath, 'utf-8')) as Record<string, unknown>;
   const adapterRelPath = manifestRaw['adapter'] as string;
   const adapterAbsPath = path.resolve(pkgPath, adapterRelPath);
 
