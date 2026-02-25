@@ -116,9 +116,11 @@ async function main() {
         fontSrc: ["'self'", 'data:'],
         objectSrc: ["'none'"],
         frameAncestors: ["'none'"],
+        upgradeInsecureRequests: null, // Disable — app runs over HTTP on LAN
       },
     },
     crossOriginEmbedderPolicy: false, // Allow loading cross-origin resources (media, etc.)
+    hsts: false, // Disable — self-hosted app may run over plain HTTP
   });
 
   // Rate limiting — generous for single-user, prevents abuse

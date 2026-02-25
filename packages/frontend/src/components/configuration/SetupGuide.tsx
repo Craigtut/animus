@@ -72,7 +72,7 @@ export function SetupGuide({ guide, fields, startCollapsed = false, onFieldRef }
               {/* Description */}
               {guide.description && (
                 <Typography.SmallBody color="secondary">
-                  {guide.description}
+                  {resolveTemplates(guide.description, templateVars)}
                 </Typography.SmallBody>
               )}
 

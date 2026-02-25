@@ -12,7 +12,6 @@ const setupSteps: { step: OnboardingStep; label: string; path: string }[] = [
   { step: 'agent_provider', label: 'Agent', path: '/onboarding/agent' },
   { step: 'identity', label: 'You', path: '/onboarding/identity' },
   { step: 'about_you', label: 'About You', path: '/onboarding/about-you' },
-  { step: 'channels', label: 'Channels', path: '/onboarding/channels' },
 ];
 
 const personaSteps: { step: OnboardingStep; label: string; path: string }[] = [

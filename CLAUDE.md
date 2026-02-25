@@ -174,6 +174,10 @@ npm run lint:fix      # ESLint auto-fix
 npm run clean         # Remove dist folders and caches
 ```
 
+### Writing Style
+
+- **Never use em dashes** (`—`) when writing copy. Use alternative punctuation (commas, colons, semicolons, parentheses, or separate sentences) instead.
+
 ### Code Style
 
 - Use TypeScript strict mode

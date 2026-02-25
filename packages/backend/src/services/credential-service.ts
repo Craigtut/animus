@@ -31,6 +31,8 @@ export interface ProviderAuthMethod {
 export interface ProviderAuthStatus {
   provider: 'claude' | 'codex';
   configured: boolean;
+  /** Whether the CLI binary (claude / codex) is installed on the system. */
+  cliInstalled: boolean;
   methods: ProviderAuthMethod[];
 }
 
@@ -233,6 +235,9 @@ export async function detectProviderAuth(
 async function detectClaudeAuth(db: Database.Database): Promise<ProviderAuthStatus> {
   const methods: ProviderAuthMethod[] = [];
 
+  // Always check if the claude binary is installed (required for the SDK)
+  const cliInstalled = await checkBinaryExists('claude');
+
   // Check env vars
   if (process.env['ANTHROPIC_API_KEY']) {
     methods.push({
@@ -291,28 +296,29 @@ async function detectClaudeAuth(db: Database.Database): Promise<ProviderAuthStat
     // Ignore filesystem errors
   }
 
-  // Check for claude CLI binary
-  if (!methods.some((m) => m.method === 'cli')) {
-    const hasCli = await checkBinaryExists('claude');
-    if (hasCli) {
-      methods.push({
-        method: 'cli',
-        available: true,
-        source: 'filesystem',
-        detail: 'claude binary found in PATH',
-      });
-    }
+  // Binary is in PATH but no credential files found — CLI installed but not authenticated
+  if (cliInstalled && !methods.some((m) => m.method === 'cli')) {
+    methods.push({
+      method: 'cli',
+      available: false,
+      source: 'filesystem',
+      detail: 'Claude Code installed but not authenticated (run: claude login)',
+    });
   }
 
   return {
     provider: 'claude',
     configured: methods.some((m) => m.available),
+    cliInstalled,
     methods,
   };
 }
 
 async function detectCodexAuth(db: Database.Database): Promise<ProviderAuthStatus> {
   const methods: ProviderAuthMethod[] = [];
+
+  // Always check if the codex binary is installed (required for the SDK)
+  const cliInstalled = await checkBinaryExists('codex');
 
   // Check env vars
   if (process.env['OPENAI_API_KEY']) {
@@ -364,22 +370,20 @@ async function detectCodexAuth(db: Database.Database): Promise<ProviderAuthStatu
     // Ignore
   }
 
-  // Check for codex CLI binary
-  if (!methods.some((m) => m.method === 'cli')) {
-    const hasCli = await checkBinaryExists('codex');
-    if (hasCli) {
-      methods.push({
-        method: 'cli',
-        available: true,
-        source: 'filesystem',
-        detail: 'codex binary found in PATH',
-      });
-    }
+  // Binary is in PATH but no auth file found — CLI installed but not authenticated
+  if (cliInstalled && !methods.some((m) => m.method === 'cli')) {
+    methods.push({
+      method: 'cli',
+      available: false,
+      source: 'filesystem',
+      detail: 'Codex CLI installed but not authenticated',
+    });
   }
 
   return {
     provider: 'codex',
     configured: methods.some((m) => m.available),
+    cliInstalled,
     methods,
   };
 }
@@ -422,6 +426,7 @@ async function validateClaudeCredential(
 
   if (credentialType === 'oauth_token') {
     headers['Authorization'] = `Bearer ${key}`;
+    headers['anthropic-beta'] = 'oauth-2025-04-20';
   } else {
     headers['x-api-key'] = key;
   }

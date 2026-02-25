@@ -88,7 +88,7 @@ function openDb(dbPath: string): Database.Database {
  */
 export async function initializeDatabases(): Promise<void> {
   // Ensure databases directory exists
-  await mkdir(path.dirname(DB_SYSTEM_PATH), { recursive: true, mode: 0o700 });
+  await mkdir(path.dirname(DB_SYSTEM_PATH), { recursive: true, mode: 0o755 });
 
   // Open all databases
   systemDb = openDb(DB_SYSTEM_PATH);

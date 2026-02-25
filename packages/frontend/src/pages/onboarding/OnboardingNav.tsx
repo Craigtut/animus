@@ -3,7 +3,7 @@ import { css, useTheme } from '@emotion/react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft } from '@phosphor-icons/react';
 import { motion } from 'motion/react';
-import { Button } from '../../components/ui';
+import { Button, Tooltip } from '../../components/ui';
 
 interface OnboardingNavProps {
   onBack?: () => void;
@@ -12,6 +12,8 @@ interface OnboardingNavProps {
   continueDisabled?: boolean;
   continueLoading?: boolean;
   onSkip?: () => void;
+  /** Tooltip text shown when the Continue button is disabled */
+  continueTooltip?: string | undefined;
 }
 
 /**
@@ -31,6 +33,7 @@ export function OnboardingNav({
   continueDisabled = false,
   continueLoading = false,
   onSkip,
+  continueTooltip,
 }: OnboardingNavProps) {
   const theme = useTheme();
 
@@ -183,16 +186,27 @@ export function OnboardingNav({
                 Skip
               </button>
             )}
-            <Button
-              onClick={onContinue}
-              disabled={continueDisabled}
-              loading={continueLoading}
-              css={css`
-                min-width: 120px;
-              `}
-            >
-              {continueLabel}
-            </Button>
+            {continueTooltip && continueDisabled ? (
+              <Tooltip content={continueTooltip} position="top">
+                <Button
+                  onClick={onContinue}
+                  disabled={continueDisabled}
+                  loading={continueLoading}
+                  css={css`min-width: 120px;`}
+                >
+                  {continueLabel}
+                </Button>
+              </Tooltip>
+            ) : (
+              <Button
+                onClick={onContinue}
+                disabled={continueDisabled}
+                loading={continueLoading}
+                css={css`min-width: 120px;`}
+              >
+                {continueLabel}
+              </Button>
+            )}
           </div>
         </div>
       </div>

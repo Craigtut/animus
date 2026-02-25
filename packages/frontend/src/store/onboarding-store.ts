@@ -14,7 +14,6 @@ export type OnboardingStep =
   | 'agent_provider'
   | 'identity'
   | 'about_you'
-  | 'channels'
   | 'persona_existence'
   | 'persona_identity'
   | 'persona_archetype'

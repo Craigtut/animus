@@ -25,7 +25,7 @@ export function ExistenceStep() {
     navigate('/onboarding/persona/identity');
   };
 
-  const handleBack = () => navigate('/onboarding/channels');
+  const handleBack = () => navigate('/onboarding/about-you');
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>

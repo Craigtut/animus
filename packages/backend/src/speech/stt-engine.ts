@@ -42,7 +42,14 @@ export class STTEngine {
     const sttDir = path.join(this.modelsPath, 'stt');
     log.info('Loading STT model (Parakeet TDT v3)...');
 
-    const sherpaModule = await import('sherpa-onnx-node');
+    let sherpaModule;
+    try {
+      sherpaModule = await import('sherpa-onnx-node');
+    } catch (err) {
+      throw new Error(
+        'Native STT addon (sherpa-onnx-node) not available. Install sherpa-onnx-node for speech-to-text support.',
+      );
+    }
     const sherpa = sherpaModule.default;
 
     const config = {

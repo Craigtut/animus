@@ -138,13 +138,17 @@ export class ChannelProcessHost {
       env: { ...process.env },
     };
 
-    // In production, use --permission flag for sandboxing
+    // In production, use --permission flag for sandboxing.
+    // The child process needs read access to:
+    //   1. The channel package directory (adapter code + bundled node_modules)
+    //   2. The bootstrapper directory (adapter-context.js that boots the child)
     const execArgv: string[] = [];
     if (process.env['NODE_ENV'] === 'production') {
+      const sdkDir = path.join(__dirname, 'sdk');
       execArgv.push(
         '--permission',
         `--allow-fs-read=${this.config.pkg.path}`,
-        '--allow-net',
+        `--allow-fs-read=${sdkDir}`,
       );
     }
     if (execArgv.length > 0) {

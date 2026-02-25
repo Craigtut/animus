@@ -55,6 +55,7 @@ temp/
 # Claude local settings (keep .claude/settings.json for shared settings)
 .claude/settings.local.json
 
+docker-compose.override.yml
 .playwright-mcp
 /data
 /design-mockups

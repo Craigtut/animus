@@ -16,8 +16,8 @@ export function AboutYouStep() {
 
   const handleContinue = () => {
     markStepComplete('about_you');
-    setCurrentStep('channels');
-    navigate('/onboarding/channels');
+    setCurrentStep('persona_existence');
+    navigate('/onboarding/persona/existence');
   };
 
   const handleBack = () => navigate('/onboarding/identity');

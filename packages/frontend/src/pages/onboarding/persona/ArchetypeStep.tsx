@@ -7,6 +7,7 @@ import { Grid, Pagination } from 'swiper/modules';
 import { SelectionCard, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
 import { OnboardingNav } from '../OnboardingNav';
+import { archetypePresets, defaultDimensions } from './archetype-presets';
 
 import 'swiper/css';
 import 'swiper/css/grid';
@@ -35,7 +36,12 @@ export function ArchetypeStep() {
   };
 
   const handleContinue = () => {
-    updatePersonaDraft({ archetype: selected });
+    const preset = selected && selected !== 'scratch' ? archetypePresets[selected] : null;
+    updatePersonaDraft({
+      archetype: selected,
+      personalityDimensions: preset ? { ...preset.dimensions } : { ...defaultDimensions },
+      traits: preset ? [...preset.traits] : [],
+    });
     markStepComplete('persona_archetype');
     setCurrentStep('persona_dimensions');
     navigate('/onboarding/persona/dimensions');

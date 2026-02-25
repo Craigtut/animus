@@ -27,7 +27,6 @@ import { WelcomeStep } from './pages/onboarding/WelcomeStep';
 import { AgentProviderStep } from './pages/onboarding/AgentProviderStep';
 import { IdentityStep } from './pages/onboarding/IdentityStep';
 import { AboutYouStep } from './pages/onboarding/AboutYouStep';
-import { ChannelsStep } from './pages/onboarding/ChannelsStep';
 import { ExistenceStep } from './pages/onboarding/persona/ExistenceStep';
 import { PersonaIdentityStep } from './pages/onboarding/persona/IdentityStep';
 import { ArchetypeStep } from './pages/onboarding/persona/ArchetypeStep';
@@ -170,7 +169,6 @@ export function App() {
                 <Route path="agent" element={<AgentProviderStep />} />
                 <Route path="identity" element={<IdentityStep />} />
                 <Route path="about-you" element={<AboutYouStep />} />
-                <Route path="channels" element={<ChannelsStep />} />
                 <Route path="persona" element={<Navigate to="existence" replace />} />
                 <Route path="persona/existence" element={<ExistenceStep />} />
                 <Route path="persona/identity" element={<PersonaIdentityStep />} />

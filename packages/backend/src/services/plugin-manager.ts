@@ -602,7 +602,7 @@ class PluginManager {
       }
 
       // 2. Remove current extracted directory
-      const extractDir = path.join(dataDir, 'packages', packageName);
+      const extractDir = path.join(DATA_DIR, 'packages', packageName);
       await fs.rm(extractDir, { recursive: true, force: true });
 
       // 3. Re-extract from cached .anpk
