@@ -500,11 +500,15 @@ run_with_credentials({
   command: string,        // Shell command to execute
   credentialRef: string,  // e.g. "nano-banana-pro.GEMINI_API_KEY"
   envVar: string,         // e.g. "GEMINI_API_KEY"
+  additionalCredentials?: Array<{  // For plugins needing multiple credentials
+    credentialRef: string,         // e.g. "trello.TRELLO_API_TOKEN"
+    envVar: string,                // e.g. "TRELLO_API_TOKEN"
+  }>,
   cwd?: string            // Working directory
 })
 ```
 
-The mind calls this tool with a credential reference. The handler resolves the reference, injects the real value as an env var on the subprocess, and returns only stdout/stderr. The credential value never appears in the tool result.
+The mind calls this tool with a credential reference. The handler resolves the reference (and any additional credentials), injects the real values as env vars on the subprocess, and returns only stdout/stderr. Credential values never appear in the tool result. The `additionalCredentials` field supports plugins that need multiple secrets per API call (e.g., Trello's API key + token).
 
 ### Permission Tiers
 

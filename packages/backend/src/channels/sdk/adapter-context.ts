@@ -146,6 +146,7 @@ export interface AdapterContext {
     identifier: string;
     content: string;
     conversationId?: string;
+    conversationType?: 'owned' | 'participated';
     media?: Array<{ type: 'image' | 'audio' | 'video' | 'file'; mimeType: string; url: string; filename?: string }>;
     metadata?: Record<string, unknown>;
     participant?: { displayName: string; avatarUrl?: string; isBot: boolean };
@@ -271,6 +272,7 @@ function createAdapterContext(): AdapterContext {
         identifier: params.identifier,
         content: params.content,
         conversationId: params.conversationId,
+        conversationType: params.conversationType,
         media: params.media,
         metadata: params.metadata,
         participant: params.participant,
@@ -612,6 +614,21 @@ async function bootstrap(): Promise<void> {
   // Signal ready
   sendToParent({ type: 'ready' });
 }
+
+// Exit when parent process dies (e.g. tsx watch restart).
+// Without this, child processes become orphans that stay connected to
+// external services (Slack Socket Mode, Discord gateway, etc.), stealing
+// events from the new child that the restarted server forks.
+process.on('disconnect', () => {
+  if (adapter) {
+    // Best-effort cleanup; don't block exit
+    Promise.resolve(adapter.stop?.()).catch(() => {}).finally(() => process.exit(0));
+    // Force exit after 3s if adapter.stop() hangs
+    setTimeout(() => process.exit(0), 3000).unref();
+  } else {
+    process.exit(0);
+  }
+});
 
 // Set up global error handlers
 process.on('uncaughtException', (err) => {

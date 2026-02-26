@@ -319,7 +319,10 @@ export async function gatherContext(
       for (const msg of recentMessages) {
         const meta = msg.metadata as Record<string, unknown> | null;
         const extConvId = meta?.['externalConversationId'] as string | undefined;
-        if (extConvId && msg.channel !== 'web') {
+        // Only fetch external history for participated conversations (channels, threads, mpims).
+        // Owned conversations (DMs, SMS) have complete history in messages.db.
+        // The adapter declares this via conversationType in reportIncoming.
+        if (extConvId && msg.channel !== 'web' && meta?.['conversationType'] === 'participated') {
           externalConvos.set(extConvId, msg.channel);
         }
       }

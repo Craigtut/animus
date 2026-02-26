@@ -49,18 +49,19 @@ export class ChannelRouter {
     identifier: string;
     content: string;
     conversationId?: string;
+    conversationType?: 'owned' | 'participated';
     media?: IncomingMedia[];
     metadata?: Record<string, unknown>;
     participant?: { displayName: string; avatarUrl?: string; isBot: boolean };
   }): Promise<Message | null> {
-    const { channel, identifier, content, conversationId, media, metadata, participant } = params;
+    const { channel, identifier, content, conversationId, conversationType, media, metadata, participant } = params;
 
     // Step 1: Resolve contact
     const resolved = resolveContact(channel, identifier);
     if (!resolved) {
       // If we have participant info (and they're not a bot), treat as recognized participant
       if (participant && !participant.isBot) {
-        return this.handleRecognizedParticipant(channel, identifier, content, conversationId, media, metadata, participant);
+        return this.handleRecognizedParticipant(channel, identifier, content, conversationId, conversationType, media, metadata, participant);
       }
       // Unknown caller — send canned response, notify primary
       this.handleUnknownCaller(channel, identifier, content);
@@ -101,10 +102,11 @@ export class ChannelRouter {
       }
     }
 
-    // Combine metadata with external conversationId, media, and voice message flag
+    // Combine metadata with external conversationId, conversationType, media, and voice message flag
     const combinedMetadata = {
       ...metadata,
       ...(conversationId ? { externalConversationId: conversationId } : {}),
+      ...(conversationType ? { conversationType } : {}),
       ...(media && media.length > 0 ? { media } : {}),
       ...(wasVoiceMessage ? { wasVoiceMessage: true, originalMediaType: 'audio' } : {}),
     };
@@ -282,6 +284,7 @@ export class ChannelRouter {
     identifier: string,
     content: string,
     conversationId?: string,
+    conversationType?: 'owned' | 'participated',
     media?: IncomingMedia[],
     metadata?: Record<string, unknown>,
     participant?: { displayName: string; avatarUrl?: string; isBot: boolean },
@@ -293,6 +296,7 @@ export class ChannelRouter {
     const combinedMetadata = {
       ...metadata,
       ...(conversationId ? { externalConversationId: conversationId } : {}),
+      ...(conversationType ? { conversationType } : {}),
       ...(media && media.length > 0 ? { media } : {}),
       participantName,
       isRecognizedParticipant: true,

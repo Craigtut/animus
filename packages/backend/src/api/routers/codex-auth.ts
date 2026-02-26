@@ -45,9 +45,14 @@ export const codexAuthRouter = router({
         const unsubscribe = subscribeToStatus(input.sessionId, (status) => {
           emit.next(status);
 
-          // Auto-complete the observable on terminal states
+          // Auto-complete the observable on terminal states.
+          // Wrapped in try-catch because the frontend may disconnect after
+          // receiving the terminal status, closing the controller before
+          // this timeout fires.
           if (status.status === 'success' || status.status === 'error' || status.status === 'expired' || status.status === 'cancelled') {
-            setTimeout(() => emit.complete(), 100);
+            setTimeout(() => {
+              try { emit.complete(); } catch { /* controller already closed */ }
+            }, 100);
           }
         });
 

@@ -453,6 +453,15 @@ class ClaudeSession extends BaseSession {
   /** Count of SDK messages received in current prompt */
   private sdkMessageCount = 0;
 
+  /** Patterns that indicate an authentication error in response content */
+  private static AUTH_ERROR_PATTERNS = [
+    /Invalid API key/i,
+    /Not logged in/i,
+    /Please run \/login/i,
+    /authentication required/i,
+    /expired.*token/i,
+  ];
+
   constructor(sdk: ClaudeSDK, config: AgentSessionConfig, logger: Logger) {
     super(config, logger);
     this.sdk = sdk;
@@ -495,6 +504,27 @@ class ClaudeSession extends BaseSession {
     if (this.waitingTimer) {
       clearInterval(this.waitingTimer);
       this.waitingTimer = null;
+    }
+  }
+
+  /**
+   * Check if a response contains known auth error patterns and throw
+   * an AgentError(category='authentication') instead of returning
+   * the error text as a successful response.
+   */
+  private validateResponseForAuthError(response: string): void {
+    if (ClaudeSession.AUTH_ERROR_PATTERNS.some(p => p.test(response))) {
+      throw new AgentError({
+        code: 'AUTH_EXPIRED',
+        message: response.trim(),
+        category: 'authentication',
+        severity: 'fatal',
+        provider: 'claude',
+        sessionId: this.id,
+        details: {
+          suggestedAction: 'Re-authenticate Claude or update your API key in Settings.',
+        },
+      });
     }
   }
 
@@ -638,6 +668,9 @@ class ClaudeSession extends BaseSession {
         hasStructuredOutput: structuredOutput !== undefined,
       });
 
+      // Detect auth errors masquerading as successful responses
+      this.validateResponseForAuthError(response);
+
       return {
         content: response,
         turns,
@@ -662,6 +695,9 @@ class ClaudeSession extends BaseSession {
           totalMs,
         });
 
+        // Detect auth errors even in the recovery path
+        this.validateResponseForAuthError(response);
+
         return {
           content: response,
           turns,
@@ -674,14 +710,17 @@ class ClaudeSession extends BaseSession {
         };
       }
 
-      // Enrich error with stderr output from the CLI subprocess
+      // Enrich error with stderr output from the CLI subprocess,
+      // but preserve typed AgentErrors (e.g. auth errors) as-is
       const stderrInfo = this.stderrBuffer.trim();
       if (stderrInfo) {
         this.logger.error('Claude CLI stderr output:', { stderr: stderrInfo });
       }
-      const enrichedError = error instanceof Error && stderrInfo
-        ? new Error(`${error.message}\nCLI stderr: ${stderrInfo}`)
-        : error;
+      const enrichedError = error instanceof AgentError
+        ? error
+        : (error instanceof Error && stderrInfo
+          ? new Error(`${error.message}\nCLI stderr: ${stderrInfo}`)
+          : error);
       this.stderrBuffer = '';
 
       throw wrapError(enrichedError, 'claude', this.id);
@@ -931,6 +970,9 @@ class ClaudeSession extends BaseSession {
         }),
       );
 
+      // Detect auth errors masquerading as successful responses
+      this.validateResponseForAuthError(response);
+
       return {
         content: response,
         turns,
@@ -956,6 +998,9 @@ class ClaudeSession extends BaseSession {
           totalMs,
         });
 
+        // Detect auth errors even in the recovery path
+        this.validateResponseForAuthError(response);
+
         await this.emit(
           this.createEvent('response_end', {
             content: response,
@@ -975,14 +1020,17 @@ class ClaudeSession extends BaseSession {
         };
       }
 
-      // Enrich error with stderr output from the CLI subprocess
+      // Enrich error with stderr output from the CLI subprocess,
+      // but preserve typed AgentErrors (e.g. auth errors) as-is
       const stderrInfo = this.stderrBuffer.trim();
       if (stderrInfo) {
         this.logger.error('Claude CLI stderr output:', { stderr: stderrInfo });
       }
-      const enrichedError = error instanceof Error && stderrInfo
-        ? new Error(`${error.message}\nCLI stderr: ${stderrInfo}`)
-        : error;
+      const enrichedError = error instanceof AgentError
+        ? error
+        : (error instanceof Error && stderrInfo
+          ? new Error(`${error.message}\nCLI stderr: ${stderrInfo}`)
+          : error);
       this.stderrBuffer = '';
 
       throw wrapError(enrichedError, 'claude', this.id);

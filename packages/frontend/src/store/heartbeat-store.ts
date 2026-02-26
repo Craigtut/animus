@@ -55,6 +55,20 @@ export interface SubAgentEventEntry {
 }
 
 // ============================================================================
+// System error shape (surfaced auth/config errors)
+// ============================================================================
+
+export interface SystemError {
+  id: string;
+  category: string;
+  message: string;
+  provider?: string;
+  recoverable: boolean;
+  suggestedAction?: string;
+  receivedAt: number;
+}
+
+// ============================================================================
 // Store shape
 // ============================================================================
 
@@ -83,6 +97,9 @@ interface HeartbeatStoreState {
   // -- Reply streaming --
   replyStream: ReplyStreamState;
 
+  // -- System errors --
+  systemErrors: SystemError[];
+
   // -- Actions --
   setHeartbeatState: (state: HeartbeatState) => void;
   setHeartbeatActive: (active: boolean) => void;
@@ -98,6 +115,8 @@ interface HeartbeatStoreState {
   completeTurn: (turnIndex: number, content: string) => void;
   completeReply: (content: string, tickNumber?: number, totalTurns?: number) => void;
   clearReplyStream: () => void;
+  addSystemError: (error: Omit<SystemError, 'id' | 'receivedAt'>) => void;
+  dismissSystemError: (id: string) => void;
 }
 
 const MAX_RECENT_THOUGHTS = 50;
@@ -117,6 +136,7 @@ export const useHeartbeatStore = create<HeartbeatStoreState>()((set) => ({
   agentEvents: [],
   subAgentEvents: new Map(),
   replyStream: { turns: [] },
+  systemErrors: [],
 
   // -- Heartbeat state --
   setHeartbeatState: (state) =>
@@ -244,6 +264,29 @@ export const useHeartbeatStore = create<HeartbeatStoreState>()((set) => ({
   clearReplyStream: () =>
     set(() => ({
       replyStream: { turns: [] },
+    })),
+
+  // -- System errors --
+  addSystemError: (error) =>
+    set((prev) => {
+      // Deduplicate: skip if same category exists within the last 60s
+      const recentCutoff = Date.now() - 60_000;
+      if (prev.systemErrors.some(
+        (e) => e.category === error.category && e.receivedAt > recentCutoff
+      )) {
+        return prev;
+      }
+      const newError: SystemError = {
+        ...error,
+        id: `syserr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        receivedAt: Date.now(),
+      };
+      return { systemErrors: [...prev.systemErrors, newError] };
+    }),
+
+  dismissSystemError: (id) =>
+    set((prev) => ({
+      systemErrors: prev.systemErrors.filter((e) => e.id !== id),
     })),
 }));
 

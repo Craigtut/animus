@@ -16,6 +16,7 @@ import type {
   configFieldOptionSchema,
   configFieldSchema,
   configFieldHelpLinkSchema,
+  configFieldOAuthSchema,
   configSchemaSchema,
   setupGuideSchema,
   setupGuideStepSchema,
@@ -46,6 +47,7 @@ export type ChannelManifest = z.infer<typeof channelManifestSchema>;
 export type ConfigFieldType = z.infer<typeof configFieldTypeSchema>;
 export type ConfigFieldOption = z.infer<typeof configFieldOptionSchema>;
 export type ConfigFieldHelpLink = z.infer<typeof configFieldHelpLinkSchema>;
+export type ConfigFieldOAuth = z.infer<typeof configFieldOAuthSchema>;
 export type ConfigField = z.infer<typeof configFieldSchema>;
 export type ConfigSchema = z.infer<typeof configSchemaSchema>;
 export type SetupGuide = z.infer<typeof setupGuideSchema>;

@@ -341,9 +341,12 @@ export async function getOrCreateMindSession(
     verbose: verboseAgent,
   });
 
-  // Attach logging
+  // Attach logging — eagerly init so logSessionId is available before promptStreaming()
   if (agentLogStoreAdapter) {
-    const logging = attachSessionLogging(session, { store: agentLogStoreAdapter });
+    const logging = attachSessionLogging(session, {
+      store: agentLogStoreAdapter,
+      eagerInit: { provider, model: model ?? 'unknown' },
+    });
     state.logSessionId = logging.getLogSessionId;
   }
 

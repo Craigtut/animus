@@ -38,9 +38,9 @@ interface SidebarItem {
 }
 
 const sections: SidebarItem[] = [
+  { id: 'journal', label: 'Journal', icon: Notebook },
   { id: 'emotions', label: 'Emotions', icon: Heartbeat },
   { id: 'energy', label: 'Energy', icon: Lightning },
-  { id: 'journal', label: 'Journal', icon: Notebook },
   { id: 'memories', label: 'Memories', icon: Brain },
   { id: 'goals', label: 'Goals', icon: Target },
   { id: 'tasks', label: 'Tasks', icon: ListChecks },

@@ -90,6 +90,7 @@ export function useSubscriptionManager() {
   // ========================================================================
   trpc.heartbeat.onReply.useSubscription(undefined, {
     onData: (data) => {
+      if (data.channel !== 'web') return;
       if (data.type === 'chunk') {
         useHeartbeatStore.getState().appendReplyChunk(data.content, data.turnIndex ?? 0);
       } else if (data.type === 'turn_complete') {
@@ -176,6 +177,7 @@ export function useSubscriptionManager() {
   trpc.heartbeat.onTickStored.useSubscription(undefined, {
     onData: () => {
       queryClient.invalidateQueries({ queryKey: [['heartbeat', 'listTicks']] });
+      queryClient.invalidateQueries({ queryKey: [['heartbeat', 'getTickTimeline']] });
     },
   });
 
@@ -185,6 +187,7 @@ export function useSubscriptionManager() {
   trpc.heartbeat.onTickInputStored.useSubscription(undefined, {
     onData: () => {
       queryClient.invalidateQueries({ queryKey: [['heartbeat', 'listTicks']] });
+      queryClient.invalidateQueries({ queryKey: [['heartbeat', 'getTickTimeline']] });
     },
   });
 
@@ -213,6 +216,15 @@ export function useSubscriptionManager() {
     onData: () => {
       queryClient.invalidateQueries({ queryKey: [['tools', 'listApprovals']] });
       queryClient.invalidateQueries({ queryKey: [['tools', 'listTools']] });
+    },
+  });
+
+  // ========================================================================
+  // 19. System errors (auth failures, config issues)
+  // ========================================================================
+  trpc.heartbeat.onSystemError.useSubscription(undefined, {
+    onData: (error) => {
+      useHeartbeatStore.getState().addSystemError(error);
     },
   });
 

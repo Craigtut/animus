@@ -51,6 +51,9 @@ export function useConfigForm({ fields, currentConfig, isLoading }: UseConfigFor
     const errors: Record<string, string> = {};
 
     for (const field of fields) {
+      // Skip OAuth fields — they are validated by the OAuth flow itself
+      if (field.type === 'oauth') continue;
+
       const value = configValues[field.key];
 
       // Required check

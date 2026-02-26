@@ -155,7 +155,47 @@ export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = a
   }
 
   const value = config[configKey];
-  if (typeof value !== 'string' || !value) {
+
+  // 2b. Resolve credential value (handle OAuth token objects and plain strings)
+  let credentialValue: string;
+
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    '__oauth' in (value as Record<string, unknown>) &&
+    (value as Record<string, unknown>).__oauth === true
+  ) {
+    // OAuth token object: extract access_token, auto-refresh if near expiry
+    const oauthData = value as Record<string, unknown>;
+    const expiresAt = oauthData.expires_at as number | undefined;
+    const fiveMinutes = 5 * 60 * 1000;
+
+    if (expiresAt && expiresAt - Date.now() < fiveMinutes) {
+      try {
+        const { refreshTokens } = await import('../../services/plugin-oauth.js');
+        await refreshTokens(pluginName, configKey);
+        // Re-read config after refresh
+        const refreshedConfig = pm.getPluginConfig(pluginName);
+        const refreshedOAuth = refreshedConfig?.[configKey] as Record<string, unknown> | undefined;
+        credentialValue = (refreshedOAuth?.access_token as string) ?? '';
+      } catch (err) {
+        log.warn(`OAuth token refresh failed for ${input.credentialRef}, using existing token:`, err);
+        credentialValue = (oauthData.access_token as string) ?? '';
+      }
+    } else {
+      credentialValue = (oauthData.access_token as string) ?? '';
+    }
+
+    if (!credentialValue) {
+      return {
+        content: [{
+          type: 'text',
+          text: `OAuth token for "${configKey}" in plugin "${pluginName}" has no access_token. The user may need to re-authenticate in Settings > Plugins.`,
+        }],
+        isError: true,
+      };
+    }
+  } else if (typeof value !== 'string' || !value) {
     return {
       content: [{
         type: 'text',
@@ -163,10 +203,66 @@ export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = a
       }],
       isError: true,
     };
+  } else {
+    credentialValue = value;
   }
 
   // 3. Build child-only env (strip agent provider keys)
-  const childEnv: Record<string, string | undefined> = { ...process.env, [input.envVar]: value };
+  const childEnv: Record<string, string | undefined> = { ...process.env, [input.envVar]: credentialValue };
+
+  // 3b. Resolve additional credentials (for plugins needing multiple keys)
+  if (input.additionalCredentials) {
+    for (const extra of input.additionalCredentials) {
+      const extraDot = extra.credentialRef.indexOf('.');
+      if (extraDot === -1) {
+        return {
+          content: [{
+            type: 'text',
+            text: `Invalid additional credentialRef format: "${extra.credentialRef}". Expected "pluginName.configKey".`,
+          }],
+          isError: true,
+        };
+      }
+
+      const extraPlugin = extra.credentialRef.substring(0, extraDot);
+      const extraKey = extra.credentialRef.substring(extraDot + 1);
+
+      if (!extraPlugin || !extraKey) {
+        return {
+          content: [{
+            type: 'text',
+            text: `Invalid additional credentialRef: plugin name and config key must both be non-empty.`,
+          }],
+          isError: true,
+        };
+      }
+
+      const extraConfig = pm.getPluginConfig(extraPlugin);
+      if (!extraConfig) {
+        return {
+          content: [{
+            type: 'text',
+            text: `Plugin "${extraPlugin}" not found or has no configuration set (additional credential).`,
+          }],
+          isError: true,
+        };
+      }
+
+      const extraValue = extraConfig[extraKey];
+      if (typeof extraValue !== 'string' || !extraValue) {
+        return {
+          content: [{
+            type: 'text',
+            text: `Credential "${extraKey}" is not set for plugin "${extraPlugin}" (additional credential).`,
+          }],
+          isError: true,
+        };
+      }
+
+      childEnv[extra.envVar] = extraValue;
+    }
+  }
+
   for (const key of STRIPPED_ENV_KEYS) {
     delete childEnv[key];
   }

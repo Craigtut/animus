@@ -51,9 +51,9 @@ export interface AnimusEventMap {
   'decision:made': TickDecision;
 
   // Reply streaming
-  'reply:chunk': { content: string; accumulated: string; turnIndex: number };
-  'reply:turn_complete': { turnIndex: number; content: string; tickNumber: number };
-  'reply:complete': { content: string; tickNumber: number; totalTurns: number };
+  'reply:chunk': { content: string; accumulated: string; turnIndex: number; channel: string };
+  'reply:turn_complete': { turnIndex: number; content: string; tickNumber: number; channel: string };
+  'reply:complete': { content: string; tickNumber: number; totalTurns: number; channel: string };
 
   // Goals & Seeds
   'goal:created': Goal;
@@ -136,6 +136,13 @@ export interface AnimusEventMap {
   // System
   'system:settings_updated': Record<string, unknown>;
   'system:shutdown': void;
+  'system:error': {
+    category: 'authentication' | 'configuration' | 'provider' | 'unknown';
+    message: string;
+    provider?: string;
+    recoverable: boolean;
+    suggestedAction?: string;
+  };
 }
 
 /**

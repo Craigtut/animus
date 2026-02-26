@@ -311,6 +311,7 @@ async function mindQuery(
     let replySentEarly = false;
     let replyTurnsSent = 0;
     const isMessageTrigger = gathered.trigger.type === 'message';
+    const triggerChannel = gathered.trigger.channel ?? '';
 
     // Per-turn accumulated text tracking for turn-based reply segments
     const turnTextMap = new Map<number, string>();
@@ -411,6 +412,7 @@ async function mindQuery(
           turnIndex: turnData.turnIndex,
           content: turnText.trim(),
           tickNumber,
+          channel: triggerChannel,
         });
       } catch (channelErr) {
         log.debug(`Turn ${turnData.turnIndex} reply send failed:`, channelErr);
@@ -436,6 +438,7 @@ async function mindQuery(
               content: chunk,
               accumulated: turnAccumulated,
               turnIndex: meta.turnIndex,
+              channel: triggerChannel,
             });
           }
         }
@@ -500,6 +503,7 @@ async function mindQuery(
         content: output.reply.content,
         tickNumber,
         totalTurns,
+        channel: triggerChannel,
       });
     }
 
@@ -519,6 +523,20 @@ async function mindQuery(
   } catch (err) {
     log.error('Mind query failed:', err);
     ctx.mindSession.toolContext.current = null;
+
+    // Surface authentication errors to the UI via system:error event
+    const { AgentError } = await import('@animus-labs/agents');
+    if (err instanceof AgentError && err.category === 'authentication') {
+      const eventBus = getEventBus();
+      eventBus.emit('system:error', {
+        category: 'authentication',
+        message: err.message,
+        provider: err.provider,
+        recoverable: false,
+        suggestedAction: (err.details?.suggestedAction as string) ??
+          'Check your API key or re-authenticate in Settings.',
+      });
+    }
 
     // End the leaked session before nulling references
     await resetMindSession(ctx.mindSession, ctx.agentManager);
@@ -556,6 +574,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
       lastTickAt: now(),
     });
     eventBus.emit('heartbeat:stage_change', { stage: 'gather' });
+    eventBus.emit('heartbeat:state_change', heartbeatStore.getHeartbeatState(hbDb));
 
     // Stage 1: GATHER CONTEXT
     const gathered = await gatherContext(queuedTick.trigger, {
@@ -592,6 +611,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     // Update state: entering mind stage
     heartbeatStore.updateHeartbeatState(hbDb, { currentStage: 'mind' });
     eventBus.emit('heartbeat:stage_change', { stage: 'mind' });
+    eventBus.emit('heartbeat:state_change', heartbeatStore.getHeartbeatState(hbDb));
 
     // Stage 2: MIND QUERY
     const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged, allThoughts, replyTurnsSent } = await mindQuery(gathered, tickNumber);
@@ -637,6 +657,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     // Update state: entering execute stage
     heartbeatStore.updateHeartbeatState(hbDb, { currentStage: 'execute' });
     eventBus.emit('heartbeat:stage_change', { stage: 'execute' });
+    eventBus.emit('heartbeat:state_change', heartbeatStore.getHeartbeatState(hbDb));
 
     // Stage 3: EXECUTE
     await executeOutput(output, tickNumber, gathered, {

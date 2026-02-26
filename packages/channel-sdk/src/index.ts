@@ -40,6 +40,7 @@ export interface AdapterContext {
     identifier: string;
     content: string;
     conversationId?: string;
+    conversationType?: 'owned' | 'participated';
     media?: Array<{ type: 'image' | 'audio' | 'video' | 'file'; mimeType: string; url: string; filename?: string }>;
     metadata?: Record<string, unknown>;
     participant?: { displayName: string; avatarUrl?: string; isBot: boolean };

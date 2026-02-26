@@ -21,7 +21,7 @@ import { OnboardingNav } from './OnboardingNav';
 import { trpc } from '../../utils/trpc';
 
 type Provider = 'claude' | 'codex';
-type ClaudeAuthTab = 'oauth' | 'api_key';
+type ClaudeAuthTab = 'sign_in' | 'api_key';
 type CodexAuthTab = 'chatgpt' | 'api_key';
 
 export function AgentProviderStep() {
@@ -34,11 +34,16 @@ export function AgentProviderStep() {
   const [showKey, setShowKey] = useState(false);
   const [validated, setValidated] = useState<'idle' | 'validating' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
-  const [authMethod, setAuthMethod] = useState<'cli' | 'key' | 'codex_oauth' | null>(null);
+  const [authMethod, setAuthMethod] = useState<'cli' | 'key' | 'codex_oauth' | 'claude_oauth' | null>(null);
   const [codexOAuthSession, setCodexOAuthSession] = useState<string | null>(null);
 
+  // Claude OAuth state
+  const [claudeOAuthSession, setClaudeOAuthSession] = useState<string | null>(null);
+  const [claudeOAuthStatus, setClaudeOAuthStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
+  const [claudeOAuthMessage, setClaudeOAuthMessage] = useState('');
+
   // Auth method tabs
-  const [claudeAuthTab, setClaudeAuthTab] = useState<ClaudeAuthTab>('oauth');
+  const [claudeAuthTab, setClaudeAuthTab] = useState<ClaudeAuthTab>('sign_in');
   const [codexAuthTab, setCodexAuthTab] = useState<CodexAuthTab>('chatgpt');
 
   // Codex OAuth UI state
@@ -62,6 +67,27 @@ export function AgentProviderStep() {
   const useCliMutation = trpc.provider.useCli.useMutation();
   const codexInitiateMutation = trpc.codexAuth.initiate.useMutation();
   const codexCancelMutation = trpc.codexAuth.cancel.useMutation();
+  const claudeInitiateMutation = trpc.claudeAuth.initiate.useMutation();
+  const claudeCancelMutation = trpc.claudeAuth.cancel.useMutation();
+
+  // Claude OAuth status subscription
+  trpc.claudeAuth.status.useSubscription(
+    { sessionId: claudeOAuthSession! },
+    {
+      enabled: claudeOAuthSession !== null && claudeOAuthStatus === 'pending',
+      onData: (data) => {
+        if (data.status === 'success') {
+          setClaudeOAuthStatus('success');
+          setAuthMethod('claude_oauth');
+        } else if (data.status === 'error') {
+          setClaudeOAuthStatus('error');
+          setClaudeOAuthMessage(data.message ?? 'Authentication failed');
+        } else if (data.status === 'cancelled') {
+          setClaudeOAuthStatus('idle');
+        }
+      },
+    }
+  );
 
   // Codex OAuth status subscription
   trpc.codexAuth.status.useSubscription(
@@ -229,6 +255,35 @@ export function AgentProviderStep() {
     stopCountdown();
   };
 
+  const handleClaudeOAuthStart = async () => {
+    setClaudeOAuthStatus('pending');
+    setClaudeOAuthMessage('');
+
+    claudeInitiateMutation.mutate(undefined, {
+      onSuccess: (result) => {
+        setClaudeOAuthSession(result.sessionId);
+      },
+      onError: (err) => {
+        setClaudeOAuthStatus('error');
+        setClaudeOAuthMessage(err.message ?? 'Failed to start authentication');
+      },
+    });
+  };
+
+  const handleClaudeOAuthCancel = () => {
+    if (claudeOAuthSession) {
+      claudeCancelMutation.mutate({ sessionId: claudeOAuthSession });
+    }
+    setClaudeOAuthStatus('idle');
+    setClaudeOAuthSession(null);
+  };
+
+  const handleClaudeOAuthRetry = () => {
+    setClaudeOAuthStatus('idle');
+    setClaudeOAuthSession(null);
+    setClaudeOAuthMessage('');
+  };
+
   const handleCopyCode = async (code: string) => {
     try {
       await navigator.clipboard.writeText(code);
@@ -251,7 +306,7 @@ export function AgentProviderStep() {
     setCredential('');
     setErrorMessage('');
     setAuthMethod(null);
-    // Reset Codex OAuth state when switching
+    // Reset OAuth state when switching
     if (codexOAuthSession) {
       codexCancelMutation.mutate({ sessionId: codexOAuthSession });
     }
@@ -260,6 +315,12 @@ export function AgentProviderStep() {
     setCodexOAuthData(null);
     setCodexOAuthMessage('');
     stopCountdown();
+    if (claudeOAuthSession) {
+      claudeCancelMutation.mutate({ sessionId: claudeOAuthSession });
+    }
+    setClaudeOAuthStatus('idle');
+    setClaudeOAuthSession(null);
+    setClaudeOAuthMessage('');
   };
 
   const canContinue = authMethod !== null;
@@ -655,8 +716,8 @@ export function AgentProviderStep() {
           {provider === 'claude' && (
             <div>
               <div css={tabBarCss}>
-                <button onClick={() => { setClaudeAuthTab('oauth'); setCredential(''); setValidated('idle'); setErrorMessage(''); }} css={tabCss(claudeAuthTab === 'oauth')}>
-                  OAuth Token
+                <button onClick={() => { setClaudeAuthTab('sign_in'); setCredential(''); setValidated('idle'); setErrorMessage(''); }} css={tabCss(claudeAuthTab === 'sign_in')}>
+                  Sign In
                 </button>
                 <button onClick={() => { setClaudeAuthTab('api_key'); setCredential(''); setValidated('idle'); setErrorMessage(''); }} css={tabCss(claudeAuthTab === 'api_key')}>
                   API Key
@@ -664,15 +725,85 @@ export function AgentProviderStep() {
               </div>
 
               <div css={tabPanelCss}>
-                {claudeAuthTab === 'oauth' && renderCredentialInput({
-                  label: 'OAuth Token',
-                  placeholder: 'sk-ant-oat01-...',
-                  helpLink: {
-                    text: 'Generate a token with: claude setup-token',
-                    url: 'https://docs.anthropic.com/en/docs/claude-code/getting-started',
-                  },
-                })}
+                {/* Sign In tab */}
+                {claudeAuthTab === 'sign_in' && claudeOAuthStatus === 'idle' && (
+                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+                    <Typography.Caption color="secondary">
+                      Use your Claude subscription (Pro/Max)
+                    </Typography.Caption>
+                    <Button
+                      size="sm"
+                      onClick={handleClaudeOAuthStart}
+                      loading={claudeInitiateMutation.isPending}
+                    >
+                      Sign in with Claude
+                    </Button>
+                    <Typography.Tiny color="disabled">
+                      Opens a browser window to authenticate with your Anthropic account
+                    </Typography.Tiny>
+                  </div>
+                )}
 
+                {/* Sign In: waiting for browser auth */}
+                {claudeAuthTab === 'sign_in' && claudeOAuthStatus === 'pending' && (
+                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+                    <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                      <CircleNotch
+                        size={14}
+                        css={css`
+                          color: ${theme.colors.text.hint};
+                          animation: spin 1s linear infinite;
+                          @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                        `}
+                      />
+                      <Typography.Caption as="span" color="secondary">
+                        Waiting for authentication... Complete sign-in in your browser.
+                      </Typography.Caption>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={handleClaudeOAuthCancel}>
+                      Cancel
+                    </Button>
+                  </div>
+                )}
+
+                {/* Sign In: success */}
+                {claudeAuthTab === 'sign_in' && claudeOAuthStatus === 'success' && (
+                  <div css={css`
+                    display: flex; align-items: center; gap: ${theme.spacing[2]};
+                    padding: ${theme.spacing[3]};
+                    border-radius: ${theme.borderRadius.sm};
+                    background: ${theme.colors.success.main}0d;
+                    border: 1px solid ${theme.colors.success.main}33;
+                  `}>
+                    <CheckCircle size={18} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+                    <Typography.SmallBody as="span" color={theme.colors.success.main}>
+                      Signed in with Claude
+                    </Typography.SmallBody>
+                  </div>
+                )}
+
+                {/* Sign In: error */}
+                {claudeAuthTab === 'sign_in' && claudeOAuthStatus === 'error' && (
+                  <div css={css`
+                    display: flex; flex-direction: column; gap: ${theme.spacing[3]};
+                    padding: ${theme.spacing[3]};
+                    border-radius: ${theme.borderRadius.sm};
+                    background: ${theme.colors.error.main}0d;
+                    border: 1px solid ${theme.colors.error.main}33;
+                  `}>
+                    <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                      <XCircle size={18} weight="fill" css={css`color: ${theme.colors.error.main}; flex-shrink: 0;`} />
+                      <Typography.SmallBody as="span" color={theme.colors.error.main}>
+                        {claudeOAuthMessage || 'Authentication failed'}
+                      </Typography.SmallBody>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={handleClaudeOAuthRetry}>
+                      Try again
+                    </Button>
+                  </div>
+                )}
+
+                {/* API Key tab */}
                 {claudeAuthTab === 'api_key' && renderCredentialInput({
                   label: 'API Key',
                   placeholder: 'sk-ant-api03-...',

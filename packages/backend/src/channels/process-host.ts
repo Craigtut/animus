@@ -35,6 +35,7 @@ export interface ProcessHostConfig {
     identifier: string;
     content: string;
     conversationId?: string;
+    conversationType?: 'owned' | 'participated';
     media?: IncomingMessage['media'];
     metadata?: Record<string, unknown>;
     participant?: IncomingMessage['participant'];
@@ -198,6 +199,7 @@ export class ChannelProcessHost {
           content: msg.content,
         };
         if (msg.conversationId) incoming.conversationId = msg.conversationId;
+        if (msg.conversationType) incoming.conversationType = msg.conversationType;
         if (msg.media) incoming.media = msg.media;
         if (msg.metadata) incoming.metadata = msg.metadata;
         if (msg.participant) incoming.participant = msg.participant;

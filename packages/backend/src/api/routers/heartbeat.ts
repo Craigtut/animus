@@ -322,22 +322,23 @@ export const heartbeatRouter = router({
     return observable<{
       type: 'chunk' | 'turn_complete' | 'complete';
       content: string;
+      channel: string;
       turnIndex?: number;
       tickNumber?: number;
       totalTurns?: number;
     }>((emit) => {
       const eventBus = getEventBus();
 
-      const chunkHandler = (data: { content: string; accumulated: string; turnIndex: number }) => {
-        emit.next({ type: 'chunk', content: data.content, turnIndex: data.turnIndex });
+      const chunkHandler = (data: { content: string; accumulated: string; turnIndex: number; channel: string }) => {
+        emit.next({ type: 'chunk', content: data.content, turnIndex: data.turnIndex, channel: data.channel });
       };
 
-      const turnCompleteHandler = (data: { turnIndex: number; content: string; tickNumber: number }) => {
-        emit.next({ type: 'turn_complete', content: data.content, turnIndex: data.turnIndex, tickNumber: data.tickNumber });
+      const turnCompleteHandler = (data: { turnIndex: number; content: string; tickNumber: number; channel: string }) => {
+        emit.next({ type: 'turn_complete', content: data.content, turnIndex: data.turnIndex, tickNumber: data.tickNumber, channel: data.channel });
       };
 
-      const completeHandler = (data: { content: string; tickNumber: number; totalTurns: number }) => {
-        emit.next({ type: 'complete', content: data.content, tickNumber: data.tickNumber, totalTurns: data.totalTurns });
+      const completeHandler = (data: { content: string; tickNumber: number; totalTurns: number; channel: string }) => {
+        emit.next({ type: 'complete', content: data.content, tickNumber: data.tickNumber, totalTurns: data.totalTurns, channel: data.channel });
       };
 
       eventBus.on('reply:chunk', chunkHandler);
@@ -771,6 +772,35 @@ export const heartbeatRouter = router({
     }
     const agentLogsDb = getAgentLogsDb();
     return agentLogStore.getAggregateUsageForSessions(agentLogsDb, sessionIds);
+  }),
+
+  /**
+   * Subscribe to system-level errors (auth failures, config issues, etc.)
+   * for surfacing to the user.
+   */
+  onSystemError: protectedProcedure.subscription(() => {
+    return observable<{
+      category: string;
+      message: string;
+      provider?: string;
+      recoverable: boolean;
+      suggestedAction?: string;
+    }>((emit) => {
+      const eventBus = getEventBus();
+      const handler = (data: {
+        category: string;
+        message: string;
+        provider?: string;
+        recoverable: boolean;
+        suggestedAction?: string;
+      }) => {
+        emit.next(data);
+      };
+      eventBus.on('system:error', handler);
+      return () => {
+        eventBus.off('system:error', handler);
+      };
+    });
   }),
 
   /**

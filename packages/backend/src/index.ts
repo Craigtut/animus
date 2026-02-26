@@ -216,6 +216,10 @@ async function main() {
   const { registerPackageUploadRoutes } = await import('./api/routes/package-upload.js');
   await registerPackageUploadRoutes(fastify);
 
+  // Register OAuth callback route (plugin OAuth authorization code flow)
+  const { registerOAuthCallbackRoute } = await import('./api/routes/oauth-callback.js');
+  await registerOAuthCallbackRoute(fastify);
+
   // Register content type parser for binary uploads (save import)
   fastify.addContentTypeParser(
     'application/octet-stream',

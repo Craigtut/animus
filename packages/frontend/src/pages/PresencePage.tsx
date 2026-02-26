@@ -49,6 +49,7 @@ export function PresencePage() {
   const heartbeatState = useHeartbeatStore((s) => s.heartbeatState);
   const storeThoughts = useHeartbeatStore((s) => s.recentThoughts);
   const energyBand = useHeartbeatStore((s) => s.energyBand);
+  const systemErrors = useHeartbeatStore((s) => s.systemErrors);
 
   // ── Derived state ──
   const isThinking = heartbeatState?.currentStage === 'mind' && !replyStream.turns.some(t => t.isStreaming);
@@ -97,6 +98,10 @@ export function PresencePage() {
 
   const handleReplyStreamClear = () => {
     useHeartbeatStore.getState().clearReplyStream();
+  };
+
+  const handleDismissSystemError = (id: string) => {
+    useHeartbeatStore.getState().dismissSystemError(id);
   };
 
   const handleThoughtClick = () => {
@@ -191,6 +196,8 @@ export function PresencePage() {
           replyStream={replyStream}
           isThinking={isThinking}
           onReplyStreamClear={handleReplyStreamClear}
+          systemErrors={systemErrors}
+          onDismissSystemError={handleDismissSystemError}
         />
       </div>
 

@@ -64,6 +64,14 @@ export interface LoggingHookOptions {
    * These can be very high volume; defaults to false.
    */
   logChunks?: boolean;
+
+  /**
+   * Eagerly create the log session immediately instead of waiting for the
+   * first SDK event.  Pass provider/model so the session row is accurate.
+   * This makes getLogSessionId() available before promptStreaming() is called,
+   * allowing tick_input to be logged early for cold sessions.
+   */
+  eagerInit?: { provider: AgentProvider; model: string };
 }
 
 /**
@@ -97,6 +105,22 @@ export function createLoggingHandler(options: LoggingHookOptions): {
   const logger = options.logger ?? createTaggedLogger('LoggingHook');
   const logChunks = options.logChunks ?? false;
   let state: SessionLogState | null = null;
+
+  // Eagerly create the log session so getLogSessionId() is available immediately
+  if (options.eagerInit) {
+    const logSession = options.store.createSession({
+      provider: options.eagerInit.provider,
+      model: options.eagerInit.model,
+    });
+    state = {
+      logSessionId: logSession.id,
+      provider: options.eagerInit.provider,
+      model: options.eagerInit.model,
+    };
+    logger.debug('Log session created eagerly', {
+      logSessionId: state.logSessionId,
+    });
+  }
 
   const handler: AgentEventHandler = async (event: AgentEvent) => {
     try {

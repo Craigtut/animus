@@ -4,11 +4,12 @@ import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { useScroll, useTransform, motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
-import { File as FileIcon, DownloadSimple } from '@phosphor-icons/react';
+import { File as FileIcon, DownloadSimple, WarningCircle, X } from '@phosphor-icons/react';
 import { Typography } from '../ui';
 import { trpc } from '../../utils/trpc';
 import { ToolApprovalCard, BatchApprovalCard } from './ToolApprovalCard';
 import type { ToolApprovalRequest } from '@animus-labs/shared';
+import type { SystemError } from '../../store/heartbeat-store';
 
 // ============================================================================
 // Types
@@ -47,6 +48,8 @@ export interface ConversationProps {
   replyStream: ReplyStreamState;
   isThinking: boolean;
   onReplyStreamClear: () => void;
+  systemErrors?: SystemError[];
+  onDismissSystemError?: (id: string) => void;
 }
 
 // ============================================================================
@@ -434,10 +437,91 @@ function MessageMarkdown({ content }: { content: string }) {
 }
 
 // ============================================================================
+// System Error Card
+// ============================================================================
+
+function SystemErrorCard({
+  error,
+  onDismiss,
+}: {
+  error: SystemError;
+  onDismiss: (id: string) => void;
+}) {
+  const theme = useTheme();
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      transition={{ duration: 0.2 }}
+      css={css`
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 12px 16px;
+        border-radius: 12px;
+        background: ${theme.mode === 'light'
+          ? 'rgba(194, 65, 12, 0.08)'
+          : 'rgba(251, 146, 60, 0.12)'};
+        border: 1px solid ${theme.mode === 'light'
+          ? 'rgba(194, 65, 12, 0.2)'
+          : 'rgba(251, 146, 60, 0.25)'};
+      `}
+    >
+      <WarningCircle
+        size={20}
+        weight="fill"
+        css={css`
+          flex-shrink: 0;
+          margin-top: 1px;
+          color: ${theme.mode === 'light' ? '#c2410c' : '#fb923c'};
+        `}
+      />
+      <div css={css`flex: 1; min-width: 0;`}>
+        <Typography.Body
+          color="primary"
+          css={css`
+            font-size: ${theme.typography.fontSize.sm};
+            font-weight: 500;
+            margin-bottom: 2px;
+          `}
+        >
+          {error.message}
+        </Typography.Body>
+        {error.suggestedAction && (
+          <Typography.Caption color="secondary">
+            {error.suggestedAction}
+          </Typography.Caption>
+        )}
+      </div>
+      <button
+        onClick={() => onDismiss(error.id)}
+        css={css`
+          flex-shrink: 0;
+          background: none;
+          border: none;
+          cursor: pointer;
+          padding: 2px;
+          border-radius: 4px;
+          color: ${theme.colors.text.hint};
+          transition: color 0.15s ease;
+          &:hover {
+            color: ${theme.colors.text.secondary};
+          }
+        `}
+      >
+        <X size={16} />
+      </button>
+    </motion.div>
+  );
+}
+
+// ============================================================================
 // Conversation Component
 // ============================================================================
 
-export function Conversation({ messages, replyStream, isThinking, onReplyStreamClear }: ConversationProps) {
+export function Conversation({ messages, replyStream, isThinking, onReplyStreamClear, systemErrors, onDismissSystemError }: ConversationProps) {
   const theme = useTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -530,6 +614,7 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
       setApprovalMap((prev) => {
         const next = new Map(prev);
         for (const req of initialPendingApprovals) {
+          if (req.channel !== 'web') continue;
           if (!next.has(req.id)) next.set(req.id, req);
         }
         return next;
@@ -540,6 +625,7 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
   // Subscribe to new approval requests
   trpc.tools.onApprovalRequest.useSubscription(undefined, {
     onData: (request) => {
+      if (request.channel !== 'web') return;
       setApprovalMap((prev) => new Map(prev).set(request.id, request));
     },
   });
@@ -719,6 +805,19 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
                 </div>
               );
             })}
+
+            {/* System error cards */}
+            {systemErrors && systemErrors.length > 0 && onDismissSystemError && (
+              <AnimatePresence>
+                {systemErrors.map((error) => (
+                  <SystemErrorCard
+                    key={error.id}
+                    error={error}
+                    onDismiss={onDismissSystemError}
+                  />
+                ))}
+              </AnimatePresence>
+            )}
 
             {/* Resolved approval pills — transient inline feedback */}
             <AnimatePresence>

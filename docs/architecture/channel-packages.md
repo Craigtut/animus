@@ -88,15 +88,28 @@ See `docs/architecture/contacts.md` for the full identity resolution and permiss
 
 Each channel determines `conversationId` differently. These values are adapter-specific:
 
-| Channel | Conversation Scoping |
-|---------|---------------------|
-| Web | One conversation per web session (or explicit thread) |
-| SMS | One conversation per phone number (ongoing thread) |
-| Discord DM | One conversation per DM channel (`channel.id`) |
-| Discord Server | One conversation per text channel (`channel.id`) |
-| Discord Thread | Separate conversation per thread |
-| API (OpenAI) | Stateless — optional `conversation_id` header, or generated per-request |
-| API (Ollama) | Stateless — same as OpenAI |
+| Channel | Conversation Scoping | Ownership |
+|---------|---------------------|-----------|
+| Web | One conversation per web session (or explicit thread) | Owned |
+| SMS | One conversation per phone number (ongoing thread) | Owned |
+| Discord DM | One conversation per DM channel (`channel.id`) | Owned |
+| Discord Server | One conversation per text channel (`channel.id`) | Participated |
+| Discord Thread | Separate conversation per thread | Participated |
+| Slack DM | `dm:{userId}` | Owned |
+| Slack Channel | `channel:{channelId}` | Participated |
+| Slack Thread | `thread:{channelId}:{threadTs}` | Participated |
+| Slack MPIM | `mpim:{channelId}` | Participated |
+| API (OpenAI) | Stateless, generated per-request | Owned |
+| API (Ollama) | Stateless, same as OpenAI | Owned |
+
+### Conversation Ownership
+
+Adapters declare whether each conversation is **owned** or **participated** via the `conversationType` field in `reportIncoming()`. This tells the engine whether it needs to fetch external history from the channel adapter.
+
+- **Owned**: The engine has complete message history in `messages.db` (DMs, SMS, 1:1 conversations). No external history fetch needed.
+- **Participated**: The engine only sees messages directed at it (e.g., @mentions in a shared channel). Other participants' messages are invisible without fetching external history via `getHistory()`.
+
+The engine uses `conversationType` during the gather-context stage to decide which conversations need external history. Only conversations explicitly marked `'participated'` trigger a `getHistory()` call. This replaces earlier heuristics based on conversation ID prefixes, which didn't generalize across channels.
 
 ### Outbound Routing
 
@@ -323,6 +336,7 @@ interface AdapterContext {
     identifier: string;
     content: string;
     conversationId?: string;
+    conversationType?: 'owned' | 'participated';
     media?: Array<{
       type: 'image' | 'audio' | 'video' | 'file';
       mimeType: string;
@@ -484,7 +498,7 @@ Communication between the main process and adapter child processes uses Node.js 
 | Type | Payload | Description |
 |------|---------|-------------|
 | `ready` | `{}` | Adapter initialized successfully |
-| `incoming` | `{ identifier, content, conversationId, media, metadata }` | Inbound message received |
+| `incoming` | `{ identifier, content, conversationId, conversationType?, media, metadata }` | Inbound message received (`conversationType`: `'owned'` or `'participated'`) |
 | `send_response` | `{ id, ok, error? }` | Response to a send request |
 | `route_response` | `{ id, status, headers, body }` | HTTP response for a non-streaming route request |
 | `route_response_stream_start` | `{ id, status, headers }` | Begin a streaming HTTP response (sets status + headers) |

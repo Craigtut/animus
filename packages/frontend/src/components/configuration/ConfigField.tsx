@@ -8,6 +8,7 @@ import {
   ArrowSquareOut,
 } from '@phosphor-icons/react';
 import { Input, Toggle, Typography, Tooltip } from '../ui';
+import { OAuthField } from './OAuthField';
 import type { ConfigField as ConfigFieldType } from '@animus-labs/shared';
 
 const glowFade = keyframes`
@@ -23,10 +24,14 @@ interface ConfigFieldProps {
   highlighted?: boolean | undefined;
   onChange: (key: string, value: unknown) => void;
   onToggleSecret?: ((key: string) => void) | undefined;
+  /** Plugin name, needed for OAuth fields to initiate flows */
+  pluginName?: string | undefined;
+  /** All current config values, needed for OAuth dependsOn checks */
+  configValues?: Record<string, unknown> | undefined;
 }
 
 export const ConfigField = forwardRef<HTMLDivElement, ConfigFieldProps>(
-  ({ field, value, error, showSecret, highlighted, onChange, onToggleSecret }, ref) => {
+  ({ field, value, error, showSecret, highlighted, onChange, onToggleSecret, pluginName, configValues }, ref) => {
     const theme = useTheme();
 
     const wrapperCss = css`
@@ -277,6 +282,20 @@ export const ConfigField = forwardRef<HTMLDivElement, ConfigFieldProps>(
               </span>
             )}
           </div>
+        </div>
+      );
+    }
+
+    // OAuth
+    if (field.type === 'oauth') {
+      return (
+        <div ref={ref} css={wrapperCss}>
+          <OAuthField
+            field={field}
+            pluginName={pluginName ?? ''}
+            configValues={configValues ?? {}}
+            highlighted={highlighted}
+          />
         </div>
       );
     }

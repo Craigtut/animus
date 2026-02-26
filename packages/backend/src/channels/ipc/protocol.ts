@@ -109,6 +109,7 @@ export interface IncomingMessage {
   identifier: string;
   content: string;
   conversationId?: string;
+  conversationType?: 'owned' | 'participated';
   media?: Array<{
     type: 'image' | 'audio' | 'video' | 'file';
     mimeType: string;

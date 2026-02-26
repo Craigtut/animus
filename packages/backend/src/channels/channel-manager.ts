@@ -1102,6 +1102,7 @@ export class ChannelManager {
           identifier: msg.identifier,
           content: msg.content,
           ...(msg.conversationId ? { conversationId: msg.conversationId } : {}),
+          ...(msg.conversationType ? { conversationType: msg.conversationType } : {}),
           ...(msg.media ? { media: msg.media } : {}),
           ...(msg.metadata ? { metadata: msg.metadata } : {}),
           ...(msg.participant ? { participant: msg.participant } : {}),

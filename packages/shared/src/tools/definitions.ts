@@ -189,6 +189,12 @@ export const runWithCredentialsDef: AnimusToolDef = {
     envVar: z.string().describe(
       'Environment variable name to inject the credential as (e.g., "GEMINI_API_KEY")'
     ),
+    additionalCredentials: z.array(z.object({
+      credentialRef: z.string().describe('Credential reference (e.g., "trello.TRELLO_API_TOKEN")'),
+      envVar: z.string().describe('Environment variable name to inject as'),
+    })).optional().describe(
+      'Additional credentials to inject. Use when a command needs multiple credentials (e.g., API key + token).'
+    ),
     cwd: z.string().optional().describe('Working directory. Defaults to project root.'),
   }),
   category: 'system',

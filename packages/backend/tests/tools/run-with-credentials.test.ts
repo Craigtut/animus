@@ -437,6 +437,119 @@ describe('run_with_credentials handler', () => {
   });
 
   // --------------------------------------------------------------------------
+  // Additional Credentials
+  // --------------------------------------------------------------------------
+
+  describe('additional credentials', () => {
+    it('should inject additional credentials into child env', async () => {
+      mockGetPluginConfig.mockReturnValue({
+        API_KEY: 'key-value',
+        API_TOKEN: 'token-value',
+      });
+
+      await runWithCredentialsHandler(
+        {
+          command: 'echo test',
+          credentialRef: 'trello.API_KEY',
+          envVar: 'TRELLO_API_KEY',
+          additionalCredentials: [
+            { credentialRef: 'trello.API_TOKEN', envVar: 'TRELLO_API_TOKEN' },
+          ],
+        },
+        createMockContext(),
+      );
+
+      expect(spawnCalls).toHaveLength(1);
+      const childEnv = spawnCalls[0]!.options.env;
+      expect(childEnv['TRELLO_API_KEY']).toBe('key-value');
+      expect(childEnv['TRELLO_API_TOKEN']).toBe('token-value');
+    });
+
+    it('should return error for invalid additional credentialRef', async () => {
+      mockGetPluginConfig.mockReturnValue({ API_KEY: 'key-value' });
+
+      const result = await runWithCredentialsHandler(
+        {
+          command: 'echo test',
+          credentialRef: 'trello.API_KEY',
+          envVar: 'TRELLO_API_KEY',
+          additionalCredentials: [
+            { credentialRef: 'no-dot', envVar: 'EXTRA' },
+          ],
+        },
+        createMockContext(),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('Invalid additional credentialRef');
+      expect(spawnCalls).toHaveLength(0);
+    });
+
+    it('should return error when additional credential is not set', async () => {
+      mockGetPluginConfig.mockReturnValue({ API_KEY: 'key-value' });
+
+      const result = await runWithCredentialsHandler(
+        {
+          command: 'echo test',
+          credentialRef: 'trello.API_KEY',
+          envVar: 'TRELLO_API_KEY',
+          additionalCredentials: [
+            { credentialRef: 'trello.MISSING_TOKEN', envVar: 'TOKEN' },
+          ],
+        },
+        createMockContext(),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('not set');
+      expect(result.content[0]!.text).toContain('MISSING_TOKEN');
+      expect(spawnCalls).toHaveLength(0);
+    });
+
+    it('should work with no additional credentials (backwards compatible)', async () => {
+      mockGetPluginConfig.mockReturnValue({ API_KEY: 'secret' });
+
+      const result = await runWithCredentialsHandler(
+        {
+          command: 'echo test',
+          credentialRef: 'test-plugin.API_KEY',
+          envVar: 'MY_KEY',
+        },
+        createMockContext(),
+      );
+
+      expect(result.isError).toBeFalsy();
+      expect(spawnCalls).toHaveLength(1);
+    });
+
+    it('should support multiple additional credentials', async () => {
+      mockGetPluginConfig.mockImplementation((name: string) => {
+        if (name === 'multi') return { KEY_A: 'a', KEY_B: 'b', KEY_C: 'c' };
+        return null;
+      });
+
+      await runWithCredentialsHandler(
+        {
+          command: 'echo test',
+          credentialRef: 'multi.KEY_A',
+          envVar: 'ENV_A',
+          additionalCredentials: [
+            { credentialRef: 'multi.KEY_B', envVar: 'ENV_B' },
+            { credentialRef: 'multi.KEY_C', envVar: 'ENV_C' },
+          ],
+        },
+        createMockContext(),
+      );
+
+      expect(spawnCalls).toHaveLength(1);
+      const childEnv = spawnCalls[0]!.options.env;
+      expect(childEnv['ENV_A']).toBe('a');
+      expect(childEnv['ENV_B']).toBe('b');
+      expect(childEnv['ENV_C']).toBe('c');
+    });
+  });
+
+  // --------------------------------------------------------------------------
   // Context Independence
   // --------------------------------------------------------------------------
 

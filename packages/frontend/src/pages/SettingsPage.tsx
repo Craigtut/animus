@@ -582,7 +582,7 @@ function ProviderSection() {
   const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
   const { data: claudeKey } = trpc.provider.hasKey.useQuery({ provider: 'claude' });
   const { data: codexKey } = trpc.provider.hasKey.useQuery({ provider: 'codex' });
-  const { data: detectData } = trpc.provider.detect.useQuery();
+  const { data: detectData, dataUpdatedAt: detectUpdatedAt } = trpc.provider.detect.useQuery();
 
   const saveKeyMutation = trpc.provider.saveKey.useMutation({
     onSuccess: () => {
@@ -611,6 +611,16 @@ function ProviderSection() {
   const codexInitiateMutation = trpc.codexAuth.initiate.useMutation();
   const codexCancelMutation = trpc.codexAuth.cancel.useMutation();
 
+  // Claude OAuth mutations
+  const claudeInitiateMutation = trpc.claudeAuth.initiate.useMutation();
+  const claudeCancelMutation = trpc.claudeAuth.cancel.useMutation();
+  const claudeLogoutMutation = trpc.claudeAuth.logout.useMutation({
+    onSuccess: () => {
+      utils.provider.hasKey.invalidate();
+      utils.provider.detect.invalidate();
+    },
+  });
+
   const activeProvider = systemSettings?.defaultAgentProvider ?? 'claude';
   const activeModel = systemSettings?.defaultModel ?? null;
 
@@ -638,6 +648,18 @@ function ProviderSection() {
   const [codexCountdown, setCodexCountdown] = useState(0);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
+
+  // Claude OAuth state
+  const [claudeOAuthSession, setClaudeOAuthSession] = useState<string | null>(null);
+  const [claudeOAuthStatus, setClaudeOAuthStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
+  const [claudeOAuthMessage, setClaudeOAuthMessage] = useState('');
+
+  // detect may clean up stale CLI credentials; refetch hasKey to stay in sync
+  useEffect(() => {
+    if (detectUpdatedAt) {
+      utils.provider.hasKey.invalidate();
+    }
+  }, [detectUpdatedAt, utils.provider.hasKey]);
 
   // Sync selectedProvider when activeProvider changes from server
   useEffect(() => {
@@ -683,6 +705,26 @@ function ProviderSection() {
         } else if (data.status === 'cancelled') {
           setCodexOAuthStatus('idle');
           stopCountdown();
+        }
+      },
+    }
+  );
+
+  // Claude OAuth status subscription
+  trpc.claudeAuth.status.useSubscription(
+    { sessionId: claudeOAuthSession! },
+    {
+      enabled: claudeOAuthSession !== null && claudeOAuthStatus === 'pending',
+      onData: (data) => {
+        if (data.status === 'success') {
+          setClaudeOAuthStatus('success');
+          utils.provider.hasKey.invalidate();
+          utils.provider.detect.invalidate();
+        } else if (data.status === 'error') {
+          setClaudeOAuthStatus('error');
+          setClaudeOAuthMessage(data.message ?? 'Authentication failed');
+        } else if (data.status === 'cancelled') {
+          setClaudeOAuthStatus('idle');
         }
       },
     }
@@ -862,6 +904,29 @@ function ProviderSection() {
     setCodexOAuthSession(null);
     setCodexOAuthData(null);
     stopCountdown();
+  };
+
+  const handleClaudeOAuthStart = () => {
+    setClaudeOAuthStatus('pending');
+    setClaudeOAuthMessage('');
+
+    claudeInitiateMutation.mutate(undefined, {
+      onSuccess: (result) => {
+        setClaudeOAuthSession(result.sessionId);
+      },
+      onError: (err) => {
+        setClaudeOAuthStatus('error');
+        setClaudeOAuthMessage(err.message ?? 'Failed to start authentication');
+      },
+    });
+  };
+
+  const handleClaudeOAuthCancel = () => {
+    if (claudeOAuthSession) {
+      claudeCancelMutation.mutate({ sessionId: claudeOAuthSession });
+    }
+    setClaudeOAuthStatus('idle');
+    setClaudeOAuthSession(null);
   };
 
   const handleCopyCode = async (code: string) => {
@@ -1383,6 +1448,86 @@ function ProviderSection() {
                   </div>
                 )}
 
+                {/* Claude Sign In section */}
+                {selectedProvider === 'claude' && (
+                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                    {claudeOAuthStatus === 'idle' && (
+                      <div css={css`
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        padding: ${theme.spacing[3]};
+                        border: 1px solid ${theme.colors.border.light};
+                        border-radius: ${theme.borderRadius.sm};
+                        gap: ${theme.spacing[2]};
+                      `}>
+                        <div>
+                          <Typography.SmallBody as="div">Claude Sign In</Typography.SmallBody>
+                          <Typography.Caption as="div" color="hint">Use your Claude subscription (Pro/Max)</Typography.Caption>
+                        </div>
+                        <Button size="sm" onClick={handleClaudeOAuthStart} loading={claudeInitiateMutation.isPending}>
+                          Sign in
+                        </Button>
+                      </div>
+                    )}
+
+                    {claudeOAuthStatus === 'pending' && (
+                      <div css={css`
+                        padding: ${theme.spacing[3]};
+                        border: 1px solid ${theme.colors.border.default};
+                        border-radius: ${theme.borderRadius.sm};
+                        display: flex;
+                        flex-direction: column;
+                        gap: ${theme.spacing[3]};
+                      `}>
+                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                          <CircleNotch
+                            size={14}
+                            css={css`
+                              color: ${theme.colors.text.hint};
+                              animation: spin 1s linear infinite;
+                              @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                            `}
+                          />
+                          <Typography.SmallBody as="div" color="secondary">
+                            Complete sign-in in your browser...
+                          </Typography.SmallBody>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={handleClaudeOAuthCancel}>
+                          Cancel
+                        </Button>
+                      </div>
+                    )}
+
+                    {claudeOAuthStatus === 'success' && (
+                      <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
+                        display: flex; align-items: center; gap: ${theme.spacing[2]};
+                        padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                        background: ${theme.colors.success.main}0d;
+                        border-radius: ${theme.borderRadius.sm};
+                      `}>
+                        <CheckCircle size={16} weight="fill" /> Signed in with Claude
+                      </Typography.SmallBody>
+                    )}
+
+                    {claudeOAuthStatus === 'error' && (
+                      <div css={css`
+                        display: flex; align-items: center; justify-content: space-between;
+                        padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                        background: ${theme.colors.error.main}0d;
+                        border-radius: ${theme.borderRadius.sm};
+                      `}>
+                        <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                          <XCircle size={16} weight="fill" /> {claudeOAuthMessage || 'Failed'}
+                        </Typography.SmallBody>
+                        <Button variant="ghost" size="sm" onClick={() => { setClaudeOAuthStatus('idle'); setClaudeOAuthSession(null); }}>
+                          Retry
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Codex OAuth section */}
                 {selectedProvider === 'codex' && (
                   <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
@@ -1852,17 +1997,13 @@ function ChannelsSection() {
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
         {/* Built-in Web Channel */}
         <Card variant="outlined" padding="md">
-          <div css={css`display: flex; align-items: center; justify-content: space-between;`}>
-            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-              <Globe size={20} />
-              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]};`}>
-                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                  <Typography.BodyAlt as="span">{webChannel.displayName}</Typography.BodyAlt>
-                  <Badge variant="success">Always on</Badge>
-                </div>
-                <Typography.Caption color="secondary">{webChannel.description}</Typography.Caption>
-              </div>
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+              <Globe size={20} css={css`flex-shrink: 0;`} />
+              <Typography.BodyAlt as="span">{webChannel.displayName}</Typography.BodyAlt>
+              <Badge variant="success">Always on</Badge>
             </div>
+            <Typography.SmallBody color="secondary">{webChannel.description}</Typography.SmallBody>
           </div>
         </Card>
 
@@ -1875,16 +2016,18 @@ function ChannelsSection() {
           const hasError = channel.status === 'error' || channel.status === 'failed';
 
           return (
-            <Card key={channel.name} variant="outlined" padding="sm">
+            <Card key={channel.name} variant="outlined" padding="md">
               <div
-                css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]}; cursor: pointer; padding: ${theme.spacing[2]};`}
+                css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]}; cursor: pointer;`}
                 onClick={() => setExpandedChannel(isExpanded ? null : channel.name)}
               >
                 {/* Row 1: Icon + title + version + badges + toggle */}
                 <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
                   <IconComponent size={20} css={css`flex-shrink: 0;`} />
-                  <Typography.BodyAlt as="span">{channel.displayName}</Typography.BodyAlt>
-                  <Typography.Caption as="span" color="disabled">v{channel.version}</Typography.Caption>
+                  <div css={css`display: flex; align-items: baseline; gap: ${theme.spacing[1.5]};`}>
+                    <Typography.BodyAlt as="span">{channel.displayName}</Typography.BodyAlt>
+                    <Typography.Caption as="span" color="disabled">v{channel.version}</Typography.Caption>
+                  </div>
                   <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
                   <Badge variant={channelSource.variant}>{channelSource.label}</Badge>
                   <div css={css`flex: 1;`} />
@@ -2619,15 +2762,16 @@ function PluginsSection() {
             return (
               <Card key={plugin.name} variant="outlined" padding="md">
                 <div
-                  css={css`display: flex; align-items: flex-start; justify-content: space-between; cursor: pointer;`}
+                  css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]}; cursor: pointer;`}
                   onClick={() => setExpandedPlugin(isExpanded ? null : plugin.name)}
                 >
-                  <div css={css`display: flex; gap: ${theme.spacing[3]}; flex: 1; min-width: 0;`}>
+                  {/* Row 1: Icon + title + version + badges + chevron + toggle */}
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
                     {plugin.iconSvg && (
                       <div
                         css={css`
-                          width: 24px;
-                          height: 24px;
+                          width: 20px;
+                          height: 20px;
                           flex-shrink: 0;
                           color: ${theme.colors.text.secondary};
                           display: flex;
@@ -2638,49 +2782,17 @@ function PluginsSection() {
                         dangerouslySetInnerHTML={{ __html: plugin.iconSvg }}
                       />
                     )}
-                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]}; flex: 1; min-width: 0;`}>
-                    <div css={css`display: flex; align-items: baseline; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
+                    <div css={css`display: flex; align-items: baseline; gap: ${theme.spacing[1.5]};`}>
                       <Typography.BodyAlt as="span">{plugin.displayName}</Typography.BodyAlt>
                       <Typography.Caption as="span" color="disabled">v{plugin.version}</Typography.Caption>
-                      <Badge variant={source.variant}>{source.label}</Badge>
-                      <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
                     </div>
-                    {plugin.description && (
-                      <Typography.SmallBody color="secondary" css={css`
-                        overflow: hidden;
-                        text-overflow: ellipsis;
-                        white-space: ${isExpanded ? 'normal' : 'nowrap'};
-                      `}>
-                        {plugin.description}
-                      </Typography.SmallBody>
-                    )}
-                    {componentBadges.length > 0 && (
-                      <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[1.5]}; margin-top: ${theme.spacing[0.5]};`}>
-                        {componentBadges.map((label) => (
-                          <Typography.Tiny
-                            key={label}
-                            as="span"
-                            color="hint"
-                            css={css`
-                              padding: 1px ${theme.spacing[1.5]};
-                              border: 1px solid ${theme.colors.border.default};
-                              border-radius: ${theme.borderRadius.full};
-                              white-space: nowrap;
-                            `}
-                          >
-                            {label}
-                          </Typography.Tiny>
-                        ))}
-                      </div>
-                    )}
-                    </div>
-                  </div>
-
-                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]}; flex-shrink: 0; margin-left: ${theme.spacing[3]};`}>
+                    <Badge variant={source.variant}>{source.label}</Badge>
+                    <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                    <div css={css`flex: 1;`} />
                     <motion.div
                       animate={{ rotate: isExpanded ? 90 : 0 }}
                       transition={{ duration: 0.15 }}
-                      css={css`display: flex; color: ${theme.colors.text.disabled};`}
+                      css={css`display: flex; color: ${theme.colors.text.disabled}; flex-shrink: 0;`}
                     >
                       <CaretRight size={14} />
                     </motion.div>
@@ -2701,6 +2813,36 @@ function PluginsSection() {
                       )}
                     </div>
                   </div>
+                  {/* Description */}
+                  {plugin.description && (
+                    <Typography.SmallBody color="secondary" css={css`
+                      overflow: hidden;
+                      text-overflow: ellipsis;
+                      white-space: ${isExpanded ? 'normal' : 'nowrap'};
+                    `}>
+                      {plugin.description}
+                    </Typography.SmallBody>
+                  )}
+                  {/* Component pills */}
+                  {componentBadges.length > 0 && (
+                    <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[1.5]}; margin-top: ${theme.spacing[1]};`}>
+                      {componentBadges.map((label) => (
+                        <Typography.Tiny
+                          key={label}
+                          as="span"
+                          color="hint"
+                          css={css`
+                            padding: 1px ${theme.spacing[1.5]};
+                            border: 1px solid ${theme.colors.border.default};
+                            border-radius: ${theme.borderRadius.full};
+                            white-space: nowrap;
+                          `}
+                        >
+                          {label}
+                        </Typography.Tiny>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Expanded detail */}

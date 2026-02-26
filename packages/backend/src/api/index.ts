@@ -24,11 +24,13 @@ import { goalsRouter } from './routers/goals.js';
 import { tasksRouter } from './routers/tasks.js';
 import { agentLogsRouter } from './routers/agent-logs.js';
 import { codexAuthRouter } from './routers/codex-auth.js';
+import { claudeAuthRouter } from './routers/claude-auth.js';
 import { pluginsRouter } from './routers/plugins.js';
 import { savesRouter } from './routers/saves.js';
 import { toolsRouter } from './routers/tools.js';
 import { speechRouter } from './routers/speech.js';
 import { downloadsRouter } from './routers/downloads.js';
+import { pluginOAuthRouter } from './routers/plugin-oauth.js';
 
 // ============================================================================
 // App Router
@@ -50,6 +52,7 @@ export const appRouter = router({
   data: dataRouter,
   provider: providerRouter,
   codexAuth: codexAuthRouter,
+  claudeAuth: claudeAuthRouter,
   memory: memoryRouter,
   goals: goalsRouter,
   tasks: tasksRouter,
@@ -59,6 +62,7 @@ export const appRouter = router({
   tools: toolsRouter,
   speech: speechRouter,
   downloads: downloadsRouter,
+  pluginOAuth: pluginOAuthRouter,
 });
 
 export type AppRouter = typeof appRouter;

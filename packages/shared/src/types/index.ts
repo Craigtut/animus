@@ -291,6 +291,7 @@ export type {
   ConfigFieldType,
   ConfigFieldOption,
   ConfigFieldHelpLink,
+  ConfigFieldOAuth,
   ConfigField,
   ConfigSchema,
   SetupGuide,

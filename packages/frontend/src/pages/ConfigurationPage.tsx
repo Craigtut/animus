@@ -294,6 +294,7 @@ export function ConfigurationPage({ extensionType }: ConfigurationPageProps) {
               rawJson={rawJson || undefined}
               onRawJsonChange={(json) => { setRawJson(json); setRawJsonError(''); }}
               rawJsonError={rawJsonError || undefined}
+              pluginName={name}
             />
           </div>
         </div>

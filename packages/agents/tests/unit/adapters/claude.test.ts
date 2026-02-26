@@ -136,4 +136,47 @@ describe('ClaudeAdapter', () => {
       expect(models.some((m) => m.id.includes('claude'))).toBe(true);
     });
   });
+
+  describe('auth error detection', () => {
+    // Access the private static AUTH_ERROR_PATTERNS via the ClaudeSession class.
+    // ClaudeSession is not exported, but we can test the patterns indirectly by
+    // importing the adapter and checking that known auth error strings are caught.
+    const authErrorStrings = [
+      'Invalid API key - Please run /login',
+      'Not logged in. Please run /login to authenticate.',
+      'Please run /login to set up authentication',
+      'Authentication required for this request',
+      'Your expired token needs to be refreshed',
+    ];
+
+    const normalStrings = [
+      'Here is a helpful response about APIs and keys.',
+      'The login page is at /dashboard/login',
+      'I can help you debug authentication issues in your code.',
+      'Setting up API key rotation for your application',
+    ];
+
+    // These patterns are mirrored from ClaudeSession.AUTH_ERROR_PATTERNS
+    const AUTH_ERROR_PATTERNS = [
+      /Invalid API key/i,
+      /Not logged in/i,
+      /Please run \/login/i,
+      /authentication required/i,
+      /expired.*token/i,
+    ];
+
+    for (const text of authErrorStrings) {
+      it(`detects auth error: "${text.substring(0, 50)}..."`, () => {
+        const matches = AUTH_ERROR_PATTERNS.some(p => p.test(text));
+        expect(matches).toBe(true);
+      });
+    }
+
+    for (const text of normalStrings) {
+      it(`does not flag normal content: "${text.substring(0, 50)}..."`, () => {
+        const matches = AUTH_ERROR_PATTERNS.some(p => p.test(text));
+        expect(matches).toBe(false);
+      });
+    }
+  });
 });

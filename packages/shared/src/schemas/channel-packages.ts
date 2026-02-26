@@ -77,6 +77,7 @@ export const configFieldTypeSchema = z.enum([
   'select',
   'text-list',
   'toggle',
+  'oauth',
 ]);
 
 export const configFieldOptionSchema = z.object({
@@ -87,6 +88,13 @@ export const configFieldOptionSchema = z.object({
 export const configFieldHelpLinkSchema = z.object({
   url: z.string().url(),
   label: z.string(),
+});
+
+export const configFieldOAuthSchema = z.object({
+  provider: z.string().min(1),
+  authorizationUrl: z.string().url(),
+  tokenUrl: z.string().url(),
+  scopes: z.string().min(1),
 });
 
 export const configFieldSchema = z.object({
@@ -103,6 +111,9 @@ export const configFieldSchema = z.object({
   max: z.number().optional(), // for 'number' type
   group: z.string().optional(), // visual grouping label (e.g., "Authentication")
   helpLink: configFieldHelpLinkSchema.optional(), // external link shown alongside helpText
+  oauth: configFieldOAuthSchema.optional(), // for 'oauth' type: provider OAuth config
+  dependsOn: z.array(z.string()).optional(), // field keys that must be filled before this field is active
+  category: z.string().optional(), // field category (e.g., "advanced") for UI grouping/visibility
 });
 
 export const setupGuideLinkSchema = z.object({

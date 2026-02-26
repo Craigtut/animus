@@ -1438,12 +1438,19 @@ class PluginManager {
       const config = this.getDecryptedConfig(loaded.manifest.name);
 
       for (const field of loaded.configSchema.fields) {
-        if (field.type !== 'secret') continue;
+        if (field.type !== 'secret' && field.type !== 'oauth') continue;
 
         const value = config?.[field.key];
-        const hint = typeof value === 'string' && value.length >= 4
-          ? `...${value.slice(-4)}`
-          : '(not set)';
+        let hint: string;
+        if (field.type === 'oauth') {
+          hint = (typeof value === 'object' && value !== null && (value as Record<string, unknown>).__oauth === true)
+            ? '(connected)'
+            : '(not connected)';
+        } else {
+          hint = typeof value === 'string' && value.length >= 4
+            ? `...${value.slice(-4)}`
+            : '(not set)';
+        }
 
         manifest.push({
           ref: `${loaded.manifest.name}.${field.key}`,
@@ -1572,9 +1579,27 @@ class PluginManager {
         .map(f => f.key),
     );
 
+    const oauthKeys = new Set(
+      loaded.configSchema.fields
+        .filter(f => f.type === 'oauth')
+        .map(f => f.key),
+    );
+
     const masked: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(config)) {
-      masked[key] = secretKeys.has(key) && value ? '••••••••' : value;
+      if (oauthKeys.has(key) && typeof value === 'object' && value !== null && (value as Record<string, unknown>).__oauth === true) {
+        // Mask OAuth token objects: expose connection status but not raw tokens
+        const oauthData = value as Record<string, unknown>;
+        masked[key] = {
+          __oauth: true,
+          connected: true,
+          expires_at: oauthData.expires_at ?? null,
+        };
+      } else if (secretKeys.has(key) && value) {
+        masked[key] = '••••••••';
+      } else {
+        masked[key] = value;
+      }
     }
     return masked;
   }

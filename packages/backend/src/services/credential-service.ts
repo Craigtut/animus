@@ -276,14 +276,50 @@ async function detectClaudeAuth(db: Database.Database): Promise<ProviderAuthStat
     // Table may not exist yet
   }
 
-  // Check filesystem — ~/.claude/.credentials or ~/.claude/.credentials.json
-  try {
-    const home = homedir();
-    const credsPath = join(home, '.claude', '.credentials');
-    const credsJsonPath = join(home, '.claude', '.credentials.json');
-    if (existsSync(credsPath) || existsSync(credsJsonPath)) {
+  // When CLI is installed, ask it directly whether it's authenticated.
+  // This is the source of truth (handles macOS Keychain, credential files, etc.)
+  if (cliInstalled) {
+    const cliAuth = await checkClaudeCliAuth();
+    if (cliAuth.authenticated) {
       const alreadyHasCli = methods.some((m) => m.method === 'cli');
       if (!alreadyHasCli) {
+        methods.push({
+          method: 'cli',
+          available: true,
+          source: 'filesystem',
+          detail: cliAuth.email
+            ? `Signed in as ${cliAuth.email}`
+            : 'Claude Code authenticated',
+        });
+      }
+    } else {
+      // CLI says not authenticated. If we have a stale cli_detected record, clean it up.
+      try {
+        const hasStaleCli = systemStore.getCredentialMetadata(db, 'claude')
+          .some((m) => m.credentialType === 'cli_detected');
+        if (hasStaleCli) {
+          log.info('Claude CLI no longer authenticated, removing stale cli_detected credential');
+          systemStore.deleteCredential(db, 'claude', 'cli_detected');
+          delete process.env['CLAUDE_CLI_CONFIGURED'];
+        }
+      } catch {
+        // Ignore
+      }
+
+      methods.push({
+        method: 'cli',
+        available: false,
+        source: 'filesystem',
+        detail: 'Claude Code installed but not authenticated',
+      });
+    }
+  } else {
+    // CLI not installed: fall back to filesystem check for credential files
+    try {
+      const home = homedir();
+      const credsPath = join(home, '.claude', '.credentials');
+      const credsJsonPath = join(home, '.claude', '.credentials.json');
+      if (existsSync(credsPath) || existsSync(credsJsonPath)) {
         methods.push({
           method: 'cli',
           available: true,
@@ -291,19 +327,9 @@ async function detectClaudeAuth(db: Database.Database): Promise<ProviderAuthStat
           detail: 'Claude Code credentials found',
         });
       }
+    } catch {
+      // Ignore filesystem errors
     }
-  } catch {
-    // Ignore filesystem errors
-  }
-
-  // Binary is in PATH but no credential files found — CLI installed but not authenticated
-  if (cliInstalled && !methods.some((m) => m.method === 'cli')) {
-    methods.push({
-      method: 'cli',
-      available: false,
-      source: 'filesystem',
-      detail: 'Claude Code installed but not authenticated (run: claude login)',
-    });
   }
 
   return {
@@ -528,5 +554,40 @@ function checkBinaryExists(name: string): Promise<boolean> {
     });
     // Ensure cleanup on timeout
     child.on('error', () => resolve(false));
+  });
+}
+
+/**
+ * Check Claude CLI authentication status by running `claude auth status --json`.
+ * Returns the actual auth state, which may differ from our DB records
+ * (e.g., if the user logged out via command line).
+ */
+function checkClaudeCliAuth(): Promise<{ authenticated: boolean; email?: string }> {
+  return new Promise((resolve) => {
+    const childEnv = { ...process.env };
+    delete childEnv['CLAUDECODE'];
+
+    execFile(
+      'claude',
+      ['auth', 'status', '--json'],
+      { env: childEnv, timeout: 5000 },
+      (err, stdout) => {
+        if (err) {
+          // CLI errored out; treat as not authenticated
+          resolve({ authenticated: false });
+          return;
+        }
+
+        try {
+          const status = JSON.parse(stdout) as Record<string, unknown>;
+          const authenticated = status['loggedIn'] === true || status['authenticated'] === true;
+          const email = (status['email'] as string) || undefined;
+          resolve({ authenticated, email });
+        } catch {
+          // Couldn't parse output; be conservative
+          resolve({ authenticated: false });
+        }
+      }
+    );
   });
 }
