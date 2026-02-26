@@ -154,6 +154,7 @@ export const PluginMcpServerSchema = z.object({
   headers: z.record(z.string()).default({}),
   // Common
   description: z.string().optional(),
+  tools: z.array(z.string()).optional(),
 }).refine(
   (data) => data.command || data.url,
   { message: 'Either "command" (stdio) or "url" (http) must be provided' },

@@ -47,7 +47,12 @@ export const pluginsRouter = router({
         status,
         components: {
           skills: loaded?.skills.length ?? 0,
-          tools: loaded ? Object.keys(loaded.mcpServers).length : 0,
+          mcpServers: loaded ? Object.keys(loaded.mcpServers).length : 0,
+          mcpToolCount: loaded
+            ? Object.values(loaded.mcpServers).reduce(
+                (sum, server) => sum + (server.tools?.length ?? 0), 0
+              )
+            : 0,
           contextSources: loaded?.contextSources.length ?? 0,
           hooks: loaded?.hooks.length ?? 0,
           decisionTypes: loaded?.decisionTypes.length ?? 0,
@@ -87,7 +92,12 @@ export const pluginsRouter = router({
         manifest: loaded.manifest,
         components: {
           skills: loaded.skills.map((s) => s.name),
-          tools: Object.keys(loaded.mcpServers),
+          mcpServers: Object.fromEntries(
+            Object.entries(loaded.mcpServers).map(([name, server]) => [
+              name,
+              { description: server.description ?? null, tools: server.tools ?? [] },
+            ])
+          ),
           contextSources: loaded.contextSources.map((cs) => cs.name),
           hooks: loaded.hooks.map((h) => h.event),
           decisionTypes: loaded.decisionTypes.map((d) => d.name),
@@ -292,6 +302,35 @@ export const pluginsRouter = router({
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: err instanceof Error ? err.message : 'Failed to install plugin from package',
+        });
+      }
+    }),
+
+  /**
+   * Update an installed plugin from a new .anpk package file.
+   * Preserves existing configuration while replacing the package code.
+   */
+  updateFromPackage: protectedProcedure
+    .input(
+      z.object({
+        name: z.string().min(1),
+        filePath: z.string().min(1),
+        grantedPermissions: z.array(z.string()).default([]),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const pm = getPluginManager();
+      try {
+        const result = await pm.updateFromPackage(
+          input.name,
+          input.filePath,
+          input.grantedPermissions,
+        );
+        return result;
+      } catch (err) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: err instanceof Error ? err.message : 'Failed to update plugin from package',
         });
       }
     }),

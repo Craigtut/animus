@@ -72,20 +72,29 @@ function createVariant(variant: Variant) {
       const Tag = (as ?? v.defaultAs) as ElementType;
       const resolvedColor = resolveColor(color as string | undefined, theme);
 
+      // Use style (not css) for variant base styles so that React's createElement
+      // actually applies them. The Emotion css prop is only processed by the JSX
+      // transform, which doesn't cover explicit createElement calls.
+      // Consumer-provided css props (for things like overflow, padding, border)
+      // are processed by Emotion at the call-site JSX level and arrive as className.
+      const { style: externalStyle, ...domProps } = rest as { style?: Record<string, unknown>; [key: string]: unknown };
+
+      const baseStyle: Record<string, unknown> = {
+        fontSize: v.fontSize,
+        fontWeight: v.fontWeight,
+        lineHeight: v.lineHeight,
+        margin: 0,
+      };
+      if (serif) baseStyle.fontFamily = theme.typography.fontFamily.serif;
+      if (italic) baseStyle.fontStyle = 'italic';
+      if (resolvedColor) baseStyle.color = resolvedColor;
+
       return createElement(
         Tag,
         {
           ref,
-          css: {
-            fontSize: v.fontSize,
-            fontWeight: v.fontWeight,
-            lineHeight: v.lineHeight,
-            fontFamily: serif ? theme.typography.fontFamily.serif : undefined,
-            fontStyle: italic ? ('italic' as const) : undefined,
-            color: resolvedColor,
-            margin: 0,
-          },
-          ...rest,
+          style: externalStyle ? { ...baseStyle, ...externalStyle } : baseStyle,
+          ...domProps,
         },
         children as ReactNode,
       );

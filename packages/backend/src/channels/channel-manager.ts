@@ -457,6 +457,155 @@ export class ChannelManager {
   }
 
   /**
+   * Update an existing channel from a new .anpk package file.
+   *
+   * Preserves the existing configuration while replacing the package code.
+   * The current version is cached for rollback.
+   */
+  async updateFromPackage(
+    name: string,
+    anpkPath: string,
+    grantedPermissions: string[] = [],
+  ): Promise<InstallResult> {
+    log.info(`Updating channel from package: ${name} with ${anpkPath}`);
+
+    const db = getSystemDb();
+    const existing = systemStore.getChannelPackage(db, name);
+    if (!existing) {
+      throw new Error(`Channel "${name}" is not installed`);
+    }
+
+    // 1. Verify the new package
+    const verification = await verifyPackage(anpkPath);
+    if (!verification.valid || !verification.manifest) {
+      throw new Error(
+        `Package verification failed: ${verification.errors.join('; ')}`,
+      );
+    }
+
+    const manifest = verification.manifest;
+    if (manifest.packageType !== 'channel') {
+      throw new Error(`Expected channel package but got "${manifest.packageType}"`);
+    }
+
+    // Ensure the package name matches the installed channel
+    if (manifest.name !== name) {
+      throw new Error(
+        `Package name "${manifest.name}" does not match installed channel "${name}"`,
+      );
+    }
+
+    const currentVersion = existing.version;
+    const wasEnabled = existing.enabled;
+
+    // 2. Stop running process if any
+    const host = this.processes.get(existing.channelType);
+    if (host) {
+      await host.stop();
+      this.processes.delete(existing.channelType);
+    }
+
+    // Clean up skills from old version
+    const oldManifest = this.manifests.get(existing.channelType);
+    if (oldManifest) {
+      await this.cleanupChannelSkills(existing, oldManifest);
+    }
+
+    // 3. Extract to packages directory (replaces existing files)
+    const packagesDir = path.join(DATA_DIR, 'packages');
+    const extractDir = path.join(packagesDir, manifest.name);
+
+    await fsp.rm(extractDir, { recursive: true, force: true });
+    await fsp.mkdir(extractDir, { recursive: true });
+    try {
+      await extractZip(anpkPath, { dir: extractDir });
+    } catch (err) {
+      await fsp.rm(extractDir, { recursive: true, force: true });
+      throw new Error(`Failed to extract package: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // 4. Cache the new .anpk file for rollback; keep old version in cache too
+    const cacheDir = path.join(packagesDir, '.cache');
+    await fsp.mkdir(cacheDir, { recursive: true });
+    const cachePath = path.join(cacheDir, `${manifest.name}-${manifest.version}.anpk`);
+    await fsp.copyFile(anpkPath, cachePath);
+
+    // 5. Re-read channel manifest
+    const channelManifest = this.loadManifest(extractDir);
+    this.manifests.set(existing.channelType, channelManifest);
+
+    // 6. Check adapter file exists
+    const adapterPath = path.join(extractDir, channelManifest.adapter);
+    if (!fs.existsSync(adapterPath)) {
+      await fsp.rm(extractDir, { recursive: true, force: true });
+      throw new Error(`Adapter file not found: ${channelManifest.adapter}`);
+    }
+
+    // 7. Compute adapter checksum and update config schema
+    const checksum = this.computeChecksum(adapterPath);
+    const configSchema = this.loadConfigSchema(extractDir);
+    if (configSchema) {
+      this.configSchemas.set(existing.channelType, configSchema);
+    }
+
+    const needsConfig = configSchema &&
+      configSchema.fields.some(f => f.required);
+
+    // 8. Update DB record — preserves config column (we only update version/path/checksum)
+    systemStore.updateChannelPackage(db, name, {
+      version: manifest.version,
+      path: extractDir,
+      checksum,
+    });
+
+    // Update distribution columns and set previous_version for rollback
+    db.prepare(
+      `UPDATE channel_packages SET
+        package_version = ?,
+        package_checksum = ?,
+        signature_status = ?,
+        package_cache_path = ?,
+        previous_version = ?,
+        permissions_granted = ?
+      WHERE name = ?`,
+    ).run(
+      manifest.version,
+      verification.checksums.verified > 0 ? 'verified' : null,
+      verification.signature.status,
+      cachePath,
+      currentVersion,
+      grantedPermissions.length > 0 ? JSON.stringify(grantedPermissions) : null,
+      name,
+    );
+
+    // 9. Re-enable if was enabled and has required config
+    if (wasEnabled) {
+      const updatedPkg = systemStore.getChannelPackage(db, name);
+      if (updatedPkg && this.hasRequiredConfig(updatedPkg)) {
+        await this.startProcess(updatedPkg, channelManifest);
+        await this.deployChannelSkills(updatedPkg, channelManifest);
+        systemStore.updateChannelPackage(db, name, { enabled: true });
+        log.info(`Updated and re-enabled channel from package: ${name} v${currentVersion} → v${manifest.version}`);
+      } else {
+        systemStore.updateChannelPackage(db, name, { enabled: false, status: 'disabled' });
+        log.info(`Updated channel from package: ${name} v${currentVersion} → v${manifest.version} (disabled — needs configuration)`);
+      }
+    } else {
+      log.info(`Updated channel from package: ${name} v${currentVersion} → v${manifest.version}`);
+    }
+
+    getEventBus().emit('channel:installed', { name, channelType: existing.channelType });
+
+    return {
+      success: true,
+      manifest,
+      needsConfig: !!needsConfig,
+      verification,
+      installedPath: extractDir,
+    };
+  }
+
+  /**
    * Rollback a channel to its previous version using the cached .anpk.
    */
   async rollback(packageName: string): Promise<RollbackResult> {

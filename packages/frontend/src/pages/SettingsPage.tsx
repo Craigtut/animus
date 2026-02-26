@@ -1676,6 +1676,18 @@ function ChannelsSection() {
   const rollbackMutation = trpc.channels.rollback.useMutation({
     onSuccess: () => utils.channels.listPackages.invalidate(),
   });
+  // Channel update mutations
+  const channelUpdateVerifyMutation = trpc.channels.verifyPackage.useMutation();
+  const channelUpdateFromPackageMutation = trpc.channels.updateFromPackage.useMutation({
+    onSuccess: () => {
+      utils.channels.listPackages.invalidate();
+      setChannelUpdateTarget(null);
+      setShowChannelUpdateConsentDialog(false);
+      setChannelUpdateVerification(null);
+      setChannelUpdatePackagePath(null);
+      toast.success('Channel updated successfully');
+    },
+  });
 
   // Local state
   const [showInstallModal, setShowInstallModal] = useState(false);
@@ -1690,6 +1702,12 @@ function ChannelsSection() {
   const [channelPackageVerification, setChannelPackageVerification] = useState<(ReturnType<typeof verifyPackageMutation.mutateAsync> extends Promise<infer T> ? T : never) | null>(null);
   const [selectedPackagePath, setSelectedPackagePath] = useState<string | null>(null);
   const [rollbackConfirm, setRollbackConfirm] = useState<string | null>(null);
+
+  // Channel update state
+  const [channelUpdateTarget, setChannelUpdateTarget] = useState<string | null>(null);
+  const [showChannelUpdateConsentDialog, setShowChannelUpdateConsentDialog] = useState(false);
+  const [channelUpdateVerification, setChannelUpdateVerification] = useState<(ReturnType<typeof channelUpdateVerifyMutation.mutateAsync> extends Promise<infer T> ? T : never) | null>(null);
+  const [channelUpdatePackagePath, setChannelUpdatePackagePath] = useState<string | null>(null);
 
   // Real-time status subscription
   trpc.channels.onStatusChange.useSubscription(undefined, {
@@ -1775,6 +1793,34 @@ function ChannelsSection() {
     );
   };
 
+  const handleChannelUpdateUpload = async (filePath: string) => {
+    try {
+      const result = await channelUpdateVerifyMutation.mutateAsync({ filePath });
+      setChannelUpdateVerification(result);
+      setChannelUpdatePackagePath(filePath);
+      setShowChannelUpdateConsentDialog(true);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      toast.error('Could not verify this package. It may be corrupted or incompatible.', { detail });
+    }
+  };
+
+  const handleChannelUpdateConfirmInstall = (grantedPermissions: string[]) => {
+    if (!channelUpdateTarget || !channelUpdatePackagePath) return;
+    channelUpdateFromPackageMutation.mutate(
+      { name: channelUpdateTarget, filePath: channelUpdatePackagePath, grantedPermissions },
+      {
+        onError: (err) => {
+          setShowChannelUpdateConsentDialog(false);
+          setChannelUpdateVerification(null);
+          setChannelUpdatePackagePath(null);
+          setChannelUpdateTarget(null);
+          toast.error('Channel update failed', { detail: err.message });
+        },
+      }
+    );
+  };
+
   if (isLoading) {
     return <Typography.Body color="hint" css={css`padding: ${theme.spacing[8]};`}>Loading channels...</Typography.Body>;
   }
@@ -1829,84 +1875,42 @@ function ChannelsSection() {
           const hasError = channel.status === 'error' || channel.status === 'failed';
 
           return (
-            <Card key={channel.name} variant="outlined" padding="md">
+            <Card key={channel.name} variant="outlined" padding="sm">
               <div
-                css={css`display: flex; align-items: flex-start; justify-content: space-between; cursor: pointer;`}
+                css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]}; cursor: pointer; padding: ${theme.spacing[2]};`}
                 onClick={() => setExpandedChannel(isExpanded ? null : channel.name)}
               >
-                <div css={css`display: flex; align-items: flex-start; gap: ${theme.spacing[3]}; flex: 1; min-width: 0;`}>
-                  <IconComponent size={20} css={css`flex-shrink: 0; margin-top: 2px;`} />
-                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]}; flex: 1; min-width: 0;`}>
-                    <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
-                      <Typography.BodyAlt as="span">{channel.displayName}</Typography.BodyAlt>
-                      <Typography.Caption as="span" color="hint">v{channel.version}</Typography.Caption>
-                      <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
-                      <Badge variant={channelSource.variant}>{channelSource.label}</Badge>
-                    </div>
-                    {channel.description && (
-                      <Typography.SmallBody color="secondary" css={css`
-                        overflow: hidden;
-                        text-overflow: ellipsis;
-                        white-space: ${isExpanded ? 'normal' : 'nowrap'};
-                      `}>
-                        {channel.description}
-                      </Typography.SmallBody>
-                    )}
-                    {/* Error message inline */}
-                    {hasError && channel.lastError && (
-                      <div css={css`
-                        display: flex;
-                        align-items: center;
-                        gap: ${theme.spacing[2]};
-                        margin-top: ${theme.spacing[1.5]};
-                        padding: ${theme.spacing[1]} ${theme.spacing[2]};
-                        background: ${theme.colors.error.main}08;
-                        border-left: 2px solid ${theme.colors.error.main}66;
-                        border-radius: 0 ${theme.borderRadius.sm} ${theme.borderRadius.sm} 0;
-                      `}>
-                        <Warning size={16} weight="fill" css={css`color: ${theme.colors.error.main}80; flex-shrink: 0;`} />
-                        <Typography.Caption color={theme.colors.error.main} css={css`
-                          flex: 1;
-                          overflow: hidden;
-                          text-overflow: ellipsis;
-                          white-space: nowrap;
-                        `} title={channel.lastError}>
-                          {channel.lastError}
-                        </Typography.Caption>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleRestart(channel.name); }}
-                          css={css`
-                            display: inline-flex;
-                            align-items: center;
-                            gap: ${theme.spacing[1]};
-                            padding: ${theme.spacing[0.5]} ${theme.spacing[1.5]};
-                            font-size: ${theme.typography.fontSize.xs};
-                            color: ${theme.colors.error.main};
-                            border: 1px solid ${theme.colors.error.main}22;
-                            border-radius: ${theme.borderRadius.sm};
-                            cursor: pointer;
-                            background: transparent;
-                            white-space: nowrap;
-                            transition: all ${theme.transitions.fast};
-                            &:hover {
-                              background: ${theme.colors.error.main}0d;
-                              border-color: ${theme.colors.error.main}44;
-                            }
-                          `}
-                        >
-                          <ArrowClockwise size={12} />
-                          Retry
-                        </button>
-                      </div>
+                {/* Row 1: Icon + title + version + badges + toggle */}
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                  <IconComponent size={20} css={css`flex-shrink: 0;`} />
+                  <Typography.BodyAlt as="span">{channel.displayName}</Typography.BodyAlt>
+                  <Typography.Caption as="span" color="disabled">v{channel.version}</Typography.Caption>
+                  <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                  <Badge variant={channelSource.variant}>{channelSource.label}</Badge>
+                  <div css={css`flex: 1;`} />
+                  <motion.div
+                    animate={{ rotate: isExpanded ? 90 : 0 }}
+                    transition={{ duration: 0.15 }}
+                    css={css`display: flex; color: ${theme.colors.text.disabled}; flex-shrink: 0;`}
+                  >
+                    <CaretRight size={14} />
+                  </motion.div>
+                  <div onClick={(e) => e.stopPropagation()}>
+                    {channel.status === 'unconfigured' ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => navigateToConfig(`/settings/channels/${channel.name}/configure`)}
+                      >
+                        Configure
+                      </Button>
+                    ) : (
+                      <Toggle
+                        checked={channel.enabled}
+                        onChange={() => handleToggleEnabled(channel.name, channel.enabled)}
+                      />
                     )}
                   </div>
-                </div>
-
-                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-shrink: 0; margin-left: ${theme.spacing[3]};`} onClick={(e) => e.stopPropagation()}>
-                  <Toggle
-                    checked={channel.enabled}
-                    onChange={() => handleToggleEnabled(channel.name, channel.enabled)}
-                  />
                 </div>
               </div>
 
@@ -1929,30 +1933,45 @@ function ChannelsSection() {
                       gap: ${theme.spacing[3]};
                     `}>
                       {/* Metadata */}
-                      <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[3]};`}>
+                      <div css={css`display: flex; gap: ${theme.spacing[6]};`}>
                         {channel.author && (
-                          <Typography.Caption as="span" color="hint">
-                            Author: {channel.author.name}
-                            {channel.author.url && (
-                              <a
-                                href={channel.author.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                css={css`
-                                  margin-left: ${theme.spacing[1]};
-                                  color: ${theme.colors.text.secondary};
-                                  &:hover { color: ${theme.colors.text.primary}; }
-                                `}
-                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                              >
-                                <ArrowSquareOut size={10} css={css`vertical-align: middle;`} />
-                              </a>
-                            )}
-                          </Typography.Caption>
+                          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]};`}>
+                            <Typography.Tiny as="span" css={css`
+                              color: ${theme.colors.text.disabled};
+                              text-transform: uppercase;
+                              letter-spacing: 0.06em;
+                              font-weight: ${theme.typography.fontWeight.medium};
+                            `}>Author</Typography.Tiny>
+                            <Typography.Caption as="span" color="secondary" css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                              {channel.author.name}
+                              {channel.author.url && (
+                                <a
+                                  href={channel.author.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  css={css`
+                                    color: ${theme.colors.text.hint};
+                                    &:hover { color: ${theme.colors.text.primary}; }
+                                  `}
+                                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                >
+                                  <ArrowSquareOut size={10} />
+                                </a>
+                              )}
+                            </Typography.Caption>
+                          </div>
                         )}
-                        <Typography.Caption as="span" color="hint">
-                          Installed: {new Date(channel.installedAt).toLocaleDateString()}
-                        </Typography.Caption>
+                        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]};`}>
+                          <Typography.Tiny as="span" css={css`
+                            color: ${theme.colors.text.disabled};
+                            text-transform: uppercase;
+                            letter-spacing: 0.06em;
+                            font-weight: ${theme.typography.fontWeight.medium};
+                          `}>Installed</Typography.Tiny>
+                          <Typography.Caption as="span" color="secondary">
+                            {new Date(channel.installedAt).toLocaleDateString()}
+                          </Typography.Caption>
+                        </div>
                       </div>
 
                       {/* Capabilities */}
@@ -1985,6 +2004,16 @@ function ChannelsSection() {
                           <GearFine size={14} css={css`margin-right: ${theme.spacing[1]};`} />
                           Configure
                         </Button>
+                        {channel.installedFrom === 'package' && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={(e: React.MouseEvent) => { e.stopPropagation(); setChannelUpdateTarget(channel.name); }}
+                          >
+                            <Upload size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+                            Update Package
+                          </Button>
+                        )}
                         {channel.enabled && (
                           <Button
                             variant="ghost"
@@ -2172,6 +2201,38 @@ function ChannelsSection() {
         </div>
       </Modal>
 
+      {/* Channel Update Package Modal */}
+      <Modal open={channelUpdateTarget !== null && !showChannelUpdateConsentDialog} onClose={() => setChannelUpdateTarget(null)}>
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+            <Upload size={20} css={css`color: ${theme.colors.accent};`} />
+            <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+              Update {channelUpdateTarget}
+            </Typography.Subtitle>
+          </div>
+          <Typography.SmallBody color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+            Upload a new .anpk package to update this channel. Your existing configuration will be preserved.
+          </Typography.SmallBody>
+          <AnpkDropZone
+            onFileReady={(filePath) => handleChannelUpdateUpload(filePath)}
+            disabled={channelUpdateVerifyMutation.isPending}
+            packageType="channel"
+          />
+          <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+            <Button variant="ghost" size="sm" onClick={() => setChannelUpdateTarget(null)}>Cancel</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Channel Update Consent Dialog */}
+      <PackageConsentDialog
+        open={showChannelUpdateConsentDialog}
+        onClose={() => { setShowChannelUpdateConsentDialog(false); setChannelUpdateVerification(null); setChannelUpdatePackagePath(null); setChannelUpdateTarget(null); }}
+        verification={channelUpdateVerification}
+        onConfirm={handleChannelUpdateConfirmInstall}
+        isInstalling={channelUpdateFromPackageMutation.isPending}
+      />
+
     </div>
   );
 }
@@ -2255,7 +2316,6 @@ function GoalsSection() {
 // Component label map for human-friendly display
 const componentLabelMap: Record<string, { singular: string; plural: string }> = {
   skills: { singular: 'skill', plural: 'skills' },
-  tools: { singular: 'tool', plural: 'tools' },
   contextSources: { singular: 'context source', plural: 'context sources' },
   hooks: { singular: 'hook', plural: 'hooks' },
   decisionTypes: { singular: 'decision type', plural: 'decision types' },
@@ -2320,6 +2380,18 @@ function PluginsSection() {
   const rollbackMutation = trpc.plugins.rollback.useMutation({
     onSuccess: () => utils.plugins.list.invalidate(),
   });
+  // Package update mutations
+  const updateVerifyMutation = trpc.plugins.verifyPackage.useMutation();
+  const updateFromPackageMutation = trpc.plugins.updateFromPackage.useMutation({
+    onSuccess: () => {
+      utils.plugins.list.invalidate();
+      setUpdateTarget(null);
+      setShowUpdateConsentDialog(false);
+      setUpdateVerification(null);
+      setUpdatePackagePath(null);
+      toast.success('Plugin updated successfully');
+    },
+  });
 
   // Local state
   const [showInstallModal, setShowInstallModal] = useState(false);
@@ -2345,6 +2417,12 @@ function PluginsSection() {
   const [packageVerification, setPackageVerification] = useState<(ReturnType<typeof verifyPackageMutation.mutateAsync> extends Promise<infer T> ? T : never) | null>(null);
   const [selectedPackagePath, setSelectedPackagePath] = useState<string | null>(null);
   const [rollbackConfirm, setRollbackConfirm] = useState<string | null>(null);
+
+  // Update state
+  const [updateTarget, setUpdateTarget] = useState<string | null>(null);
+  const [showUpdateConsentDialog, setShowUpdateConsentDialog] = useState(false);
+  const [updateVerification, setUpdateVerification] = useState<(ReturnType<typeof updateVerifyMutation.mutateAsync> extends Promise<infer T> ? T : never) | null>(null);
+  const [updatePackagePath, setUpdatePackagePath] = useState<string | null>(null);
 
   // Validate path query (lazy)
   const validateQuery = trpc.plugins.validatePath.useQuery(
@@ -2406,6 +2484,34 @@ function PluginsSection() {
         onError: (err) => {
           toast.error(`Failed to rollback plugin "${name}"`, { detail: err.message });
           setRollbackConfirm(null);
+        },
+      }
+    );
+  };
+
+  const handleUpdateUpload = async (filePath: string) => {
+    try {
+      const result = await updateVerifyMutation.mutateAsync({ filePath });
+      setUpdateVerification(result);
+      setUpdatePackagePath(filePath);
+      setShowUpdateConsentDialog(true);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      toast.error('Could not verify this package. It may be corrupted or incompatible.', { detail });
+    }
+  };
+
+  const handleUpdateConfirmInstall = (grantedPermissions: string[]) => {
+    if (!updateTarget || !updatePackagePath) return;
+    updateFromPackageMutation.mutate(
+      { name: updateTarget, filePath: updatePackagePath, grantedPermissions },
+      {
+        onError: (err) => {
+          setShowUpdateConsentDialog(false);
+          setUpdateVerification(null);
+          setUpdatePackagePath(null);
+          setUpdateTarget(null);
+          toast.error('Plugin update failed', { detail: err.message });
         },
       }
     );
@@ -2483,13 +2589,31 @@ function PluginsSection() {
             const isExpanded = expandedPlugin === plugin.name;
             const source = sourceBadgeConfig[plugin.installedFrom] ?? { variant: 'default' as const, label: plugin.installedFrom };
             const statusInfo = pluginStatusBadge[plugin.status] ?? { variant: 'default' as const, label: plugin.status };
-            const componentBadges = Object.entries(plugin.components)
-              .filter(([, count]) => (count as number) > 0)
-              .map(([key, count]) => {
+            const componentBadges: string[] = [];
+
+            // MCP server badge with optional tool count
+            const mcpCount = (plugin.components as any).mcpServers as number;
+            const mcpToolCount = (plugin.components as any).mcpToolCount as number;
+            if (mcpCount > 0) {
+              const serverLabel = mcpCount === 1 ? 'MCP server' : 'MCP servers';
+              if (mcpToolCount > 0) {
+                const toolLabel = mcpToolCount === 1 ? 'tool' : 'tools';
+                componentBadges.push(`${mcpCount} ${serverLabel} (${mcpToolCount} ${toolLabel})`);
+              } else {
+                componentBadges.push(`${mcpCount} ${serverLabel}`);
+              }
+            }
+
+            // Generic component badges (skip MCP-related keys)
+            Object.entries(plugin.components)
+              .filter(([key, count]) => !['mcpServers', 'mcpToolCount'].includes(key) && (count as number) > 0)
+              .forEach(([key, count]) => {
                 const labels = componentLabelMap[key];
-                return labels
-                  ? `${count} ${(count as number) === 1 ? labels.singular : labels.plural}`
-                  : `${count} ${key}`;
+                componentBadges.push(
+                  labels
+                    ? `${count} ${(count as number) === 1 ? labels.singular : labels.plural}`
+                    : `${count} ${key}`
+                );
               });
 
             return (
@@ -2515,9 +2639,9 @@ function PluginsSection() {
                       />
                     )}
                     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]}; flex: 1; min-width: 0;`}>
-                    <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
+                    <div css={css`display: flex; align-items: baseline; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
                       <Typography.BodyAlt as="span">{plugin.displayName}</Typography.BodyAlt>
-                      <Typography.Caption as="span" color="hint">v{plugin.version}</Typography.Caption>
+                      <Typography.Caption as="span" color="disabled">v{plugin.version}</Typography.Caption>
                       <Badge variant={source.variant}>{source.label}</Badge>
                       <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
                     </div>
@@ -2533,30 +2657,49 @@ function PluginsSection() {
                     {componentBadges.length > 0 && (
                       <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[1.5]}; margin-top: ${theme.spacing[0.5]};`}>
                         {componentBadges.map((label) => (
-                          <Typography.Caption
+                          <Typography.Tiny
                             key={label}
                             as="span"
                             color="hint"
                             css={css`
-                              padding: 1px ${theme.spacing[2]};
+                              padding: 1px ${theme.spacing[1.5]};
                               border: 1px solid ${theme.colors.border.default};
                               border-radius: ${theme.borderRadius.full};
                               white-space: nowrap;
                             `}
                           >
                             {label}
-                          </Typography.Caption>
+                          </Typography.Tiny>
                         ))}
                       </div>
                     )}
                     </div>
                   </div>
 
-                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-shrink: 0; margin-left: ${theme.spacing[3]};`} onClick={(e) => e.stopPropagation()}>
-                    <Toggle
-                      checked={plugin.enabled}
-                      onChange={() => handleToggleEnabled(plugin.name, plugin.enabled)}
-                    />
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]}; flex-shrink: 0; margin-left: ${theme.spacing[3]};`}>
+                    <motion.div
+                      animate={{ rotate: isExpanded ? 90 : 0 }}
+                      transition={{ duration: 0.15 }}
+                      css={css`display: flex; color: ${theme.colors.text.disabled};`}
+                    >
+                      <CaretRight size={14} />
+                    </motion.div>
+                    <div onClick={(e) => e.stopPropagation()}>
+                      {plugin.status === 'unconfigured' ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => navigateToConfig(`/settings/plugins/${plugin.name}/configure`)}
+                        >
+                          Configure
+                        </Button>
+                      ) : (
+                        <Toggle
+                          checked={plugin.enabled}
+                          onChange={() => handleToggleEnabled(plugin.name, plugin.enabled)}
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -2576,6 +2719,7 @@ function PluginsSection() {
                         hasConfig={plugin.hasConfig}
                         onConfigure={() => navigateToConfig(`/settings/plugins/${plugin.name}/configure`)}
                         onUninstall={() => setUninstallConfirm(plugin.name)}
+                        onUpdate={() => setUpdateTarget(plugin.name)}
                       />
                     </motion.div>
                   )}
@@ -2810,6 +2954,38 @@ function PluginsSection() {
         </div>
       </Modal>
 
+      {/* Update Package Modal */}
+      <Modal open={updateTarget !== null && !showUpdateConsentDialog} onClose={() => setUpdateTarget(null)}>
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+            <Upload size={20} css={css`color: ${theme.colors.accent};`} />
+            <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+              Update {updateTarget}
+            </Typography.Subtitle>
+          </div>
+          <Typography.SmallBody color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+            Upload a new .anpk package to update this plugin. Your existing configuration will be preserved.
+          </Typography.SmallBody>
+          <AnpkDropZone
+            onFileReady={(filePath) => handleUpdateUpload(filePath)}
+            disabled={updateVerifyMutation.isPending}
+            packageType="plugin"
+          />
+          <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+            <Button variant="ghost" size="sm" onClick={() => setUpdateTarget(null)}>Cancel</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Update Consent Dialog */}
+      <PackageConsentDialog
+        open={showUpdateConsentDialog}
+        onClose={() => { setShowUpdateConsentDialog(false); setUpdateVerification(null); setUpdatePackagePath(null); setUpdateTarget(null); }}
+        verification={updateVerification}
+        onConfirm={handleUpdateConfirmInstall}
+        isInstalling={updateFromPackageMutation.isPending}
+      />
+
     </div>
   );
 }
@@ -2824,12 +3000,14 @@ function PluginDetail({
   hasConfig,
   onConfigure,
   onUninstall,
+  onUpdate,
 }: {
   pluginName: string;
   installedFrom: string;
   hasConfig: boolean;
   onConfigure: () => void;
   onUninstall: () => void;
+  onUpdate: () => void;
 }) {
   const theme = useTheme();
   const { data: detail, isLoading } = trpc.plugins.get.useQuery({ name: pluginName });
@@ -2848,9 +3026,11 @@ function PluginDetail({
 
   if (!detail) return null;
 
+  const mcpServers = (detail.components as any).mcpServers as Record<string, { description: string | null; tools: string[] }> | undefined;
+  const mcpServerEntries = mcpServers ? Object.entries(mcpServers) : [];
+
   const componentSections = [
     { label: 'Skills', items: detail.components.skills },
-    { label: 'Tools (MCP)', items: detail.components.tools },
     { label: 'Context Sources', items: detail.components.contextSources },
     { label: 'Hooks', items: detail.components.hooks },
     { label: 'Decision Types', items: detail.components.decisionTypes },
@@ -2869,32 +3049,89 @@ function PluginDetail({
     `}>
       {/* Author & license */}
       {(detail.author || detail.license) && (
-        <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[3]};`}>
+        <div css={css`display: flex; gap: ${theme.spacing[6]};`}>
           {detail.author && (
-            <Typography.Caption as="span" color="hint">
-              Author: {detail.author.name}
-              {detail.author.url && (
-                <a
-                  href={detail.author.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  css={css`
-                    margin-left: ${theme.spacing[1]};
-                    color: ${theme.colors.text.secondary};
-                    &:hover { color: ${theme.colors.text.primary}; }
-                  `}
-                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                >
-                  <ArrowSquareOut size={10} css={css`vertical-align: middle;`} />
-                </a>
-              )}
-            </Typography.Caption>
+            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]};`}>
+              <Typography.Tiny as="span" css={css`
+                color: ${theme.colors.text.disabled};
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                font-weight: ${theme.typography.fontWeight.medium};
+              `}>Author</Typography.Tiny>
+              <Typography.Caption as="span" color="secondary" css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                {detail.author.name}
+                {detail.author.url && (
+                  <a
+                    href={detail.author.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    css={css`
+                      color: ${theme.colors.text.hint};
+                      &:hover { color: ${theme.colors.text.primary}; }
+                    `}
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                  >
+                    <ArrowSquareOut size={10} />
+                  </a>
+                )}
+              </Typography.Caption>
+            </div>
           )}
           {detail.license && (
-            <Typography.Caption as="span" color="hint">
-              License: {detail.license}
-            </Typography.Caption>
+            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]};`}>
+              <Typography.Tiny as="span" css={css`
+                color: ${theme.colors.text.disabled};
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                font-weight: ${theme.typography.fontWeight.medium};
+              `}>License</Typography.Tiny>
+              <Typography.Caption as="span" color="secondary">
+                {detail.license}
+              </Typography.Caption>
+            </div>
           )}
+        </div>
+      )}
+
+      {/* MCP Servers */}
+      {mcpServerEntries.length > 0 && (
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+          <Typography.Tiny as="span" css={css`
+            color: ${theme.colors.text.disabled};
+            font-weight: ${theme.typography.fontWeight.medium};
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+          `}>MCP Servers</Typography.Tiny>
+          {mcpServerEntries.map(([name, server]) => (
+            <div key={name} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+              <Typography.Caption as="span" color="secondary" css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
+                {name}
+                {server.description && (
+                  <span css={css`font-weight: ${theme.typography.fontWeight.regular}; color: ${theme.colors.text.hint}; margin-left: ${theme.spacing[1]};`}>
+                    — {server.description}
+                  </span>
+                )}
+              </Typography.Caption>
+              {server.tools.length > 0 && (
+                <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[1.5]};`}>
+                  {server.tools.map((tool) => (
+                    <Typography.Caption
+                      key={tool}
+                      as="span"
+                      css={css`
+                        padding: ${theme.spacing[0.5]} ${theme.spacing[2]};
+                        background: ${theme.colors.background.elevated};
+                        border-radius: ${theme.borderRadius.sm};
+                        color: ${theme.colors.text.secondary};
+                      `}
+                    >
+                      {tool}
+                    </Typography.Caption>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
@@ -2903,27 +3140,28 @@ function PluginDetail({
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
           {componentSections.map((section) => (
             <div key={section.label} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
-              <Typography.Caption as="span" color="hint" css={css`
+              <Typography.Tiny as="span" css={css`
+                color: ${theme.colors.text.disabled};
                 font-weight: ${theme.typography.fontWeight.medium};
                 text-transform: uppercase;
                 letter-spacing: 0.06em;
               `}>
                 {section.label}
-              </Typography.Caption>
+              </Typography.Tiny>
               <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[1.5]};`}>
                 {section.items.map((item) => (
-                  <Typography.SmallBody
+                  <Typography.Caption
                     key={item}
                     as="span"
                     css={css`
                       padding: ${theme.spacing[0.5]} ${theme.spacing[2]};
                       background: ${theme.colors.background.elevated};
                       border-radius: ${theme.borderRadius.sm};
-                      font-size: ${theme.typography.fontSize.xs};
+                      color: ${theme.colors.text.secondary};
                     `}
                   >
                     {item}
-                  </Typography.SmallBody>
+                  </Typography.Caption>
                 ))}
               </div>
             </div>
@@ -2941,6 +3179,16 @@ function PluginDetail({
           >
             <GearFine size={14} css={css`margin-right: ${theme.spacing[1]};`} />
             Configure
+          </Button>
+        )}
+        {installedFrom === 'package' && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={(e: React.MouseEvent) => { e.stopPropagation(); onUpdate(); }}
+          >
+            <Upload size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+            Update Package
           </Button>
         )}
         {installedFrom !== 'built-in' && (

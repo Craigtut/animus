@@ -293,6 +293,35 @@ export const channelsRouter = router({
     }),
 
   /**
+   * Update an installed channel from a new .anpk package file.
+   * Preserves existing configuration while replacing the package code.
+   */
+  updateFromPackage: protectedProcedure
+    .input(
+      z.object({
+        name: z.string().min(1),
+        filePath: z.string().min(1),
+        grantedPermissions: z.array(z.string()).default([]),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const channelManager = getChannelManager();
+      try {
+        const result = await channelManager.updateFromPackage(
+          input.name,
+          input.filePath,
+          input.grantedPermissions,
+        );
+        return result;
+      } catch (err) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: err instanceof Error ? err.message : 'Failed to update channel from package',
+        });
+      }
+    }),
+
+  /**
    * Rollback a channel to its previous cached version.
    */
   rollback: protectedProcedure

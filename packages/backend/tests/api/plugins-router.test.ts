@@ -24,6 +24,7 @@ vi.mock('../../src/services/plugin-manager.js', () => {
     getPluginConfigSchema: vi.fn().mockReturnValue(null),
     setPluginConfig: vi.fn(),
     hasRequiredConfig: vi.fn().mockReturnValue(true),
+    updateFromPackage: vi.fn(),
   };
   return {
     getPluginManager: () => mockManager,
@@ -45,6 +46,7 @@ type PluginManagerModule = typeof import('../../src/services/plugin-manager.js')
     getPluginConfigSchema: ReturnType<typeof vi.fn>;
     setPluginConfig: ReturnType<typeof vi.fn>;
     hasRequiredConfig: ReturnType<typeof vi.fn>;
+    updateFromPackage: ReturnType<typeof vi.fn>;
   };
 };
 
@@ -107,7 +109,7 @@ const sampleLoaded = {
   source: 'local' as const,
   enabled: true,
   skills: [{ name: 'my-skill', absolutePath: '/path/to/plugin/skills/my-skill' }],
-  mcpServers: { 'my-server': { command: 'node', args: ['server.js'], env: {} } },
+  mcpServers: { 'my-server': { command: 'node', args: ['server.js'], env: {}, tools: ['tool_a', 'tool_b'] } },
   contextSources: [{ name: 'my-ctx', description: 'test', type: 'static' as const, maxTokens: 500, priority: 5 }],
   hooks: [{ event: 'preTick' as const, handler: { type: 'command' as const, command: 'echo hi' } }],
   decisionTypes: [{ name: 'custom_action', description: 'test', payloadSchema: {}, handler: { type: 'command' as const, command: 'echo' }, contactTier: 'primary' as const }],
@@ -162,7 +164,8 @@ describe('plugins router', () => {
       expect(result[0]!.version).toBe('1.0.0');
       expect(result[0]!.enabled).toBe(true);
       expect(result[0]!.components.skills).toBe(1);
-      expect(result[0]!.components.tools).toBe(1);
+      expect(result[0]!.components.mcpServers).toBe(1);
+      expect(result[0]!.components.mcpToolCount).toBe(2);
       expect(result[0]!.components.contextSources).toBe(1);
       expect(result[0]!.components.hooks).toBe(1);
       expect(result[0]!.components.decisionTypes).toBe(1);
@@ -185,7 +188,9 @@ describe('plugins router', () => {
       expect(result.name).toBe('test-plugin');
       expect(result.manifest).toEqual(sampleManifest);
       expect(result.components.skills).toEqual(['my-skill']);
-      expect(result.components.tools).toEqual(['my-server']);
+      expect(result.components.mcpServers).toEqual({
+        'my-server': { description: null, tools: ['tool_a', 'tool_b'] },
+      });
       expect(result.components.agents).toEqual(['my-agent']);
     });
 
@@ -372,6 +377,68 @@ describe('plugins router', () => {
 
       expect(result.valid).toBe(false);
       expect(result.error).toBeDefined();
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // updateFromPackage
+  // --------------------------------------------------------------------------
+
+  describe('updateFromPackage', () => {
+    const sampleUpdateResult = {
+      success: true,
+      manifest: { packageType: 'plugin', name: 'test-plugin', version: '2.0.0' },
+      needsConfig: false,
+      verification: { valid: true, errors: [], warnings: [] },
+      installedPath: '/data/packages/test-plugin',
+    };
+
+    it('should call pm.updateFromPackage with correct args', async () => {
+      mockManager.updateFromPackage.mockResolvedValue(sampleUpdateResult);
+
+      const caller = getAuthedCaller();
+      const result = await caller.plugins.updateFromPackage({
+        name: 'test-plugin',
+        filePath: '/tmp/test-plugin-2.0.0.anpk',
+        grantedPermissions: ['tool:bash'],
+      });
+
+      expect(mockManager.updateFromPackage).toHaveBeenCalledWith(
+        'test-plugin',
+        '/tmp/test-plugin-2.0.0.anpk',
+        ['tool:bash'],
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('should throw BAD_REQUEST when update fails', async () => {
+      mockManager.updateFromPackage.mockRejectedValue(
+        new Error('Package name "other" does not match installed plugin "test-plugin"'),
+      );
+
+      const caller = getAuthedCaller();
+      await expect(
+        caller.plugins.updateFromPackage({
+          name: 'test-plugin',
+          filePath: '/tmp/other.anpk',
+        })
+      ).rejects.toThrow('does not match');
+    });
+
+    it('should default grantedPermissions to empty array', async () => {
+      mockManager.updateFromPackage.mockResolvedValue(sampleUpdateResult);
+
+      const caller = getAuthedCaller();
+      await caller.plugins.updateFromPackage({
+        name: 'test-plugin',
+        filePath: '/tmp/test-plugin-2.0.0.anpk',
+      });
+
+      expect(mockManager.updateFromPackage).toHaveBeenCalledWith(
+        'test-plugin',
+        '/tmp/test-plugin-2.0.0.anpk',
+        [],
+      );
     });
   });
 });

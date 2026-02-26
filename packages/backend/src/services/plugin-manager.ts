@@ -545,6 +545,186 @@ class PluginManager {
   }
 
   /**
+   * Update an existing plugin from a new .anpk package file.
+   *
+   * Preserves the existing configuration while replacing the package code.
+   * The current version is cached for rollback.
+   */
+  async updateFromPackage(
+    name: string,
+    anpkPath: string,
+    grantedPermissions: string[] = [],
+  ): Promise<InstallResult> {
+    log.info(`Updating plugin from package: ${name} with ${anpkPath}`);
+
+    const db = getSystemDb();
+    const existing = pluginStore.getPlugin(db, name);
+    if (!existing) {
+      throw new Error(`Plugin "${name}" is not installed`);
+    }
+
+    // 1. Verify the new package
+    const verification = await verifyPackage(anpkPath);
+    if (!verification.valid || !verification.manifest) {
+      throw new Error(
+        `Package verification failed: ${verification.errors.join('; ')}`,
+      );
+    }
+
+    const manifest = verification.manifest;
+    if (manifest.packageType !== 'plugin') {
+      throw new Error(`Expected plugin package but got "${manifest.packageType}"`);
+    }
+
+    // Ensure the package name matches the installed plugin
+    if (manifest.name !== name) {
+      throw new Error(
+        `Package name "${manifest.name}" does not match installed plugin "${name}"`,
+      );
+    }
+
+    const currentVersion = existing.version;
+
+    // 2. Disable current version if enabled
+    const loaded = this.plugins.get(name);
+    const wasEnabled = loaded?.enabled ?? false;
+    if (loaded?.enabled) {
+      await this.stopTriggersForPlugin(name);
+      this.deregisterHooks(name);
+      this.deregisterDecisionTypes(name);
+      await this.removeSkillsForPlugin(loaded);
+    }
+
+    // 3. Extract to packages directory (replaces existing files)
+    const packagesDir = path.join(DATA_DIR, 'packages');
+    const extractDir = path.join(packagesDir, manifest.name);
+
+    await fs.rm(extractDir, { recursive: true, force: true });
+    await fs.mkdir(extractDir, { recursive: true });
+    try {
+      await extractZip(anpkPath, { dir: extractDir });
+    } catch (err) {
+      await fs.rm(extractDir, { recursive: true, force: true });
+      throw new Error(`Failed to extract package: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // 4. Cache the new .anpk file for rollback; keep old version in cache too
+    const cacheDir = path.join(packagesDir, '.cache');
+    await fs.mkdir(cacheDir, { recursive: true });
+    const cachePath = path.join(cacheDir, `${manifest.name}-${manifest.version}.anpk`);
+    await fs.copyFile(anpkPath, cachePath);
+
+    // 5. Read plugin manifest from extracted directory
+    let pluginManifest: PluginManifest;
+    const pluginJsonPath = path.join(extractDir, 'plugin.json');
+    if (fsSync.existsSync(pluginJsonPath)) {
+      const raw = await fs.readFile(pluginJsonPath, 'utf-8');
+      pluginManifest = PluginManifestSchema.parse(JSON.parse(raw));
+    } else {
+      pluginManifest = {
+        name: manifest.name,
+        displayName: manifest.displayName ?? manifest.name,
+        version: manifest.version,
+        description: manifest.description,
+        author: manifest.author,
+        license: manifest.license,
+        engine: manifest.engineVersion,
+        icon: manifest.icon,
+        components: manifest.components,
+        dependencies: manifest.dependencies,
+        permissions: manifest.permissions ? {
+          tools: manifest.permissions.tools,
+          network: Array.isArray(manifest.permissions.network)
+            ? manifest.permissions.network.length > 0
+            : manifest.permissions.network,
+          filesystem: manifest.permissions.filesystem,
+          contacts: manifest.permissions.contacts,
+          memory: manifest.permissions.memory,
+        } : undefined,
+        configSchema: manifest.configSchema,
+        setup: manifest.setup,
+      } as PluginManifest;
+    }
+
+    // 6. Re-load components
+    const reloaded: LoadedPlugin = {
+      manifest: pluginManifest,
+      absolutePath: extractDir,
+      source: loaded?.source ?? 'package',
+      enabled: false,
+      configSchema: null,
+      iconSvg: null,
+      skills: [],
+      mcpServers: {},
+      contextSources: [],
+      hooks: [],
+      decisionTypes: [],
+      triggers: [],
+      agents: [],
+    };
+
+    await this.loadComponents(reloaded);
+
+    // 7. Update DB record — preserves config_encrypted (we only update version/path/distribution columns)
+    pluginStore.updatePlugin(db, name, {
+      version: manifest.version,
+      path: extractDir,
+    });
+
+    // Update distribution columns and set previous_version for rollback
+    db.prepare(
+      `UPDATE plugins SET
+        package_version = ?,
+        package_checksum = ?,
+        signature_status = ?,
+        package_cache_path = ?,
+        previous_version = ?,
+        permissions_granted = ?
+      WHERE name = ?`,
+    ).run(
+      manifest.version,
+      verification.checksums.verified > 0 ? 'verified' : null,
+      verification.signature.status,
+      cachePath,
+      currentVersion,
+      grantedPermissions.length > 0 ? JSON.stringify(grantedPermissions) : null,
+      name,
+    );
+
+    // 8. Re-enable if was enabled and has required config
+    const needsConfig = reloaded.configSchema &&
+      reloaded.configSchema.fields.some(f => f.required);
+
+    if (wasEnabled && this.hasRequiredConfig(name)) {
+      reloaded.enabled = true;
+      pluginStore.updatePlugin(db, name, { enabled: true });
+      this.registerHooks(reloaded);
+      this.registerDecisionTypes(reloaded);
+
+      const settings = systemStore.getSystemSettings(db);
+      await this.deploySkillsForPlugin(reloaded, settings.defaultAgentProvider);
+      await this.startTriggersForPlugin(reloaded);
+      log.info(`Updated and re-enabled plugin from package: ${name} v${currentVersion} → v${manifest.version}`);
+    } else {
+      reloaded.enabled = false;
+      pluginStore.updatePlugin(db, name, { enabled: false });
+      log.info(`Updated plugin from package: ${name} v${currentVersion} → v${manifest.version}${needsConfig ? ' (disabled — needs configuration)' : ''}`);
+    }
+
+    this.plugins.set(name, reloaded);
+
+    getEventBus().emit('plugin:changed', { pluginName: name, action: 'installed' });
+
+    return {
+      success: true,
+      manifest,
+      needsConfig: !!needsConfig,
+      verification,
+      installedPath: extractDir,
+    };
+  }
+
+  /**
    * Rollback a plugin to its previous version using the cached .anpk.
    */
   async rollback(packageName: string): Promise<RollbackResult> {
