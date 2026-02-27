@@ -195,6 +195,12 @@ export const codexConfigSchema = baseSessionConfigSchema.extend({
 
   /** Thread ID to resume */
   resume: z.string().optional(),
+
+  /** List of allowed tool names */
+  allowedTools: z.array(z.string()).optional(),
+
+  /** List of disallowed tool names */
+  disallowedTools: z.array(z.string()).optional(),
 });
 
 /**

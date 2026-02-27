@@ -18,18 +18,34 @@ const breathe = keyframes`
 export function BirthPage() {
   const theme = useTheme();
   const navigate = useNavigate();
+  const utils = trpc.useUtils();
   const { markStepComplete, setCurrentStep, personaDraft } = useOnboardingStore();
 
   const [phase, setPhase] = useState<BirthPhase>('stillness');
+  const [finalized, setFinalized] = useState(false);
+  const [animationReady, setAnimationReady] = useState(false);
   const finalizeMutation = trpc.persona.finalize.useMutation();
 
   // Finalize persona on mount — triggers heartbeat start on the backend
   useEffect(() => {
     finalizeMutation.mutate(undefined, {
+      onSuccess: () => {
+        utils.onboarding.getState.invalidate();
+        setFinalized(true);
+      },
       onError: (err) => console.error('Failed to finalize persona:', err),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Navigate once both animation is ready AND finalize has completed
+  useEffect(() => {
+    if (animationReady && finalized) {
+      markStepComplete('birth');
+      setCurrentStep('complete');
+      navigate('/');
+    }
+  }, [animationReady, finalized, markStepComplete, setCurrentStep, navigate]);
 
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
@@ -46,24 +62,16 @@ export function BirthPage() {
     // Phase 4: Identity (3.5s)
     timers.push(setTimeout(() => setPhase('transition'), 13500));
 
-    // Phase 5: Transition to app (3s)
-    timers.push(
-      setTimeout(() => {
-        markStepComplete('birth');
-        setCurrentStep('complete');
-        navigate('/');
-      }, 16500)
-    );
+    // Phase 5: Animation complete — mark ready (navigation happens in effect above)
+    timers.push(setTimeout(() => setAnimationReady(true), 16500));
 
     return () => timers.forEach(clearTimeout);
-  }, [markStepComplete, setCurrentStep, navigate]);
+  }, []);
 
   // Allow click to accelerate from phase 4 onward
   const handleClick = () => {
     if (phase === 'identity' || phase === 'transition') {
-      markStepComplete('birth');
-      setCurrentStep('complete');
-      navigate('/');
+      setAnimationReady(true);
     }
   };
 

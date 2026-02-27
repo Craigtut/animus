@@ -8,6 +8,14 @@
 
 The OpenAI Codex SDK provides programmatic control over local Codex agents. The TypeScript SDK wraps a bundled codex binary, spawning the CLI and exchanging JSONL events over stdin/stdout. This is fundamentally different from Claude's approach.
 
+### Bundled Binary Architecture
+
+The Codex SDK bundles complete native binaries for each platform under `vendor/{targetTriple}/codex/codex`. Unlike Claude's SDK (which bundles only the agent execution engine), Codex bundles the full CLI including ALL subcommands: `login`, `logout`, `login status`, and the agent runtime. The SDK's internal `findCodexPath()` resolves the correct binary based on platform and architecture.
+
+Platform target triples: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-musl`, `x86_64-unknown-linux-musl`, `aarch64-pc-windows-msvc`, `x86_64-pc-windows-msvc`.
+
+This means no separate CLI installation is needed for Codex: the SDK package provides everything. See [sdk-cli-architecture.md](../sdk-cli-architecture.md) for how the Animus backend resolves these paths.
+
 ## Installation
 
 ```bash

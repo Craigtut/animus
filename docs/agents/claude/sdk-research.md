@@ -65,6 +65,12 @@ The SDK can either:
 1. Use a bundled Claude Code binary (default)
 2. Use a custom Claude Code executable via `pathToClaudeCodeExecutable` option
 
+### Bundled CLI vs Native Binary
+
+The SDK bundles a `cli.js` at the package root. This is the agent execution engine only: it handles queries, tools, streaming, and MCP. It does NOT have auth subcommands (`auth login`, `auth logout`, `auth status`). Those commands are exclusive to the separately-installed native Claude Code binary (typically at `~/.local/bin/claude` or `/usr/local/bin/claude`).
+
+This distinction matters for the Animus backend: agent execution uses the SDK-bundled `cli.js`, while auth flows need the native binary. See [sdk-cli-architecture.md](../sdk-cli-architecture.md) for the full resolution strategy.
+
 ## Authentication Methods
 
 ### 1. API Key Authentication

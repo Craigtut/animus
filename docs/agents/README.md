@@ -71,6 +71,7 @@ docs/agents/
 | Document | Description |
 |----------|-------------|
 | [architecture-overview.md](./architecture-overview.md) | Unified abstraction layer design, SDK comparison matrix, interface definitions, design decisions |
+| [sdk-cli-architecture.md](./sdk-cli-architecture.md) | SDK subprocess architecture, CLI binary resolution (`cli-paths.ts`), deployment modes, auth flow differences |
 | [plugin-extension-systems.md](./plugin-extension-systems.md) | Plugin/extension system comparison & Animus plugin strategy (skills, tools, hooks, agents) |
 
 ## Quick Reference

@@ -82,7 +82,7 @@ export const systemSettingsSchema = z.object({
   agentLogRetentionDays: z.number().int().positive().default(7),
   taskRunRetentionDays: z.number().int().positive().default(7),
   defaultAgentProvider: agentProviderSchema.default('claude'),
-  defaultModel: z.string().optional(),
+  defaultModel: z.string().nullable().optional(),
   goalApprovalMode: z
     .enum(['always_approve', 'auto_approve', 'full_autonomy'])
     .default('always_approve'),

@@ -2,7 +2,7 @@
  * Sandbox MCP Server — in-process MCP server with only `run_with_credentials`.
  *
  * Claude-only feature (in-process servers use the Claude SDK's tool()/createSdkMcpServer).
- * Follows the exact pattern from tools/servers/claude-mcp.ts.
+ * Follows the exact pattern from tools/servers/mcp-bridge.ts.
  *
  * Built once and cached — reused across session resets.
  */

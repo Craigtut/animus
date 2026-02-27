@@ -77,6 +77,7 @@ export function ArchetypeStep() {
           width: 100vw;
           margin-left: calc(-50vw + 50%);
           padding: 0 ${theme.spacing[6]};
+          overflow: hidden;
 
           @media (max-width: ${theme.breakpoints.md}) {
             padding: 0 ${theme.spacing[4]};

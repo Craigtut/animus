@@ -29,8 +29,14 @@ vi.mock('../../src/lib/logger.js', () => ({
   }),
 }));
 
+// Mock cli-paths
+vi.mock('../../src/lib/cli-paths.js', () => ({
+  getClaudeNativeBinary: vi.fn(),
+}));
+
 import { spawn, execFile } from 'node:child_process';
 import { saveCliDetected, ensureClaudeOnboardingFile, removeCredential } from '../../src/services/credential-service.js';
+import { getClaudeNativeBinary } from '../../src/lib/cli-paths.js';
 import {
   initiateClaudeAuth,
   getSessionStatus,
@@ -47,6 +53,7 @@ const mockExecFile = vi.mocked(execFile);
 const mockSaveCliDetected = vi.mocked(saveCliDetected);
 const mockEnsureOnboarding = vi.mocked(ensureClaudeOnboardingFile);
 const mockRemoveCredential = vi.mocked(removeCredential);
+const mockGetClaudeNativeBinary = vi.mocked(getClaudeNativeBinary);
 
 function createMockProcess(): EventEmitter & Partial<ChildProcess> {
   const proc = new EventEmitter() as EventEmitter & Partial<ChildProcess>;
@@ -66,6 +73,8 @@ describe('claude-oauth', () => {
     vi.clearAllMocks();
     _clearSessions();
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Default: native binary is available
+    mockGetClaudeNativeBinary.mockReturnValue('/usr/local/bin/claude');
   });
 
   afterEach(() => {
@@ -85,6 +94,19 @@ describe('claude-oauth', () => {
       expect(session?.status).toBe('pending');
     });
 
+    it('should use native binary path from cli-paths', () => {
+      const proc = createMockProcess();
+      mockSpawn.mockReturnValue(proc as unknown as ChildProcess);
+
+      initiateClaudeAuth(fakeDb);
+
+      expect(mockSpawn).toHaveBeenCalledWith(
+        '/usr/local/bin/claude',
+        ['auth', 'login'],
+        expect.any(Object)
+      );
+    });
+
     it('should strip CLAUDECODE from child env', () => {
       const proc = createMockProcess();
       mockSpawn.mockReturnValue(proc as unknown as ChildProcess);
@@ -100,7 +122,7 @@ describe('claude-oauth', () => {
       delete process.env['CLAUDECODE'];
     });
 
-    it('should handle ENOENT error (CLI not installed)', async () => {
+    it('should handle ENOENT error (binary not found)', async () => {
       const proc = createMockProcess();
       mockSpawn.mockReturnValue(proc as unknown as ChildProcess);
 
@@ -117,7 +139,13 @@ describe('claude-oauth', () => {
       expect(updates.length).toBeGreaterThanOrEqual(2);
       const lastUpdate = updates[updates.length - 1]!;
       expect(lastUpdate.status).toBe('error');
-      expect(lastUpdate.message).toContain('Claude CLI not installed');
+      expect(lastUpdate.message).toContain('Claude Code binary not found');
+    });
+
+    it('should throw when native binary is not found', () => {
+      mockGetClaudeNativeBinary.mockReturnValue(null);
+
+      expect(() => initiateClaudeAuth(fakeDb)).toThrow('Claude Code native binary not found');
     });
 
     it('should handle non-zero exit code', async () => {
@@ -317,7 +345,7 @@ describe('claude-oauth', () => {
   });
 
   describe('logoutClaude', () => {
-    it('should call claude auth logout and remove credential', async () => {
+    it('should call native binary auth logout and remove credential', async () => {
       mockExecFile.mockImplementation((_cmd, _args, _opts, callback) => {
         if (typeof callback === 'function') {
           callback(null, '', '');
@@ -328,6 +356,12 @@ describe('claude-oauth', () => {
       const result = await logoutClaude(fakeDb);
 
       expect(result).toBe(true);
+      expect(mockExecFile).toHaveBeenCalledWith(
+        '/usr/local/bin/claude',
+        ['auth', 'logout'],
+        expect.any(Object),
+        expect.any(Function)
+      );
       expect(mockRemoveCredential).toHaveBeenCalledWith(fakeDb, 'claude', 'cli_detected');
     });
 
@@ -346,6 +380,16 @@ describe('claude-oauth', () => {
       await logoutClaude(fakeDb);
 
       delete process.env['CLAUDECODE'];
+    });
+
+    it('should still remove credential when native binary is not found', async () => {
+      mockGetClaudeNativeBinary.mockReturnValue(null);
+
+      const result = await logoutClaude(fakeDb);
+
+      expect(result).toBe(false);
+      expect(mockExecFile).not.toHaveBeenCalled();
+      expect(mockRemoveCredential).toHaveBeenCalledWith(fakeDb, 'claude', 'cli_detected');
     });
 
     it('should still remove credential on logout error', async () => {

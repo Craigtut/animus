@@ -13,6 +13,7 @@ import * as systemStore from '../../db/stores/system-store.js';
 import * as personaStore from '../../db/stores/persona-store.js';
 import { getSystemDb, getPersonaDb } from '../../db/index.js';
 import { updateCategoryCache } from '../../lib/logger.js';
+import { getEventBus } from '../../lib/event-bus.js';
 
 export const settingsRouter = router({
   getSystemSettings: protectedProcedure.query(() => {
@@ -27,6 +28,9 @@ export const settingsRouter = router({
         if (v !== undefined) clean[k] = v;
       }
       systemStore.updateSystemSettings(getSystemDb(), clean as Partial<SystemSettings>);
+      if (Object.keys(clean).length > 0) {
+        getEventBus().emit('system:settings_updated', clean);
+      }
       return systemStore.getSystemSettings(getSystemDb());
     }),
 

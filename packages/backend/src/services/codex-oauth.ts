@@ -8,8 +8,10 @@
  */
 
 import { generateUUID } from '@animus-labs/shared';
-import { writeFile, mkdir } from 'node:fs/promises';
+import { copyFile, writeFile, mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import type Database from 'better-sqlite3';
 import * as systemStore from '../db/stores/system-store.js';
 import { createLogger } from '../lib/logger.js';
@@ -282,6 +284,34 @@ export async function prepareCodexSessionAuth(
   );
 
   return { CODEX_HOME: sessionDir };
+}
+
+/**
+ * Copy CLI auth credentials into a CODEX_HOME directory.
+ *
+ * When using CLI-based auth (`codex login`), credentials live at
+ * ~/.codex/auth.json (or the system keyring). Since we override CODEX_HOME
+ * for plugin config, the binary's file fallback won't find auth at the
+ * default location. This copies the auth file so it's available at
+ * $CODEX_HOME/auth.json.
+ *
+ * Safe to call when no CLI auth exists (no-ops silently).
+ */
+export async function copyCodexCliAuth(codexHome: string): Promise<void> {
+  const source = join(homedir(), '.codex', 'auth.json');
+  if (!existsSync(source)) {
+    log.debug('No CLI auth.json at ~/.codex/auth.json, skipping copy');
+    return;
+  }
+
+  try {
+    await mkdir(codexHome, { recursive: true });
+    const dest = join(codexHome, 'auth.json');
+    await copyFile(source, dest);
+    log.debug(`Copied CLI auth.json to ${dest}`);
+  } catch (err) {
+    log.warn('Failed to copy CLI auth.json to CODEX_HOME:', err);
+  }
 }
 
 // ============================================================================

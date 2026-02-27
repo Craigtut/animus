@@ -17,7 +17,7 @@ import type {
 } from '@animus-labs/agents';
 import { attachSessionLogging, type AgentLogStore } from '@animus-labs/agents';
 import type { IEventBus } from '@animus-labs/shared';
-import { prepareCodexSessionAuth } from '../services/codex-oauth.js';
+import { prepareCodexSessionAuth, copyCodexCliAuth } from '../services/codex-oauth.js';
 import { getSystemDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
 import * as messageStore from '../db/stores/message-store.js';
@@ -27,10 +27,20 @@ import { env, PROJECT_ROOT } from '../utils/env.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSubAgentMcpServer, type MutableToolContext, type ToolPermissionLookup } from '../tools/servers/claude-mcp.js';
+import {
+  startBridge,
+  registerContext,
+  unregisterContext,
+  updatePermissions,
+  updateSubagentTier,
+  buildMcpServerConfig,
+  type MutableToolContext,
+  type ToolPermissionLookup,
+} from '../tools/servers/mcp-bridge.js';
 import type { ToolHandlerContext } from '../tools/types.js';
 import { getToolPermissions } from '../db/stores/system-store.js';
 import { getPluginManager } from '../services/plugin-manager.js';
+import { getAllowedTools, ANIMUS_TOOL_DEFS } from '@animus-labs/shared';
 
 const log = createLogger('AgentOrchestrator', 'agents');
 
@@ -140,8 +150,6 @@ export class AgentOrchestrator {
   private spawnBudgetPerHour: number;
   private getPreferredProvider: (() => AgentProvider | null) | null;
   private getPreferredModel: (() => string | undefined) | null;
-  /** Cached sub-agent MCP server (built lazily, once per process) */
-  private subAgentMcpServer: { serverConfig: Record<string, unknown>; allowedTools: string[] } | null = null;
   /** Per-task mutable tool contexts for sub-agent MCP handlers */
   private subAgentToolContexts = new Map<string, MutableToolContext>();
   private onAgentComplete: (params: {
@@ -259,7 +267,7 @@ export class AgentOrchestrator {
     let codexTempDir: string | null = null;
 
     try {
-      // Prepare Codex OAuth session auth if needed
+      // Prepare Codex session auth if needed
       let sessionEnv: Record<string, string> | undefined;
       if (provider === 'codex' && process.env['CODEX_OAUTH_CONFIGURED']) {
         try {
@@ -274,20 +282,31 @@ export class AgentOrchestrator {
         }
       }
 
-      // Build sub-agent MCP server lazily (once per process, Claude only)
-      // Determine contact tier for tool filtering
+      // Build sub-agent MCP server via stdio bridge (works for ALL providers)
       const contactTier = this.resolveContactTier(params.contactId);
       const subAgentContext: MutableToolContext = { current: null };
       this.subAgentToolContexts.set(taskId, subAgentContext);
 
-      if (!this.subAgentMcpServer && provider === 'claude') {
-        try {
-          const permissions = this.buildToolPermissionLookup();
-          this.subAgentMcpServer = await buildSubAgentMcpServer(contactTier, subAgentContext, permissions);
-          log.info(`Sub-agent MCP server built with tools: ${this.subAgentMcpServer.allowedTools.join(', ')}`);
-        } catch (err) {
-          log.warn('Failed to build sub-agent MCP server:', err);
+      let subAgentMcpConfig: { serverConfig: Record<string, unknown>; allowedTools: string[] } | null = null;
+      try {
+        const permissions = this.buildToolPermissionLookup();
+        updatePermissions(permissions);
+        updateSubagentTier(contactTier);
+        const bridgePort = await startBridge();
+        registerContext(taskId, subAgentContext);
+        const serverConfig = buildMcpServerConfig(bridgePort, 'subagent', taskId);
+        // Build allowed tools list from the sub-agent tool set
+        const subAgentToolNames = getAllowedTools(contactTier);
+        const allowedTools: string[] = [];
+        for (const toolName of subAgentToolNames) {
+          const mode = permissions.get(toolName);
+          if (mode === 'off' || mode === 'ask') continue;
+          allowedTools.push(`mcp__animus__${toolName}`);
         }
+        subAgentMcpConfig = { serverConfig: serverConfig as unknown as Record<string, unknown>, allowedTools };
+        log.info(`Sub-agent MCP server built (stdio bridge) with tools: ${allowedTools.join(', ')}`);
+      } catch (err) {
+        log.warn('Failed to build sub-agent MCP server:', err);
       }
 
       // Merge built-in sub-agent MCP tools with plugin MCP servers.
@@ -313,11 +332,11 @@ export class AgentOrchestrator {
         filteredPluginTools.push(...pluginMcp.allowedTools);
       }
       const mergedMcpServers: Record<string, Record<string, unknown>> = {
-        ...(this.subAgentMcpServer ? { animus: this.subAgentMcpServer.serverConfig } : {}),
+        ...(subAgentMcpConfig ? { animus: subAgentMcpConfig.serverConfig } : {}),
         ...filteredPluginServers,
       };
       const mergedAllowedTools: string[] = [
-        ...(this.subAgentMcpServer ? this.subAgentMcpServer.allowedTools : []),
+        ...(subAgentMcpConfig ? subAgentMcpConfig.allowedTools : []),
         ...filteredPluginTools,
       ];
 
@@ -327,6 +346,11 @@ export class AgentOrchestrator {
       let sdkPlugins: Array<{ type: 'local'; path: string }> | undefined;
       if (provider === 'codex') {
         sessionEnv = await getPluginManager().buildCodexRuntimeEnv(sessionEnv);
+        // CLI auth: copy ~/.codex/auth.json into CODEX_HOME so the binary
+        // finds it at the overridden path (keyring may not be available).
+        if (process.env['CODEX_CLI_CONFIGURED'] && !process.env['CODEX_OAUTH_CONFIGURED']) {
+          await copyCodexCliAuth(sessionEnv['CODEX_HOME']!);
+        }
       }
       if (provider === 'claude') {
         const bridgePath = getPluginManager().getSkillBridgePath();
@@ -471,6 +495,8 @@ export class AgentOrchestrator {
       }
       this.activeSessions.delete(params.agentId);
     }
+    this.subAgentToolContexts.delete(params.agentId);
+    unregisterContext(params.agentId);
 
     this.taskStore.updateAgentTask(params.agentId, {
       status: 'cancelled',
@@ -648,9 +674,10 @@ export class AgentOrchestrator {
         this.timeoutTimers.delete(taskId);
       }
 
-      // Clean up session and tool context
+      // Clean up session, tool context, and bridge registration
       this.activeSessions.delete(taskId);
       this.subAgentToolContexts.delete(taskId);
+      unregisterContext(taskId);
       await session.end();
 
       // Check for empty result
@@ -704,6 +731,7 @@ export class AgentOrchestrator {
 
       this.activeSessions.delete(taskId);
       this.subAgentToolContexts.delete(taskId);
+      unregisterContext(taskId);
 
       const errorMsg = err instanceof Error ? err.message : String(err);
       const task = this.taskStore.getAgentTask(taskId);
@@ -747,6 +775,7 @@ export class AgentOrchestrator {
       this.activeSessions.delete(taskId);
     }
     this.subAgentToolContexts.delete(taskId);
+    unregisterContext(taskId);
 
     const task = this.taskStore.getAgentTask(taskId);
 

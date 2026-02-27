@@ -907,6 +907,18 @@ export async function initializeHeartbeat(): Promise<{ resumedAfterRestart: bool
     log.info('Tool permission changed -- next tick will force cold session');
   });
 
+  // Listen for provider/model setting changes to force a cold session rebuild.
+  // Nulling mcpServer and cognitiveServer ensures the MCP build guards in
+  // mind-session.ts re-create them for the new provider on the next tick.
+  getEventBus().on('system:settings_updated', (payload) => {
+    if ('defaultAgentProvider' in payload || 'defaultModel' in payload) {
+      ctx.mindSession.invalidated = true;
+      ctx.mindSession.mcpServer = null;
+      ctx.mindSession.cognitiveServer = null;
+      log.info('Provider/model settings changed -- next tick will force cold session');
+    }
+  });
+
   // Set up the tick queue processor
   tickQueue.setProcessor(executeTick);
 

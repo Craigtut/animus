@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import * as systemStore from '../db/stores/system-store.js';
 import { createLogger } from '../lib/logger.js';
+import { checkSdkAvailable, getClaudeNativeBinary, getClaudeNativeBinaryAsync, getCodexBundledBinary } from '../lib/cli-paths.js';
 
 const log = createLogger('Credentials', 'server');
 
@@ -235,8 +236,8 @@ export async function detectProviderAuth(
 async function detectClaudeAuth(db: Database.Database): Promise<ProviderAuthStatus> {
   const methods: ProviderAuthMethod[] = [];
 
-  // Always check if the claude binary is installed (required for the SDK)
-  const cliInstalled = await checkBinaryExists('claude');
+  // Check if the Claude Agent SDK is available (bundled cli.js exists)
+  const cliInstalled = checkSdkAvailable('claude');
 
   // Check env vars
   if (process.env['ANTHROPIC_API_KEY']) {
@@ -276,10 +277,13 @@ async function detectClaudeAuth(db: Database.Database): Promise<ProviderAuthStat
     // Table may not exist yet
   }
 
-  // When CLI is installed, ask it directly whether it's authenticated.
-  // This is the source of truth (handles macOS Keychain, credential files, etc.)
-  if (cliInstalled) {
-    const cliAuth = await checkClaudeCliAuth();
+  // Try to check auth status via the native Claude binary.
+  // The native binary (claude auth status) is the source of truth for auth state.
+  // The SDK-bundled cli.js is for agent execution only and has no auth commands.
+  const nativeBinary = await getClaudeNativeBinaryAsync();
+
+  if (nativeBinary) {
+    const cliAuth = await checkClaudeCliAuth(nativeBinary);
     if (cliAuth.authenticated) {
       const alreadyHasCli = methods.some((m) => m.method === 'cli');
       if (!alreadyHasCli) {
@@ -314,7 +318,7 @@ async function detectClaudeAuth(db: Database.Database): Promise<ProviderAuthStat
       });
     }
   } else {
-    // CLI not installed: fall back to filesystem check for credential files
+    // Native binary not found: fall back to filesystem check for credential files
     try {
       const home = homedir();
       const credsPath = join(home, '.claude', '.credentials');
@@ -343,8 +347,8 @@ async function detectClaudeAuth(db: Database.Database): Promise<ProviderAuthStat
 async function detectCodexAuth(db: Database.Database): Promise<ProviderAuthStatus> {
   const methods: ProviderAuthMethod[] = [];
 
-  // Always check if the codex binary is installed (required for the SDK)
-  const cliInstalled = await checkBinaryExists('codex');
+  // Check if the Codex SDK is available (bundled binary exists)
+  const cliInstalled = checkSdkAvailable('codex');
 
   // Check env vars
   if (process.env['OPENAI_API_KEY']) {
@@ -378,10 +382,11 @@ async function detectCodexAuth(db: Database.Database): Promise<ProviderAuthStatu
     // Table may not exist yet
   }
 
-  // When CLI is installed, ask it directly whether it's authenticated.
+  // When SDK is available, ask the bundled binary directly whether it's authenticated.
   // This is the source of truth (handles auth.json, token refresh, etc.)
-  if (cliInstalled) {
-    const cliAuth = await checkCodexCliAuth();
+  const codexBinary = getCodexBundledBinary();
+  if (cliInstalled && codexBinary) {
+    const cliAuth = await checkCodexCliAuth(codexBinary);
     if (cliAuth.authenticated) {
       const alreadyHasCli = methods.some((m) => m.method === 'cli');
       if (!alreadyHasCli) {
@@ -568,27 +573,13 @@ export function ensureClaudeOnboardingFile(): void {
 // ============================================================================
 
 /**
- * Check if a binary exists in PATH with a timeout.
- */
-function checkBinaryExists(name: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const cmd = process.platform === 'win32' ? 'where' : 'which';
-    const child = execFile(cmd, [name], { timeout: 2000 }, (err) => {
-      resolve(!err);
-    });
-    // Ensure cleanup on timeout
-    child.on('error', () => resolve(false));
-  });
-}
-
-/**
- * Check Codex CLI authentication status by running `codex login status`.
+ * Check Codex CLI authentication status using the bundled binary.
  * Uses exit code only: 0 = authenticated, non-zero = not authenticated.
  */
-function checkCodexCliAuth(): Promise<{ authenticated: boolean }> {
+function checkCodexCliAuth(binaryPath: string): Promise<{ authenticated: boolean }> {
   return new Promise((resolve) => {
     execFile(
-      'codex',
+      binaryPath,
       ['login', 'status'],
       { timeout: 5000 },
       (err) => {
@@ -599,17 +590,18 @@ function checkCodexCliAuth(): Promise<{ authenticated: boolean }> {
 }
 
 /**
- * Check Claude CLI authentication status by running `claude auth status --json`.
- * Returns the actual auth state, which may differ from our DB records
- * (e.g., if the user logged out via command line).
+ * Check Claude CLI authentication status using the native binary.
+ * Runs `claude auth status --json` and returns the actual auth state,
+ * which may differ from our DB records (e.g., if the user logged out
+ * via command line).
  */
-function checkClaudeCliAuth(): Promise<{ authenticated: boolean; email?: string }> {
+function checkClaudeCliAuth(binaryPath: string): Promise<{ authenticated: boolean; email?: string }> {
   return new Promise((resolve) => {
     const childEnv = { ...process.env };
     delete childEnv['CLAUDECODE'];
 
     execFile(
-      'claude',
+      binaryPath,
       ['auth', 'status', '--json'],
       { env: childEnv, timeout: 5000 },
       (err, stdout) => {

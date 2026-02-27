@@ -7,7 +7,7 @@ import {
   ShieldCheck,
   ArrowSquareOut,
 } from '@phosphor-icons/react';
-import { Input, Toggle, Typography, Tooltip } from '../ui';
+import { Input, Select, Toggle, Typography, Tooltip } from '../ui';
 import { OAuthField } from './OAuthField';
 import type { ConfigField as ConfigFieldType } from '@animus-labs/shared';
 
@@ -108,49 +108,17 @@ export const ConfigField = forwardRef<HTMLDivElement, ConfigFieldProps>(
     if (field.type === 'select' && field.options) {
       return (
         <div ref={ref} css={wrapperCss}>
-          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
-            <label css={css`
-              font-size: ${theme.typography.fontSize.sm};
-              font-weight: ${theme.typography.fontWeight.medium};
-              color: ${theme.colors.text.secondary};
-            `}>
-              {field.label}{field.required && <span css={css`color: ${theme.colors.error.main}; margin-left: 2px;`}>*</span>}
-            </label>
-            <select
-              value={value != null ? String(value) : ''}
-              onChange={(e) => onChange(field.key, e.target.value)}
-              css={css`
-                width: 100%;
-                padding: ${theme.spacing[3]};
-                background: ${theme.colors.background.paper};
-                border: 1px solid ${error ? theme.colors.error.main : theme.colors.border.default};
-                border-radius: ${theme.borderRadius.default};
-                color: ${theme.colors.text.primary};
-                font-size: ${theme.typography.fontSize.base};
-                outline: none;
-                cursor: pointer;
-                &:focus { border-color: ${error ? theme.colors.error.main : theme.colors.border.focus}; }
-              `}
-            >
-              <option value="">Select...</option>
-              {field.options.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-            {(field.helpText || helpLinkEl) && (
-              <div css={css`display: flex; flex-direction: column; gap: 2px;`}>
-                {field.helpText && (
-                  <Typography.Caption as="p" color="hint">{field.helpText}</Typography.Caption>
-                )}
-                {helpLinkEl}
-              </div>
-            )}
-            {error && (
-              <span css={css`color: ${theme.colors.error.main}; font-size: 12px; margin-top: 4px; display: block;`}>
-                {error}
-              </span>
-            )}
-          </div>
+          <Select
+            label={`${field.label}${field.required ? ' *' : ''}`}
+            value={value != null ? String(value) : ''}
+            onChange={(v) => onChange(field.key, v)}
+            options={field.options}
+            error={error}
+            helperText={field.helpText}
+          />
+          {helpLinkEl && (
+            <div css={css`margin-top: 2px;`}>{helpLinkEl}</div>
+          )}
         </div>
       );
     }

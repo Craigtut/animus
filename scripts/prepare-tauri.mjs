@@ -3,9 +3,10 @@
 /**
  * prepare-tauri.mjs
  *
- * Automates the two manual steps needed before `cargo tauri build`:
+ * Automates the steps needed before `cargo tauri build`:
  *   A) Download a standalone Node.js binary for the current platform
  *   B) Populate packages/tauri/resources/ with the sidecar payload
+ *   C) Prune foreign-platform binaries and non-essential files to reduce bundle size
  *
  * Run after `npm run build:prod`.
  */
@@ -80,7 +81,7 @@ async function downloadNodeBinary() {
   const destPath = path.join(BINARIES_DIR, targetTriple);
 
   if (fs.existsSync(destPath)) {
-    console.log(`[1/7] Node.js binary already exists at ${destPath}, skipping download`);
+    console.log(`[1/9] Node.js binary already exists at ${destPath}, skipping download`);
     return;
   }
 
@@ -88,7 +89,7 @@ async function downloadNodeBinary() {
   const archiveName = `node-${nodeVersion}-${nodePlatform}`;
   const url = `https://nodejs.org/dist/${nodeVersion}/${archiveName}${ext}`;
 
-  console.log(`[1/7] Downloading Node.js ${nodeVersion} for ${nodePlatform}...`);
+  console.log(`[1/9] Downloading Node.js ${nodeVersion} for ${nodePlatform}...`);
   console.log(`      URL: ${url}`);
 
   fs.mkdirSync(BINARIES_DIR, { recursive: true });
@@ -154,7 +155,7 @@ async function downloadNodeBinary() {
 // ---------------------------------------------------------------------------
 
 function cleanResources() {
-  console.log('[2/7] Cleaning resources/ directory...');
+  console.log('[2/9] Cleaning resources/ directory...');
 
   if (!fs.existsSync(RESOURCES_DIR)) {
     fs.mkdirSync(RESOURCES_DIR, { recursive: true });
@@ -170,7 +171,7 @@ function cleanResources() {
 }
 
 function copyBackendDist() {
-  console.log('[3/7] Copying backend dist to resources/backend/...');
+  console.log('[3/9] Copying backend dist to resources/backend/...');
 
   const src = path.join(ROOT, 'packages', 'backend', 'dist');
   const dest = path.join(RESOURCES_DIR, 'backend');
@@ -185,7 +186,7 @@ function copyBackendDist() {
 }
 
 function copyWorkspacePackages() {
-  console.log('[6/7] Copying workspace packages (@animus-labs/shared, @animus-labs/agents, @animus-labs/tts-native)...');
+  console.log('[8/9] Copying workspace packages (@animus-labs/shared, @animus-labs/agents, @animus-labs/tts-native)...');
 
   const packages = ['shared', 'agents', 'tts-native'];
 
@@ -220,7 +221,7 @@ function copyWorkspacePackages() {
 }
 
 function generatePackageJson() {
-  console.log('[4/7] Generating resources/package.json...');
+  console.log('[4/9] Generating resources/package.json...');
 
   const backendPkgPath = path.join(ROOT, 'packages', 'backend', 'package.json');
   const backendPkg = JSON.parse(fs.readFileSync(backendPkgPath, 'utf-8'));
@@ -246,7 +247,7 @@ function generatePackageJson() {
 }
 
 function installDependencies() {
-  console.log('[5/7] Installing production dependencies in resources/...');
+  console.log('[5/9] Installing production dependencies in resources/...');
 
   execSync('npm install --omit=dev', {
     cwd: RESOURCES_DIR,
@@ -256,14 +257,273 @@ function installDependencies() {
   console.log('      Done');
 }
 
+// ---------------------------------------------------------------------------
+// Step C: Prune foreign-platform binaries and non-essential files
+// ---------------------------------------------------------------------------
+
+/** Recursively compute total size in bytes of a path. */
+function dirSize(dirPath) {
+  if (!fs.existsSync(dirPath)) return 0;
+  const stat = fs.statSync(dirPath);
+  if (stat.isFile()) return stat.size;
+  let total = 0;
+  for (const entry of fs.readdirSync(dirPath)) {
+    total += dirSize(path.join(dirPath, entry));
+  }
+  return total;
+}
+
+function formatMB(bytes) {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * Remove foreign-platform binaries from packages that bundle all platforms
+ * in a single npm package (rather than using the optionalDependencies pattern).
+ *
+ * Three packages are affected:
+ *   - @openai/codex-sdk: vendor/{target-triple}/
+ *   - onnxruntime-node: bin/napi-v3/{os}/{arch}/
+ *   - @anthropic-ai/claude-agent-sdk: vendor/ripgrep/{arch}-{os}/
+ */
+function prunePlatformBinaries() {
+  console.log('[6/9] Pruning foreign-platform binaries...');
+
+  const { platform, arch } = process;
+  const nodeModules = path.join(RESOURCES_DIR, 'node_modules');
+  let totalSaved = 0;
+
+  // --- @openai/codex-sdk ---
+  // Uses Rust target triples: aarch64-apple-darwin, x86_64-pc-windows-msvc, etc.
+  const codexVendor = path.join(nodeModules, '@openai', 'codex-sdk', 'vendor');
+  if (fs.existsSync(codexVendor)) {
+    const keepTriple = {
+      'darwin-arm64': 'aarch64-apple-darwin',
+      'darwin-x64': 'x86_64-apple-darwin',
+      'linux-arm64': 'aarch64-unknown-linux-musl',
+      'linux-x64': 'x86_64-unknown-linux-musl',
+      'win32-arm64': 'aarch64-pc-windows-msvc',
+      'win32-x64': 'x86_64-pc-windows-msvc',
+    }[`${platform}-${arch}`];
+
+    if (keepTriple) {
+      for (const entry of fs.readdirSync(codexVendor)) {
+        if (entry === keepTriple) continue;
+        const entryPath = path.join(codexVendor, entry);
+        if (fs.statSync(entryPath).isDirectory()) {
+          const size = dirSize(entryPath);
+          fs.rmSync(entryPath, { recursive: true, force: true });
+          totalSaved += size;
+          console.log(`      Removed codex-sdk vendor/${entry} (${formatMB(size)})`);
+        }
+      }
+    } else {
+      console.log(`      WARN: No codex-sdk platform mapping for ${platform}-${arch}, skipping`);
+    }
+  }
+
+  // --- onnxruntime-node ---
+  // Uses {os}/{arch} directories: darwin/arm64, linux/x64, win32/x64, etc.
+  const ortBin = path.join(nodeModules, 'onnxruntime-node', 'bin', 'napi-v3');
+  if (fs.existsSync(ortBin)) {
+    for (const osDir of fs.readdirSync(ortBin)) {
+      const osPath = path.join(ortBin, osDir);
+      if (!fs.statSync(osPath).isDirectory()) continue;
+
+      if (osDir !== platform) {
+        // Remove the entire OS directory
+        const size = dirSize(osPath);
+        fs.rmSync(osPath, { recursive: true, force: true });
+        totalSaved += size;
+        console.log(`      Removed onnxruntime-node bin/napi-v3/${osDir}/ (${formatMB(size)})`);
+      } else {
+        // Same OS, remove non-matching architectures
+        for (const archDir of fs.readdirSync(osPath)) {
+          if (archDir === arch) continue;
+          const archPath = path.join(osPath, archDir);
+          if (fs.statSync(archPath).isDirectory()) {
+            const size = dirSize(archPath);
+            fs.rmSync(archPath, { recursive: true, force: true });
+            totalSaved += size;
+            console.log(`      Removed onnxruntime-node bin/napi-v3/${osDir}/${archDir}/ (${formatMB(size)})`);
+          }
+        }
+      }
+    }
+  }
+
+  // --- @anthropic-ai/claude-agent-sdk ---
+  // Uses {arch}-{os} directories: arm64-darwin, x64-linux, x64-win32, etc.
+  const rgVendor = path.join(nodeModules, '@anthropic-ai', 'claude-agent-sdk', 'vendor', 'ripgrep');
+  if (fs.existsSync(rgVendor)) {
+    const keepDir = `${arch}-${platform}`;
+
+    for (const entry of fs.readdirSync(rgVendor)) {
+      if (entry === keepDir) continue;
+      const entryPath = path.join(rgVendor, entry);
+      if (fs.statSync(entryPath).isDirectory()) {
+        const size = dirSize(entryPath);
+        fs.rmSync(entryPath, { recursive: true, force: true });
+        totalSaved += size;
+        console.log(`      Removed claude-agent-sdk vendor/ripgrep/${entry} (${formatMB(size)})`);
+      }
+    }
+  }
+
+  // --- onnxruntime-web ---
+  // WASM runtime pulled in by @huggingface/transformers but unused in Node.js.
+  // The backend uses onnxruntime-node for native inference.
+  const ortWeb = path.join(nodeModules, 'onnxruntime-web');
+  if (fs.existsSync(ortWeb)) {
+    const size = dirSize(ortWeb);
+    fs.rmSync(ortWeb, { recursive: true, force: true });
+    totalSaved += size;
+    console.log(`      Removed onnxruntime-web entirely (${formatMB(size)})`);
+  }
+
+  console.log(`      Platform pruning saved ${formatMB(totalSaved)}`);
+}
+
+/**
+ * Remove non-essential files from node_modules: source maps, TypeScript
+ * declarations, test directories, C/C++ source, documentation, etc.
+ */
+function pruneNonEssentialFiles() {
+  console.log('[7/9] Pruning non-essential files from node_modules...');
+
+  const nodeModules = path.join(RESOURCES_DIR, 'node_modules');
+  if (!fs.existsSync(nodeModules)) return;
+
+  let totalSaved = 0;
+
+  // Directories to remove by name (case-insensitive match)
+  const pruneDirNames = new Set([
+    'test', 'tests', '__tests__', '__test__',
+    'example', 'examples',
+    'docs', 'doc',
+    '.github',
+  ]);
+
+  // File extensions to remove
+  const pruneExtensions = new Set([
+    '.map',       // Source maps
+    '.ts',        // TypeScript source (but not .d.ts, handled separately)
+    '.o',         // Object files from native builds
+    '.c',         // C source from native builds
+    '.cc',        // C++ source
+    '.cpp',       // C++ source
+    '.h',         // C/C++ headers
+    '.gyp',       // node-gyp build files
+    '.gypi',      // node-gyp include files
+    '.md',        // Markdown documentation
+    '.markdown',  // Markdown documentation
+  ]);
+
+  // Files to remove by exact name
+  const pruneFileNames = new Set([
+    'CHANGELOG', 'CHANGELOG.md', 'CHANGELOG.txt',
+    'CHANGES', 'CHANGES.md',
+    'HISTORY', 'HISTORY.md',
+    'README', 'README.md', 'README.txt', 'readme.md',
+    // Note: LICENSE files are intentionally kept for legal compliance
+    'CONTRIBUTING', 'CONTRIBUTING.md',
+    'AUTHORS', 'AUTHORS.md',
+    'Makefile', 'Makefile.am',
+    'binding.gyp',
+    '.eslintrc', '.eslintrc.js', '.eslintrc.json', '.eslintrc.yml',
+    '.prettierrc', '.prettierrc.js', '.prettierrc.json',
+    'tsconfig.json', 'tsconfig.build.json',
+    '.npmignore', '.gitignore', '.editorconfig',
+  ]);
+
+  function pruneDir(dirPath, depth) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    } catch {
+      return; // Permission error or deleted concurrently
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
+
+      if (entry.isDirectory()) {
+        // Don't descend into .bin or @-scoped directories at wrong levels
+        if (entry.name === '.bin' || entry.name === '.package-lock.json') continue;
+
+        if (pruneDirNames.has(entry.name.toLowerCase())) {
+          const size = dirSize(fullPath);
+          fs.rmSync(fullPath, { recursive: true, force: true });
+          totalSaved += size;
+          continue;
+        }
+
+        // Recurse into subdirectories
+        pruneDir(fullPath, depth + 1);
+      } else if (entry.isFile()) {
+        const ext = path.extname(entry.name).toLowerCase();
+        const shouldPrune =
+          pruneExtensions.has(ext) ||
+          pruneFileNames.has(entry.name);
+
+        // Don't prune .ts files that are actually .d.ts declaration files
+        // we want to remove, but DO keep .js files with .ts extension
+        // Actually, skip .ts pruning to be safe (some packages ship .ts source as main)
+        if (ext === '.ts' && !entry.name.endsWith('.d.ts')) continue;
+
+        if (shouldPrune) {
+          try {
+            const size = fs.statSync(fullPath).size;
+            fs.unlinkSync(fullPath);
+            totalSaved += size;
+          } catch {
+            // File may have been removed by directory pruning
+          }
+        }
+      }
+    }
+  }
+
+  pruneDir(nodeModules, 0);
+
+  // Remove typescript package if present (dev tool, not needed at runtime)
+  const tsDir = path.join(nodeModules, 'typescript');
+  if (fs.existsSync(tsDir)) {
+    const size = dirSize(tsDir);
+    fs.rmSync(tsDir, { recursive: true, force: true });
+    totalSaved += size;
+    console.log(`      Removed typescript package (${formatMB(size)})`);
+  }
+
+  // Clean up dangling symlinks in .bin/ (e.g. from removed typescript package).
+  // Tauri's build script enumerates all resource files and fails on broken symlinks.
+  const binDir = path.join(nodeModules, '.bin');
+  if (fs.existsSync(binDir)) {
+    for (const entry of fs.readdirSync(binDir)) {
+      const linkPath = path.join(binDir, entry);
+      try {
+        // fs.statSync follows symlinks — if it throws, the target is gone
+        fs.statSync(linkPath);
+      } catch {
+        fs.unlinkSync(linkPath);
+        console.log(`      Removed dangling symlink .bin/${entry}`);
+      }
+    }
+  }
+
+  console.log(`      Non-essential file pruning saved ${formatMB(totalSaved)}`);
+}
+
 function verify() {
-  console.log('[7/7] Verifying sidecar payload...');
+  console.log('[9/9] Verifying sidecar payload...');
 
   const checks = [
     { path: path.join(RESOURCES_DIR, 'backend', 'index.js'), label: 'resources/backend/index.js' },
     { path: path.join(RESOURCES_DIR, 'node_modules', 'fastify'), label: 'resources/node_modules/fastify' },
     { path: path.join(RESOURCES_DIR, 'node_modules', '@animus-labs', 'shared', 'dist'), label: 'resources/node_modules/@animus-labs/shared/dist' },
     { path: path.join(RESOURCES_DIR, 'node_modules', '@animus-labs', 'agents', 'dist'), label: 'resources/node_modules/@animus-labs/agents/dist' },
+    { path: path.join(RESOURCES_DIR, 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'cli.js'), label: 'Claude SDK cli.js' },
+    { path: path.join(RESOURCES_DIR, 'node_modules', '@openai', 'codex-sdk', 'vendor'), label: 'Codex SDK vendor/' },
   ];
 
   let allOk = true;
@@ -297,6 +557,8 @@ async function main() {
     copyBackendDist();
     generatePackageJson();
     installDependencies();
+    prunePlatformBinaries();
+    pruneNonEssentialFiles();
     // Copy workspace packages AFTER npm install, otherwise npm removes them
     copyWorkspacePackages();
     verify();

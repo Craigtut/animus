@@ -650,8 +650,16 @@ The Tauri scaffold at `/packages/tauri/` implements this:
 - `binaries/` — Place the Node.js binary here with the correct target triple suffix
 - `capabilities/` — Shell permissions for spawning the sidecar
 
+**Bundle size optimization** (implemented in `scripts/prepare-tauri.mjs`):
+
+The prepare script includes two pruning passes that run after `npm install` to reduce the sidecar payload:
+
+1. **Platform binary pruning** — Packages like `@openai/codex-sdk`, `onnxruntime-node`, and `@anthropic-ai/claude-agent-sdk` bundle binaries for all platforms in a single npm package (rather than using the `optionalDependencies` pattern). The script maps `process.platform`/`process.arch` to each package's directory naming convention and removes all non-matching platform directories. Also removes `onnxruntime-web` entirely (WASM runtime unused by the Node.js backend).
+2. **Non-essential file pruning** — Removes source maps, TypeScript declarations, test directories, C/C++ source files, documentation, build artifacts, and the `typescript` package from `node_modules`. Cleans up dangling symlinks in `.bin/` afterward.
+
+These passes reduce the sidecar `node_modules` by roughly 680 MB (varies by platform).
+
 **Future optimizations** (not implemented):
-- Bundle size reduction via `bun compile` or Node.js SEA (single executable)
 - macOS code signing and notarization
 - Windows signal handling (SIGTERM alternative)
 - Auto-update via Tauri's updater plugin

@@ -1123,6 +1123,16 @@ describe('ClaudeAdapter (integration)', () => {
 });
 ```
 
+## SDK Subprocess Architecture
+
+Both Claude and Codex SDKs are subprocess wrappers that spawn CLI binaries. The backend's `cli-paths.ts` module handles binary resolution without relying on the system PATH (which is minimal in Tauri desktop builds).
+
+Key details:
+- **Claude Agent SDK**: bundles `cli.js` for agent execution; auth commands require the separately-installed native binary
+- **Codex SDK**: bundles complete native binaries per platform in `vendor/`; all commands including auth are available
+
+See [sdk-cli-architecture.md](./sdk-cli-architecture.md) for the full design, path resolution strategy, and deployment mode matrix.
+
 ## Conclusion
 
 Building a unified abstraction layer is feasible but requires careful handling of fundamental architectural differences. The key is to:

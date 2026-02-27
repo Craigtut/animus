@@ -24,7 +24,14 @@ import {
   type PreToolUseEvent,
 } from '@animus-labs/agents';
 
-import { buildMindMcpServer, type MutableToolContext, type ToolPermissionLookup } from '../tools/index.js';
+import {
+  startBridge,
+  registerContext,
+  updatePermissions,
+  buildMcpServerConfig,
+  type MutableToolContext,
+  type ToolPermissionLookup,
+} from '../tools/index.js';
 import type { ToolHandlerContext } from '../tools/index.js';
 import { getToolPermissions, getToolPermission } from '../db/stores/system-store.js';
 import {
@@ -36,12 +43,18 @@ import {
 } from '../db/stores/heartbeat-store.js';
 import { getHeartbeatDb } from '../db/index.js';
 import { getPluginManager } from '../services/plugin-manager.js';
-import { prepareCodexSessionAuth } from '../services/codex-oauth.js';
+import { prepareCodexSessionAuth, copyCodexCliAuth } from '../services/codex-oauth.js';
 import { getChannelRouter } from '../channels/index.js';
 import type { MemoryManager } from '../memory/index.js';
 
 import type { GatherResult } from './gather-context.js';
-import { buildCognitiveMcpServer, type CognitiveSnapshot, type CognitivePhase } from './cognitive-tools.js';
+import {
+  getSnapshot as getCognitiveSnapshot,
+  resetSnapshot as resetCognitiveSnapshot,
+  getPhase as getCognitivePhase,
+  type CognitiveSnapshot,
+  type CognitivePhase,
+} from './cognitive-tools.js';
 
 const log = createLogger('MindSession', 'heartbeat');
 
@@ -54,7 +67,9 @@ export interface MindSessionState {
   sessionId: string | null;
   logSessionId: (() => string | null) | null;
   warmSince: number | null;
+  /** Stdio MCP config for Animus built-in tools */
   mcpServer: { serverConfig: Record<string, unknown>; allowedTools: string[] } | null;
+  /** Cognitive tools: snapshot accessors (in-process) + stdio MCP config */
   cognitiveServer: {
     serverConfig: Record<string, unknown>;
     allowedTools: string[];
@@ -196,21 +211,48 @@ export async function getOrCreateMindSession(
   }
 
   // Build MCP servers on first cold session (lazy, once per process lifetime)
-  if (!state.mcpServer && provider === 'claude') {
+  // Uses the stdio bridge pattern so tools work with ALL providers (Claude, Codex, OpenCode)
+  if (!state.mcpServer) {
     try {
       const permissions = buildToolPermissionLookup();
-      state.mcpServer = await buildMindMcpServer(state.toolContext, permissions);
-      log.info(`Mind MCP server built with tools: ${state.mcpServer.allowedTools.join(', ')}`);
+      updatePermissions(permissions);
+      const bridgePort = await startBridge();
+      registerContext('mind', state.toolContext);
+      const serverConfig = buildMcpServerConfig(bridgePort, 'mind', 'mind');
+      // Build the allowedTools list using the same logic as before
+      const { getMindTools } = await import('@animus-labs/shared');
+      const mindTools = getMindTools();
+      const allowedTools: string[] = [];
+      for (const def of mindTools) {
+        const mode = permissions.get(def.name);
+        if (mode === 'off') continue;
+        allowedTools.push(`mcp__tools__${def.name}`);
+      }
+      state.mcpServer = { serverConfig: serverConfig as unknown as Record<string, unknown>, allowedTools };
+      log.info(`Mind MCP server built (stdio bridge) with tools: ${allowedTools.join(', ')}`);
     } catch (err) {
       log.warn('Failed to build mind MCP server, proceeding without tools:', err);
     }
   }
 
-  // Build cognitive MCP server (record_thought + record_cognitive_state)
-  if (!state.cognitiveServer && provider === 'claude') {
+  // Build cognitive MCP server config (record_thought + record_cognitive_state)
+  // Cognitive state is accumulated in-process via module-level singleton;
+  // the stdio subprocess proxies tool calls back to the bridge.
+  if (!state.cognitiveServer) {
     try {
-      state.cognitiveServer = await buildCognitiveMcpServer();
-      log.info(`Cognitive MCP server built with tools: ${state.cognitiveServer.allowedTools.join(', ')}`);
+      const bridgePort = await startBridge();
+      const serverConfig = buildMcpServerConfig(bridgePort, 'cognitive', 'mind');
+      state.cognitiveServer = {
+        serverConfig: serverConfig as unknown as Record<string, unknown>,
+        allowedTools: [
+          'mcp__cognitive__record_thought',
+          'mcp__cognitive__record_cognitive_state',
+        ],
+        getSnapshot: getCognitiveSnapshot,
+        resetSnapshot: resetCognitiveSnapshot,
+        getPhase: getCognitivePhase,
+      };
+      log.info(`Cognitive MCP server built (stdio bridge) with tools: ${state.cognitiveServer.allowedTools.join(', ')}`);
     } catch (err) {
       log.warn('Failed to build cognitive MCP server, proceeding without:', err);
     }
@@ -270,6 +312,11 @@ export async function getOrCreateMindSession(
       } catch (err) {
         log.warn('Codex OAuth session prep failed, continuing without refresh:', err);
       }
+    } else if (process.env['CODEX_CLI_CONFIGURED']) {
+      // CLI auth: credentials live at ~/.codex/auth.json (or system keyring).
+      // Since CODEX_HOME is overridden for plugin config, copy the auth file
+      // so the binary finds it at $CODEX_HOME/auth.json as a file fallback.
+      await copyCodexCliAuth(sessionEnv['CODEX_HOME']!);
     }
     sessionEnv = await pluginMgr.buildCodexRuntimeEnv(sessionEnv);
     log.info('Codex runtime config prepared for session', {

@@ -58,9 +58,9 @@ The permission system spans three categories of tools with different enforcement
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 1. Core Animus MCP Tools (In-Process)
+### 1. Core Animus MCP Tools (via stdio Bridge)
 
-Tools defined in `@animus-labs/shared` and handled in `packages/backend/src/tools/`. These run in-process via `createSdkMcpServer()`. Permission checking happens in `registry.ts:executeTool()` via `checkToolPermission()`.
+Tools defined in `@animus-labs/shared` and handled in `packages/backend/src/tools/`. These are exposed to agents via the unified stdio MCP bridge (`mcp-bridge.ts` + `animus-mcp-server.ts`). Permission checking happens both at the bridge level (tool list filtering) and in `registry.ts:executeTool()` via `checkToolPermission()`.
 
 **Exempt tools:** `resolve_tool_approval` and `send_message` bypass the permission gate entirely — the approval tool must always work (otherwise the user can't respond to requests), and `send_message` is the primary communication channel.
 

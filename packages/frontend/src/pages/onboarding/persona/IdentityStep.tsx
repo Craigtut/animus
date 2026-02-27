@@ -2,7 +2,7 @@
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Input, Typography } from '../../../components/ui';
+import { Input, Select, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
 import { OnboardingNav } from '../OnboardingNav';
 
@@ -51,31 +51,18 @@ export function PersonaIdentityStep() {
         />
 
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
-          <Typography.SmallBodyAlt as="label" color="secondary">
-            Gender
-          </Typography.SmallBodyAlt>
-          <select
+          <Select
+            label="Gender"
             value={gender}
-            onChange={(e) => setGender(e.target.value)}
-            css={css`
-              padding: ${theme.spacing[3]};
-              background: ${theme.colors.background.paper};
-              backdrop-filter: blur(12px);
-              -webkit-backdrop-filter: blur(12px);
-              border: 1px solid ${theme.colors.border.default};
-              border-radius: ${theme.borderRadius.default};
-              color: ${theme.colors.text.primary};
-              font-size: ${theme.typography.fontSize.base};
-              outline: none;
-              &:focus { border-color: ${theme.colors.border.focus}; }
-            `}
-          >
-            <option value="">Select...</option>
-            <option value="male">Male</option>
-            <option value="female">Female</option>
-            <option value="nonbinary">Non-binary</option>
-            <option value="custom">Custom</option>
-          </select>
+            onChange={setGender}
+            placeholder="Select..."
+            options={[
+              { value: 'male', label: 'Male' },
+              { value: 'female', label: 'Female' },
+              { value: 'nonbinary', label: 'Non-binary' },
+              { value: 'custom', label: 'Custom' },
+            ]}
+          />
           {gender === 'custom' && (
             <Input
               value={customGender}

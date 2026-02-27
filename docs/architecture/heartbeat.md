@@ -675,14 +675,14 @@ const output = snapshotToMindOutput(snapshot, replyAccumulated, gathered);
 │   @animus-labs/agents     │   Adapter streams text chunks via
 │   (SDK Adapter)      │   promptStreaming() onChunk callback
 └──────────┬───────────┘
-           │ text chunks + tool calls (MCP)
+           │ text chunks + tool calls (MCP via stdio)
            ▼
 ┌──────────────────────────────────────┐
 │   @animus-labs/backend (Mind Query Stage) │
 │                                      │
 │   ┌─────────────────────────┐        │
 │   │ Cognitive MCP Server    │        │
-│   │ (in-process, Claude SDK)│        │
+│   │ (stdio → HTTP bridge)   │        │
 │   │                         │        │
 │   │ record_thought ────────►│ phase = 'replying'
 │   │                         │        │
@@ -695,7 +695,7 @@ const output = snapshotToMindOutput(snapshot, replyAccumulated, gathered);
 └──────────────────────────────────────┘
 ```
 
-**The cognitive tools live in `@animus-labs/backend`** (`heartbeat/cognitive-tools.ts`), built as an in-process MCP server via the Claude SDK's `createSdkMcpServer()`. The agents package remains a stateless SDK abstraction — it doesn't know about cognitive state or `MindOutput`.
+**The cognitive tools live in `@animus-labs/backend`** (`heartbeat/cognitive-tools.ts`). Tool calls arrive via the unified stdio MCP bridge (see `docs/architecture/mcp-tools.md`), while the cognitive state (`CognitiveSnapshot`) accumulates in a module-level singleton and is read directly in-process by the mind session via `getSnapshot()`, `resetSnapshot()`, and `getPhase()`. The agents package remains a stateless SDK abstraction; it doesn't know about cognitive state or `MindOutput`.
 
 ### Three-Layer Prompt Architecture
 
@@ -753,13 +753,14 @@ Structured data is validated at the **tool call level**, not via post-hoc JSON p
 
 ### Cross-Provider Behavior
 
-Cognitive MCP tools use the Claude SDK's in-process MCP server pattern (`createSdkMcpServer()`). Provider support:
+Cognitive MCP tools use the unified stdio MCP bridge pattern (see `docs/architecture/mcp-tools.md`). All providers are supported:
 
-- **Claude**: Full support. In-process MCP server attaches to the agent session. Tools are Zod-validated.
+- **Claude**: Full support via stdio MCP subprocess.
+- **Codex**: Full support via stdio MCP subprocess.
+- **OpenCode**: Full support via stdio MCP subprocess.
 - **Pi**: Full support planned. Pi's in-process architecture supports MCP tool registration natively.
-- **Codex / OpenCode**: Not yet supported. These providers fall back to `safeMindOutput()` (minimal valid output). Future work may bridge cognitive tools via provider-specific mechanisms.
 
-The cognitive tools are built once per process lifetime and cached. The `CognitiveSnapshot` is reset before each tick via `resetSnapshot()`.
+The HTTP bridge is a singleton started once per process. The `CognitiveSnapshot` is reset before each tick via `resetSnapshot()`. Tool calls from the subprocess are routed to the bridge's `/cognitive/*` endpoints, which mutate the in-process snapshot directly.
 
 ## Error Handling Strategy
 

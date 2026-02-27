@@ -301,6 +301,7 @@ export function updateSystemSettings(
     agentLogRetentionDays: 'agent_log_retention_days',
     taskRunRetentionDays: 'task_run_retention_days',
     defaultAgentProvider: 'default_agent_provider',
+    defaultModel: 'default_model',
     goalApprovalMode: 'goal_approval_mode',
     timezone: 'timezone',
     energySystemEnabled: 'energy_system_enabled',

@@ -13,6 +13,7 @@ import { generateUUID } from '@animus-labs/shared';
 import type Database from 'better-sqlite3';
 import { saveCliDetected, removeCredential as removeStoredCredential } from './credential-service.js';
 import { createLogger } from '../lib/logger.js';
+import { getCodexBundledBinary } from '../lib/cli-paths.js';
 
 const log = createLogger('CodexCliAuth', 'auth');
 
@@ -59,13 +60,18 @@ const sessions = new Map<string, CodexCliAuthSession>();
 export function initiateCodexCliAuth(db: Database.Database): { sessionId: string } {
   const sessionId = generateUUID();
 
+  const codexBinary = getCodexBundledBinary();
+  if (!codexBinary) {
+    throw new Error('Codex SDK binary not found. The @openai/codex-sdk package may not be installed correctly.');
+  }
+
   let childProcess: ReturnType<typeof spawn>;
   try {
-    childProcess = spawn('codex', ['login'], {
+    childProcess = spawn(codexBinary, ['login'], {
       stdio: 'pipe',
     });
   } catch (err) {
-    throw new Error('Failed to spawn Codex CLI. Is it installed?');
+    throw new Error('Failed to spawn Codex CLI. The @openai/codex-sdk package may not be installed correctly.');
   }
 
   const session: CodexCliAuthSession = {
@@ -98,7 +104,7 @@ export function initiateCodexCliAuth(db: Database.Database): { sessionId: string
 
     if (err.code === 'ENOENT') {
       session.status = 'error';
-      session.error = 'Codex CLI not installed. Install with: npm install -g @openai/codex';
+      session.error = 'Codex SDK binary not found. Try reinstalling the application or the @openai/codex-sdk package.';
     } else {
       session.status = 'error';
       session.error = `Failed to start Codex auth: ${err.message}`;
@@ -185,8 +191,22 @@ export function cancelFlow(sessionId: string): boolean {
  * Run `codex logout` and remove the stored cli_detected credential.
  */
 export async function logoutCodex(db: Database.Database): Promise<boolean> {
+  const codexBinary = getCodexBundledBinary();
+
   return new Promise((resolve) => {
-    execFile('codex', ['logout'], { timeout: 10_000 }, (err) => {
+    if (!codexBinary) {
+      log.warn('Codex binary not found, skipping CLI logout');
+      // Still remove credential for graceful degradation
+      try {
+        removeStoredCredential(db, 'codex', 'cli_detected');
+      } catch (e) {
+        log.error('Failed to remove cli_detected credential:', e);
+      }
+      resolve(false);
+      return;
+    }
+
+    execFile(codexBinary, ['logout'], { timeout: 10_000 }, (err) => {
       if (err) {
         log.warn('codex logout error:', err);
       }
@@ -233,8 +253,16 @@ function scheduleCleanup(sessionId: string): void {
  * to confirm authentication succeeded. Codex uses exit code only (0 = success).
  */
 function verifyAuthStatus(session: CodexCliAuthSession, db: Database.Database): void {
+  const codexBinary = getCodexBundledBinary();
+  if (!codexBinary) {
+    // Binary was available at login start but disappeared; assume success
+    log.warn('Codex binary not found during verification, assuming success');
+    completeAuth(session, db);
+    return;
+  }
+
   execFile(
-    'codex',
+    codexBinary,
     ['login', 'status'],
     { timeout: 10_000 },
     (err) => {

@@ -239,17 +239,69 @@ export class CodexAdapter extends BaseAdapter {
     }
 
     const sdk = await this.loadSDK();
+
+    // The Codex SDK treats `env` as a complete replacement (not a merge with
+    // process.env). If we only pass our overrides (e.g. CODEX_HOME), the
+    // subprocess loses PATH, HOME, OPENAI_API_KEY, and everything else.
+    // Merge our overrides onto the full process.env so the subprocess has a
+    // working environment while still picking up our CODEX_HOME override.
+    let mergedEnv: Record<string, string> | undefined;
+    if (config.env) {
+      mergedEnv = {};
+      for (const [key, value] of Object.entries(process.env)) {
+        if (value !== undefined) mergedEnv[key] = value;
+      }
+      Object.assign(mergedEnv, config.env);
+    }
+    // Build Codex-specific config from session config
+    const codexConfig: Record<string, unknown> = {};
+
+    // System prompt via developer_instructions
+    if (config.systemPrompt) {
+      const prompt = typeof config.systemPrompt === 'string'
+        ? config.systemPrompt
+        : config.systemPrompt.append ?? '';
+      if (prompt) {
+        codexConfig['developer_instructions'] = prompt;
+      }
+    }
+
+    // MCP server configs -- pass through as-is, Codex SDK accepts them in config
+    if (config.mcpServers && Object.keys(config.mcpServers).length > 0) {
+      codexConfig['mcp_servers'] = config.mcpServers;
+    }
+
+    // Tool permission enforcement via approval_policy
+    // Determine if any enabled tools require 'ask' mode approval.
+    // If all enabled tools are in allowedTools, use 'never' (auto-approve all).
+    // Otherwise default to 'on-request' as the safe default.
+    // Note: Codex runs as a headless subprocess. If 'on-request' causes hangs,
+    // we may need to fall back to binary mode (always_allow + off only).
+    if (config.allowedTools && config.disallowedTools) {
+      // All tools explicitly accounted for -- safe to auto-approve
+      codexConfig['approval_policy'] = 'never';
+    } else if (config.allowedTools && config.allowedTools.length > 0) {
+      // Some tools allowed, but we can't know if there are 'ask' mode tools
+      // without the full tool count. Default safe.
+      codexConfig['approval_policy'] = 'never';
+    } else {
+      codexConfig['approval_policy'] = 'on-request';
+    }
+
     const codex = new sdk.Codex({
-      env: config.env,
+      env: mergedEnv,
+      config: codexConfig,
     });
 
-    const session = new CodexSession(codex, config, this.logger);
+    const session = new CodexSession(codex, config, this.logger, config.resume);
+    const initialId = session.id;  // Capture pending ID before it changes
     this.trackSession(session);
 
-    // Setup cleanup on session end
+    // Setup cleanup on session end -- untrack by both IDs to handle ID changes
     session.onEvent(async (event) => {
       if (event.type === 'session_end') {
-        this.untrackSession(session.id);
+        this.untrackSession(session.id);    // native thread ID
+        this.untrackSession(initialId);     // pending ID
       }
     });
 
@@ -258,6 +310,10 @@ export class CodexAdapter extends BaseAdapter {
 
   /**
    * Resume an existing Codex thread.
+   *
+   * Delegates to createSession() with the resume option set, so the full
+   * config-building logic (system prompt, MCP servers, approval policy)
+   * runs for the resumed session, matching Claude's behavior.
    */
   override async resumeSession(sessionId: string): Promise<IAgentSession> {
     const { provider, nativeId } = await import('../utils/index.js').then((m) =>
@@ -274,23 +330,7 @@ export class CodexAdapter extends BaseAdapter {
       });
     }
 
-    if (!this.isConfigured()) {
-      throw new AgentError({
-        code: 'MISSING_CREDENTIALS',
-        message: 'Codex credentials not configured.',
-        category: 'authentication',
-        severity: 'fatal',
-        provider: 'codex',
-      });
-    }
-
-    const sdk = await this.loadSDK();
-    const codex = new sdk.Codex();
-    const session = new CodexSession(codex, { provider: 'codex' }, this.logger, nativeId);
-
-    this.trackSession(session);
-
-    return session;
+    return this.createSession({ provider: 'codex', resume: nativeId });
   }
 }
 
@@ -304,6 +344,8 @@ class CodexSession extends BaseSession {
   private thread: CodexThread | null = null;
   private pendingId: string;
   private resumeThreadId: string | null;
+  /** Tracks the toolCallId from item.started so item.completed can reuse it */
+  private activeToolCallId: string | null = null;
 
   constructor(
     codex: CodexClient,
@@ -417,9 +459,27 @@ class CodexSession extends BaseSession {
       }
       this.calculateAndSetCost();
 
+      // Inspect result items for tool calls and thinking
+      const toolItems = (result.items ?? []).filter(
+        (item) => item.type === 'command' || item.type === 'tool',
+      );
+      const hasToolCalls = toolItems.length > 0;
+      const toolNames = toolItems.map((item) => item.type);
+      const hasThinking = (result.items ?? []).some((item) => item.type === 'reasoning');
+
+      // Emit turn_end for consistency with streaming path
+      const turnResult = {
+        turnIndex: 0,
+        text: response,
+        hasToolCalls,
+        hasThinking,
+        toolNames,
+      };
+      await this.emit(this.createEvent('turn_end', turnResult));
+
       return {
         content: response,
-        turns: [{ turnIndex: 0, text: response, hasToolCalls: false, hasThinking: false, toolNames: [] }],
+        turns: [turnResult],
         finishReason,
         usage: this.getUsage(),
         cost: this.getCost() ?? undefined,
@@ -446,6 +506,14 @@ class CodexSession extends BaseSession {
     let accumulated = '';
     let finishReason: AgentResponse['finishReason'] = 'complete';
 
+    // Turn tracking state
+    let turnIndex = 0;
+    let currentTurnText = '';
+    let currentTurnHasToolCalls = false;
+    let currentTurnToolNames: string[] = [];
+    let currentTurnHasThinking = false;
+    const turns: import('../types.js').TurnResult[] = [];
+
     try {
       const thread = await this.ensureThread();
 
@@ -471,11 +539,38 @@ class CodexSession extends BaseSession {
             // Session already started
             break;
 
+          case 'item.started':
+            // When a tool call starts, emit turn_end for any accumulated text
+            if (event.item.type === 'command' || event.item.type === 'tool') {
+              if (currentTurnText) {
+                const turnResult = {
+                  turnIndex,
+                  text: currentTurnText,
+                  hasToolCalls: true,
+                  hasThinking: currentTurnHasThinking,
+                  toolNames: [...currentTurnToolNames],
+                };
+                turns.push(turnResult);
+                await this.emit(this.createEvent('turn_end', turnResult));
+                turnIndex++;
+                currentTurnText = '';
+                currentTurnToolNames = [];
+                currentTurnHasThinking = false;
+              }
+              currentTurnHasToolCalls = true;
+              currentTurnToolNames.push(event.item.type);
+            }
+            if (event.item.type === 'reasoning') {
+              currentTurnHasThinking = true;
+            }
+            break;
+
           case 'item/agentMessage/delta':
             if (event.delta?.text) {
               const chunk = event.delta.text;
               accumulated += chunk;
-              onChunk(chunk, { turnIndex: 0 });
+              currentTurnText += chunk;
+              onChunk(chunk, { turnIndex });
 
               await this.emit(
                 this.createEvent('response_chunk', {
@@ -486,6 +581,11 @@ class CodexSession extends BaseSession {
             }
             break;
 
+          case 'item/reasoning/delta':
+            // Reasoning deltas tracked for hasThinking but not appended to turn text
+            currentTurnHasThinking = true;
+            break;
+
           case 'turn.completed':
             response = accumulated;
             if (event.usage) {
@@ -493,6 +593,25 @@ class CodexSession extends BaseSession {
                 inputTokens: event.usage.input_tokens ?? 0,
                 outputTokens: event.usage.output_tokens ?? 0,
               });
+            }
+
+            // Emit turn_end for remaining text OR tool-only turns (matches Claude behavior
+            // which always emits turn_end for every assistant message, even with empty text)
+            if (currentTurnText || currentTurnHasToolCalls) {
+              const turnResult = {
+                turnIndex,
+                text: currentTurnText,
+                hasToolCalls: currentTurnHasToolCalls,
+                hasThinking: currentTurnHasThinking,
+                toolNames: [...currentTurnToolNames],
+              };
+              turns.push(turnResult);
+              await this.emit(this.createEvent('turn_end', turnResult));
+              turnIndex++;
+              currentTurnText = '';
+              currentTurnToolNames = [];
+              currentTurnHasThinking = false;
+              currentTurnHasToolCalls = false;
             }
             break;
 
@@ -515,7 +634,7 @@ class CodexSession extends BaseSession {
 
       return {
         content: response,
-        turns: [{ turnIndex: 0, text: response, hasToolCalls: false, hasThinking: false, toolNames: [] }],
+        turns: turns.length > 0 ? turns : [{ turnIndex: 0, text: response, hasToolCalls: false, hasThinking: false, toolNames: [] }],
         finishReason,
         usage: this.getUsage(),
         cost: this.getCost() ?? undefined,
@@ -550,6 +669,7 @@ class CodexSession extends BaseSession {
     }
 
     this.logger.info('Ending session', { sessionId: this.id });
+    await this.cancel();
     this._isActive = false;
 
     await this.emit(
@@ -596,6 +716,7 @@ class CodexSession extends BaseSession {
         // Check if this is a command/tool execution
         if (event.item.type === 'command' || event.item.type === 'tool') {
           const toolCallId = generateUUID();
+          this.activeToolCallId = toolCallId;
 
           // Emit pre-tool-use for logging (cannot block)
           if (this.hooks.onPreToolUse) {
@@ -632,7 +753,9 @@ class CodexSession extends BaseSession {
 
       case 'item.completed':
         if (event.item.type === 'command' || event.item.type === 'tool') {
-          const toolCallId = generateUUID();
+          // Reuse the toolCallId from item.started so start/end can be correlated
+          const toolCallId = this.activeToolCallId ?? generateUUID();
+          this.activeToolCallId = null;
 
           await this.emit(
             this.createEvent('tool_call_end', {

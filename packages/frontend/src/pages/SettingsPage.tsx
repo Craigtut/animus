@@ -38,7 +38,7 @@ import {
   Wrench,
   SignOut,
 } from '@phosphor-icons/react';
-import { Card, SelectionCard, Button, Input, Modal, Badge, Toggle, Slider, Typography, Tooltip } from '../components/ui';
+import { Card, SelectionCard, Button, Input, Select, Modal, Badge, Toggle, Slider, Typography, Tooltip } from '../components/ui';
 import { trpc } from '../utils/trpc';
 import { isTauri } from '../utils/tauri';
 import { useAutostart } from '../hooks/useAutostart';
@@ -482,30 +482,12 @@ function SleepEnergySettings() {
                   </Typography.SmallBody>
                   <SaveIndicator show={sleepStartSave.show} />
                 </div>
-                <select
-                  value={sleepStartHour}
-                  onChange={(e) => handleSleepStartChange(parseInt(e.target.value, 10))}
-                  css={css`
-                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                    border-radius: ${theme.borderRadius.default};
-                    border: 1px solid ${theme.colors.border.default};
-                    background: ${theme.colors.background.paper};
-                    color: ${theme.colors.text.primary};
-                    font-size: ${theme.typography.fontSize.sm};
-                    font-family: ${theme.typography.fontFamily.sans};
-                    cursor: pointer;
-                    max-width: 160px;
-
-                    &:focus {
-                      outline: none;
-                      border-color: ${theme.colors.border.focus};
-                    }
-                  `}
-                >
-                  {hours.map((h) => (
-                    <option key={h} value={h}>{formatHour(h)}</option>
-                  ))}
-                </select>
+                <Select
+                  value={String(sleepStartHour)}
+                  onChange={(v) => handleSleepStartChange(parseInt(v, 10))}
+                  maxWidth="160px"
+                  options={hours.map((h) => ({ value: String(h), label: formatHour(h) }))}
+                />
               </div>
 
               {/* Sleep End Hour */}
@@ -516,30 +498,12 @@ function SleepEnergySettings() {
                   </Typography.SmallBody>
                   <SaveIndicator show={sleepEndSave.show} />
                 </div>
-                <select
-                  value={sleepEndHour}
-                  onChange={(e) => handleSleepEndChange(parseInt(e.target.value, 10))}
-                  css={css`
-                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                    border-radius: ${theme.borderRadius.default};
-                    border: 1px solid ${theme.colors.border.default};
-                    background: ${theme.colors.background.paper};
-                    color: ${theme.colors.text.primary};
-                    font-size: ${theme.typography.fontSize.sm};
-                    font-family: ${theme.typography.fontFamily.sans};
-                    cursor: pointer;
-                    max-width: 160px;
-
-                    &:focus {
-                      outline: none;
-                      border-color: ${theme.colors.border.focus};
-                    }
-                  `}
-                >
-                  {hours.map((h) => (
-                    <option key={h} value={h}>{formatHour(h)}</option>
-                  ))}
-                </select>
+                <Select
+                  value={String(sleepEndHour)}
+                  onChange={(v) => handleSleepEndChange(parseInt(v, 10))}
+                  maxWidth="160px"
+                  options={hours.map((h) => ({ value: String(h), label: formatHour(h) }))}
+                />
               </div>
 
               {/* Sleep Tick Interval */}
@@ -832,7 +796,7 @@ function ProviderSection() {
     if (!switchConfirm) return;
     updateSettingsMutation.mutate({
       defaultAgentProvider: switchConfirm as 'claude' | 'codex' | 'opencode',
-      defaultModel: undefined, // Reset model on provider switch
+      defaultModel: null, // Reset model on provider switch
     });
     setSwitchConfirm(null);
     setPendingModel(null);

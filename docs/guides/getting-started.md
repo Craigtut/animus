@@ -228,7 +228,7 @@ npm run build:tauri
 
 This runs three stages automatically:
 1. `npm run build:prod` — Builds shared, agents, frontend, and backend
-2. `node scripts/prepare-tauri.mjs` — Downloads a standalone Node.js binary for your platform and assembles the sidecar payload (backend dist + dependencies) into `packages/tauri/resources/`
+2. `node scripts/prepare-tauri.mjs` — Downloads a standalone Node.js binary for your platform, assembles the sidecar payload (backend dist + dependencies) into `packages/tauri/resources/`, and prunes foreign-platform binaries and non-essential files to minimize bundle size
 3. `cargo tauri build` — Compiles the Rust shell and packages the installable
 
 The output is in `packages/tauri/target/release/bundle/` — a `.dmg` on macOS, `.deb`/`.AppImage` on Linux, or `.msi` on Windows.

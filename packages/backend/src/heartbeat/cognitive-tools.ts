@@ -74,7 +74,7 @@ export function createEmptySnapshot(): CognitiveSnapshot {
 // Zod schemas for the tool inputs
 // ============================================================================
 
-const recordThoughtSchema = z.object({
+export const recordThoughtSchema = z.object({
   content: z
     .string()
     .describe(
@@ -91,7 +91,7 @@ const recordThoughtSchema = z.object({
     .describe('0.0 = idle musing, 1.0 = critical realization'),
 });
 
-const recordCognitiveStateSchema = z.object({
+export const recordCognitiveStateSchema = z.object({
   // 1. Experience — narrate what just happened (generated first, grounds everything else)
   experience: z
     .object({
@@ -193,12 +193,89 @@ const recordCognitiveStateSchema = z.object({
 });
 
 // ============================================================================
-// Build the cognitive MCP server (Claude SDK in-process pattern)
+// Mutable Snapshot State (module-level singleton)
 // ============================================================================
 
 /** Mutable box so tool closures and getSnapshot always share the same reference. */
 const snapshotBox: { current: CognitiveSnapshot } = { current: createEmptySnapshot() };
 let phase: CognitivePhase = 'pre-thought';
+
+/** Get the current cognitive snapshot. */
+export function getSnapshot(): CognitiveSnapshot {
+  return snapshotBox.current;
+}
+
+/** Reset the snapshot and phase for a new tick. */
+export function resetSnapshot(): void {
+  snapshotBox.current = createEmptySnapshot();
+  phase = 'pre-thought';
+}
+
+/** Get the current cognitive phase. */
+export function getPhase(): CognitivePhase {
+  return phase;
+}
+
+// ============================================================================
+// Standalone Handler Functions (used by MCP bridge)
+// ============================================================================
+
+/**
+ * Handle a record_thought tool call. Accumulates into the module-level snapshot.
+ * Returns an MCP-compatible content result.
+ */
+export function handleRecordThought(args: z.infer<typeof recordThoughtSchema>): {
+  content: Array<{ type: 'text'; text: string }>;
+} {
+  const prevPhase = phase;
+  snapshotBox.current.thoughts.push({ content: args.content, importance: args.importance });
+  phase = 'replying';
+  log.info(`record_thought: "${args.content.substring(0, 80)}${args.content.length > 80 ? '...' : ''}" (importance=${args.importance}, #${snapshotBox.current.thoughts.length}, phase ${prevPhase}→replying)`);
+  return { content: [{ type: 'text' as const, text: 'Thought recorded.' }] };
+}
+
+/**
+ * Handle a record_cognitive_state tool call. Accumulates into the module-level snapshot.
+ * Returns an MCP-compatible content result.
+ */
+export function handleRecordCognitiveState(args: z.infer<typeof recordCognitiveStateSchema>): {
+  content: Array<{ type: 'text'; text: string }>;
+} {
+  const emotions = args.emotionDeltas.map(e => `${e.emotion}(${e.delta > 0 ? '+' : ''}${e.delta.toFixed(2)})`).join(', ');
+  const alreadyCalled = snapshotBox.current.experience !== null;
+  log.info(`record_cognitive_state: ${args.emotionDeltas.length} emotion(s)${emotions ? ` [${emotions}]` : ''}, ${args.decisions.length} decision(s), ${args.memoryCandidate.length} memory(s)${alreadyCalled ? ' (DUPLICATE CALL — snapshot already has state)' : ''}, phase stays replying`);
+
+  snapshotBox.current.experience = args.experience;
+  snapshotBox.current.emotionDeltas.push(...args.emotionDeltas);
+
+  if (args.energyDelta) {
+    if (snapshotBox.current.energyDelta) {
+      snapshotBox.current.energyDelta.delta += args.energyDelta.delta;
+      snapshotBox.current.energyDelta.reasoning = args.energyDelta.reasoning;
+    } else {
+      snapshotBox.current.energyDelta = { ...args.energyDelta };
+    }
+  }
+
+  snapshotBox.current.decisions.push(...args.decisions);
+  snapshotBox.current.memoryCandidate.push(...args.memoryCandidate.map(mc => ({
+    content: mc.content,
+    memoryType: mc.memoryType,
+    importance: mc.importance,
+    ...(mc.contactId != null ? { contactId: mc.contactId } : {}),
+    ...(mc.keywords != null ? { keywords: mc.keywords } : {}),
+  })));
+
+  snapshotBox.current.workingMemoryUpdate = args.workingMemoryUpdate ?? snapshotBox.current.workingMemoryUpdate;
+  snapshotBox.current.coreSelfUpdate = args.coreSelfUpdate ?? snapshotBox.current.coreSelfUpdate;
+
+  return { content: [{ type: 'text' as const, text: 'Cognitive state recorded. You are done — stop here.' }] };
+}
+
+// ============================================================================
+// Build the cognitive MCP server (Claude SDK in-process pattern)
+// @deprecated Use stdio MCP via mcp-bridge.ts instead.
+// ============================================================================
 
 let cached: {
   serverConfig: Record<string, unknown>;
@@ -222,12 +299,9 @@ export async function buildCognitiveMcpServer(): Promise<{
   getPhase: () => CognitivePhase;
 }> {
   const result = {
-    getSnapshot: () => snapshotBox.current,
-    resetSnapshot: () => {
-      snapshotBox.current = createEmptySnapshot();
-      phase = 'pre-thought';
-    },
-    getPhase: () => phase,
+    getSnapshot,
+    resetSnapshot,
+    getPhase,
   };
 
   if (cached) {
@@ -236,76 +310,23 @@ export async function buildCognitiveMcpServer(): Promise<{
 
   const sdk = await import('@anthropic-ai/claude-agent-sdk');
 
-  // --- record_thought ---
+  // --- record_thought --- (delegates to standalone handler)
   const thoughtTool = sdk.tool(
     'record_thought',
     'Your first action every time you respond. Call this once before writing any reply ' +
     'or calling any other tool. It is critical that this is the very first thing you do.',
     recordThoughtSchema.shape,
-    async (args: z.infer<typeof recordThoughtSchema>) => {
-      const prevPhase = phase;
-      snapshotBox.current.thoughts.push({ content: args.content, importance: args.importance });
-      // Always set phase to 'replying' — supports re-entry after mid-tick injection
-      phase = 'replying';
-      log.info(`record_thought: "${args.content.substring(0, 80)}${args.content.length > 80 ? '...' : ''}" (importance=${args.importance}, #${snapshotBox.current.thoughts.length}, phase ${prevPhase}→replying)`);
-      // Return MCP-compatible content object (bare strings fail MCP protocol validation)
-      return { content: [{ type: 'text' as const, text: 'Thought recorded.' }] };
-    },
+    async (args: z.infer<typeof recordThoughtSchema>) => handleRecordThought(args),
   );
 
-  // --- record_cognitive_state ---
+  // --- record_cognitive_state --- (delegates to standalone handler)
   const stateTool = sdk.tool(
     'record_cognitive_state',
     'Your absolute last action. Call this exactly once after you have delivered your ' +
     'final reply and completed all other work. After calling this tool, STOP IMMEDIATELY — ' +
     'do not generate any more text, tool calls, or start another cycle. You are done.',
     recordCognitiveStateSchema.shape,
-    async (args: z.infer<typeof recordCognitiveStateSchema>) => {
-      const emotions = args.emotionDeltas.map(e => `${e.emotion}(${e.delta > 0 ? '+' : ''}${e.delta.toFixed(2)})`).join(', ');
-      const alreadyCalled = snapshotBox.current.experience !== null;
-      log.info(`record_cognitive_state: ${args.emotionDeltas.length} emotion(s)${emotions ? ` [${emotions}]` : ''}, ${args.decisions.length} decision(s), ${args.memoryCandidate.length} memory(s)${alreadyCalled ? ' (DUPLICATE CALL — snapshot already has state)' : ''}, phase stays replying`);
-
-      // Experience always takes the latest (narrative progresses forward)
-      snapshotBox.current.experience = args.experience;
-
-      // Emotion deltas accumulate across cycles within the same prompt
-      snapshotBox.current.emotionDeltas.push(...args.emotionDeltas);
-
-      // Energy deltas accumulate (sum)
-      if (args.energyDelta) {
-        if (snapshotBox.current.energyDelta) {
-          snapshotBox.current.energyDelta.delta += args.energyDelta.delta;
-          snapshotBox.current.energyDelta.reasoning = args.energyDelta.reasoning;
-        } else {
-          snapshotBox.current.energyDelta = { ...args.energyDelta };
-        }
-      }
-
-      // Decisions and memories accumulate
-      snapshotBox.current.decisions.push(...args.decisions);
-      snapshotBox.current.memoryCandidate.push(...args.memoryCandidate.map(mc => ({
-        content: mc.content,
-        memoryType: mc.memoryType,
-        importance: mc.importance,
-        ...(mc.contactId != null ? { contactId: mc.contactId } : {}),
-        ...(mc.keywords != null ? { keywords: mc.keywords } : {}),
-      })));
-
-      // These take the latest value (overwrite with latest)
-      snapshotBox.current.workingMemoryUpdate = args.workingMemoryUpdate ?? snapshotBox.current.workingMemoryUpdate;
-      snapshotBox.current.coreSelfUpdate = args.coreSelfUpdate ?? snapshotBox.current.coreSelfUpdate;
-
-      // DO NOT set phase to 'done' here. The AI sometimes calls this tool
-      // prematurely during intensive tasks (mid-processing, before the reply
-      // is complete). Setting phase='done' caused all subsequent reply text
-      // to be silently dropped by the streaming callback, resulting in empty
-      // or incomplete replies. Keep phase as 'replying' so text continues to
-      // accumulate. Phase resets to 'pre-thought' via resetSnapshot() at the
-      // start of the next tick.
-
-      // Return MCP-compatible content object (bare strings fail MCP protocol validation)
-      return { content: [{ type: 'text' as const, text: 'Cognitive state recorded. You are done — stop here.' }] };
-    },
+    async (args: z.infer<typeof recordCognitiveStateSchema>) => handleRecordCognitiveState(args),
   );
 
   const server = sdk.createSdkMcpServer({

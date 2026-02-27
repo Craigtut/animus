@@ -13,6 +13,7 @@ import { generateUUID } from '@animus-labs/shared';
 import type Database from 'better-sqlite3';
 import { saveCliDetected, ensureClaudeOnboardingFile, removeCredential as removeStoredCredential } from './credential-service.js';
 import { createLogger } from '../lib/logger.js';
+import { getClaudeNativeBinary } from '../lib/cli-paths.js';
 
 const log = createLogger('ClaudeOAuth', 'auth');
 
@@ -59,13 +60,21 @@ const sessions = new Map<string, ClaudeAuthSession>();
 export function initiateClaudeAuth(db: Database.Database): { sessionId: string } {
   const sessionId = generateUUID();
 
+  const nativeBinary = getClaudeNativeBinary();
+  if (!nativeBinary) {
+    throw new Error(
+      'Claude Code native binary not found. ' +
+      'Install Claude Code (npm install -g @anthropic-ai/claude-code) or use an API key instead.'
+    );
+  }
+
   // Build env without CLAUDECODE to avoid nesting guard
   const childEnv = { ...process.env };
   delete childEnv['CLAUDECODE'];
 
   let childProcess: ReturnType<typeof spawn>;
   try {
-    childProcess = spawn('claude', ['auth', 'login'], {
+    childProcess = spawn(nativeBinary, ['auth', 'login'], {
       env: childEnv,
       stdio: 'pipe',
     });
@@ -103,7 +112,7 @@ export function initiateClaudeAuth(db: Database.Database): { sessionId: string }
 
     if (err.code === 'ENOENT') {
       session.status = 'error';
-      session.error = 'Claude CLI not installed. Install with: npm install -g @anthropic-ai/claude-code';
+      session.error = 'Claude Code binary not found. Install with: npm install -g @anthropic-ai/claude-code';
     } else {
       session.status = 'error';
       session.error = `Failed to start Claude auth: ${err.message}`;
@@ -190,11 +199,25 @@ export function cancelFlow(sessionId: string): boolean {
  * Run `claude auth logout` and remove the stored cli_detected credential.
  */
 export async function logoutClaude(db: Database.Database): Promise<boolean> {
+  const nativeBinary = getClaudeNativeBinary();
+
   return new Promise((resolve) => {
+    if (!nativeBinary) {
+      log.warn('Claude native binary not found, skipping CLI logout');
+      // Still remove credential for graceful degradation
+      try {
+        removeStoredCredential(db, 'claude', 'cli_detected');
+      } catch (e) {
+        log.error('Failed to remove cli_detected credential:', e);
+      }
+      resolve(false);
+      return;
+    }
+
     const childEnv = { ...process.env };
     delete childEnv['CLAUDECODE'];
 
-    execFile('claude', ['auth', 'logout'], { env: childEnv, timeout: 10_000 }, (err) => {
+    execFile(nativeBinary, ['auth', 'logout'], { env: childEnv, timeout: 10_000 }, (err) => {
       if (err) {
         log.warn('claude auth logout error:', err);
       }
@@ -241,11 +264,19 @@ function scheduleCleanup(sessionId: string): void {
  * to confirm authentication succeeded.
  */
 function verifyAuthStatus(session: ClaudeAuthSession, db: Database.Database): void {
+  const nativeBinary = getClaudeNativeBinary();
+  if (!nativeBinary) {
+    // Binary was available at login start but disappeared; assume success
+    log.warn('Claude native binary not found during verification, assuming success');
+    completeAuth(session, db, {});
+    return;
+  }
+
   const childEnv = { ...process.env };
   delete childEnv['CLAUDECODE'];
 
   execFile(
-    'claude',
+    nativeBinary,
     ['auth', 'status', '--json'],
     { env: childEnv, timeout: 10_000 },
     (err, stdout) => {

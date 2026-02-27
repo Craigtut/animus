@@ -51,6 +51,17 @@ export const Input = forwardRef<HTMLInputElement | HTMLTextAreaElement, InputPro
         opacity: 0.5;
         cursor: not-allowed;
       }
+
+      /* Strip native number input spinners (macOS WebKit, Chrome, Firefox) */
+      &[type='number'] {
+        -moz-appearance: textfield;
+        appearance: textfield;
+      }
+      &[type='number']::-webkit-inner-spin-button,
+      &[type='number']::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
     `;
 
     return (

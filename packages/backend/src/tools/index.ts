@@ -6,4 +6,18 @@
 
 export { getToolsForTier, getTool, getToolNames, getMindToolRegistry, executeTool } from './registry.js';
 export type { ToolHandlerContext, ToolResult, ToolHandler, AnimusTool } from './types.js';
-export { buildMindMcpServer, buildSubAgentMcpServer, type MutableToolContext, type ToolPermissionLookup } from './servers/claude-mcp.js';
+export {
+  startBridge,
+  stopBridge,
+  getBridgePort,
+  registerContext,
+  unregisterContext,
+  updatePermissions,
+  updateSubagentTier,
+  buildMcpServerConfig,
+  getToolDefs,
+  type MutableToolContext,
+  type ToolPermissionLookup,
+  type ToolSet,
+  type BridgeToolDef,
+} from './servers/mcp-bridge.js';

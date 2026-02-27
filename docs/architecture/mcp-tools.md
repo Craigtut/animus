@@ -26,35 +26,31 @@ SSE-only transport is deprecated (March 2025). The protocol is transport-agnosti
 | **Approval model** | `permissionMode` or per-tool `allowedTools` | Approval policies (smart approvals default) | Per-tool permission controls |
 | **Transport** | stdio, HTTP, SSE, in-process | stdio, Streamable HTTP | Local (stdio), Remote (HTTP) |
 
-### Key Insight: In-Process vs External
+### Key Insight: Unified stdio Transport
 
-**Claude** is the only SDK that supports truly in-process MCP tools via `createSdkMcpServer()`. This means zero IPC overhead — the tool handler runs in the same Node.js process as the SDK.
-
-**Codex** and **OpenCode** require external MCP servers (stdio subprocess or HTTP endpoint). They cannot run tool handlers in the host process directly.
-
-However, all three SDKs support **stdio MCP servers**. A stdio server is just a child process that reads JSON-RPC from stdin and writes to stdout. The key realization: **we can build a single MCP server binary that all three SDKs connect to via stdio**, while Claude can additionally use in-process mode for zero overhead.
+All three SDKs support **stdio MCP servers**. A stdio server is just a child process that reads JSON-RPC from stdin and writes to stdout. While Claude also supports in-process MCP tools via `createSdkMcpServer()`, the latency difference is negligible (~1-3ms HTTP roundtrip vs ~0ms in-process) against 2-10 second LLM API calls.
 
 ---
 
-## Decision: Hybrid Approach — In-Process for Claude, Shared stdio Server for Others
+## Decision: Unified stdio Bridge for All Providers
 
-We use a **hybrid architecture** that optimizes for each provider:
+We use a **single architecture** for all providers: a lightweight stdio MCP subprocess that proxies tool calls back to the backend process via an internal HTTP bridge.
 
-1. **Claude**: In-process MCP server via `createSdkMcpServer()` + `tool()` — zero IPC, lowest latency, native Zod schemas
-2. **Codex & OpenCode**: Shared stdio MCP server process — the backend spawns a lightweight Node.js subprocess that serves the same tools over stdio transport
+**Why unified stdio instead of hybrid (in-process for Claude, stdio for others)?**
 
-**Why not a single approach for all three?**
+- **Simplicity**: One code path for all providers eliminates provider-specific guards and branching
+- **Negligible overhead**: The HTTP bridge adds ~1-3ms per tool call, invisible against LLM latency
+- **Correctness**: Removing `provider === 'claude'` guards means all providers get tools and cognitive output (previously Codex and OpenCode got zero tools)
+- **Testability**: The bridge is a plain HTTP server, easy to test without SDK dependencies
 
-- **All-stdio** would force Claude to pay subprocess IPC costs unnecessarily. Claude is the primary (and most mature) provider — optimizing its path matters.
-- **All-in-process** is impossible — Codex and OpenCode don't support it.
-- **HTTP server** adds network stack overhead and complexity (auth, CORS, port management) for tools that are inherently local to the Animus instance.
+**Why HTTP bridge + stdio subprocess (not direct stdio)?**
 
-**Why not HTTP?** All Animus tools are local to the host machine (they access SQLite databases on disk). stdio is the natural transport for local tools — no port management, no auth, no network exposure.
+Tool handlers need access to databases, the event bus, and other backend infrastructure that lives in the main Node.js process. The architecture uses two layers:
 
-**The hybrid approach gives us:**
-- Best performance for the primary provider (Claude)
-- Universal compatibility via stdio for all others
-- Single tool definition source — both paths consume the same registry
+1. **HTTP bridge** (in the backend process): Receives tool calls via localhost HTTP, executes handlers in-process where DB connections live
+2. **stdio subprocess** (spawned per MCP server entry): Translates MCP protocol (stdin/stdout) to HTTP bridge calls
+
+This keeps handlers in the backend process while providing a clean stdio interface for all SDKs.
 
 ---
 
@@ -62,79 +58,66 @@ We use a **hybrid architecture** that optimizes for each provider:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                        @animus-labs/shared                                │
-│                                                                      │
-│  ┌────────────────────────────────────────────────────────────────┐  │
-│  │  Tool Definitions (tool-definitions.ts)                       │  │
-│  │                                                               │  │
-│  │  • AnimusToolDef<TInput>: name, description, inputSchema     │  │
-│  │  • Zod schemas for each tool's input                         │  │
-│  │  • No handlers — pure declarations                           │  │
-│  │  • Exported as ANIMUS_TOOLS registry                         │  │
-│  └────────────────────────────────────────────────────────────────┘  │
-│                                                                      │
-│  ┌────────────────────────────────────────────────────────────────┐  │
-│  │  Tool Permission Map (tool-permissions.ts)                    │  │
-│  │                                                               │  │
-│  │  • Maps PermissionTier → allowed tool names                  │  │
-│  │  • primary: send_message, update_progress, read_memory,     │  │
-│  │           run_with_credentials                               │  │
-│  │  • standard: send_message, read_memory, run_with_credentials│  │
-│  └────────────────────────────────────────────────────────────────┘  │
+│                        @animus-labs/shared                          │
+│                                                                    │
+│  ┌────────────────────────────────────────────────────────────────┐│
+│  │  Tool Definitions (tool-definitions.ts)                       ││
+│  │  • AnimusToolDef<TInput>: name, description, inputSchema      ││
+│  │  • Zod schemas for each tool's input                          ││
+│  │  • No handlers — pure declarations                            ││
+│  │  • Exported as ANIMUS_TOOLS registry                          ││
+│  └────────────────────────────────────────────────────────────────┘│
+│                                                                    │
+│  ┌────────────────────────────────────────────────────────────────┐│
+│  │  Tool Permission Map (tool-permissions.ts)                    ││
+│  │  • Maps PermissionTier → allowed tool names                   ││
+│  │  • primary: send_message, update_progress, read_memory, ...   ││
+│  │  • standard: send_message, read_memory, ...                   ││
+│  └────────────────────────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────────────────────────┘
                               │
                ┌──────────────┼──────────────┐
                ▼              │              ▼
-┌──────────────────────┐      │    ┌──────────────────────────────────┐
-│   @animus-labs/backend    │      │    │       @animus-labs/agents             │
-│                      │      │    │                                  │
-│ ┌──────────────────┐ │      │    │ ┌──────────────────────────────┐ │
-│ │  Tool Handlers   │ │      │    │ │  McpServerConfig in session  │ │
-│ │  (tool-handlers/)│ │      │    │ │  options — pass-through to   │ │
-│ │                  │ │      │    │ │  each SDK's native MCP config│ │
-│ │ Sub-agent tools: │◄┼──────┘    │ └──────────────────────────────┘ │
-│ │  send_message()  │ │           └──────────────────────────────────┘
-│ │  update_progress │ │
-│ │  read_memory()   │ │
-│ │  run_with_creds  │ │
-│ │ Mind-only tools: │ │
-│ │  lookup_contacts │ │
-│ │  send_proactive  │ │
-│ │  send_media()    │ │
-│ │  read_memory()   │ │
-│ │  run_with_creds  │ │
-│ │                  │ │
-│ │ Has DB access,   │ │
-│ │ event bus, etc.  │ │
-│ └────────┬─────────┘ │
-│          │           │
-│ ┌────────▼─────────┐ │
-│ │  Tool Registry   │ │
-│ │  (tool-registry) │ │
-│ │                  │ │
-│ │ Combines defs +  │ │
-│ │ handlers into    │ │
-│ │ complete tools   │ │
-│ │                  │ │
-│ │ Filters by       │ │
-│ │ permission tier  │ │
-│ └────────┬─────────┘ │
-│          │           │
-│  ┌───────┴────────┐  │
-│  │                │  │
-│  ▼                ▼  │
-│ ┌──────┐  ┌────────┐ │
-│ │Claude│  │ stdio  │ │
-│ │ In-  │  │ MCP    │ │
-│ │Proc  │  │Server  │ │
-│ │Server│  │Process │ │
-│ └──┬───┘  └───┬────┘ │
-└────┼──────────┼──────┘
-     │          │
-     ▼          ▼
-  Claude     Codex /
-  Agent      OpenCode
-  SDK        SDKs
+┌──────────────────────────┐  │   ┌──────────────────────────────────┐
+│  @animus-labs/backend    │  │   │     @animus-labs/agents          │
+│                          │  │   │                                  │
+│ ┌──────────────────────┐ │  │   │ ┌──────────────────────────────┐ │
+│ │  Tool Handlers       │ │  │   │ │  McpServerConfig in session  │ │
+│ │  (tool-handlers/)    │ │  │   │ │  options — pass-through to   │ │
+│ │  send_message()      │◄┼──┘   │ │  each SDK's native MCP config│ │
+│ │  update_progress()   │ │      │ └──────────────────────────────┘ │
+│ │  read_memory()       │ │      └──────────────────────────────────┘
+│ │  lookup_contacts()   │ │
+│ │  send_proactive()    │ │
+│ │  send_media()        │ │
+│ │  run_with_creds()    │ │
+│ │  Has DB access,      │ │
+│ │  event bus, etc.     │ │
+│ └──────────┬───────────┘ │
+│            │             │
+│ ┌──────────▼───────────┐ │
+│ │  Tool Registry       │ │
+│ │  (registry.ts)       │ │
+│ │  Combines defs +     │ │
+│ │  handlers, filters   │ │
+│ │  by permission tier  │ │
+│ └──────────┬───────────┘ │
+│            │             │
+│ ┌──────────▼───────────┐ │
+│ │  HTTP Bridge         │ │    ┌────────────────────────────┐
+│ │  (mcp-bridge.ts)     │ │    │  stdio MCP Subprocess      │
+│ │                      │◄┼────│  (animus-mcp-server.ts)    │
+│ │  127.0.0.1:ephemeral │ │    │                            │
+│ │  Context registry    │ │    │  Reads BRIDGE_PORT,        │
+│ │  Tool list endpoint  │ │    │  TOOL_SET, TASK_ID from env│
+│ │  Execute endpoint    │ │    │  Translates MCP protocol   │
+│ │  Cognitive endpoints │ │    │  to HTTP bridge calls      │
+│ └──────────────────────┘ │    └────────────┬───────────────┘
+└──────────────────────────┘                 │
+                                             │ stdio (MCP protocol)
+                                             ▼
+                                    Any Agent SDK
+                                    (Claude, Codex, OpenCode)
 ```
 
 ---
@@ -192,7 +175,7 @@ These are provided to sub-agent sessions via MCP, filtered by the triggering con
 
 #### Mind-Only Tools
 
-These are available only to the mind session. They are served via a separate in-process MCP server (`animus-tools`) alongside the cognitive tools MCP server (`cognitive`). Not filtered by permission tier — the mind always has all of them.
+These are available only to the mind session. They are served via a separate MCP server (`tools`) alongside the cognitive tools MCP server (`cognitive`), both delivered through the stdio bridge. Not filtered by permission tier; the mind always has all of them.
 
 | Tool | Category | Description |
 |------|----------|-------------|
@@ -202,7 +185,7 @@ These are available only to the mind session. They are served via a separate in-
 | `send_media` | messaging | Send media files (images, audio, video, documents) to the **triggering contact** on the trigger channel. Files must already exist on disk (from plugin tools, sub-agents, etc.). Delivered immediately during the mind query, before the text reply. |
 | `run_with_credentials` | system | Same as above — execute a command with injected credentials. |
 
-**Note:** The mind also has two **cognitive tools** (`record_thought`, `record_cognitive_state`) served by a separate `cognitive` MCP server. These are not part of the Animus tool registry — they're defined in `heartbeat/cognitive-tools.ts` and manage the phase-based streaming pipeline. See `docs/architecture/heartbeat.md`.
+**Note:** The mind also has two **cognitive tools** (`record_thought`, `record_cognitive_state`) served by a separate `cognitive` MCP server. These are not part of the Animus tool registry; they're defined in `heartbeat/cognitive-tools.ts` and manage the phase-based streaming pipeline. The cognitive state (`CognitiveSnapshot`) accumulates in-process via module-level singleton in `cognitive-tools.ts`, while the tools themselves are exposed via the same stdio bridge pattern as all other tools. See `docs/architecture/heartbeat.md`.
 
 #### Tool Definitions Source
 
@@ -366,410 +349,189 @@ All 7 tools are registered in the single `TOOL_REGISTRY` record. The distinction
 
 ---
 
-## Layer 4: MCP Server Factories (`@animus-labs/backend`)
+## Layer 4: MCP Bridge & stdio Server (`@animus-labs/backend`)
 
-Two factory functions produce MCP servers for different providers, both consuming the same registry.
+All providers use the same two-component architecture: an HTTP bridge in the backend process and a stdio MCP subprocess that proxies tool calls to it.
 
-### Claude: In-Process Server
+### HTTP Bridge (`mcp-bridge.ts`)
+
+A singleton HTTP server running in the backend Node.js process. Started lazily on the first session, reused by all subsequent sessions (mind + sub-agents).
 
 ```typescript
-// packages/backend/src/tools/servers/claude-mcp.ts
+// packages/backend/src/tools/servers/mcp-bridge.ts (key exports)
 
-import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
-import type { PermissionTier } from '@animus-labs/shared';
-import type { ToolHandlerContext } from '../types.js';
-import { getToolsForTier } from '../registry.js';
+/** Start the bridge server (idempotent, returns port) */
+export async function startBridge(): Promise<number>;
 
-/**
- * Create an in-process MCP server for Claude Agent SDK.
- *
- * This runs in the same Node.js process as the backend — zero IPC overhead.
- * Tool handlers are wrapped with the provided context and executed directly.
- *
- * @param tier - Contact permission tier (filters available tools)
- * @param context - Handler context (DB access, event bus, etc.)
- * @returns MCP server config ready to pass to Claude's mcpServers option
- */
-export function createClaudeMcpServer(
-  tier: PermissionTier,
-  context: ToolHandlerContext,
-) {
-  const tools = getToolsForTier(tier);
+/** Stop the bridge server */
+export async function stopBridge(): Promise<void>;
 
-  const sdkTools = tools.map(t =>
-    tool(
-      t.name,
-      t.description,
-      // The Zod schema shape object (Claude's tool() expects the inner shape)
-      t.inputSchema.shape ?? t.inputSchema,
-      async (args: unknown) => {
-        // Validate input against schema
-        const validated = t.inputSchema.parse(args);
-        // Execute handler with context
-        return await t.handler(validated, context);
-      },
-    )
-  );
+/** Get current bridge port (null if not started) */
+export function getBridgePort(): number | null;
 
-  return createSdkMcpServer({
-    name: 'animus-tools',
-    version: '1.0.0',
-    tools: sdkTools,
-  });
-}
+/** Register a tool context for a session */
+export function registerContext(taskId: string, ctx: MutableToolContext): void;
 
-/**
- * Build the mcpServers config object for a Claude session.
- *
- * Returns the object to merge into AgentSessionConfig.mcpServers.
- */
-export function buildClaudeMcpConfig(
-  tier: PermissionTier,
-  context: ToolHandlerContext,
-): Record<string, unknown> {
-  return {
-    'animus-tools': createClaudeMcpServer(tier, context),
-  };
-}
+/** Unregister a tool context when session ends */
+export function unregisterContext(taskId: string): void;
 
-/**
- * Build the allowedTools list for a Claude session.
- *
- * Claude requires explicit tool permissions via allowedTools.
- * Format: mcp__{server}__{tool}
- */
-export function buildClaudeAllowedTools(tier: PermissionTier): string[] {
-  const tools = getToolsForTier(tier);
-  return tools.map(t => `mcp__animus-tools__${t.name}`);
-}
+/** Update permission lookup (mind session refreshes each tick) */
+export function updatePermissions(perms: ToolPermissionLookup): void;
+
+/** Update sub-agent tier (for permission filtering) */
+export function updateSubagentTier(tier: PermissionTier): void;
+
+/** Get tool definitions for a given set (used by tests and subprocess) */
+export function getToolDefs(set: ToolSet): BridgeToolDef[];
+
+/** Build a stdio MCP server config for any provider */
+export function buildMcpServerConfig(
+  bridgePort: number,
+  toolSet: ToolSet,
+  taskId: string,
+): { command: string; args: string[]; env: Record<string, string> };
 ```
 
-### Codex/OpenCode: stdio MCP Server
+**Endpoints:**
 
-For Codex and OpenCode, we run a lightweight Node.js subprocess that serves tools over stdio. The subprocess receives the handler context via environment variables (serialized) and communicates with the parent process for handler execution via IPC.
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/health` | GET | Health check (`{ ok: true }`) |
+| `/tools?set=mind\|cognitive\|subagent` | GET | Returns tool definitions as JSON Schema |
+| `/execute` | POST | Execute a tool: `{ taskId, toolName, args }` |
+| `/cognitive/thought` | POST | Record a thought: `{ content, importance }` |
+| `/cognitive/state` | POST | Record cognitive state (experience, emotions, decisions, etc.) |
+
+**Context registry:** A `Map<taskId, MutableToolContext>` routes tool calls to the correct session context. The mind session registers as `taskId='mind'`, sub-agents register with their UUID task IDs. Contexts are unregistered on session cleanup.
+
+**Permission filtering:** Applied when returning tool lists via `/tools`:
+- `mind` set: Excludes tools with permission `'off'`
+- `subagent` set: Excludes tools with permission `'off'` or `'ask'` (sub-agents can't do interactive approvals)
+- `cognitive` set: Always returns both cognitive tools (never filtered)
+
+**Security:** Binds to `127.0.0.1` only (localhost), ephemeral port. No external network exposure.
+
+### stdio MCP Subprocess (`animus-mcp-server.ts`)
+
+A stateless proxy process. One instance is spawned per MCP server entry in the session config (typically two per mind session: `tools` + `cognitive`, one per sub-agent: `tools`).
 
 ```typescript
-// packages/backend/src/tools/servers/stdio-mcp.ts
+// packages/backend/src/tools/servers/animus-mcp-server.ts (standalone entry point)
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import type { PermissionTier } from '@animus-labs/shared';
-import type { ToolHandlerContext } from '../types.js';
-import { getToolsForTier } from '../registry.js';
+// Reads from environment:
+//   BRIDGE_PORT  — port of the HTTP bridge
+//   TOOL_SET     — 'mind' | 'cognitive' | 'subagent'
+//   TASK_ID      — 'mind' or sub-agent UUID
 
-/**
- * Strategy: Rather than running a separate subprocess, we use the
- * @modelcontextprotocol/sdk to create an MCP server that the backend
- * can spawn as a child process. The child process communicates with
- * the parent via IPC (Node.js child_process.fork) for handler execution.
- *
- * The architecture:
- * 1. Backend forks a child process running stdio-mcp-process.ts
- * 2. Child process creates an MCP server with stdio transport
- * 3. When a tool is called, child sends IPC message to parent
- * 4. Parent executes the handler (which has DB access)
- * 5. Parent sends result back via IPC
- * 6. Child returns the result to the SDK
- *
- * This keeps handlers in the parent process (where DB connections live)
- * while providing a clean stdio interface for Codex and OpenCode.
- */
+// On startup:
+//   GET /tools?set=<TOOL_SET> from bridge → cache tool definitions
 
-/**
- * Fork a stdio MCP server subprocess.
- *
- * Returns the config object to pass to the SDK's MCP server configuration.
- * The subprocess is managed by the orchestrator and terminated when the
- * agent session ends.
- */
-export function createStdioMcpConfig(
-  tier: PermissionTier,
-  context: ToolHandlerContext,
-): StdioMcpHandle {
-  const tools = getToolsForTier(tier);
-
-  // Serialize tool metadata (NOT handlers) for the child process
-  const toolMeta = tools.map(t => ({
-    name: t.name,
-    description: t.description,
-    inputSchema: JSON.parse(JSON.stringify(t.inputSchema)), // JSON Schema from Zod
-  }));
-
-  // Fork the MCP server subprocess
-  const child = fork(
-    resolve(__dirname, 'stdio-mcp-process.js'),
-    [],
-    {
-      stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
-      env: {
-        ...process.env,
-        ANIMUS_MCP_TOOLS: JSON.stringify(toolMeta),
-      },
-    },
-  );
-
-  // Handle IPC messages from the child (tool call requests)
-  child.on('message', async (msg: IpcToolCallRequest) => {
-    if (msg.type === 'tool_call') {
-      const tool = tools.find(t => t.name === msg.toolName);
-      if (!tool) {
-        child.send({
-          type: 'tool_result',
-          callId: msg.callId,
-          result: {
-            content: [{ type: 'text', text: `Unknown tool: ${msg.toolName}` }],
-            isError: true,
-          },
-        });
-        return;
-      }
-
-      try {
-        const validated = tool.inputSchema.parse(msg.input);
-        const result = await tool.handler(validated, context);
-        child.send({ type: 'tool_result', callId: msg.callId, result });
-      } catch (error) {
-        child.send({
-          type: 'tool_result',
-          callId: msg.callId,
-          result: {
-            content: [{ type: 'text', text: `Tool error: ${String(error)}` }],
-            isError: true,
-          },
-        });
-      }
-    }
-  });
-
-  return {
-    child,
-    // Config for the SDK — point to our subprocess
-    config: {
-      command: process.execPath,
-      args: [resolve(__dirname, 'stdio-mcp-process.js')],
-      env: {
-        ANIMUS_MCP_TOOLS: JSON.stringify(toolMeta),
-      },
-    },
-    kill: () => {
-      child.kill('SIGTERM');
-    },
-  };
-}
-
-interface StdioMcpHandle {
-  child: ChildProcess;
-  config: { command: string; args: string[]; env: Record<string, string> };
-  kill: () => void;
-}
+// MCP protocol handlers:
+//   tools/list  → return cached tool definitions
+//   tools/call  → POST /execute (or /cognitive/*) to bridge → return result
 ```
 
+The subprocess uses `@modelcontextprotocol/sdk` (`Server` + `StdioServerTransport`) to implement the MCP protocol. It has NO direct access to databases or the event bus. All handler logic runs in the backend process via the bridge.
+
+**Dev/prod entry point resolution:** `buildMcpServerConfig()` detects whether the backend is running in dev mode (via `import.meta.url.endsWith('.ts')`) and uses `tsx` for TypeScript or `node` for compiled JavaScript accordingly.
+
+### Config Builder
+
+`buildMcpServerConfig()` produces standard `{ command, args, env }` configs that all SDKs understand:
+
 ```typescript
-// packages/backend/src/tools/servers/stdio-mcp-process.ts
+// For mind session Animus tools
+buildMcpServerConfig(bridgePort, 'mind', 'mind')
+// → { command: 'node', args: ['animus-mcp-server.js'], env: { BRIDGE_PORT, TOOL_SET: 'mind', TASK_ID: 'mind' } }
 
-/**
- * Stdio MCP server subprocess.
- *
- * This file runs as a forked child process. It:
- * 1. Reads tool definitions from ANIMUS_MCP_TOOLS env var
- * 2. Creates an MCP server with stdio transport
- * 3. When tools are called, sends IPC messages to parent for execution
- * 4. Returns results from parent back to the SDK
- *
- * This process has NO direct access to databases or the event bus.
- * All handler logic runs in the parent process.
- */
+// For mind session cognitive tools
+buildMcpServerConfig(bridgePort, 'cognitive', 'mind')
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { z } from 'zod';
-
-const toolMeta = JSON.parse(process.env.ANIMUS_MCP_TOOLS ?? '[]');
-
-const server = new McpServer({
-  name: 'animus-tools',
-  version: '1.0.0',
-});
-
-// Pending tool calls waiting for parent response
-const pendingCalls = new Map<string, {
-  resolve: (result: unknown) => void;
-  reject: (error: Error) => void;
-}>();
-
-let callIdCounter = 0;
-
-// Register each tool
-for (const tool of toolMeta) {
-  server.registerTool(
-    tool.name,
-    {
-      description: tool.description,
-      inputSchema: tool.inputSchema, // Already JSON Schema
-    },
-    async (args: Record<string, unknown>) => {
-      // Send to parent for execution
-      const callId = String(++callIdCounter);
-
-      const result = await new Promise<unknown>((resolve, reject) => {
-        pendingCalls.set(callId, { resolve, reject });
-
-        process.send!({
-          type: 'tool_call',
-          callId,
-          toolName: tool.name,
-          input: args,
-        });
-
-        // Timeout after 60 seconds
-        setTimeout(() => {
-          if (pendingCalls.has(callId)) {
-            pendingCalls.delete(callId);
-            reject(new Error('Tool call timed out'));
-          }
-        }, 60_000);
-      });
-
-      return result;
-    },
-  );
-}
-
-// Handle results from parent
-process.on('message', (msg: { type: string; callId: string; result: unknown }) => {
-  if (msg.type === 'tool_result') {
-    const pending = pendingCalls.get(msg.callId);
-    if (pending) {
-      pendingCalls.delete(msg.callId);
-      pending.resolve(msg.result);
-    }
-  }
-});
-
-// Start the server with stdio transport
-const transport = new StdioServerTransport();
-await server.connect(transport);
+// For sub-agent Animus tools
+buildMcpServerConfig(bridgePort, 'subagent', taskId)
 ```
 
 ---
 
 ## Layer 5: Orchestrator Integration
 
-The Agent Orchestrator (in `@animus-labs/backend`) assembles the MCP server configuration when spawning sub-agents. This is where the per-contact permission filtering happens.
+The Agent Orchestrator and Mind Session assemble the MCP server configuration using the bridge. This is provider-agnostic: the same code path runs for Claude, Codex, and OpenCode.
+
+### Mind Session Setup
 
 ```typescript
-// packages/backend/src/heartbeat/orchestrator.ts (relevant section)
+// packages/backend/src/heartbeat/mind-session.ts (relevant section)
 
-import type { AgentProvider, PermissionTier } from '@animus-labs/shared';
-import type { AgentSessionConfig } from '@animus-labs/agents';
-import type { ToolHandlerContext } from '../tools/types.js';
-import { buildClaudeMcpConfig, buildClaudeAllowedTools } from '../tools/servers/claude-mcp.js';
-import { createStdioMcpConfig } from '../tools/servers/stdio-mcp.js';
+import { startBridge, registerContext, updatePermissions, buildMcpServerConfig } from '../tools/index.js';
+import { getSnapshot, resetSnapshot, getPhase } from './cognitive-tools.js';
 
-/**
- * Build the MCP server configuration for a sub-agent session.
- *
- * Selects the appropriate MCP server strategy based on provider:
- * - Claude: In-process MCP server (zero IPC overhead)
- * - Codex/OpenCode: stdio subprocess MCP server
- *
- * Tools are filtered by the triggering contact's permission tier.
- */
-function buildMcpConfig(
-  provider: AgentProvider,
-  tier: PermissionTier,
-  handlerContext: ToolHandlerContext,
-): Partial<AgentSessionConfig> {
-  switch (provider) {
-    case 'claude': {
-      return {
-        mcpServers: buildClaudeMcpConfig(tier, handlerContext),
-        allowedTools: buildClaudeAllowedTools(tier),
-      };
-    }
+// During mind session initialization:
+const bridgePort = await startBridge();
+registerContext('mind', state.toolContext);
+updatePermissions(currentPermissions);
 
-    case 'codex': {
-      const handle = createStdioMcpConfig(tier, handlerContext);
-      // Track the handle for cleanup when session ends
-      this.mcpHandles.set(handlerContext.agentTaskId, handle);
+// Build stdio MCP configs (same for all providers)
+const toolsConfig = buildMcpServerConfig(bridgePort, 'mind', 'mind');
+const cognitiveConfig = buildMcpServerConfig(bridgePort, 'cognitive', 'mind');
 
-      return {
-        mcpServers: {
-          'animus-tools': handle.config,
-        },
-      };
-    }
+// Cognitive state access remains in-process (direct imports)
+state.cognitiveServer = {
+  serverConfig: cognitiveConfig,
+  getSnapshot,
+  resetSnapshot,
+  getPhase,
+};
 
-    case 'opencode': {
-      const handle = createStdioMcpConfig(tier, handlerContext);
-      this.mcpHandles.set(handlerContext.agentTaskId, handle);
-
-      // OpenCode uses slightly different config format
-      return {
-        mcpServers: {
-          'animus-tools': {
-            command: handle.config.command,
-            args: handle.config.args,
-            env: handle.config.env,
-          },
-        },
-      };
-    }
-  }
-}
+// Merge with plugin MCP servers
+const mergedMcpServers = {
+  tools: toolsConfig,
+  cognitive: cognitiveConfig,
+  ...pluginMcpServers,
+};
 ```
+
+### Sub-Agent Setup
+
+```typescript
+// packages/backend/src/heartbeat/agent-orchestrator.ts (relevant section)
+
+import { startBridge, registerContext, unregisterContext, buildMcpServerConfig } from '../tools/index.js';
+
+// When spawning a sub-agent:
+const bridgePort = await startBridge();
+registerContext(taskId, subAgentToolContext);
+const mcpConfig = buildMcpServerConfig(bridgePort, 'subagent', taskId);
+
+// Cleanup in ALL exit paths (success, error, timeout, cancel):
+unregisterContext(taskId);
+```
+
+No provider switching, no handle tracking, no subprocess management. The bridge and stdio subprocess handle everything uniformly.
 
 ---
 
 ## MCP Server Configuration Mapping
 
-Each SDK receives the same tools but through different configuration formats. The adapters in `@animus-labs/agents` pass these through to the SDKs unchanged.
+All SDKs receive the same stdio `{ command, args, env }` config format. The adapters in `@animus-labs/agents` pass these through to the SDKs unchanged.
 
-### Claude Agent SDK
+### Mind Session (all providers)
 
-**Sub-agent sessions** receive tier-filtered tools:
-
-```typescript
-// Sub-agent MCP config (primary tier example)
-{
-  mcpServers: {
-    'animus-tools': createSdkMcpServer({
-      name: 'animus-tools',
-      version: '1.0.0',
-      tools: [
-        tool('send_message', '...', schema, handler),
-        tool('update_progress', '...', schema, handler),
-        tool('read_memory', '...', schema, handler),
-        tool('run_with_credentials', '...', schema, handler),
-      ],
-    }),
-  },
-  allowedTools: [
-    'mcp__animus-tools__send_message',
-    'mcp__animus-tools__update_progress',
-    'mcp__animus-tools__read_memory',
-    'mcp__animus-tools__run_with_credentials',
-  ],
-}
-```
-
-**Mind session** receives two MCP servers — `animus-tools` (mind tools) and `cognitive` (phase-tracking tools):
+The mind session receives two MCP servers: `tools` (mind tools) and `cognitive` (phase-tracking tools), plus any plugin MCP servers:
 
 ```typescript
-// Mind session MCP config
+// Mind session MCP config (identical for Claude, Codex, OpenCode)
 {
   mcpServers: {
-    'tools': createSdkMcpServer({ tools: [
-      tool('read_memory', '...', schema, handler),
-      tool('lookup_contacts', '...', schema, handler),
-      tool('send_proactive_message', '...', schema, handler),
-      tool('send_media', '...', schema, handler),
-      tool('run_with_credentials', '...', schema, handler),
-    ]}),
-    'cognitive': createSdkMcpServer({ tools: [
-      tool('record_thought', '...', schema, handler),
-      tool('record_cognitive_state', '...', schema, handler),
-    ]}),
+    'tools': {
+      command: 'node',  // or tsx in dev mode
+      args: ['/path/to/animus-mcp-server.js'],
+      env: { BRIDGE_PORT: '54321', TOOL_SET: 'mind', TASK_ID: 'mind' },
+    },
+    'cognitive': {
+      command: 'node',
+      args: ['/path/to/animus-mcp-server.js'],
+      env: { BRIDGE_PORT: '54321', TOOL_SET: 'cognitive', TASK_ID: 'mind' },
+    },
     // ...plus any plugin MCP servers
   },
   allowedTools: [
@@ -784,37 +546,26 @@ Each SDK receives the same tools but through different configuration formats. Th
 }
 ```
 
-### Codex SDK
+### Sub-Agent Session (all providers)
+
+Sub-agents receive a single `tools` MCP server with tier-filtered tools:
 
 ```typescript
-// Mapped to Codex config.toml format (or programmatic equivalent)
+// Sub-agent MCP config (primary tier example)
 {
   mcpServers: {
-    'animus-tools': {
-      command: '/usr/bin/node',
-      args: ['/path/to/stdio-mcp-process.js'],
-      env: {
-        ANIMUS_MCP_TOOLS: '...',  // Serialized tool metadata
-      },
+    'tools': {
+      command: 'node',
+      args: ['/path/to/animus-mcp-server.js'],
+      env: { BRIDGE_PORT: '54321', TOOL_SET: 'subagent', TASK_ID: 'task-uuid-123' },
     },
   },
-}
-```
-
-### OpenCode SDK
-
-```typescript
-// Mapped to OpenCode's mcp config format
-{
-  mcpServers: {
-    'animus-tools': {
-      command: '/usr/bin/node',
-      args: ['/path/to/stdio-mcp-process.js'],
-      env: {
-        ANIMUS_MCP_TOOLS: '...',
-      },
-    },
-  },
+  allowedTools: [
+    'mcp__tools__send_message',
+    'mcp__tools__update_progress',
+    'mcp__tools__read_memory',
+    'mcp__tools__run_with_credentials',
+  ],
 }
 ```
 
@@ -914,29 +665,33 @@ This is already supported by the existing `McpServerConfig` type in `@animus-lab
 
 ---
 
-## Transport Comparison & Tradeoffs
+## Transport Architecture & Tradeoffs
 
-| Aspect | In-Process (Claude) | stdio Subprocess (Codex/OpenCode) |
-|--------|--------------------|---------------------------------|
-| **Latency** | ~0ms (function call) | ~1-5ms (IPC serialization) |
-| **Memory** | Shared with backend | Separate V8 isolate (~30-50MB) |
-| **Reliability** | Same as host process | Subprocess can crash independently |
-| **Debugging** | Same debugger session | Requires separate log inspection |
-| **Compatibility** | Claude SDK only | All SDKs via MCP stdio transport |
-| **Handler access** | Direct DB access | IPC to parent for handler execution |
-| **Lifecycle** | Tied to query() call | Must be explicitly killed on session end |
+### Why HTTP Bridge + stdio (not direct stdio IPC)?
 
-### Why not a persistent HTTP MCP server?
+The architecture uses an internal HTTP bridge (localhost-only, ephemeral port) between the stdio subprocess and the backend process. This is different from the common pattern of direct IPC via `child_process.fork()`:
 
-A persistent HTTP MCP server running on localhost would work for all three SDKs, but introduces unnecessary complexity for a single-user, self-hosted application:
+| Aspect | HTTP Bridge (current) | Direct IPC (fork) |
+|--------|----------------------|-------------------|
+| **Context routing** | `taskId` in request body routes to correct session | Would need per-subprocess handler wiring |
+| **Multiple MCP servers** | Share one bridge (mind tools, cognitive, sub-agents) | Each subprocess needs its own IPC channel |
+| **Testability** | Plain HTTP endpoints, easy to test with `curl` | Requires process spawning in tests |
+| **Overhead** | ~1-3ms per HTTP roundtrip | ~0.5-1ms per IPC message |
+| **Complexity** | Single server, simple endpoints | Per-process message handlers, pending call maps |
 
-1. **Port management** — Need to pick a port, handle conflicts, manage lifecycle
-2. **Authentication** — Even on localhost, should validate requests come from our sessions
-3. **Additional attack surface** — A listening HTTP port is a security risk, even on localhost
-4. **No benefit over stdio** — stdio provides the same functionality with zero configuration
-5. **Connection lifecycle** — Must handle server startup, health checks, graceful shutdown
+The HTTP roundtrip overhead is negligible against 2-10 second LLM API calls. The testability and simplicity gains are significant.
 
-stdio is the right choice for local tools. HTTP/Streamable HTTP is for **remote** MCP servers (which we support via passthrough for user-configured servers).
+### Why not expose tools as a persistent HTTP MCP server?
+
+The bridge is an **internal** HTTP server for subprocess-to-backend communication, not an MCP-over-HTTP server. The SDKs still connect via **stdio** to the subprocess. This avoids:
+
+1. **Port management for SDK connections** - stdio has no port conflicts
+2. **Authentication** - stdio subprocess inherits parent process trust
+3. **Additional attack surface** - the bridge binds to 127.0.0.1 only and is not directly exposed to SDKs
+
+### Cognitive State: In-Process Access
+
+While tool execution goes through the bridge, the cognitive state (`CognitiveSnapshot`) is accessed directly via in-process imports. The mind session calls `getSnapshot()`, `resetSnapshot()`, and `getPhase()` from `cognitive-tools.ts` without any HTTP overhead. The bridge's `/cognitive/*` endpoints only handle writes from the subprocess; reads are always in-process.
 
 ---
 
@@ -950,18 +705,17 @@ stdio is the right choice for local tools. HTTP/Streamable HTTP is for **remote*
 - `packages/backend/src/tools/registry.ts` — full registry with all handlers
 - `packages/backend/src/tools/handlers/` — 7 handler implementations
 
-### Phase 2: Claude In-Process Server — COMPLETE
+### Phase 2: MCP Bridge & stdio Server — COMPLETE
 
-- `packages/backend/src/tools/servers/claude-mcp.ts` — in-process MCP server factory
-- `packages/backend/src/heartbeat/mind-session.ts` — mind session assembles `tools` + `cognitive` + plugin MCP servers
-- `packages/backend/src/heartbeat/cognitive-tools.ts` — cognitive MCP server (record_thought + record_cognitive_state)
-- All tools tested end-to-end with Claude Agent SDK
+- `packages/backend/src/tools/servers/mcp-bridge.ts` — HTTP bridge server (singleton, context registry, tool list/execute/cognitive endpoints)
+- `packages/backend/src/tools/servers/animus-mcp-server.ts` — stdio MCP subprocess (stateless proxy using `@modelcontextprotocol/sdk`)
+- `packages/backend/src/heartbeat/mind-session.ts` — mind session assembles `tools` + `cognitive` + plugin MCP servers via bridge
+- `packages/backend/src/heartbeat/cognitive-tools.ts` — cognitive tool handlers with exported standalone functions + in-process snapshot access
+- `packages/backend/src/heartbeat/agent-orchestrator.ts` — sub-agent MCP setup via bridge with proper context cleanup
+- `packages/backend/tests/tools/mcp-bridge.test.ts` — 21 tests covering bridge lifecycle, endpoints, permission filtering, context registry
+- All tools work for all providers (Claude, Codex, OpenCode) via unified stdio pattern
 
-### Phase 3: stdio MCP Server (when implementing Codex/OpenCode adapters)
-
-Not yet started. Will be needed when Codex/OpenCode adapters are implemented.
-
-### Phase 4: Plugin MCP Servers — COMPLETE
+### Phase 3: Plugin MCP Servers — COMPLETE
 
 Plugin-defined MCP servers are loaded via the plugin system and merged into the mind session's MCP config alongside built-in tools. See `docs/architecture/plugin-system.md`.
 
@@ -972,8 +726,8 @@ Plugin-defined MCP servers are loaded via the plugin system and merged into the 
 | Package | Used By | Purpose |
 |---------|---------|---------|
 | `zod` | `@animus-labs/shared` | Tool input schema definitions |
-| `@anthropic-ai/claude-agent-sdk` | `@animus-labs/backend` | `createSdkMcpServer()`, `tool()` for in-process server |
-| `@modelcontextprotocol/sdk` | `@animus-labs/backend` | `McpServer`, `StdioServerTransport` for stdio subprocess |
+| `zod-to-json-schema` | `@animus-labs/backend` | Convert Zod schemas to JSON Schema for bridge tool list endpoint |
+| `@modelcontextprotocol/sdk` | `@animus-labs/backend` | `Server`, `StdioServerTransport` for stdio MCP subprocess |
 
 ### Package Boundary Summary
 
@@ -983,7 +737,7 @@ Plugin-defined MCP servers are loaded via the plugin system and merged into the 
 | Permission map | `@animus-labs/shared` | Shared knowledge of who can use what |
 | Tool handlers (implementation) | `@animus-labs/backend` | Need DB access, event bus, embeddings |
 | Tool registry (defs + handlers) | `@animus-labs/backend` | Combines shared defs with backend handlers |
-| MCP server factories | `@animus-labs/backend` | Creates provider-specific MCP configs |
+| MCP bridge + stdio server | `@animus-labs/backend` | Unified tool delivery for all providers |
 | MCP config passthrough | `@animus-labs/agents` | Passes mcpServers to SDK unchanged |
 
 ---
@@ -997,7 +751,7 @@ This document resolves **Open Question #3: MCP Tool Design for Sub-Agents** from
 - **`read_memory` interface**: Uses `MemoryManager.retrieveRelevant()` which embeds the query and searches LanceDB, same retrieval as GATHER CONTEXT but available on-demand.
 - **Tool permissions**: Sub-agent tools filtered at session creation time via `getToolsForTier()`. Mind tools are unfiltered.
 - **Custom user-defined tools**: Supported via plugin MCP servers (see `docs/architecture/plugin-system.md`).
-- **Tool call result flow**: For Claude, results return in-process. For Codex/OpenCode, results will flow via IPC (stdio transport, not yet implemented).
+- **Tool call result flow**: All providers use the same path: stdio subprocess sends HTTP request to bridge, bridge executes handler in-process, result flows back through the subprocess to the SDK.
 - **Mind media delivery**: The `send_media` tool allows the mind to send media files to the triggering contact during the mind query, before the text reply. This replaces the removed `reply.media` structured output path. Media-producing tools (plugins) return file paths; the mind calls `send_media` to deliver them through the channel router.
 
 ---

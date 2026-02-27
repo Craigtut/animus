@@ -377,7 +377,12 @@ export function AgentProviderStep() {
     setCodexCliAuthMessage('');
   };
 
+  const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation();
+
   const handleContinue = () => {
+    // Persist selected provider to system settings (fire-and-forget; heartbeat
+    // hasn't started yet so the write will land before the first tick)
+    updateSettingsMutation.mutate({ defaultAgentProvider: provider });
     markStepComplete('agent_provider');
     setCurrentStep('identity');
     navigate('/onboarding/identity');
@@ -629,9 +634,9 @@ export function AgentProviderStep() {
                     css={css`display: flex; align-items: center; gap: 3px;`}
                   >
                     {isInstalled ? (
-                      <><CheckCircle size={10} weight="fill" /> Installed</>
+                      <><CheckCircle size={10} weight="fill" /> Available</>
                     ) : (
-                      'Not installed'
+                      'SDK not found'
                     )}
                   </Typography.Tiny>
                 )}
@@ -647,7 +652,8 @@ export function AgentProviderStep() {
       </div>
 
       {/* ============================================================
-          State C: CLI not installed -- blocking prerequisite
+          State C: Agent SDK not available -- blocking prerequisite
+          This should rarely trigger since SDKs are bundled with the app.
           ============================================================ */}
       {detectData && !selectedCliInstalled && (
         <div css={css`
@@ -663,10 +669,10 @@ export function AgentProviderStep() {
             <Warning size={20} weight="fill" css={css`color: ${theme.colors.warning.main}; flex-shrink: 0; margin-top: 1px;`} />
             <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
               <Typography.SmallBodyAlt>
-                {provider === 'claude' ? 'Claude Code' : 'Codex'} CLI required
+                {provider === 'claude' ? 'Claude' : 'Codex'} agent SDK not found
               </Typography.SmallBodyAlt>
               <Typography.Caption color="secondary">
-                Install the {provider === 'claude' ? 'Claude Code' : 'Codex'} CLI first, then return here to authenticate.
+                The {provider === 'claude' ? 'Claude Agent SDK' : 'Codex SDK'} component could not be located. Try reinstalling the application, or install the SDK package manually.
               </Typography.Caption>
             </div>
           </div>
@@ -688,15 +694,10 @@ export function AgentProviderStep() {
                 user-select: all;
               `}>
                 {provider === 'claude'
-                  ? 'npm install -g @anthropic-ai/claude-code'
-                  : 'npm install -g @openai/codex'}
+                  ? 'npm install @anthropic-ai/claude-agent-sdk'
+                  : 'npm install @openai/codex-sdk'}
               </Typography.SmallBody>
             </div>
-            {provider === 'claude' && (
-              <Typography.Tiny color="hint" css={css`margin-left: 25px;`}>
-                or: brew install claude-code
-              </Typography.Tiny>
-            )}
           </div>
 
           <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
@@ -709,22 +710,6 @@ export function AgentProviderStep() {
               <ArrowsClockwise size={13} css={css`margin-right: ${theme.spacing[1]};`} />
               Check again
             </Button>
-            <Typography.Caption
-              as="a"
-              href={provider === 'claude'
-                ? 'https://docs.anthropic.com/en/docs/claude-code/getting-started'
-                : 'https://github.com/openai/codex'}
-              target="_blank"
-              rel="noopener noreferrer"
-              color="hint"
-              css={css`
-                display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
-                text-decoration: none;
-                &:hover { color: ${theme.colors.text.secondary}; text-decoration: underline; }
-              `}
-            >
-              Installation guide <ArrowSquareOut size={11} />
-            </Typography.Caption>
           </div>
         </div>
       )}
