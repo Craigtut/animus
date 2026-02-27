@@ -72,13 +72,17 @@ export function ReviewStep() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]}; text-align: center;`}>
-        <Typography.Title3 as="h2" serif>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]}; text-align: center;`}>
+        <Typography.Body color="secondary" serif css={css`
+          font-style: italic;
+        `}>
+          One last look
+        </Typography.Body>
+        <Typography.Title3 as="h2" css={css`
+          font-weight: ${theme.typography.fontWeight.medium};
+        `}>
           Is this who they are?
         </Typography.Title3>
-        <Typography.Body color="secondary">
-          Review everything before bringing them to life. You can edit any section.
-        </Typography.Body>
       </div>
 
       {/* Summary sections */}
@@ -89,7 +93,7 @@ export function ReviewStep() {
         >
           <Typography.SmallBody color="secondary">
             {personaDraft.existenceParadigm === 'simulated_life'
-              ? `Simulated Life${personaDraft.location ? ` — ${personaDraft.location}` : ''}`
+              ? `Simulated Life${personaDraft.location ? `, ${personaDraft.location}` : ''}`
               : personaDraft.existenceParadigm === 'digital_consciousness'
                 ? 'Digital Consciousness'
                 : 'Not configured'}

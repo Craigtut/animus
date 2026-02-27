@@ -85,9 +85,9 @@ function createVariant(variant: Variant) {
         lineHeight: v.lineHeight,
         margin: 0,
       };
-      if (serif) baseStyle.fontFamily = theme.typography.fontFamily.serif;
-      if (italic) baseStyle.fontStyle = 'italic';
-      if (resolvedColor) baseStyle.color = resolvedColor;
+      if (serif) baseStyle['fontFamily'] = theme.typography.fontFamily.serif;
+      if (italic) baseStyle['fontStyle'] = 'italic';
+      if (resolvedColor) baseStyle['color'] = resolvedColor;
 
       return createElement(
         Tag,

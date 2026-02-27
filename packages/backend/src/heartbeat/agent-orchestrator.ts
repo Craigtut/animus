@@ -346,7 +346,7 @@ export class AgentOrchestrator {
 
       const session = await this.manager.createSession({
         provider,
-        model,
+        ...(model != null ? { model } : {}),
         cwd: PROJECT_ROOT,
         systemPrompt: params.systemPrompt,
         permissions: {

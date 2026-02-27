@@ -21,7 +21,8 @@ export function LoginPage() {
   const [showForgotHelp, setShowForgotHelp] = useState(false);
 
   const { data: status } = trpc.auth.status.useQuery(undefined, {
-    retry: false,
+    retry: 3,
+    retryDelay: 1000,
   });
 
   const loginMutation = trpc.auth.login.useMutation({
@@ -67,6 +68,16 @@ export function LoginPage() {
           max-width: 400px;
         `}
       >
+        <img
+          src="/favicon.svg"
+          alt="Animus"
+          css={css`
+            display: block;
+            margin: 0 auto ${theme.spacing[5]};
+            width: 48px;
+            height: 48px;
+          `}
+        />
         <Typography.Title serif css={css`text-align: center; margin-bottom: ${theme.spacing[1]};`}>
           Welcome back
         </Typography.Title>

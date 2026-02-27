@@ -44,6 +44,7 @@ export class STTEngine {
 
     let sherpaModule;
     try {
+      // @ts-expect-error -- sherpa-onnx-node has no type declarations
       sherpaModule = await import('sherpa-onnx-node');
     } catch (err) {
       throw new Error(

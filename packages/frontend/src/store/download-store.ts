@@ -79,7 +79,7 @@ export const useDownloadStore = create<DownloadStore>((set, get) => ({
         bytesDownloaded,
         totalBytes,
         percent,
-        error: existing?.error,
+        ...(existing?.error != null ? { error: existing.error } : {}),
       });
       return { items, visible: true, dismissed: false };
     });

@@ -42,13 +42,17 @@ export function TraitsStep() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-        <Typography.Title3 as="h2" serif>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+        <Typography.Body color="secondary" serif css={css`
+          font-style: italic;
+        `}>
           Add some texture
-        </Typography.Title3>
-        <Typography.Body color="secondary">
-          These are the adjectives -- the quirks, style, and flavor that make a personality distinctive.
         </Typography.Body>
+        <Typography.Title3 as="h2" css={css`
+          font-weight: ${theme.typography.fontWeight.medium};
+        `}>
+          Pick the quirks, style, and flavor that make them distinctive
+        </Typography.Title3>
       </div>
 
       {/* Selected strip */}
@@ -82,47 +86,61 @@ export function TraitsStep() {
         {selected.length} of {MAX_TRAITS} selected
       </Typography.SmallBody>
 
-      {traitCategories.map((cat) => (
-        <div key={cat.title} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-          <Typography.SmallBodyAlt as="h3" color="hint" css={css`
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-          `}>
-            {cat.title}
-          </Typography.SmallBodyAlt>
-          <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[2]};`}>
-            {cat.traits.map((trait) => {
-              const isSelected = selected.includes(trait);
-              const isDisabled = !isSelected && selected.length >= MAX_TRAITS;
-              return (
-                <motion.button
-                  key={trait}
-                  {...(isDisabled ? {} : { whileTap: { scale: 1.1 } })}
-                  transition={{ duration: 0.1 }}
-                  onClick={() => !isDisabled && toggleTrait(trait)}
-                  css={css`
-                    padding: ${theme.spacing[1.5]} ${theme.spacing[3]};
-                    border-radius: ${theme.borderRadius.full};
-                    font-size: ${theme.typography.fontSize.sm};
-                    cursor: ${isDisabled ? 'default' : 'pointer'};
-                    border: 1px solid ${isSelected ? theme.colors.accent : theme.colors.border.default};
-                    background: ${isSelected ? theme.colors.accent : 'transparent'};
-                    color: ${isSelected ? theme.colors.accentForeground : theme.colors.text.primary};
-                    opacity: ${isDisabled ? 0.4 : 1};
-                    transition: all ${theme.transitions.fast};
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+        {traitCategories.map((cat) => (
+          <div
+            key={cat.title}
+            css={css`
+              background: ${theme.colors.background.paper};
+              border: 1px solid ${theme.colors.border.default};
+              border-radius: ${theme.borderRadius.lg};
+              padding: ${theme.spacing[4]} ${theme.spacing[5]};
+              display: flex;
+              flex-direction: column;
+              gap: ${theme.spacing[3]};
+            `}
+          >
+            <Typography.Caption as="h3" color="hint" css={css`
+              text-transform: uppercase;
+              letter-spacing: 0.08em;
+              font-weight: ${theme.typography.fontWeight.medium};
+            `}>
+              {cat.title}
+            </Typography.Caption>
+            <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[2]};`}>
+              {cat.traits.map((trait) => {
+                const isSelected = selected.includes(trait);
+                const isDisabled = !isSelected && selected.length >= MAX_TRAITS;
+                return (
+                  <motion.button
+                    key={trait}
+                    {...(isDisabled ? {} : { whileTap: { scale: 1.1 } })}
+                    transition={{ duration: 0.1 }}
+                    onClick={() => !isDisabled && toggleTrait(trait)}
+                    css={css`
+                      padding: ${theme.spacing[1.5]} ${theme.spacing[3]};
+                      border-radius: ${theme.borderRadius.full};
+                      font-size: ${theme.typography.fontSize.sm};
+                      cursor: ${isDisabled ? 'default' : 'pointer'};
+                      border: 1px solid ${isSelected ? theme.colors.accent : theme.colors.border.default};
+                      background: ${isSelected ? theme.colors.accent : 'transparent'};
+                      color: ${isSelected ? theme.colors.accentForeground : theme.colors.text.primary};
+                      opacity: ${isDisabled ? 0.4 : 1};
+                      transition: all ${theme.transitions.fast};
 
-                    &:hover:not(:disabled) {
-                      ${!isSelected && !isDisabled ? `background: ${theme.colors.background.elevated};` : ''}
-                    }
-                  `}
-                >
-                  {trait}
-                </motion.button>
-              );
-            })}
+                      &:hover:not(:disabled) {
+                        ${!isSelected && !isDisabled ? `background: ${theme.colors.background.elevated};` : ''}
+                      }
+                    `}
+                  >
+                    {trait}
+                  </motion.button>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
 
       <OnboardingNav
         onBack={handleBack}

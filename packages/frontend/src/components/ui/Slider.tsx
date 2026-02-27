@@ -34,6 +34,13 @@ export function Slider({
   const isNeutral = showNeutral && value >= neutralMin && value <= neutralMax;
   const percentage = ((value - min) / (max - min)) * 100;
 
+  // How far from center (0 = center, 1 = edge)
+  const deviation = Math.abs(value - 0.5) * 2;
+
+  // Which side is active
+  const leaningLeft = value < neutralMin;
+  const leaningRight = value > neutralMax;
+
   const updateValue = useCallback(
     (clientX: number) => {
       if (!trackRef.current || disabled) return;
@@ -72,39 +79,54 @@ export function Slider({
       css={css`
         display: flex;
         flex-direction: column;
-        gap: ${theme.spacing[1]};
+        gap: ${theme.spacing[2]};
         opacity: ${disabled ? 0.5 : 1};
       `}
     >
-      <div css={css`display: flex; justify-content: space-between; align-items: center;`}>
+      {/* Labels row */}
+      <div css={css`display: flex; justify-content: space-between; align-items: baseline; position: relative;`}>
         {leftLabel && (
-          <span css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint};`}>
+          <span css={css`
+            font-size: ${theme.typography.fontSize.sm};
+            font-weight: ${showNeutral && leaningLeft ? theme.typography.fontWeight.medium : theme.typography.fontWeight.normal};
+            color: ${showNeutral && leaningLeft ? theme.colors.text.primary : theme.colors.text.hint};
+            transition: all ${theme.transitions.normal};
+          `}>
             {leftLabel}
           </span>
         )}
         {isNeutral && (
           <span css={css`
             font-size: ${theme.typography.fontSize.xs};
-            color: ${theme.colors.text.hint};
+            color: ${theme.colors.text.disabled};
             position: absolute;
             left: 50%;
             transform: translateX(-50%);
+            letter-spacing: 0.04em;
           `}>
             neutral
           </span>
         )}
         {rightLabel && (
-          <span css={css`font-size: ${theme.typography.fontSize.xs}; color: ${theme.colors.text.hint};`}>
+          <span css={css`
+            font-size: ${theme.typography.fontSize.sm};
+            font-weight: ${showNeutral && leaningRight ? theme.typography.fontWeight.medium : theme.typography.fontWeight.normal};
+            color: ${showNeutral && leaningRight ? theme.colors.text.primary : theme.colors.text.hint};
+            transition: all ${theme.transitions.normal};
+          `}>
             {rightLabel}
           </span>
         )}
       </div>
+
+      {/* Track area */}
       <div
         ref={trackRef}
         role="slider"
         aria-valuemin={min}
         aria-valuemax={max}
         aria-valuenow={value}
+        aria-label={leftLabel && rightLabel ? `${leftLabel} to ${rightLabel}` : undefined}
         tabIndex={disabled ? -1 : 0}
         onPointerDown={(e) => {
           if (disabled) return;
@@ -126,67 +148,102 @@ export function Slider({
         }}
         css={css`
           position: relative;
-          height: 24px;
+          height: 32px;
           display: flex;
           align-items: center;
           cursor: ${disabled ? 'not-allowed' : 'pointer'};
           touch-action: none;
           user-select: none;
+
+          &:focus-visible {
+            outline: none;
+          }
+          &:focus-visible > div:last-child {
+            box-shadow: 0 0 0 3px ${theme.colors.border.focus};
+          }
         `}
       >
-        {/* Track */}
+        {/* Track background */}
         <div
           css={css`
             position: absolute;
             width: 100%;
-            height: 4px;
+            height: 6px;
             border-radius: ${theme.borderRadius.full};
-            background: ${theme.colors.background.elevated};
+            background: ${theme.colors.border.default};
+            overflow: hidden;
           `}
         >
           {/* Fill */}
-          <div
-            css={css`
-              height: 100%;
-              width: ${percentage}%;
-              border-radius: ${theme.borderRadius.full};
-              background: ${theme.colors.accent};
-              opacity: 0.4;
-              transition: width 50ms ease-out;
-            `}
-          />
+          {showNeutral ? (
+            /* Center-outward fill for dimension sliders */
+            !isNeutral && (
+              <div
+                css={css`
+                  position: absolute;
+                  top: 0;
+                  height: 100%;
+                  border-radius: ${theme.borderRadius.full};
+                  background: ${theme.colors.accent};
+                  opacity: ${0.5 + deviation * 0.42};
+                  transition: ${dragging ? 'opacity 50ms ease-out' : 'all 120ms ease-out'};
+                  ${leaningLeft ? css`
+                    right: 50%;
+                    width: ${(0.5 - value) * 100}%;
+                  ` : css`
+                    left: 50%;
+                    width: ${(value - 0.5) * 100}%;
+                  `}
+                `}
+              />
+            )
+          ) : (
+            /* Left-to-thumb fill for linear sliders */
+            <div
+              css={css`
+                position: absolute;
+                top: 0;
+                left: 0;
+                height: 100%;
+                width: ${percentage}%;
+                border-radius: ${theme.borderRadius.full};
+                background: ${theme.colors.accent};
+                transition: ${dragging ? 'none' : 'width 50ms ease-out'};
+              `}
+            />
+          )}
         </div>
-        {/* Neutral marker */}
+
+        {/* Neutral center tick */}
         {showNeutral && (
           <div
             css={css`
               position: absolute;
               left: 50%;
               width: 2px;
-              height: 8px;
+              height: 14px;
               background: ${theme.colors.border.default};
               transform: translateX(-50%);
               border-radius: 1px;
+              opacity: ${isNeutral ? 0.7 : 0.3};
+              transition: opacity ${theme.transitions.fast};
             `}
           />
         )}
+
         {/* Thumb */}
         <div
           css={css`
             position: absolute;
             left: ${percentage}%;
-            width: 16px;
-            height: 16px;
+            width: ${dragging ? 20 : 18}px;
+            height: ${dragging ? 20 : 18}px;
             border-radius: 50%;
             background: ${theme.colors.accent};
             transform: translateX(-50%);
-            transition: ${dragging ? 'none' : `left 50ms ease-out`};
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+            transition: ${dragging ? 'width 100ms, height 100ms' : 'left 50ms ease-out, width 100ms, height 100ms'};
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08);
             pointer-events: none;
-
-            &:hover {
-              box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2);
-            }
           `}
         />
       </div>

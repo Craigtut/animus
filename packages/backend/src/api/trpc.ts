@@ -57,7 +57,7 @@ export async function createTRPCContext({
       // WebSocket raw IncomingMessage — manually verify JWT from cookie
       const token = extractCookieValue(req.headers.cookie, COOKIE_NAME);
       if (token) {
-        const decoded = verifyJwt(token) as JwtPayload;
+        const decoded = await verifyJwt(token) as JwtPayload;
         userId = decoded.userId;
       }
     }

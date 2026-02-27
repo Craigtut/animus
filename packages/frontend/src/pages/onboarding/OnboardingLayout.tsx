@@ -1,11 +1,24 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { useLocation, useOutlet } from 'react-router-dom';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { FluidBackground } from '../../components/effects/FluidBackground';
 import { TauriDragRegion } from '../../components/layout/TauriDragRegion';
 import { Typography } from '../../components/ui';
+import { useState } from 'react';
 import type { OnboardingStep } from '../../store';
+
+/**
+ * Freezes the outlet element so exiting AnimatePresence motion.divs
+ * still show the OLD route's content during exit animations.
+ * Without this, <Outlet /> re-renders with the new route immediately,
+ * causing a flash of the new page before the exit animation plays.
+ */
+function FrozenOutlet() {
+  const outlet = useOutlet();
+  const [frozen] = useState(outlet);
+  return frozen;
+}
 
 const setupSteps: { step: OnboardingStep; label: string; path: string }[] = [
   { step: 'welcome', label: 'Welcome', path: '/onboarding/welcome' },
@@ -57,7 +70,7 @@ export function OnboardingLayout() {
           display: flex;
           flex-direction: column;
           align-items: center;
-          padding: ${theme.spacing[5]} ${theme.spacing[4]} ${theme.spacing[2]};
+          padding: calc(${theme.spacing[5]} + var(--titlebar-area-height, 0px)) ${theme.spacing[4]} ${theme.spacing[2]};
           gap: 5px;
         `}
         aria-label="Onboarding progress"
@@ -165,7 +178,7 @@ export function OnboardingLayout() {
               exit={{ opacity: 0, x: -30 }}
               transition={{ duration: 0.25, ease: 'easeOut' }}
             >
-              <Outlet />
+              <FrozenOutlet />
             </motion.div>
           </AnimatePresence>
         </div>

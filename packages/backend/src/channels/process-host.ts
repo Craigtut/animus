@@ -294,8 +294,8 @@ export class ChannelProcessHost {
           msg.identifier,
           {
             status: msg.status,
-            statusText: msg.statusText,
-            activity: msg.activity,
+            ...(msg.statusText != null ? { statusText: msg.statusText } : {}),
+            ...(msg.activity != null ? { activity: msg.activity } : {}),
           }
         );
       },

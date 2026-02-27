@@ -307,7 +307,7 @@ export async function getOrCreateMindSession(
 
   const session = await agentManager.createSession({
     provider,
-    model,
+    ...(model != null ? { model } : {}),
     cwd: PROJECT_ROOT,
     ...(systemPrompt != null ? {
       systemPrompt: {

@@ -29,25 +29,39 @@ export function WelcomeStep() {
         gap: ${theme.spacing[2]};
       `}
     >
-      {/* Heading */}
-      <motion.h1
+      {/* Logo + Word Mark */}
+      <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 1, delay: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
         css={css`
-          font-size: ${theme.typography.fontSize['5xl']};
-          font-weight: ${theme.typography.fontWeight.medium};
-          line-height: ${theme.typography.lineHeight.tight};
-          letter-spacing: -0.02em;
+          display: flex;
+          flex-direction: row;
+          align-items: center;
+          gap: ${theme.spacing[3]};
           position: relative;
-
-          @media (max-width: ${theme.breakpoints.sm}) {
-            font-size: ${theme.typography.fontSize['4xl']};
-          }
         `}
       >
-        animus.
-      </motion.h1>
+        <img
+          src="/favicon.svg"
+          alt=""
+          css={css`
+            width: 40px;
+            height: 40px;
+          `}
+        />
+        <Typography.Title
+          as="h1"
+          color="#927768"
+          style={{
+            fontSize: 40,
+            fontWeight: theme.typography.fontWeight.light,
+            letterSpacing: '-0.02em',
+          }}
+        >
+          animus
+        </Typography.Title>
+      </motion.div>
 
       {/* Single evocative line — no mechanics, no explanation */}
       <Typography.Subtitle
@@ -58,8 +72,9 @@ export function WelcomeStep() {
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.9, delay: 0.7, ease: [0.25, 0.1, 0.25, 1] }}
+        style={{ fontSize: 20 }}
         css={css`
-          max-width: 360px;
+          max-width: 480px;
           position: relative;
         `}
       >
@@ -72,8 +87,14 @@ export function WelcomeStep() {
         animate={{ opacity: 1 }}
         transition={{ duration: 0.8, delay: 1.3, ease: 'easeOut' }}
         css={css`
-          margin-top: ${theme.spacing[16]};
+          margin-top: ${theme.spacing[12]};
           position: relative;
+
+          & > button {
+            border-radius: 9999px !important;
+            padding-left: 48px !important;
+            padding-right: 48px !important;
+          }
         `}
       >
         <Button

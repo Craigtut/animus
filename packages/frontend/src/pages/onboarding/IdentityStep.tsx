@@ -24,17 +24,20 @@ export function IdentityStep() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-        <Typography.Title2 serif>
-          Tell your AI who you are
-        </Typography.Title2>
-        <Typography.Body color="secondary">
-          This is how your AI will know you across every channel.
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+        <Typography.Body color="secondary" serif css={css`
+          font-style: italic;
+        `}>
+          First introductions
         </Typography.Body>
+        <Typography.Title3 as="h2" css={css`
+          font-weight: ${theme.typography.fontWeight.medium};
+        `}>
+          Tell your Animus who you are
+        </Typography.Title3>
       </div>
 
       <Input
-        label="What should your AI call you?"
         value={fullName}
         onChange={(e) => setFullName((e.target as HTMLInputElement).value)}
         placeholder="Your name"

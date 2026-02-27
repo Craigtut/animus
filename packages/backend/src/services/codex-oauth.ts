@@ -375,7 +375,7 @@ async function pollForAuthCode(session: DeviceCodeSession, db: Database.Database
         if (!tokenResponse.ok) {
           const text = await tokenResponse.text().catch(() => '');
           session.status = 'error';
-          session.error = `Token exchange failed: ${tokenResponse.status} ${text}`;
+          session.error = parseTokenExchangeError(tokenResponse.status, text);
           notifyListeners(session, { status: 'error', message: session.error });
           setTimeout(() => sessions.delete(session.id), 60_000);
           return;
@@ -429,6 +429,33 @@ async function pollForAuthCode(session: DeviceCodeSession, db: Database.Database
       // Continue polling on transient errors
     }
   }
+}
+
+/**
+ * Parse a token exchange error into a user-friendly message.
+ */
+function parseTokenExchangeError(status: number, responseText: string): string {
+  try {
+    const data = JSON.parse(responseText) as Record<string, unknown>;
+    const errorCode = data['error'] as string | undefined;
+    const errorDescription = data['error_description'] as string | undefined;
+
+    if (errorCode === 'token_exchange_user_error') {
+      return 'Your ChatGPT account may not support API access. Check your subscription settings, or use an API key instead.';
+    }
+
+    if (errorDescription) {
+      return errorDescription;
+    }
+
+    if (errorCode) {
+      return `Token exchange failed: ${errorCode}`;
+    }
+  } catch {
+    // Not JSON, fall through
+  }
+
+  return `Token exchange failed (${status}). Try using an API key instead.`;
 }
 
 /**

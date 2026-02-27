@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=../../.env --conditions source src/index.ts",
-    "build": "tsc -p tsconfig.build.json && cp -r src/db/migrations dist/db/migrations && npm run build:frontend",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp -r src/db/migrations dist/db/migrations && npm run build:frontend",
     "build:frontend": "cp -r ../frontend/dist ./dist/public 2>/dev/null || echo 'Frontend not built yet'",
     "start": "node --env-file-if-exists=../../.env dist/index.js",
     "sandbox": "tsx --env-file-if-exists=../../.env --conditions source src/sandbox/index.tsx",

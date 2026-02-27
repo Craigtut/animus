@@ -15,6 +15,7 @@ export {
   resolveToolApprovalDef,
   transcribeAudioDef,
   generateSpeechDef,
+  sendVoiceReplyDef,
 } from './definitions.js';
 export type { AnimusToolDef, AnimusToolName } from './definitions.js';
 

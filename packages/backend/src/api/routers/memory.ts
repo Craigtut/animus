@@ -93,8 +93,8 @@ export const memoryRouter = router({
       // Browse mode: cursor-paginated
       const db = getMemoryDb();
       const rows = memoryStore.getLongTermMemoriesPaginated(db, limit + 1, cursor, {
-        contactId,
-        memoryType,
+        ...(contactId != null ? { contactId } : {}),
+        ...(memoryType != null ? { memoryType } : {}),
       });
 
       const hasMore = rows.length > limit;

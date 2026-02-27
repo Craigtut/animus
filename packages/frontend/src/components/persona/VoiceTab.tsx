@@ -62,7 +62,7 @@ function VoiceCard({
             </Typography.Caption>
           )}
         </div>
-        <Badge variant={voice.type === 'builtin' ? 'default' : 'accent'}>
+        <Badge variant={voice.type === 'builtin' ? 'default' : 'info'}>
           {voice.type === 'builtin' ? 'Built-in' : 'Custom'}
         </Badge>
       </div>

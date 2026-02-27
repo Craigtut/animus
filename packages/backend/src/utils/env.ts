@@ -22,8 +22,8 @@ export const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
  * 1. ANIMUS_DATA_DIR env var (Docker, Tauri, explicit override)
  * 2. ./data/ relative to project root (dev default)
  */
-export const DATA_DIR: string = process.env.ANIMUS_DATA_DIR
-  ? path.resolve(process.env.ANIMUS_DATA_DIR)
+export const DATA_DIR: string = process.env['ANIMUS_DATA_DIR']
+  ? path.resolve(process.env['ANIMUS_DATA_DIR'])
   : path.join(PROJECT_ROOT, 'data');
 
 // ---------------------------------------------------------------------------

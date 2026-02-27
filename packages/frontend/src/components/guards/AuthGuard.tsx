@@ -21,6 +21,15 @@ export function AuthGuard({ children }: AuthGuardProps) {
     refetchOnWindowFocus: false,
   });
 
+  // Always check if any user exists — used to redirect to /register vs /login.
+  // This runs unconditionally (not gated on auth.me) to avoid a timing gap
+  // where auth.me finishes but the status query hasn't started yet.
+  const { data: authStatus, isLoading: statusLoading } = trpc.auth.status.useQuery(undefined, {
+    retry: 3,
+    retryDelay: 1000,
+    refetchOnWindowFocus: false,
+  });
+
   // Check onboarding status for non-onboarding routes
   const isOnboardingRoute = location.pathname.startsWith('/onboarding');
   const { data: onboardingState, isLoading: onboardingLoading } = trpc.onboarding.getState.useQuery(
@@ -37,7 +46,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
     }
   }, [meData, error, setUser, logout]);
 
-  if (authLoading || (meData && !isOnboardingRoute && onboardingLoading)) {
+  if (authLoading || statusLoading || (meData && !isOnboardingRoute && onboardingLoading)) {
     return (
       <div css={css`
         min-height: 100vh;
@@ -52,6 +61,10 @@ export function AuthGuard({ children }: AuthGuardProps) {
   }
 
   if (!meData) {
+    // No user exists yet — go to registration instead of login
+    if (authStatus && !authStatus.hasUser) {
+      return <Navigate to="/register" replace />;
+    }
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 

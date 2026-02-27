@@ -53,13 +53,17 @@ export function ValuesStep() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-        <Typography.Title3 as="h2" serif>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+        <Typography.Body color="secondary" serif css={css`
+          font-style: italic;
+        `}>
           What matters most?
-        </Typography.Title3>
-        <Typography.Body color="secondary">
-          Pick your top 3 to 5 values and rank them. When values conflict, higher-ranked values win.
         </Typography.Body>
+        <Typography.Title3 as="h2" css={css`
+          font-weight: ${theme.typography.fontWeight.medium};
+        `}>
+          Choose their core values and rank them by importance
+        </Typography.Title3>
       </div>
 
       {/* Ranked summary */}

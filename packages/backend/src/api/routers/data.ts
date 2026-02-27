@@ -1,24 +1,22 @@
 /**
- * Data Management Router — tRPC procedures for data reset and export.
+ * Data Management Router — tRPC procedures for data reset operations.
  *
- * Provides soft reset, full reset, conversation clear, and data export.
+ * Provides soft reset, full reset, and factory reset (complete wipe).
  */
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { router, protectedProcedure } from '../trpc.js';
 import {
   getHeartbeatDb,
   getMemoryDb,
   getMessagesDb,
-  getSystemDb,
-  getPersonaDb,
-  getAgentLogsDb,
+  closeDatabases,
 } from '../../db/index.js';
 import { stopHeartbeat, getVectorStore } from '../../heartbeat/index.js';
-import * as systemStore from '../../db/stores/system-store.js';
-import * as personaStore from '../../db/stores/persona-store.js';
 import * as heartbeatStore from '../../db/stores/heartbeat-store.js';
 import { MEDIA_DIR } from '../routes/media.js';
+import { DATA_DIR } from '../../utils/env.js';
 import { createLogger } from '../../lib/logger.js';
 
 const log = createLogger('DataRouter', 'server');
@@ -151,53 +149,91 @@ export const dataRouter = router({
   }),
 
   /**
-   * Clear all conversations, messages, and media attachments.
+   * Factory reset — wipe all application data and reinitialize in place.
+   *
+   * Gracefully shuts down every background service, then deletes all user
+   * data (databases, media, logs, installed packages, cache, etc.) and
+   * re-opens fresh empty databases. The server stays running throughout;
+   * no process restart needed.
+   *
+   * Preserves system resources that are expensive to re-acquire:
+   *   - .secrets  (JWT + encryption keys, so the running server stays valid)
+   *   - models/   (STT/TTS model weights, ~900 MB)
+   *   - voices/   (builtin + custom voice files)
+   *   - saves/    (user backup snapshots)
+   *
+   * After this, the user will go through registration and onboarding again.
    */
-  clearConversations: protectedProcedure.mutation(() => {
-    const msgDb = getMessagesDb();
-    msgDb.transaction(() => {
-      msgDb.exec('DELETE FROM media_attachments');
-      msgDb.exec('DELETE FROM messages');
-      msgDb.exec('DELETE FROM conversations');
-    })();
-    clearMediaFiles();
-    return { success: true, cleared: 'messages' };
-  }),
+  factoryReset: protectedProcedure.mutation(async () => {
+    log.warn('Factory reset initiated — wiping application data');
 
-  /**
-   * Export all database data as JSON.
-   */
-  export: protectedProcedure.query(() => {
-    const sysDb = getSystemDb();
-    const hbDb = getHeartbeatDb();
-    const memDb = getMemoryDb();
-    const msgDb = getMessagesDb();
+    // Enter maintenance mode so concurrent requests get 503 during the wipe
+    const { setMaintenanceMode } = await import('../../lib/maintenance.js');
+    setMaintenanceMode(true, 'Factory reset in progress...');
 
-    return {
-      exportedAt: new Date().toISOString(),
-      system: {
-        contacts: systemStore.listContacts(sysDb),
-        settings: systemStore.getSystemSettings(sysDb),
-        persona: personaStore.getPersona(getPersonaDb()),
-        channelPackages: systemStore.getChannelPackages(sysDb),
-      },
-      heartbeat: {
-        state: heartbeatStore.getHeartbeatState(hbDb),
-        emotions: heartbeatStore.getEmotionStates(hbDb),
-        thoughts: heartbeatStore.getRecentThoughts(hbDb, 1000),
-        experiences: heartbeatStore.getRecentExperiences(hbDb, 1000),
-      },
-      memory: {
-        workingMemories: memDb.prepare('SELECT * FROM working_memory').all(),
-        coreSelf: memDb.prepare('SELECT * FROM core_self WHERE id = 1').get(),
-        longTermMemories: memDb.prepare('SELECT * FROM long_term_memories LIMIT 1000').all(),
-      },
-      messages: {
-        conversations: msgDb.prepare('SELECT * FROM conversations').all(),
-        messageCount: (
-          msgDb.prepare('SELECT COUNT(*) as count FROM messages').get() as { count: number }
-        ).count,
-      },
-    };
+    try {
+      // 1. Wait for in-flight observational memory operations
+      const { waitForActiveOps } = await import('../../memory/observational-memory/index.js');
+      await waitForActiveOps(10_000);
+
+      // 2. Stop heartbeat (ends mind session, cancels sub-agents, stops task scheduler)
+      await stopHeartbeat();
+
+      // 3. Stop all channel child processes
+      const { getChannelManager } = await import('../../channels/channel-manager.js');
+      const channelManager = getChannelManager();
+      await channelManager.stopAll();
+
+      // 4. Stop plugin trigger watchers and clean up skill symlinks
+      const { getPluginManager } = await import('../../services/plugin-manager.js');
+      const pluginManager = getPluginManager();
+      await pluginManager.stopTriggers();
+      await pluginManager.cleanupSkills();
+
+      // 5. Cancel any in-progress downloads
+      const { getDownloadManager } = await import('../../downloads/index.js');
+      try {
+        getDownloadManager().cancelAll();
+      } catch {
+        // Download manager may not be initialized
+      }
+
+      // 6. Release native speech engine resources (TTS/STT models)
+      const { getSpeechService } = await import('../../speech/speech-service.js');
+      try {
+        await getSpeechService().shutdown();
+      } catch {
+        // Speech service may not be initialized
+      }
+
+      // 7. Close all database connections
+      closeDatabases();
+
+      // 8. Selectively delete data directory contents, preserving
+      //    secrets (server identity), models, voices, and saves
+      const PRESERVE = new Set(['.secrets', 'models', 'voices', 'saves']);
+
+      try {
+        const entries = fs.readdirSync(DATA_DIR, { withFileTypes: true });
+        for (const entry of entries) {
+          if (PRESERVE.has(entry.name)) continue;
+          const fullPath = path.join(DATA_DIR, entry.name);
+          fs.rmSync(fullPath, { recursive: true, force: true });
+        }
+        log.info('Data directory wiped (preserved: .secrets, models, voices, saves)');
+      } catch (err) {
+        log.error('Failed to wipe data directory:', err);
+      }
+
+      // 9. Re-initialize fresh databases (creates empty DBs, runs migrations)
+      const { initializeDatabases } = await import('../../db/index.js');
+      await initializeDatabases();
+
+      log.info('Factory reset complete — server reinitialized with fresh databases');
+    } finally {
+      setMaintenanceMode(false, '');
+    }
+
+    return { success: true };
   }),
 });

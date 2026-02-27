@@ -25,13 +25,17 @@ export function BackgroundStep() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-        <Typography.Title3 as="h2" serif>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+        <Typography.Body color="secondary" serif css={css`
+          font-style: italic;
+        `}>
           Give them depth
-        </Typography.Title3>
-        <Typography.Body color="secondary">
-          Structure gets you far, but the details make it real.
         </Typography.Body>
+        <Typography.Title3 as="h2" css={css`
+          font-weight: ${theme.typography.fontWeight.medium};
+        `}>
+          The details that make a personality real
+        </Typography.Title3>
       </div>
 
       <Input

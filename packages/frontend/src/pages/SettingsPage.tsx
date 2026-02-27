@@ -36,6 +36,7 @@ import {
   CaretDown,
   ArrowRight,
   Wrench,
+  SignOut,
 } from '@phosphor-icons/react';
 import { Card, SelectionCard, Button, Input, Modal, Badge, Toggle, Slider, Typography, Tooltip } from '../components/ui';
 import { trpc } from '../utils/trpc';
@@ -621,6 +622,16 @@ function ProviderSection() {
     },
   });
 
+  // Codex CLI auth mutations
+  const codexCliInitiateMutation = trpc.codexCliAuth.initiate.useMutation();
+  const codexCliCancelMutation = trpc.codexCliAuth.cancel.useMutation();
+  const codexCliLogoutMutation = trpc.codexCliAuth.logout.useMutation({
+    onSuccess: () => {
+      utils.provider.hasKey.invalidate();
+      utils.provider.detect.invalidate();
+    },
+  });
+
   const activeProvider = systemSettings?.defaultAgentProvider ?? 'claude';
   const activeModel = systemSettings?.defaultModel ?? null;
 
@@ -653,6 +664,11 @@ function ProviderSection() {
   const [claudeOAuthSession, setClaudeOAuthSession] = useState<string | null>(null);
   const [claudeOAuthStatus, setClaudeOAuthStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
   const [claudeOAuthMessage, setClaudeOAuthMessage] = useState('');
+
+  // Codex CLI auth state
+  const [codexCliAuthSession, setCodexCliAuthSession] = useState<string | null>(null);
+  const [codexCliAuthStatus, setCodexCliAuthStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
+  const [codexCliAuthMessage, setCodexCliAuthMessage] = useState('');
 
   // detect may clean up stale CLI credentials; refetch hasKey to stay in sync
   useEffect(() => {
@@ -730,7 +746,29 @@ function ProviderSection() {
     }
   );
 
+  // Codex CLI auth status subscription
+  trpc.codexCliAuth.status.useSubscription(
+    { sessionId: codexCliAuthSession! },
+    {
+      enabled: codexCliAuthSession !== null && codexCliAuthStatus === 'pending',
+      onData: (data) => {
+        if (data.status === 'success') {
+          setCodexCliAuthStatus('success');
+          utils.provider.hasKey.invalidate();
+          utils.provider.detect.invalidate();
+        } else if (data.status === 'error') {
+          setCodexCliAuthStatus('error');
+          setCodexCliAuthMessage(data.message ?? 'Authentication failed');
+        } else if (data.status === 'cancelled') {
+          setCodexCliAuthStatus('idle');
+        }
+      },
+    }
+  );
+
   // Derive CLI detection
+  const claudeCliInstalled = detectData?.find((d) => d.provider === 'claude')?.cliInstalled ?? false;
+  const codexCliInstalled = detectData?.find((d) => d.provider === 'codex')?.cliInstalled ?? false;
   const claudeCliAvailable = detectData?.find((d) => d.provider === 'claude')?.methods.some((m) => m.method === 'cli' && m.available) ?? false;
   const codexCliAvailable = detectData?.find((d) => d.provider === 'codex')?.methods.some((m) => m.method === 'cli' && m.available) ?? false;
 
@@ -746,6 +784,12 @@ function ProviderSection() {
   const getCliAvailable = (provider: string) => {
     if (provider === 'claude') return claudeCliAvailable;
     if (provider === 'codex') return codexCliAvailable;
+    return false;
+  };
+
+  const getCliInstalled = (provider: string) => {
+    if (provider === 'claude') return claudeCliInstalled;
+    if (provider === 'codex') return codexCliInstalled;
     return false;
   };
 
@@ -929,6 +973,37 @@ function ProviderSection() {
     setClaudeOAuthSession(null);
   };
 
+  const handleCodexCliAuthStart = () => {
+    setCodexCliAuthStatus('pending');
+    setCodexCliAuthMessage('');
+    codexCliInitiateMutation.mutate(undefined, {
+      onSuccess: (result) => setCodexCliAuthSession(result.sessionId),
+      onError: (err) => {
+        setCodexCliAuthStatus('error');
+        setCodexCliAuthMessage(err.message ?? 'Failed to start authentication');
+      },
+    });
+  };
+
+  const handleCodexCliAuthCancel = () => {
+    if (codexCliAuthSession) codexCliCancelMutation.mutate({ sessionId: codexCliAuthSession });
+    setCodexCliAuthStatus('idle');
+    setCodexCliAuthSession(null);
+  };
+
+  const handleSignOut = (provider: 'claude' | 'codex') => {
+    if (provider === 'claude') {
+      claudeLogoutMutation.mutate();
+    } else {
+      codexCliLogoutMutation.mutate();
+    }
+    // Reset any in-progress auth flows
+    setClaudeOAuthStatus('idle');
+    setClaudeOAuthSession(null);
+    setCodexCliAuthStatus('idle');
+    setCodexCliAuthSession(null);
+  };
+
   const handleCopyCode = async (code: string) => {
     try {
       await navigator.clipboard.writeText(code);
@@ -954,6 +1029,7 @@ function ProviderSection() {
   const currentKeyData = getKeyData(selectedProvider);
   const currentHasCredentials = hasCredentials(selectedProvider);
   const currentCliAvailable = getCliAvailable(selectedProvider);
+  const currentCliInstalled = getCliInstalled(selectedProvider);
   const needsCredentialSetup = !currentHasCredentials;
 
   // Determine which model is "current" (saved on server)
@@ -992,7 +1068,7 @@ function ProviderSection() {
                 onClick={() => handleProviderClick(provider)}
                 css={css`
                   flex: 1;
-                  padding: ${theme.spacing[2.5]} ${theme.spacing[3]};
+                  padding: ${theme.spacing[3]} ${theme.spacing[3]};
                   display: flex;
                   align-items: center;
                   justify-content: center;
@@ -1211,7 +1287,7 @@ function ProviderSection() {
                 onClick={() => setShowAllModels(true)}
                 css={css`
                   width: 100%;
-                  padding: ${theme.spacing[2.5]} ${theme.spacing[4]};
+                  padding: ${theme.spacing[3]} ${theme.spacing[4]};
                   border-top: 1px solid ${theme.colors.border.light};
                   cursor: pointer;
                   display: flex;
@@ -1231,7 +1307,7 @@ function ProviderSection() {
                 onClick={() => setShowAllModels(false)}
                 css={css`
                   width: 100%;
-                  padding: ${theme.spacing[2.5]} ${theme.spacing[4]};
+                  padding: ${theme.spacing[3]} ${theme.spacing[4]};
                   border-top: 1px solid ${theme.colors.border.light};
                   cursor: pointer;
                   display: flex;
@@ -1360,7 +1436,158 @@ function ProviderSection() {
           )}
         </div>
 
-        {/* Collapsed state: show toggle */}
+        {/* State A: CLI authenticated -- signed-in card with sign-out */}
+        {currentCliAvailable && selectedProvider !== 'opencode' && (
+          <div css={css`
+            padding: ${theme.spacing[3]};
+            border-radius: ${theme.borderRadius.sm};
+            border: 1px solid ${theme.colors.success.main}33;
+            background: ${theme.colors.success.main}08;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: ${theme.spacing[3]};
+            margin-bottom: ${theme.spacing[3]};
+          `}>
+            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+              <CheckCircle size={18} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+              <div>
+                <Typography.SmallBody as="div">
+                  {selectedProvider === 'claude' ? 'Claude' : 'Codex'} is signed in
+                </Typography.SmallBody>
+                <Typography.Caption as="div" color="hint">
+                  {selectedProvider === 'claude' ? 'Claude Code' : 'Codex'} CLI authenticated
+                </Typography.Caption>
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleSignOut(selectedProvider as 'claude' | 'codex')}
+              loading={selectedProvider === 'claude' ? claudeLogoutMutation.isPending : codexCliLogoutMutation.isPending}
+              css={css`flex-shrink: 0;`}
+            >
+              <SignOut size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+              Sign out
+            </Button>
+          </div>
+        )}
+
+        {/* State B: CLI installed, not authenticated -- primary sign-in + collapsible alternatives */}
+        {currentCliInstalled && !currentCliAvailable && selectedProvider !== 'opencode' && (
+          <div css={css`
+            display: flex;
+            flex-direction: column;
+            gap: ${theme.spacing[3]};
+            margin-bottom: ${theme.spacing[3]};
+          `}>
+            {/* Primary CLI sign-in */}
+            {(() => {
+              const cliStatus = selectedProvider === 'claude' ? claudeOAuthStatus : codexCliAuthStatus;
+              const cliMessage = selectedProvider === 'claude' ? claudeOAuthMessage : codexCliAuthMessage;
+              const cliIsPending = selectedProvider === 'claude' ? claudeInitiateMutation.isPending : codexCliInitiateMutation.isPending;
+
+              return (
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                  {cliStatus === 'idle' && (
+                    <div css={css`
+                      display: flex;
+                      align-items: center;
+                      justify-content: space-between;
+                      padding: ${theme.spacing[3]};
+                      border: 1px solid ${theme.colors.border.light};
+                      border-radius: ${theme.borderRadius.sm};
+                      gap: ${theme.spacing[2]};
+                    `}>
+                      <div>
+                        <Typography.SmallBody as="div">
+                          {selectedProvider === 'claude' ? 'Claude' : 'ChatGPT'} Sign In
+                        </Typography.SmallBody>
+                        <Typography.Caption as="div" color="hint">
+                          Recommended. Opens a browser to sign in.
+                        </Typography.Caption>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={selectedProvider === 'claude' ? handleClaudeOAuthStart : handleCodexCliAuthStart}
+                        loading={cliIsPending}
+                      >
+                        Sign in
+                      </Button>
+                    </div>
+                  )}
+
+                  {cliStatus === 'pending' && (
+                    <div css={css`
+                      padding: ${theme.spacing[3]};
+                      border: 1px solid ${theme.colors.border.default};
+                      border-radius: ${theme.borderRadius.sm};
+                      display: flex;
+                      flex-direction: column;
+                      gap: ${theme.spacing[3]};
+                    `}>
+                      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                        <CircleNotch
+                          size={14}
+                          css={css`
+                            color: ${theme.colors.text.hint};
+                            animation: spin 1s linear infinite;
+                            @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                          `}
+                        />
+                        <Typography.SmallBody as="div" color="secondary">
+                          Complete sign-in in your browser...
+                        </Typography.SmallBody>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={selectedProvider === 'claude' ? handleClaudeOAuthCancel : handleCodexCliAuthCancel}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+
+                  {cliStatus === 'success' && (
+                    <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
+                      display: flex; align-items: center; gap: ${theme.spacing[2]};
+                      padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                      background: ${theme.colors.success.main}0d;
+                      border-radius: ${theme.borderRadius.sm};
+                    `}>
+                      <CheckCircle size={16} weight="fill" /> Signed in with {selectedProvider === 'claude' ? 'Claude' : 'ChatGPT'}
+                    </Typography.SmallBody>
+                  )}
+
+                  {cliStatus === 'error' && (
+                    <div css={css`
+                      display: flex; align-items: center; justify-content: space-between;
+                      padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                      background: ${theme.colors.error.main}0d;
+                      border-radius: ${theme.borderRadius.sm};
+                    `}>
+                      <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                        <XCircle size={16} weight="fill" /> {cliMessage || 'Failed'}
+                      </Typography.SmallBody>
+                      <Button variant="ghost" size="sm" onClick={() => {
+                        if (selectedProvider === 'claude') {
+                          setClaudeOAuthStatus('idle'); setClaudeOAuthSession(null);
+                        } else {
+                          setCodexCliAuthStatus('idle'); setCodexCliAuthSession(null);
+                        }
+                      }}>
+                        Retry
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Collapsed state: show toggle for alternative methods */}
         {currentHasCredentials && !credentialsExpanded && (
           <button
             onClick={() => setCredentialsExpanded(true)}
@@ -1380,7 +1607,7 @@ function ProviderSection() {
           </button>
         )}
 
-        {/* Expanded credential management */}
+        {/* Expanded credential management (alternative methods) */}
         <AnimatePresence>
           {(credentialsExpanded || needsCredentialSetup) && (
             <motion.div
@@ -1416,119 +1643,13 @@ function ProviderSection() {
                   </button>
                 )}
 
-                {needsCredentialSetup && (
+                {needsCredentialSetup && !currentCliInstalled && (
                   <Typography.SmallBody color="secondary">
                     Set up credentials to use {selectedProvider === 'claude' ? 'Claude' : selectedProvider === 'codex' ? 'Codex' : 'OpenCode'}.
                   </Typography.SmallBody>
                 )}
 
-                {/* CLI detection */}
-                {currentCliAvailable && selectedProvider !== 'opencode' && (
-                  <div css={css`
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    padding: ${theme.spacing[3]};
-                    background: ${theme.colors.background.elevated};
-                    border-radius: ${theme.borderRadius.sm};
-                    gap: ${theme.spacing[2]};
-                  `}>
-                    <Typography.SmallBody as="div" color="secondary">
-                      {selectedProvider === 'claude' ? 'Claude' : 'Codex'} CLI detected
-                    </Typography.SmallBody>
-                    {currentKeyData?.credentialType === 'cli_detected' ? (
-                      <Typography.Caption as="span" color={theme.colors.success.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
-                        <CheckCircle size={14} weight="fill" /> Active
-                      </Typography.Caption>
-                    ) : (
-                      <Button variant="ghost" size="sm" onClick={() => handleUseCli(selectedProvider as 'claude' | 'codex')} loading={useCliMutation.isPending}>
-                        Use CLI
-                      </Button>
-                    )}
-                  </div>
-                )}
-
-                {/* Claude Sign In section */}
-                {selectedProvider === 'claude' && (
-                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                    {claudeOAuthStatus === 'idle' && (
-                      <div css={css`
-                        display: flex;
-                        align-items: center;
-                        justify-content: space-between;
-                        padding: ${theme.spacing[3]};
-                        border: 1px solid ${theme.colors.border.light};
-                        border-radius: ${theme.borderRadius.sm};
-                        gap: ${theme.spacing[2]};
-                      `}>
-                        <div>
-                          <Typography.SmallBody as="div">Claude Sign In</Typography.SmallBody>
-                          <Typography.Caption as="div" color="hint">Use your Claude subscription (Pro/Max)</Typography.Caption>
-                        </div>
-                        <Button size="sm" onClick={handleClaudeOAuthStart} loading={claudeInitiateMutation.isPending}>
-                          Sign in
-                        </Button>
-                      </div>
-                    )}
-
-                    {claudeOAuthStatus === 'pending' && (
-                      <div css={css`
-                        padding: ${theme.spacing[3]};
-                        border: 1px solid ${theme.colors.border.default};
-                        border-radius: ${theme.borderRadius.sm};
-                        display: flex;
-                        flex-direction: column;
-                        gap: ${theme.spacing[3]};
-                      `}>
-                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                          <CircleNotch
-                            size={14}
-                            css={css`
-                              color: ${theme.colors.text.hint};
-                              animation: spin 1s linear infinite;
-                              @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-                            `}
-                          />
-                          <Typography.SmallBody as="div" color="secondary">
-                            Complete sign-in in your browser...
-                          </Typography.SmallBody>
-                        </div>
-                        <Button variant="ghost" size="sm" onClick={handleClaudeOAuthCancel}>
-                          Cancel
-                        </Button>
-                      </div>
-                    )}
-
-                    {claudeOAuthStatus === 'success' && (
-                      <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
-                        display: flex; align-items: center; gap: ${theme.spacing[2]};
-                        padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                        background: ${theme.colors.success.main}0d;
-                        border-radius: ${theme.borderRadius.sm};
-                      `}>
-                        <CheckCircle size={16} weight="fill" /> Signed in with Claude
-                      </Typography.SmallBody>
-                    )}
-
-                    {claudeOAuthStatus === 'error' && (
-                      <div css={css`
-                        display: flex; align-items: center; justify-content: space-between;
-                        padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                        background: ${theme.colors.error.main}0d;
-                        border-radius: ${theme.borderRadius.sm};
-                      `}>
-                        <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
-                          <XCircle size={16} weight="fill" /> {claudeOAuthMessage || 'Failed'}
-                        </Typography.SmallBody>
-                        <Button variant="ghost" size="sm" onClick={() => { setClaudeOAuthStatus('idle'); setClaudeOAuthSession(null); }}>
-                          Retry
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Codex OAuth section */}
+                {/* Codex device-code OAuth (alternative for Codex) */}
                 {selectedProvider === 'codex' && (
                   <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
                     {codexOAuthStatus === 'idle' && (
@@ -1542,10 +1663,10 @@ function ProviderSection() {
                         gap: ${theme.spacing[2]};
                       `}>
                         <div>
-                          <Typography.SmallBody as="div">ChatGPT Sign In</Typography.SmallBody>
-                          <Typography.Caption as="div" color="hint">Use your ChatGPT subscription</Typography.Caption>
+                          <Typography.SmallBody as="div">ChatGPT Device Code</Typography.SmallBody>
+                          <Typography.Caption as="div" color="hint">Use your ChatGPT subscription via device code</Typography.Caption>
                         </div>
-                        <Button size="sm" onClick={handleCodexOAuthStart} loading={codexInitiateMutation.isPending}>
+                        <Button size="sm" variant="secondary" onClick={handleCodexOAuthStart} loading={codexInitiateMutation.isPending}>
                           Sign in
                         </Button>
                       </div>
@@ -1641,6 +1762,86 @@ function ProviderSection() {
                           <XCircle size={16} weight="fill" /> {codexOAuthMessage || 'Failed'}
                         </Typography.SmallBody>
                         <Button variant="ghost" size="sm" onClick={() => { setCodexOAuthStatus('idle'); setCodexOAuthSession(null); setCodexOAuthData(null); }}>
+                          Retry
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Claude Sign In (alternative when not using CLI) */}
+                {selectedProvider === 'claude' && !currentCliInstalled && (
+                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                    {claudeOAuthStatus === 'idle' && (
+                      <div css={css`
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        padding: ${theme.spacing[3]};
+                        border: 1px solid ${theme.colors.border.light};
+                        border-radius: ${theme.borderRadius.sm};
+                        gap: ${theme.spacing[2]};
+                      `}>
+                        <div>
+                          <Typography.SmallBody as="div">Claude Sign In</Typography.SmallBody>
+                          <Typography.Caption as="div" color="hint">Use your Claude subscription (Pro/Max)</Typography.Caption>
+                        </div>
+                        <Button size="sm" onClick={handleClaudeOAuthStart} loading={claudeInitiateMutation.isPending}>
+                          Sign in
+                        </Button>
+                      </div>
+                    )}
+
+                    {claudeOAuthStatus === 'pending' && (
+                      <div css={css`
+                        padding: ${theme.spacing[3]};
+                        border: 1px solid ${theme.colors.border.default};
+                        border-radius: ${theme.borderRadius.sm};
+                        display: flex;
+                        flex-direction: column;
+                        gap: ${theme.spacing[3]};
+                      `}>
+                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                          <CircleNotch
+                            size={14}
+                            css={css`
+                              color: ${theme.colors.text.hint};
+                              animation: spin 1s linear infinite;
+                              @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                            `}
+                          />
+                          <Typography.SmallBody as="div" color="secondary">
+                            Complete sign-in in your browser...
+                          </Typography.SmallBody>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={handleClaudeOAuthCancel}>
+                          Cancel
+                        </Button>
+                      </div>
+                    )}
+
+                    {claudeOAuthStatus === 'success' && (
+                      <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
+                        display: flex; align-items: center; gap: ${theme.spacing[2]};
+                        padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                        background: ${theme.colors.success.main}0d;
+                        border-radius: ${theme.borderRadius.sm};
+                      `}>
+                        <CheckCircle size={16} weight="fill" /> Signed in with Claude
+                      </Typography.SmallBody>
+                    )}
+
+                    {claudeOAuthStatus === 'error' && (
+                      <div css={css`
+                        display: flex; align-items: center; justify-content: space-between;
+                        padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                        background: ${theme.colors.error.main}0d;
+                        border-radius: ${theme.borderRadius.sm};
+                      `}>
+                        <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                          <XCircle size={16} weight="fill" /> {claudeOAuthMessage || 'Failed'}
+                        </Typography.SmallBody>
+                        <Button variant="ghost" size="sm" onClick={() => { setClaudeOAuthStatus('idle'); setClaudeOAuthSession(null); }}>
                           Retry
                         </Button>
                       </div>
@@ -3249,7 +3450,7 @@ function PluginDetail({
               <Typography.Caption as="span" color="secondary" css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
                 {name}
                 {server.description && (
-                  <span css={css`font-weight: ${theme.typography.fontWeight.regular}; color: ${theme.colors.text.hint}; margin-left: ${theme.spacing[1]};`}>
+                  <span css={css`font-weight: ${theme.typography.fontWeight.normal}; color: ${theme.colors.text.hint}; margin-left: ${theme.spacing[1]};`}>
                     — {server.description}
                   </span>
                 )}
@@ -3364,33 +3565,32 @@ function SystemSection() {
 
   const softResetMutation = trpc.data.softReset.useMutation();
   const fullResetMutation = trpc.data.fullReset.useMutation();
-  const clearConvMutation = trpc.data.clearConversations.useMutation();
-  const exportQuery = trpc.data.export.useQuery(undefined, { enabled: false });
+  const factoryResetMutation = trpc.data.factoryReset.useMutation();
+  const logoutMutation = trpc.auth.logout.useMutation();
 
-  const [confirmAction, setConfirmAction] = useState<'soft' | 'full' | 'clear' | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'soft' | 'full' | 'factory' | null>(null);
+  const [factoryResetting, setFactoryResetting] = useState(false);
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const autostart = useAutostart();
 
-
-  const handleConfirmAction = () => {
+  const handleConfirmAction = async () => {
     const onSuccess = () => setConfirmAction(null);
     if (confirmAction === 'soft') softResetMutation.mutate(undefined, { onSuccess });
     if (confirmAction === 'full') fullResetMutation.mutate(undefined, { onSuccess });
-    if (confirmAction === 'clear') clearConvMutation.mutate(undefined, { onSuccess });
-  };
-
-  const handleExport = async () => {
-    const result = await exportQuery.refetch();
-    if (result.data) {
-      const blob = new Blob([JSON.stringify(result.data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `animus-export-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+    if (confirmAction === 'factory') {
+      setFactoryResetting(true);
+      // Clear the httpOnly session cookie first — frontend JS can't delete
+      // httpOnly cookies, so we need the server to send a Set-Cookie clearing it.
+      try { await logoutMutation.mutateAsync(); } catch { /* ok */ }
+      factoryResetMutation.mutate(undefined, {
+        onSuccess: () => {
+          // Server stays running with fresh databases — clear local state and
+          // redirect to register. No delay needed since the server is still up.
+          localStorage.clear();
+          sessionStorage.clear();
+          window.location.replace('/register');
+        },
+      });
     }
   };
 
@@ -3403,9 +3603,9 @@ function SystemSection() {
       title: 'Full reset',
       description: 'This will clear all AI state including memories, conversations, goals, and tasks. Your Animus will be effectively reborn with the same personality but no accumulated knowledge. This cannot be undone.',
     },
-    clear: {
-      title: 'Clear conversations',
-      description: 'This will delete all message history and media across all contacts and channels. This cannot be undone.',
+    factory: {
+      title: 'Reset application',
+      description: 'This will permanently destroy all application data: databases, authentication, persona, memories, conversations, installed packages, and secrets. Speech models, voices, and saves will be preserved. The application will restart and you will need to set it up again from scratch. This cannot be undone.',
     },
   };
 
@@ -3478,7 +3678,7 @@ function SystemSection() {
           </div>
           <div>
             <button
-              onClick={() => setConfirmAction('clear')}
+              onClick={() => setConfirmAction('factory')}
               css={css`
                 font-size: ${theme.typography.fontSize.sm};
                 color: ${theme.colors.error.main};
@@ -3489,29 +3689,10 @@ function SystemSection() {
                 &:hover { opacity: 0.8; }
               `}
             >
-              Clear conversations
+              Reset application
             </button>
             <Typography.Caption as="p" color="hint" css={css`margin-top: ${theme.spacing[0.5]};`}>
-              Delete all message history and media across all contacts and channels.
-            </Typography.Caption>
-          </div>
-          <div>
-            <button
-              onClick={handleExport}
-              css={css`
-                font-size: ${theme.typography.fontSize.sm};
-                color: ${theme.colors.text.primary};
-                cursor: pointer;
-                padding: 0;
-                text-decoration: underline;
-                text-underline-offset: 3px;
-                &:hover { opacity: 0.8; }
-              `}
-            >
-              Export data
-            </button>
-            <Typography.Caption as="p" color="hint" css={css`margin-top: ${theme.spacing[0.5]};`}>
-              Download all databases as a backup file.
+              Completely wipe all data and start fresh. Requires re-setup.
             </Typography.Caption>
           </div>
         </div>
@@ -3565,7 +3746,7 @@ function SystemSection() {
                 variant="danger"
                 size="sm"
                 onClick={handleConfirmAction}
-                loading={softResetMutation.isPending || fullResetMutation.isPending || clearConvMutation.isPending}
+                loading={softResetMutation.isPending || fullResetMutation.isPending || factoryResetting}
               >
                 Confirm
               </Button>
@@ -3576,7 +3757,7 @@ function SystemSection() {
 
       {/* Success/error banners */}
       <AnimatePresence>
-        {(softResetMutation.isSuccess || fullResetMutation.isSuccess || clearConvMutation.isSuccess) && (
+        {(softResetMutation.isSuccess || fullResetMutation.isSuccess) && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

@@ -32,8 +32,10 @@ export interface TTSEngineConfig {
 }
 
 // Re-exported from @animus-labs/tts-native — opaque handle
-type NativeVoiceState = import('@animus-labs/tts-native').VoiceState;
-type NativePocketTTS = import('@animus-labs/tts-native').PocketTTS;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type NativeVoiceState = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type NativePocketTTS = any;
 
 export class TTSEngine {
   private config: TTSEngineConfig;
@@ -67,9 +69,12 @@ export class TTSEngine {
     const ttsDir = path.join(this.config.modelsPath, 'tts');
     log.info('Loading TTS model (native Pocket TTS)...');
 
-    let PocketTTS: typeof import('@animus-labs/tts-native').PocketTTS;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let PocketTTS: any;
     try {
-      ({ PocketTTS } = await import('@animus-labs/tts-native'));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // @ts-expect-error -- @animus-labs/tts-native has no type declarations until native build
+      ({ PocketTTS } = await import('@animus-labs/tts-native') as any);
     } catch (err) {
       throw new Error(
         'Native TTS addon not built. Run: npm run build -w @animus-labs/tts-native (requires Rust toolchain)',

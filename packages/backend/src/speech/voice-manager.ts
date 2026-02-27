@@ -164,7 +164,7 @@ export class VoiceManager {
       name,
       type: 'custom',
       filePath,
-      description,
+      ...(description != null ? { description } : {}),
       addedAt: new Date().toISOString(),
     };
 

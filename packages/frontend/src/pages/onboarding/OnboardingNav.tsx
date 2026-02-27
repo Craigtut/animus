@@ -37,10 +37,10 @@ export function OnboardingNav({
 }: OnboardingNavProps) {
   const theme = useTheme();
 
-  // RGB base for gradient — must match the opaque canvas background.
+  // RGB base for gradient — slightly warmer than the canvas background.
   const gradientBase =
     theme.mode === 'light'
-      ? '250, 249, 244' // #FAF9F4
+      ? '245, 240, 231' // #F5F0E7 — warm linen
       : '28, 26, 24'; // #1C1A18
 
   // Portal to document.body so the fixed nav isn't affected by
@@ -123,21 +123,27 @@ export function OnboardingNav({
                   display: flex;
                   align-items: center;
                   justify-content: center;
-                  width: 40px;
+                  gap: ${theme.spacing[2]};
                   height: 40px;
+                  width: 40px;
+                  padding: 0;
                   border-radius: ${theme.borderRadius.full};
                   border: none;
-                  background: transparent;
-                  color: ${theme.colors.text.secondary};
+                  background: ${theme.colors.text.primary};
+                  color: ${theme.colors.background.default};
                   cursor: pointer;
                   font-family: inherit;
+                  font-size: ${theme.typography.fontSize.sm};
+                  font-weight: ${theme.typography.fontWeight.medium};
                   transition: all ${theme.transitions.fast};
 
+                  @media (min-width: ${theme.breakpoints.md}) {
+                    width: auto;
+                    padding: 0 ${theme.spacing[4]} 0 ${theme.spacing[3]};
+                  }
+
                   &:hover {
-                    background: ${theme.colors.background.elevated};
-                    backdrop-filter: blur(8px);
-                    -webkit-backdrop-filter: blur(8px);
-                    color: ${theme.colors.text.primary};
+                    opacity: 0.85;
                   }
 
                   &:focus-visible {
@@ -146,7 +152,18 @@ export function OnboardingNav({
                   }
                 `}
               >
-                <ArrowLeft size={20} />
+                <ArrowLeft size={18} weight="bold" />
+                <span
+                  css={css`
+                    display: none;
+
+                    @media (min-width: ${theme.breakpoints.md}) {
+                      display: inline;
+                    }
+                  `}
+                >
+                  Back
+                </span>
               </motion.button>
             )}
           </div>
@@ -192,7 +209,7 @@ export function OnboardingNav({
                   onClick={onContinue}
                   disabled={continueDisabled}
                   loading={continueLoading}
-                  css={css`min-width: 120px;`}
+                  css={css`min-width: 120px; border-radius: ${theme.borderRadius.full};`}
                 >
                   {continueLabel}
                 </Button>
@@ -202,7 +219,7 @@ export function OnboardingNav({
                 onClick={onContinue}
                 disabled={continueDisabled}
                 loading={continueLoading}
-                css={css`min-width: 120px;`}
+                css={css`min-width: 120px; border-radius: ${theme.borderRadius.full};`}
               >
                 {continueLabel}
               </Button>

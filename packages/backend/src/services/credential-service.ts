@@ -378,12 +378,46 @@ async function detectCodexAuth(db: Database.Database): Promise<ProviderAuthStatu
     // Table may not exist yet
   }
 
-  // Check filesystem — ~/.codex/auth.json
-  try {
-    const authPath = join(homedir(), '.codex', 'auth.json');
-    if (existsSync(authPath)) {
+  // When CLI is installed, ask it directly whether it's authenticated.
+  // This is the source of truth (handles auth.json, token refresh, etc.)
+  if (cliInstalled) {
+    const cliAuth = await checkCodexCliAuth();
+    if (cliAuth.authenticated) {
       const alreadyHasCli = methods.some((m) => m.method === 'cli');
       if (!alreadyHasCli) {
+        methods.push({
+          method: 'cli',
+          available: true,
+          source: 'filesystem',
+          detail: 'Codex CLI authenticated',
+        });
+      }
+    } else {
+      // CLI says not authenticated. If we have a stale cli_detected record, clean it up.
+      try {
+        const hasStaleCli = systemStore.getCredentialMetadata(db, 'codex')
+          .some((m) => m.credentialType === 'cli_detected');
+        if (hasStaleCli) {
+          log.info('Codex CLI no longer authenticated, removing stale cli_detected credential');
+          systemStore.deleteCredential(db, 'codex', 'cli_detected');
+          delete process.env['CODEX_CLI_CONFIGURED'];
+        }
+      } catch {
+        // Ignore
+      }
+
+      methods.push({
+        method: 'cli',
+        available: false,
+        source: 'filesystem',
+        detail: 'Codex CLI installed but not authenticated',
+      });
+    }
+  } else {
+    // CLI not installed: fall back to filesystem check for auth.json
+    try {
+      const authPath = join(homedir(), '.codex', 'auth.json');
+      if (existsSync(authPath)) {
         methods.push({
           method: 'cli',
           available: true,
@@ -391,19 +425,9 @@ async function detectCodexAuth(db: Database.Database): Promise<ProviderAuthStatu
           detail: 'Codex auth.json found',
         });
       }
+    } catch {
+      // Ignore
     }
-  } catch {
-    // Ignore
-  }
-
-  // Binary is in PATH but no auth file found — CLI installed but not authenticated
-  if (cliInstalled && !methods.some((m) => m.method === 'cli')) {
-    methods.push({
-      method: 'cli',
-      available: false,
-      source: 'filesystem',
-      detail: 'Codex CLI installed but not authenticated',
-    });
   }
 
   return {
@@ -558,6 +582,23 @@ function checkBinaryExists(name: string): Promise<boolean> {
 }
 
 /**
+ * Check Codex CLI authentication status by running `codex login status`.
+ * Uses exit code only: 0 = authenticated, non-zero = not authenticated.
+ */
+function checkCodexCliAuth(): Promise<{ authenticated: boolean }> {
+  return new Promise((resolve) => {
+    execFile(
+      'codex',
+      ['login', 'status'],
+      { timeout: 5000 },
+      (err) => {
+        resolve({ authenticated: !err });
+      }
+    );
+  });
+}
+
+/**
  * Check Claude CLI authentication status by running `claude auth status --json`.
  * Returns the actual auth state, which may differ from our DB records
  * (e.g., if the user logged out via command line).
@@ -582,7 +623,7 @@ function checkClaudeCliAuth(): Promise<{ authenticated: boolean; email?: string 
           const status = JSON.parse(stdout) as Record<string, unknown>;
           const authenticated = status['loggedIn'] === true || status['authenticated'] === true;
           const email = (status['email'] as string) || undefined;
-          resolve({ authenticated, email });
+          resolve({ authenticated, ...(email != null ? { email } : {}) });
         } catch {
           // Couldn't parse output; be conservative
           resolve({ authenticated: false });

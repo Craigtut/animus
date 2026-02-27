@@ -14,6 +14,8 @@ import {
   Warning,
   ArrowsClockwise,
   Terminal,
+  CaretRight,
+  SignOut,
 } from '@phosphor-icons/react';
 import { Button, SelectionCard, Tooltip, Typography } from '../../components/ui';
 import { useOnboardingStore } from '../../store';
@@ -21,8 +23,6 @@ import { OnboardingNav } from './OnboardingNav';
 import { trpc } from '../../utils/trpc';
 
 type Provider = 'claude' | 'codex';
-type ClaudeAuthTab = 'sign_in' | 'api_key';
-type CodexAuthTab = 'chatgpt' | 'api_key';
 
 export function AgentProviderStep() {
   const theme = useTheme();
@@ -37,16 +37,17 @@ export function AgentProviderStep() {
   const [authMethod, setAuthMethod] = useState<'cli' | 'key' | 'codex_oauth' | 'claude_oauth' | null>(null);
   const [codexOAuthSession, setCodexOAuthSession] = useState<string | null>(null);
 
-  // Claude OAuth state
+  // Claude OAuth state (spawns `claude auth login`)
   const [claudeOAuthSession, setClaudeOAuthSession] = useState<string | null>(null);
   const [claudeOAuthStatus, setClaudeOAuthStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
   const [claudeOAuthMessage, setClaudeOAuthMessage] = useState('');
 
-  // Auth method tabs
-  const [claudeAuthTab, setClaudeAuthTab] = useState<ClaudeAuthTab>('sign_in');
-  const [codexAuthTab, setCodexAuthTab] = useState<CodexAuthTab>('chatgpt');
+  // Codex CLI auth state (spawns `codex login`)
+  const [codexCliAuthSession, setCodexCliAuthSession] = useState<string | null>(null);
+  const [codexCliAuthStatus, setCodexCliAuthStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
+  const [codexCliAuthMessage, setCodexCliAuthMessage] = useState('');
 
-  // Codex OAuth UI state
+  // Codex device-code OAuth UI state
   const [codexOAuthData, setCodexOAuthData] = useState<{
     userCode: string;
     verificationUrl: string;
@@ -58,6 +59,9 @@ export function AgentProviderStep() {
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
 
+  // Collapsible alternative methods
+  const [altMethodsExpanded, setAltMethodsExpanded] = useState(false);
+
   // Detection query
   const { data: detectData, refetch: refetchDetect, isFetching: isDetecting } = trpc.provider.detect.useQuery();
 
@@ -65,10 +69,24 @@ export function AgentProviderStep() {
   const validateMutation = trpc.provider.validateKey.useMutation();
   const saveKeyMutation = trpc.provider.saveKey.useMutation();
   const useCliMutation = trpc.provider.useCli.useMutation();
+
+  // Device-code OAuth (Codex)
   const codexInitiateMutation = trpc.codexAuth.initiate.useMutation();
   const codexCancelMutation = trpc.codexAuth.cancel.useMutation();
+
+  // CLI auth (Claude: `claude auth login`)
   const claudeInitiateMutation = trpc.claudeAuth.initiate.useMutation();
   const claudeCancelMutation = trpc.claudeAuth.cancel.useMutation();
+  const claudeLogoutMutation = trpc.claudeAuth.logout.useMutation({
+    onSuccess: () => refetchDetect(),
+  });
+
+  // CLI auth (Codex: `codex login`)
+  const codexCliInitiateMutation = trpc.codexCliAuth.initiate.useMutation();
+  const codexCliCancelMutation = trpc.codexCliAuth.cancel.useMutation();
+  const codexCliLogoutMutation = trpc.codexCliAuth.logout.useMutation({
+    onSuccess: () => refetchDetect(),
+  });
 
   // Claude OAuth status subscription
   trpc.claudeAuth.status.useSubscription(
@@ -79,6 +97,7 @@ export function AgentProviderStep() {
         if (data.status === 'success') {
           setClaudeOAuthStatus('success');
           setAuthMethod('claude_oauth');
+          refetchDetect();
         } else if (data.status === 'error') {
           setClaudeOAuthStatus('error');
           setClaudeOAuthMessage(data.message ?? 'Authentication failed');
@@ -89,7 +108,27 @@ export function AgentProviderStep() {
     }
   );
 
-  // Codex OAuth status subscription
+  // Codex CLI auth status subscription
+  trpc.codexCliAuth.status.useSubscription(
+    { sessionId: codexCliAuthSession! },
+    {
+      enabled: codexCliAuthSession !== null && codexCliAuthStatus === 'pending',
+      onData: (data) => {
+        if (data.status === 'success') {
+          setCodexCliAuthStatus('success');
+          setAuthMethod('cli');
+          refetchDetect();
+        } else if (data.status === 'error') {
+          setCodexCliAuthStatus('error');
+          setCodexCliAuthMessage(data.message ?? 'Authentication failed');
+        } else if (data.status === 'cancelled') {
+          setCodexCliAuthStatus('idle');
+        }
+      },
+    }
+  );
+
+  // Codex device-code OAuth status subscription
   trpc.codexAuth.status.useSubscription(
     { sessionId: codexOAuthSession! },
     {
@@ -139,8 +178,18 @@ export function AgentProviderStep() {
   const claudeCliAvailable = claudeDetect?.methods.some((m) => m.method === 'cli' && m.available) ?? false;
   const codexCliAvailable = codexDetect?.methods.some((m) => m.method === 'cli' && m.available) ?? false;
 
-  // Is the selected provider's CLI installed?
+  // Is the selected provider's CLI installed / authenticated?
   const selectedCliInstalled = provider === 'claude' ? claudeCliInstalled : codexCliInstalled;
+  const cliAvailable = provider === 'claude' ? claudeCliAvailable : codexCliAvailable;
+
+  // Auto-set authMethod when CLI is already authenticated
+  useEffect(() => {
+    if (cliAvailable && authMethod === null) {
+      setAuthMethod('cli');
+    }
+  }, [cliAvailable, authMethod]);
+
+  const canContinue = authMethod !== null || cliAvailable;
 
   // Infer credential type from input prefix (client-side, for badge display)
   const inferredType = (() => {
@@ -165,7 +214,6 @@ export function AgentProviderStep() {
       {
         onSuccess: (result) => {
           if (result.valid) {
-            // Auto-save on successful validation
             saveKeyMutation.mutate(
               { provider, key: credential, credentialType: result.credentialType as 'api_key' | 'oauth_token' | undefined },
               {
@@ -192,22 +240,63 @@ export function AgentProviderStep() {
     );
   };
 
-  const handleUseCli = () => {
-    useCliMutation.mutate(
-      { provider },
-      {
-        onSuccess: () => {
-          setAuthMethod('cli');
-        },
-      }
-    );
+  // CLI sign-in handlers
+  const handleClaudeOAuthStart = async () => {
+    setClaudeOAuthStatus('pending');
+    setClaudeOAuthMessage('');
+    claudeInitiateMutation.mutate(undefined, {
+      onSuccess: (result) => setClaudeOAuthSession(result.sessionId),
+      onError: (err) => {
+        setClaudeOAuthStatus('error');
+        setClaudeOAuthMessage(err.message ?? 'Failed to start authentication');
+      },
+    });
   };
 
+  const handleClaudeOAuthCancel = () => {
+    if (claudeOAuthSession) claudeCancelMutation.mutate({ sessionId: claudeOAuthSession });
+    setClaudeOAuthStatus('idle');
+    setClaudeOAuthSession(null);
+  };
+
+  const handleCodexCliAuthStart = async () => {
+    setCodexCliAuthStatus('pending');
+    setCodexCliAuthMessage('');
+    codexCliInitiateMutation.mutate(undefined, {
+      onSuccess: (result) => setCodexCliAuthSession(result.sessionId),
+      onError: (err) => {
+        setCodexCliAuthStatus('error');
+        setCodexCliAuthMessage(err.message ?? 'Failed to start authentication');
+      },
+    });
+  };
+
+  const handleCodexCliAuthCancel = () => {
+    if (codexCliAuthSession) codexCliCancelMutation.mutate({ sessionId: codexCliAuthSession });
+    setCodexCliAuthStatus('idle');
+    setCodexCliAuthSession(null);
+  };
+
+  // Sign out
+  const handleSignOut = (p: Provider) => {
+    if (p === 'claude') {
+      claudeLogoutMutation.mutate();
+    } else {
+      codexCliLogoutMutation.mutate();
+    }
+    setAuthMethod(null);
+    // Reset any in-progress auth flows
+    setClaudeOAuthStatus('idle');
+    setClaudeOAuthSession(null);
+    setCodexCliAuthStatus('idle');
+    setCodexCliAuthSession(null);
+  };
+
+  // Codex device-code OAuth handlers (alternative method)
   const handleCodexOAuthStart = async () => {
     setCodexOAuthStatus('pending');
     setCodexOAuthMessage('');
     setCodexOAuthData(null);
-
     codexInitiateMutation.mutate(undefined, {
       onSuccess: (result) => {
         setCodexOAuthData({
@@ -217,15 +306,10 @@ export function AgentProviderStep() {
         });
         setCodexOAuthSession(result.sessionId);
         setCodexCountdown(result.expiresIn);
-
-        // Start countdown timer
         stopCountdown();
         countdownRef.current = setInterval(() => {
           setCodexCountdown((prev) => {
-            if (prev <= 1) {
-              stopCountdown();
-              return 0;
-            }
+            if (prev <= 1) { stopCountdown(); return 0; }
             return prev - 1;
           });
         }, 1000);
@@ -238,9 +322,7 @@ export function AgentProviderStep() {
   };
 
   const handleCodexOAuthCancel = () => {
-    if (codexOAuthSession) {
-      codexCancelMutation.mutate({ sessionId: codexOAuthSession });
-    }
+    if (codexOAuthSession) codexCancelMutation.mutate({ sessionId: codexOAuthSession });
     setCodexOAuthStatus('cancelled');
     setCodexOAuthSession(null);
     setCodexOAuthData(null);
@@ -253,35 +335,6 @@ export function AgentProviderStep() {
     setCodexOAuthData(null);
     setCodexOAuthMessage('');
     stopCountdown();
-  };
-
-  const handleClaudeOAuthStart = async () => {
-    setClaudeOAuthStatus('pending');
-    setClaudeOAuthMessage('');
-
-    claudeInitiateMutation.mutate(undefined, {
-      onSuccess: (result) => {
-        setClaudeOAuthSession(result.sessionId);
-      },
-      onError: (err) => {
-        setClaudeOAuthStatus('error');
-        setClaudeOAuthMessage(err.message ?? 'Failed to start authentication');
-      },
-    });
-  };
-
-  const handleClaudeOAuthCancel = () => {
-    if (claudeOAuthSession) {
-      claudeCancelMutation.mutate({ sessionId: claudeOAuthSession });
-    }
-    setClaudeOAuthStatus('idle');
-    setClaudeOAuthSession(null);
-  };
-
-  const handleClaudeOAuthRetry = () => {
-    setClaudeOAuthStatus('idle');
-    setClaudeOAuthSession(null);
-    setClaudeOAuthMessage('');
   };
 
   const handleCopyCode = async (code: string) => {
@@ -306,24 +359,23 @@ export function AgentProviderStep() {
     setCredential('');
     setErrorMessage('');
     setAuthMethod(null);
-    // Reset OAuth state when switching
-    if (codexOAuthSession) {
-      codexCancelMutation.mutate({ sessionId: codexOAuthSession });
-    }
+    setAltMethodsExpanded(false);
+    // Reset all OAuth/CLI auth state when switching
+    if (codexOAuthSession) codexCancelMutation.mutate({ sessionId: codexOAuthSession });
     setCodexOAuthStatus('idle');
     setCodexOAuthSession(null);
     setCodexOAuthData(null);
     setCodexOAuthMessage('');
     stopCountdown();
-    if (claudeOAuthSession) {
-      claudeCancelMutation.mutate({ sessionId: claudeOAuthSession });
-    }
+    if (claudeOAuthSession) claudeCancelMutation.mutate({ sessionId: claudeOAuthSession });
     setClaudeOAuthStatus('idle');
     setClaudeOAuthSession(null);
     setClaudeOAuthMessage('');
+    if (codexCliAuthSession) codexCliCancelMutation.mutate({ sessionId: codexCliAuthSession });
+    setCodexCliAuthStatus('idle');
+    setCodexCliAuthSession(null);
+    setCodexCliAuthMessage('');
   };
-
-  const canContinue = authMethod !== null;
 
   const handleContinue = () => {
     markStepComplete('agent_provider');
@@ -333,33 +385,6 @@ export function AgentProviderStep() {
 
   const handleBack = () => navigate('/onboarding/welcome');
 
-  // Shared styles
-  const tabBarCss = css`
-    display: flex;
-    gap: ${theme.spacing[1]};
-    border-bottom: 1px solid ${theme.colors.border.default};
-  `;
-
-  const tabCss = (active: boolean) => css`
-    display: flex;
-    align-items: center;
-    gap: ${theme.spacing[1.5]};
-    padding: ${theme.spacing[2]} ${theme.spacing[4]};
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    font-size: ${theme.typography.fontSize.sm};
-    font-weight: ${active ? theme.typography.fontWeight.medium : theme.typography.fontWeight.normal};
-    color: ${active ? theme.colors.text.primary : theme.colors.text.hint};
-    border-bottom: 2px solid ${active ? theme.colors.text.primary : 'transparent'};
-    transition: color ${theme.transitions.fast}, border-color ${theme.transitions.fast};
-    &:hover { color: ${theme.colors.text.primary}; }
-  `;
-
-  const tabPanelCss = css`
-    padding: ${theme.spacing[4]} 0 0;
-  `;
-
   // Credential input + inline validate row
   const renderCredentialInput = (opts: {
     label: string;
@@ -367,7 +392,6 @@ export function AgentProviderStep() {
     helpLink: { text: string; url: string };
   }) => (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-      {/* Label row with security tooltip */}
       <div css={css`display: flex; align-items: center; gap: ${theme.spacing[1.5]};`}>
         <label css={css`
           font-size: ${theme.typography.fontSize.sm};
@@ -381,8 +405,7 @@ export function AgentProviderStep() {
         </Tooltip>
       </div>
 
-      {/* Input + Validate button inline */}
-      <div css={css`display: flex; gap: ${theme.spacing[2]}; align-items: flex-start;`}>
+      <div css={css`display: flex; gap: ${theme.spacing[2]}; align-items: stretch;`}>
         <div css={css`flex: 1; position: relative;`}>
           <input
             type={showKey ? 'text' : 'password'}
@@ -452,11 +475,7 @@ export function AgentProviderStep() {
           onClick={handleValidate}
           loading={validated === 'validating'}
           disabled={!credential.trim()}
-          css={css`
-            flex-shrink: 0;
-            min-width: 90px;
-            height: 38px;
-          `}
+          css={css`flex-shrink: 0; min-width: 90px;`}
         >
           {validated === 'success' ? (
             <span css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
@@ -466,14 +485,12 @@ export function AgentProviderStep() {
         </Button>
       </div>
 
-      {/* Validation feedback */}
       {validated === 'error' && (
         <Typography.Caption as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
           <XCircle size={12} weight="fill" /> {errorMessage || 'Invalid credential'}
         </Typography.Caption>
       )}
 
-      {/* Help link */}
       <Typography.Caption
         as="a"
         href={opts.helpLink.url}
@@ -481,9 +498,7 @@ export function AgentProviderStep() {
         rel="noopener noreferrer"
         color="hint"
         css={css`
-          display: inline-flex;
-          align-items: center;
-          gap: ${theme.spacing[1]};
+          display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
           text-decoration: none;
           &:hover { color: ${theme.colors.text.secondary}; text-decoration: underline; }
         `}
@@ -493,20 +508,96 @@ export function AgentProviderStep() {
     </div>
   );
 
+  // The pending/error UI for CLI sign-in flows (shared between Claude and Codex)
+  const renderCliAuthFlow = (opts: {
+    status: 'idle' | 'pending' | 'success' | 'error';
+    message: string;
+    onStart: () => void;
+    onCancel: () => void;
+    onRetry: () => void;
+    isPending: boolean;
+    label: string;
+    subtitle: string;
+  }) => {
+    if (opts.status === 'idle') return null; // handled by the primary button
+    if (opts.status === 'pending') {
+      return (
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+            <CircleNotch
+              size={14}
+              css={css`
+                color: ${theme.colors.text.hint};
+                animation: spin 1s linear infinite;
+                @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+              `}
+            />
+            <Typography.Caption as="span" color="secondary">
+              Waiting for authentication... Complete sign-in in your browser.
+            </Typography.Caption>
+          </div>
+          <Button variant="ghost" size="sm" onClick={opts.onCancel}>
+            Cancel
+          </Button>
+        </div>
+      );
+    }
+    if (opts.status === 'success') {
+      return (
+        <div css={css`
+          display: flex; align-items: center; gap: ${theme.spacing[2]};
+          padding: ${theme.spacing[3]};
+          border-radius: ${theme.borderRadius.sm};
+          background: ${theme.colors.success.main}0d;
+          border: 1px solid ${theme.colors.success.main}33;
+        `}>
+          <CheckCircle size={18} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+          <Typography.SmallBody as="span" color={theme.colors.success.main}>
+            {opts.label}
+          </Typography.SmallBody>
+        </div>
+      );
+    }
+    // error
+    return (
+      <div css={css`
+        display: flex; flex-direction: column; gap: ${theme.spacing[3]};
+        padding: ${theme.spacing[3]};
+        border-radius: ${theme.borderRadius.sm};
+        background: ${theme.colors.error.main}0d;
+        border: 1px solid ${theme.colors.error.main}33;
+      `}>
+        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+          <XCircle size={18} weight="fill" css={css`color: ${theme.colors.error.main}; flex-shrink: 0;`} />
+          <Typography.SmallBody as="span" color={theme.colors.error.main}>
+            {opts.message || 'Authentication failed'}
+          </Typography.SmallBody>
+        </div>
+        <Button variant="secondary" size="sm" onClick={opts.onRetry}>
+          Try again
+        </Button>
+      </div>
+    );
+  };
+
+  // Get the current CLI auth flow status for the primary button
+  const cliAuthStatus = provider === 'claude' ? claudeOAuthStatus : codexCliAuthStatus;
+  const cliAuthMessage = provider === 'claude' ? claudeOAuthMessage : codexCliAuthMessage;
+  const cliAuthIsPending = provider === 'claude' ? claudeInitiateMutation.isPending : codexCliInitiateMutation.isPending;
+
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      {/* Header — hierarchy flipped */}
+      {/* Header */}
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
-        <Typography.SmallBody color="secondary" serif css={css`
+        <Typography.Body color="secondary" serif css={css`
           font-style: italic;
-          letter-spacing: 0.01em;
         `}>
           The mind behind the curtain
-        </Typography.SmallBody>
+        </Typography.Body>
         <Typography.Title3 as="h2" css={css`
           font-weight: ${theme.typography.fontWeight.medium};
         `}>
-          Choose which AI will power your Animus
+          Choose a provider for your Animus
         </Typography.Title3>
       </div>
 
@@ -525,12 +616,12 @@ export function AgentProviderStep() {
               padding="md"
               onClick={() => handleSwitchProvider(p)}
             >
-              <div css={css`display: flex; align-items: center; justify-content: space-between; margin-bottom: ${theme.spacing[0.5]};`}>
+              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; margin-bottom: ${theme.spacing[0.5]};`}>
                 <Typography.SmallBodyAlt
                   as="h3"
                   css={css`color: ${theme.colors.text.primary};`}
                 >
-                  {p === 'claude' ? 'Claude' : 'Codex'}
+                  {p === 'claude' ? 'Anthropic' : 'OpenAI'}
                 </Typography.SmallBodyAlt>
                 {detectData && (
                   <Typography.Tiny
@@ -547,8 +638,8 @@ export function AgentProviderStep() {
               </div>
               <Typography.Caption css={css`color: ${theme.colors.text.hint};`}>
                 {p === 'claude'
-                  ? 'Full-featured, most capable.'
-                  : 'Strong agentic abilities.'}
+                  ? 'Uses Claude Code under the hood'
+                  : 'Uses Codex under the hood'}
               </Typography.Caption>
             </SelectionCard>
           );
@@ -556,7 +647,7 @@ export function AgentProviderStep() {
       </div>
 
       {/* ============================================================
-          CLI not installed — blocking prerequisite
+          State C: CLI not installed -- blocking prerequisite
           ============================================================ */}
       {detectData && !selectedCliInstalled && (
         <div css={css`
@@ -639,344 +730,285 @@ export function AgentProviderStep() {
       )}
 
       {/* ============================================================
-          Authentication section — only when CLI is installed
+          State A: CLI already authenticated -- simple signed-in card
           ============================================================ */}
-      {selectedCliInstalled && (
-        <div css={css`display: flex; flex-direction: column; gap: 0;`}>
-
-          {/* CLI detected and authenticated — top-level card */}
-          {((provider === 'claude' && claudeCliAvailable) || (provider === 'codex' && codexCliAvailable)) && (
-            <div css={css`
-              padding: ${theme.spacing[3]} ${theme.spacing[4]};
-              border-radius: ${theme.borderRadius.md};
-              border: 1px solid ${authMethod === 'cli' ? theme.colors.success.main + '33' : theme.colors.border.default};
-              background: ${authMethod === 'cli' ? theme.colors.success.main + '08' : theme.colors.background.elevated};
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-              gap: ${theme.spacing[3]};
-              margin-bottom: ${theme.spacing[4]};
-            `}>
-              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                <CheckCircle size={16} weight="fill" css={css`color: ${theme.colors.success.main};`} />
-                <Typography.SmallBody>
-                  {provider === 'claude' ? 'Claude Code' : 'Codex'} authenticated
-                </Typography.SmallBody>
-              </div>
-              {authMethod === 'cli' ? (
-                <Typography.Caption as="span" color={theme.colors.success.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
-                  Active
-                </Typography.Caption>
-              ) : (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleUseCli}
-                  loading={useCliMutation.isPending}
-                >
-                  Use CLI auth
-                </Button>
-              )}
-            </div>
-          )}
-
-          {/* CLI installed but not authenticated */}
-          {!((provider === 'claude' && claudeCliAvailable) || (provider === 'codex' && codexCliAvailable)) && (
-            <div css={css`
-              padding: ${theme.spacing[3]} ${theme.spacing[4]};
-              border-radius: ${theme.borderRadius.md};
-              border: 1px solid ${theme.colors.border.default};
-              background: ${theme.colors.background.elevated};
-              display: flex;
-              align-items: center;
-              gap: ${theme.spacing[2]};
-              margin-bottom: ${theme.spacing[4]};
-            `}>
-              <Terminal size={15} css={css`color: ${theme.colors.text.hint}; flex-shrink: 0;`} />
-              <Typography.Caption color="secondary">
-                CLI installed. Authenticate below, or run{' '}
-                <code css={css`font-family: ${theme.typography.fontFamily.mono}; font-size: inherit;`}>
-                  {provider === 'claude' ? 'claude login' : 'codex auth'}
-                </code>
-                {' '}in your terminal.
+      {selectedCliInstalled && cliAvailable && (
+        <div css={css`
+          padding: ${theme.spacing[4]};
+          border-radius: ${theme.borderRadius.md};
+          border: 1px solid ${theme.colors.success.main}33;
+          background: ${theme.colors.success.main}08;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: ${theme.spacing[3]};
+        `}>
+          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+            <CheckCircle size={22} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+            <div>
+              <Typography.SmallBodyAlt>
+                {provider === 'claude' ? 'Claude' : 'Codex'} is signed in
+              </Typography.SmallBodyAlt>
+              <Typography.Caption color="hint">
+                {provider === 'claude' ? 'Claude Code' : 'Codex'} CLI authenticated
               </Typography.Caption>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleSignOut(provider)}
+            loading={provider === 'claude' ? claudeLogoutMutation.isPending : codexCliLogoutMutation.isPending}
+            css={css`flex-shrink: 0;`}
+          >
+            <SignOut size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+            Sign out
+          </Button>
+        </div>
+      )}
+
+      {/* ============================================================
+          State B: CLI installed, not authenticated
+          ============================================================ */}
+      {selectedCliInstalled && !cliAvailable && (
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+
+          {/* Primary CLI sign-in button */}
+          {cliAuthStatus === 'idle' && (
+            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
               <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => refetchDetect()}
-                loading={isDetecting}
-                css={css`margin-left: auto; flex-shrink: 0;`}
+                size="md"
+                onClick={provider === 'claude' ? handleClaudeOAuthStart : handleCodexCliAuthStart}
+                loading={cliAuthIsPending}
+                css={css`align-self: flex-start;`}
               >
-                <ArrowsClockwise size={12} />
+                Sign in with {provider === 'claude' ? 'Claude' : 'ChatGPT'}
               </Button>
+              <Typography.Tiny color="disabled">
+                Recommended. Opens a browser to sign in.
+              </Typography.Tiny>
             </div>
           )}
 
-          {/* ========== CLAUDE AUTH TABS ========== */}
-          {provider === 'claude' && (
-            <div>
-              <div css={tabBarCss}>
-                <button onClick={() => { setClaudeAuthTab('sign_in'); setCredential(''); setValidated('idle'); setErrorMessage(''); }} css={tabCss(claudeAuthTab === 'sign_in')}>
-                  Sign In
-                </button>
-                <button onClick={() => { setClaudeAuthTab('api_key'); setCredential(''); setValidated('idle'); setErrorMessage(''); }} css={tabCss(claudeAuthTab === 'api_key')}>
-                  API Key
-                </button>
-              </div>
+          {/* CLI auth flow pending/success/error states */}
+          {renderCliAuthFlow({
+            status: cliAuthStatus,
+            message: cliAuthMessage,
+            onStart: provider === 'claude' ? handleClaudeOAuthStart : handleCodexCliAuthStart,
+            onCancel: provider === 'claude' ? handleClaudeOAuthCancel : handleCodexCliAuthCancel,
+            onRetry: () => {
+              if (provider === 'claude') {
+                setClaudeOAuthStatus('idle');
+                setClaudeOAuthSession(null);
+                setClaudeOAuthMessage('');
+              } else {
+                setCodexCliAuthStatus('idle');
+                setCodexCliAuthSession(null);
+                setCodexCliAuthMessage('');
+              }
+            },
+            isPending: cliAuthIsPending,
+            label: `Signed in with ${provider === 'claude' ? 'Claude' : 'ChatGPT'}`,
+            subtitle: '',
+          })}
 
-              <div css={tabPanelCss}>
-                {/* Sign In tab */}
-                {claudeAuthTab === 'sign_in' && claudeOAuthStatus === 'idle' && (
+          {/* Collapsible alternative methods */}
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+            <button
+              onClick={() => setAltMethodsExpanded(!altMethodsExpanded)}
+              css={css`
+                display: flex;
+                align-items: center;
+                gap: ${theme.spacing[1]};
+                padding: 0;
+                background: none;
+                border: none;
+                cursor: pointer;
+                font-size: ${theme.typography.fontSize.sm};
+                color: ${theme.colors.text.hint};
+                &:hover { color: ${theme.colors.text.secondary}; }
+              `}
+            >
+              <CaretRight
+                size={12}
+                css={css`
+                  transition: transform 150ms ease;
+                  transform: rotate(${altMethodsExpanded ? '90deg' : '0deg'});
+                `}
+              />
+              Alternative sign-in methods
+            </button>
+
+            {altMethodsExpanded && (
+              <div css={css`
+                display: flex;
+                flex-direction: column;
+                gap: ${theme.spacing[4]};
+                padding: ${theme.spacing[4]};
+                border-radius: ${theme.borderRadius.md};
+                border: 1px solid ${theme.colors.border.default};
+                background: ${theme.colors.background.elevated};
+              `}>
+
+                {/* Codex device-code OAuth (only for Codex provider) */}
+                {provider === 'codex' && (
                   <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+                    <Typography.SmallBodyAlt>OpenAI Subscription</Typography.SmallBodyAlt>
                     <Typography.Caption color="secondary">
-                      Use your Claude subscription (Pro/Max)
+                      Use your ChatGPT subscription (Plus/Pro/Team) via device code
                     </Typography.Caption>
-                    <Button
-                      size="sm"
-                      onClick={handleClaudeOAuthStart}
-                      loading={claudeInitiateMutation.isPending}
-                    >
-                      Sign in with Claude
-                    </Button>
-                    <Typography.Tiny color="disabled">
-                      Opens a browser window to authenticate with your Anthropic account
-                    </Typography.Tiny>
-                  </div>
-                )}
 
-                {/* Sign In: waiting for browser auth */}
-                {claudeAuthTab === 'sign_in' && claudeOAuthStatus === 'pending' && (
-                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-                    <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                      <CircleNotch
-                        size={14}
-                        css={css`
-                          color: ${theme.colors.text.hint};
-                          animation: spin 1s linear infinite;
-                          @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-                        `}
-                      />
-                      <Typography.Caption as="span" color="secondary">
-                        Waiting for authentication... Complete sign-in in your browser.
-                      </Typography.Caption>
-                    </div>
-                    <Button variant="ghost" size="sm" onClick={handleClaudeOAuthCancel}>
-                      Cancel
-                    </Button>
-                  </div>
-                )}
-
-                {/* Sign In: success */}
-                {claudeAuthTab === 'sign_in' && claudeOAuthStatus === 'success' && (
-                  <div css={css`
-                    display: flex; align-items: center; gap: ${theme.spacing[2]};
-                    padding: ${theme.spacing[3]};
-                    border-radius: ${theme.borderRadius.sm};
-                    background: ${theme.colors.success.main}0d;
-                    border: 1px solid ${theme.colors.success.main}33;
-                  `}>
-                    <CheckCircle size={18} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                    <Typography.SmallBody as="span" color={theme.colors.success.main}>
-                      Signed in with Claude
-                    </Typography.SmallBody>
-                  </div>
-                )}
-
-                {/* Sign In: error */}
-                {claudeAuthTab === 'sign_in' && claudeOAuthStatus === 'error' && (
-                  <div css={css`
-                    display: flex; flex-direction: column; gap: ${theme.spacing[3]};
-                    padding: ${theme.spacing[3]};
-                    border-radius: ${theme.borderRadius.sm};
-                    background: ${theme.colors.error.main}0d;
-                    border: 1px solid ${theme.colors.error.main}33;
-                  `}>
-                    <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                      <XCircle size={18} weight="fill" css={css`color: ${theme.colors.error.main}; flex-shrink: 0;`} />
-                      <Typography.SmallBody as="span" color={theme.colors.error.main}>
-                        {claudeOAuthMessage || 'Authentication failed'}
-                      </Typography.SmallBody>
-                    </div>
-                    <Button variant="secondary" size="sm" onClick={handleClaudeOAuthRetry}>
-                      Try again
-                    </Button>
-                  </div>
-                )}
-
-                {/* API Key tab */}
-                {claudeAuthTab === 'api_key' && renderCredentialInput({
-                  label: 'API Key',
-                  placeholder: 'sk-ant-api03-...',
-                  helpLink: {
-                    text: 'Get an API key at console.anthropic.com',
-                    url: 'https://console.anthropic.com',
-                  },
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* ========== CODEX AUTH TABS ========== */}
-          {provider === 'codex' && (
-            <div>
-              <div css={tabBarCss}>
-                <button onClick={() => { setCodexAuthTab('chatgpt'); setCredential(''); setValidated('idle'); setErrorMessage(''); }} css={tabCss(codexAuthTab === 'chatgpt')}>
-                  ChatGPT Sign In
-                </button>
-                <button onClick={() => { setCodexAuthTab('api_key'); setCredential(''); setValidated('idle'); setErrorMessage(''); }} css={tabCss(codexAuthTab === 'api_key')}>
-                  API Key
-                </button>
-              </div>
-
-              <div css={tabPanelCss}>
-                {/* ChatGPT OAuth tab */}
-                {codexAuthTab === 'chatgpt' && codexOAuthStatus === 'idle' && (
-                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-                    <Typography.Caption color="secondary">
-                      Use your ChatGPT subscription (Plus/Pro/Team)
-                    </Typography.Caption>
-                    <Button
-                      size="sm"
-                      onClick={handleCodexOAuthStart}
-                      loading={codexInitiateMutation.isPending}
-                    >
-                      Sign in with ChatGPT
-                    </Button>
-                    <Typography.Tiny color="disabled">
-                      Requires "Device code authentication" enabled in ChatGPT security settings
-                    </Typography.Tiny>
-                  </div>
-                )}
-
-                {/* ChatGPT OAuth: device code flow in progress */}
-                {codexAuthTab === 'chatgpt' && codexOAuthStatus === 'pending' && codexOAuthData && (
-                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-                    <div>
-                      <Typography.Caption color="hint" css={css`margin-bottom: ${theme.spacing[1]};`}>
-                        1. Open in your browser:
-                      </Typography.Caption>
-                      <Typography.SmallBodyAlt
-                        as="a"
-                        href={codexOAuthData.verificationUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        css={css`
-                          display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
-                          text-decoration: none;
-                          &:hover { text-decoration: underline; }
-                        `}
+                    {codexOAuthStatus === 'idle' && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={handleCodexOAuthStart}
+                        loading={codexInitiateMutation.isPending}
+                        css={css`align-self: flex-start;`}
                       >
-                        {codexOAuthData.verificationUrl} <ArrowSquareOut size={13} />
-                      </Typography.SmallBodyAlt>
-                    </div>
+                        Sign in with device code
+                      </Button>
+                    )}
 
-                    <div>
-                      <Typography.Caption color="hint" css={css`margin-bottom: ${theme.spacing[1]};`}>
-                        2. Enter this code:
-                      </Typography.Caption>
-                      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                        <Typography.SmallBodyAlt as="code" css={css`
-                          font-weight: ${theme.typography.fontWeight.semibold};
-                          letter-spacing: 0.15em;
-                          background: ${theme.colors.background.elevated};
-                          padding: ${theme.spacing[1.5]} ${theme.spacing[3]};
-                          border-radius: ${theme.borderRadius.sm};
-                          border: 1px solid ${theme.colors.border.default};
-                        `}>
-                          {codexOAuthData.userCode}
-                        </Typography.SmallBodyAlt>
-                        <button
-                          onClick={() => handleCopyCode(codexOAuthData.userCode)}
-                          css={css`
-                            display: flex; align-items: center; gap: 4px;
-                            padding: ${theme.spacing[1]} ${theme.spacing[1.5]};
-                            border-radius: ${theme.borderRadius.sm};
-                            color: ${codeCopied ? theme.colors.success.main : theme.colors.text.hint};
-                            cursor: pointer; background: none; border: none;
-                            &:hover { color: ${codeCopied ? theme.colors.success.main : theme.colors.text.primary}; }
-                          `}
-                        >
-                          <Typography.Tiny as="span" color={codeCopied ? theme.colors.success.main : theme.colors.text.hint}>
-                            {codeCopied ? <><CheckCircle size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
-                          </Typography.Tiny>
-                        </button>
+                    {codexOAuthStatus === 'pending' && codexOAuthData && (
+                      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+                        <div>
+                          <Typography.Caption color="hint" css={css`margin-bottom: ${theme.spacing[1]};`}>
+                            1. Open in your browser:
+                          </Typography.Caption>
+                          <Typography.SmallBodyAlt
+                            as="a"
+                            href={codexOAuthData.verificationUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            css={css`
+                              display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
+                              text-decoration: none;
+                              &:hover { text-decoration: underline; }
+                            `}
+                          >
+                            {codexOAuthData.verificationUrl} <ArrowSquareOut size={13} />
+                          </Typography.SmallBodyAlt>
+                        </div>
+
+                        <div>
+                          <Typography.Caption color="hint" css={css`margin-bottom: ${theme.spacing[1]};`}>
+                            2. Enter this code:
+                          </Typography.Caption>
+                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                            <Typography.SmallBodyAlt as="code" css={css`
+                              font-weight: ${theme.typography.fontWeight.semibold};
+                              letter-spacing: 0.15em;
+                              background: ${theme.colors.background.paper};
+                              padding: ${theme.spacing[1.5]} ${theme.spacing[3]};
+                              border-radius: ${theme.borderRadius.sm};
+                              border: 1px solid ${theme.colors.border.default};
+                            `}>
+                              {codexOAuthData.userCode}
+                            </Typography.SmallBodyAlt>
+                            <button
+                              onClick={() => handleCopyCode(codexOAuthData.userCode)}
+                              css={css`
+                                display: flex; align-items: center; gap: 4px;
+                                padding: ${theme.spacing[1]} ${theme.spacing[1.5]};
+                                border-radius: ${theme.borderRadius.sm};
+                                color: ${codeCopied ? theme.colors.success.main : theme.colors.text.hint};
+                                cursor: pointer; background: none; border: none;
+                                &:hover { color: ${codeCopied ? theme.colors.success.main : theme.colors.text.primary}; }
+                              `}
+                            >
+                              <Typography.Tiny as="span" color={codeCopied ? theme.colors.success.main : theme.colors.text.hint}>
+                                {codeCopied ? <><CheckCircle size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
+                              </Typography.Tiny>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                          <CircleNotch
+                            size={14}
+                            css={css`
+                              color: ${theme.colors.text.hint};
+                              animation: spin 1s linear infinite;
+                              @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                            `}
+                          />
+                          <Typography.Caption as="span" color="secondary">
+                            Waiting for authorization...
+                          </Typography.Caption>
+                          {codexCountdown > 0 && (
+                            <Typography.Tiny color="disabled" css={css`margin-left: auto;`}>
+                              {formatCountdown(codexCountdown)}
+                            </Typography.Tiny>
+                          )}
+                        </div>
+
+                        <Button variant="ghost" size="sm" onClick={handleCodexOAuthCancel}>
+                          Cancel
+                        </Button>
                       </div>
-                    </div>
+                    )}
 
-                    <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                      <CircleNotch
-                        size={14}
-                        css={css`
-                          color: ${theme.colors.text.hint};
-                          animation: spin 1s linear infinite;
-                          @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-                        `}
-                      />
-                      <Typography.Caption as="span" color="secondary">
-                        Waiting for authorization...
-                      </Typography.Caption>
-                      {codexCountdown > 0 && (
-                        <Typography.Tiny color="disabled" css={css`margin-left: auto;`}>
-                          {formatCountdown(codexCountdown)}
-                        </Typography.Tiny>
-                      )}
-                    </div>
+                    {codexOAuthStatus === 'success' && (
+                      <div css={css`
+                        display: flex; align-items: center; gap: ${theme.spacing[2]};
+                        padding: ${theme.spacing[3]};
+                        border-radius: ${theme.borderRadius.sm};
+                        background: ${theme.colors.success.main}0d;
+                        border: 1px solid ${theme.colors.success.main}33;
+                      `}>
+                        <CheckCircle size={18} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+                        <Typography.SmallBody as="span" color={theme.colors.success.main}>
+                          Signed in with ChatGPT
+                        </Typography.SmallBody>
+                      </div>
+                    )}
 
-                    <Button variant="ghost" size="sm" onClick={handleCodexOAuthCancel}>
-                      Cancel
-                    </Button>
+                    {(codexOAuthStatus === 'error' || codexOAuthStatus === 'expired') && (
+                      <div css={css`
+                        display: flex; flex-direction: column; gap: ${theme.spacing[3]};
+                        padding: ${theme.spacing[3]};
+                        border-radius: ${theme.borderRadius.sm};
+                        background: ${theme.colors.error.main}0d;
+                        border: 1px solid ${theme.colors.error.main}33;
+                      `}>
+                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                          <XCircle size={18} weight="fill" css={css`color: ${theme.colors.error.main}; flex-shrink: 0;`} />
+                          <Typography.SmallBody as="span" color={theme.colors.error.main}>
+                            {codexOAuthMessage || 'Authorization failed'}
+                          </Typography.SmallBody>
+                        </div>
+                        <Button variant="secondary" size="sm" onClick={handleCodexOAuthRetry}>
+                          Try again
+                        </Button>
+                      </div>
+                    )}
+
+                    {provider === 'codex' && codexOAuthStatus === 'idle' && (
+                      <Typography.Tiny color="disabled">
+                        Requires "Device code authentication" enabled in ChatGPT security settings
+                      </Typography.Tiny>
+                    )}
+
+                    <div css={css`
+                      height: 1px;
+                      background: ${theme.colors.border.default};
+                      margin: ${theme.spacing[1]} 0;
+                    `} />
                   </div>
                 )}
 
-                {/* ChatGPT OAuth: success */}
-                {codexAuthTab === 'chatgpt' && codexOAuthStatus === 'success' && (
-                  <div css={css`
-                    display: flex; align-items: center; gap: ${theme.spacing[2]};
-                    padding: ${theme.spacing[3]};
-                    border-radius: ${theme.borderRadius.sm};
-                    background: ${theme.colors.success.main}0d;
-                    border: 1px solid ${theme.colors.success.main}33;
-                  `}>
-                    <CheckCircle size={18} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                    <Typography.SmallBody as="span" color={theme.colors.success.main}>
-                      Signed in with ChatGPT
-                    </Typography.SmallBody>
-                  </div>
-                )}
-
-                {/* ChatGPT OAuth: error/expired */}
-                {codexAuthTab === 'chatgpt' && (codexOAuthStatus === 'error' || codexOAuthStatus === 'expired') && (
-                  <div css={css`
-                    display: flex; flex-direction: column; gap: ${theme.spacing[3]};
-                    padding: ${theme.spacing[3]};
-                    border-radius: ${theme.borderRadius.sm};
-                    background: ${theme.colors.error.main}0d;
-                    border: 1px solid ${theme.colors.error.main}33;
-                  `}>
-                    <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                      <XCircle size={18} weight="fill" css={css`color: ${theme.colors.error.main}; flex-shrink: 0;`} />
-                      <Typography.SmallBody as="span" color={theme.colors.error.main}>
-                        {codexOAuthMessage || 'Authorization failed'}
-                      </Typography.SmallBody>
-                    </div>
-                    <Button variant="secondary" size="sm" onClick={handleCodexOAuthRetry}>
-                      Try again
-                    </Button>
-                  </div>
-                )}
-
-                {/* API Key tab */}
-                {codexAuthTab === 'api_key' && renderCredentialInput({
+                {/* API Key input */}
+                {renderCredentialInput({
                   label: 'API Key',
-                  placeholder: 'sk-proj-...',
-                  helpLink: {
-                    text: 'Get an API key at platform.openai.com',
-                    url: 'https://platform.openai.com/api-keys',
-                  },
+                  placeholder: provider === 'claude' ? 'sk-ant-api03-...' : 'sk-proj-...',
+                  helpLink: provider === 'claude'
+                    ? { text: 'Get an API key at console.anthropic.com', url: 'https://console.anthropic.com' }
+                    : { text: 'Get an API key at platform.openai.com', url: 'https://platform.openai.com/api-keys' },
                 })}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 

@@ -185,27 +185,37 @@ function copyBackendDist() {
 }
 
 function copyWorkspacePackages() {
-  console.log('[6/7] Copying workspace packages (@animus/shared, @animus/agents)...');
+  console.log('[6/7] Copying workspace packages (@animus-labs/shared, @animus-labs/agents, @animus-labs/tts-native)...');
 
-  const packages = ['shared', 'agents'];
+  const packages = ['shared', 'agents', 'tts-native'];
 
   for (const pkg of packages) {
     const pkgRoot = path.join(ROOT, 'packages', pkg);
-    const destRoot = path.join(RESOURCES_DIR, 'node_modules', '@animus', pkg);
+    const destRoot = path.join(RESOURCES_DIR, 'node_modules', '@animus-labs', pkg);
 
     // Copy package.json
     fs.mkdirSync(destRoot, { recursive: true });
     fs.cpSync(path.join(pkgRoot, 'package.json'), path.join(destRoot, 'package.json'));
 
-    // Copy dist/
+    // Copy dist/ (or native build artifacts for tts-native)
     const distSrc = path.join(pkgRoot, 'dist');
-    if (!fs.existsSync(distSrc)) {
+    if (fs.existsSync(distSrc)) {
+      fs.cpSync(distSrc, path.join(destRoot, 'dist'), { recursive: true });
+    }
+
+    // Copy native addon files (.node binaries, index.js, index.d.ts) for tts-native
+    if (pkg === 'tts-native') {
+      for (const file of fs.readdirSync(pkgRoot)) {
+        if (file.endsWith('.node') || file === 'index.js' || file === 'index.d.ts') {
+          fs.cpSync(path.join(pkgRoot, file), path.join(destRoot, file));
+        }
+      }
+    } else if (!fs.existsSync(distSrc)) {
       console.error(`      ERROR: packages/${pkg}/dist/ does not exist. Run npm run build:prod first.`);
       process.exit(1);
     }
-    fs.cpSync(distSrc, path.join(destRoot, 'dist'), { recursive: true });
 
-    console.log(`      Copied @animus/${pkg}`);
+    console.log(`      Copied @animus-labs/${pkg}`);
   }
 }
 
@@ -215,10 +225,11 @@ function generatePackageJson() {
   const backendPkgPath = path.join(ROOT, 'packages', 'backend', 'package.json');
   const backendPkg = JSON.parse(fs.readFileSync(backendPkgPath, 'utf-8'));
 
-  // Filter out workspace references
+  // Filter out workspace references (local packages copied separately)
   const deps = { ...backendPkg.dependencies };
-  delete deps['@animus/shared'];
-  delete deps['@animus/agents'];
+  delete deps['@animus-labs/shared'];
+  delete deps['@animus-labs/agents'];
+  delete deps['@animus-labs/tts-native'];
 
   const resourcePkg = {
     private: true,
@@ -251,8 +262,8 @@ function verify() {
   const checks = [
     { path: path.join(RESOURCES_DIR, 'backend', 'index.js'), label: 'resources/backend/index.js' },
     { path: path.join(RESOURCES_DIR, 'node_modules', 'fastify'), label: 'resources/node_modules/fastify' },
-    { path: path.join(RESOURCES_DIR, 'node_modules', '@animus', 'shared', 'dist'), label: 'resources/node_modules/@animus/shared/dist' },
-    { path: path.join(RESOURCES_DIR, 'node_modules', '@animus', 'agents', 'dist'), label: 'resources/node_modules/@animus/agents/dist' },
+    { path: path.join(RESOURCES_DIR, 'node_modules', '@animus-labs', 'shared', 'dist'), label: 'resources/node_modules/@animus-labs/shared/dist' },
+    { path: path.join(RESOURCES_DIR, 'node_modules', '@animus-labs', 'agents', 'dist'), label: 'resources/node_modules/@animus-labs/agents/dist' },
   ];
 
   let allOk = true;

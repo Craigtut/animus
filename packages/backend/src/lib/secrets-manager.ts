@@ -128,12 +128,12 @@ export function resolveSecrets(): void {
   }
 
   // Mutate env object so downstream code sees the resolved values
-  (env as Record<string, unknown>).ANIMUS_ENCRYPTION_KEY = encryptionKey;
-  (env as Record<string, unknown>).JWT_SECRET = jwtSecret;
+  (env as Record<string, unknown>)['ANIMUS_ENCRYPTION_KEY'] = encryptionKey;
+  (env as Record<string, unknown>)['JWT_SECRET'] = jwtSecret;
 
   // Scrub process.env to prevent agent bash access via `env`/`printenv`
-  delete process.env.ANIMUS_ENCRYPTION_KEY;
-  delete process.env.JWT_SECRET;
+  delete process.env['ANIMUS_ENCRYPTION_KEY'];
+  delete process.env['JWT_SECRET'];
 }
 
 /**

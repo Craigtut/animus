@@ -24,21 +24,17 @@ export function AboutYouStep() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div>
-        <Typography.Title3
-          as="h2"
-          serif
-          css={css`
-            font-weight: ${theme.typography.fontWeight.light};
-            margin-bottom: ${theme.spacing[2]};
-          `}
-        >
-          What should your AI know about you?
-        </Typography.Title3>
-        <Typography.Body color="secondary">
-          This is context your AI will always carry -- not something it has to learn over time.
-          Think of it as the things you'd tell someone on day one.
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+        <Typography.Body color="secondary" serif css={css`
+          font-style: italic;
+        `}>
+          The things you'd share on day one
         </Typography.Body>
+        <Typography.Title3 as="h2" css={css`
+          font-weight: ${theme.typography.fontWeight.medium};
+        `}>
+          What should your Animus know about you?
+        </Typography.Title3>
       </div>
 
       <Input
@@ -50,7 +46,7 @@ export function AboutYouStep() {
 
       {charCount > 1800 && (
         <Typography.Caption as="p" color="hint">
-          Your AI always carries this context, so keeping it concise helps it stay focused.
+          Your Animus always carries this context, so keeping it concise helps it stay focused.
           You can always add more detail later.
         </Typography.Caption>
       )}

@@ -51,7 +51,6 @@ export function DimensionsStep() {
   const { markStepComplete, setCurrentStep, personaDraft, updatePersonaDraft } = useOnboardingStore();
 
   const [values, setValues] = useState<Record<string, number>>(() => {
-    // Initialize from store if available, otherwise default to 0.5
     const stored = personaDraft.personalityDimensions;
     const initial: Record<string, number> = {};
     dimensionGroups.forEach((g) =>
@@ -76,36 +75,52 @@ export function DimensionsStep() {
   const handleBack = () => navigate('/onboarding/persona/archetype');
 
   return (
-    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-        <Typography.Title3 as="h2" serif>
-          Shape their personality
-        </Typography.Title3>
-        <Typography.Body color="secondary">
-          Slide each dimension to define who they are. Leave anything in the middle if it's not distinctive.
+    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+        <Typography.Body color="secondary" serif css={css`font-style: italic;`}>
+          The spectrum of who they are
         </Typography.Body>
+        <Typography.Title3 as="h2" css={css`
+          font-weight: ${theme.typography.fontWeight.medium};
+        `}>
+          Shape who they are across ten dimensions of personality
+        </Typography.Title3>
       </div>
 
-      {dimensionGroups.map((group) => (
-        <div key={group.title} css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-          <Typography.SmallBodyAlt as="h3" color="hint" css={css`
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-          `}>
-            {group.title}
-          </Typography.SmallBodyAlt>
-          {group.dimensions.map((dim) => (
-            <Slider
-              key={dim.id}
-              value={values[dim.id] ?? 0.5}
-              onChange={(v) => handleChange(dim.id, v)}
-              leftLabel={dim.leftLabel}
-              rightLabel={dim.rightLabel}
-              showNeutral
-            />
-          ))}
-        </div>
-      ))}
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+        {dimensionGroups.map((group) => (
+          <div
+            key={group.title}
+            css={css`
+              background: ${theme.colors.background.paper};
+              border: 1px solid ${theme.colors.border.default};
+              border-radius: ${theme.borderRadius.lg};
+              padding: ${theme.spacing[4]} ${theme.spacing[5]};
+              display: flex;
+              flex-direction: column;
+              gap: ${theme.spacing[4]};
+            `}
+          >
+            <Typography.Caption as="h3" color="hint" css={css`
+              text-transform: uppercase;
+              letter-spacing: 0.08em;
+              font-weight: ${theme.typography.fontWeight.medium};
+            `}>
+              {group.title}
+            </Typography.Caption>
+            {group.dimensions.map((dim) => (
+              <Slider
+                key={dim.id}
+                value={values[dim.id] ?? 0.5}
+                onChange={(v) => handleChange(dim.id, v)}
+                leftLabel={dim.leftLabel}
+                rightLabel={dim.rightLabel}
+                showNeutral
+              />
+            ))}
+          </div>
+        ))}
+      </div>
 
       <OnboardingNav
         onBack={handleBack}

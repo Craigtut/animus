@@ -563,6 +563,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     triggerType: queuedTick.trigger.type,
   });
 
+  let typingTimer: ReturnType<typeof setInterval> | null = null;
   try {
     // Update state: entering gather stage
     heartbeatStore.updateHeartbeatState(hbDb, {
@@ -589,7 +590,6 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     const tickStart = Date.now();
 
     // Start typing indicator for message-triggered ticks
-    let typingTimer: ReturnType<typeof setInterval> | null = null;
     if (queuedTick.trigger.type === 'message' && queuedTick.trigger.channel) {
       const triggerChannel = queuedTick.trigger.channel;
       const triggerMetadata = queuedTick.trigger.metadata as Record<string, unknown> | undefined;

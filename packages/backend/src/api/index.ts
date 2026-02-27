@@ -25,6 +25,7 @@ import { tasksRouter } from './routers/tasks.js';
 import { agentLogsRouter } from './routers/agent-logs.js';
 import { codexAuthRouter } from './routers/codex-auth.js';
 import { claudeAuthRouter } from './routers/claude-auth.js';
+import { codexCliAuthRouter } from './routers/codex-cli-auth.js';
 import { pluginsRouter } from './routers/plugins.js';
 import { savesRouter } from './routers/saves.js';
 import { toolsRouter } from './routers/tools.js';
@@ -53,6 +54,7 @@ export const appRouter = router({
   provider: providerRouter,
   codexAuth: codexAuthRouter,
   claudeAuth: claudeAuthRouter,
+  codexCliAuth: codexCliAuthRouter,
   memory: memoryRouter,
   goals: goalsRouter,
   tasks: tasksRouter,

@@ -1029,7 +1029,7 @@ class PluginManager {
   }
 
   private escapeToml(str: string): string {
-    return str.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+    return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 
   /**
@@ -1443,7 +1443,7 @@ class PluginManager {
         const value = config?.[field.key];
         let hint: string;
         if (field.type === 'oauth') {
-          hint = (typeof value === 'object' && value !== null && (value as Record<string, unknown>).__oauth === true)
+          hint = (typeof value === 'object' && value !== null && (value as Record<string, unknown>)['__oauth'] === true)
             ? '(connected)'
             : '(not connected)';
         } else {
@@ -1587,13 +1587,13 @@ class PluginManager {
 
     const masked: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(config)) {
-      if (oauthKeys.has(key) && typeof value === 'object' && value !== null && (value as Record<string, unknown>).__oauth === true) {
+      if (oauthKeys.has(key) && typeof value === 'object' && value !== null && (value as Record<string, unknown>)['__oauth'] === true) {
         // Mask OAuth token objects: expose connection status but not raw tokens
         const oauthData = value as Record<string, unknown>;
         masked[key] = {
           __oauth: true,
           connected: true,
-          expires_at: oauthData.expires_at ?? null,
+          expires_at: oauthData['expires_at'] ?? null,
         };
       } else if (secretKeys.has(key) && value) {
         masked[key] = '••••••••';

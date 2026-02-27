@@ -1005,7 +1005,11 @@ export class ChannelManager {
       if (!hasAnyPresence) return null;
     }
 
-    return { status: bestStatus, statusText: bestStatusText, activity: bestActivity };
+    return {
+      status: bestStatus,
+      ...(bestStatusText != null ? { statusText: bestStatusText } : {}),
+      ...(bestActivity != null ? { activity: bestActivity } : {}),
+    };
   }
 
   // ---- Skills Deployment ----

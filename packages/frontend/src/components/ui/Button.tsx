@@ -22,17 +22,17 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       sm: css`
         padding: ${theme.spacing[1.5]} ${theme.spacing[3]};
         font-size: ${theme.typography.fontSize.sm};
-        border-radius: ${theme.borderRadius.sm};
+        border-radius: 9999px;
       `,
       md: css`
         padding: ${theme.spacing[2]} ${theme.spacing[5]};
         font-size: ${theme.typography.fontSize.base};
-        border-radius: ${theme.borderRadius.default};
+        border-radius: 9999px;
       `,
       lg: css`
         padding: ${theme.spacing[3]} ${theme.spacing[6]};
         font-size: ${theme.typography.fontSize.lg};
-        border-radius: ${theme.borderRadius.default};
+        border-radius: 9999px;
       `,
     };
 

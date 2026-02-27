@@ -305,12 +305,12 @@ export async function handleCallback(state: string, code: string): Promise<void>
     const oauthTokens: OAuthTokenData = {
       __oauth: true,
       access_token: tokenData.access_token,
-      refresh_token: tokenData.refresh_token,
+      ...(tokenData.refresh_token != null ? { refresh_token: tokenData.refresh_token } : {}),
       expires_at: tokenData.expires_in
         ? Date.now() + tokenData.expires_in * 1000
         : null,
-      scope: tokenData.scope,
-      token_type: tokenData.token_type,
+      ...(tokenData.scope != null ? { scope: tokenData.scope } : {}),
+      ...(tokenData.token_type != null ? { token_type: tokenData.token_type } : {}),
     };
 
     // Store in plugin config under the OAuth config key
@@ -359,7 +359,7 @@ export function getOAuthStatus(
   if (
     typeof value === 'object' &&
     value !== null &&
-    (value as Record<string, unknown>).__oauth === true
+    (value as Record<string, unknown>)['__oauth'] === true
   ) {
     const oauthData = value as OAuthTokenData;
     return {
@@ -394,7 +394,7 @@ export async function refreshTokens(
   if (
     typeof value !== 'object' ||
     value === null ||
-    !(value as Record<string, unknown>).__oauth
+    !(value as Record<string, unknown>)['__oauth']
   ) {
     throw new Error(`"${configKey}" in plugin "${pluginName}" is not an OAuth token object.`);
   }
@@ -441,6 +441,8 @@ export async function refreshTokens(
   }
 
   // Update the token object (preserve existing refresh_token if not rotated)
+  const resolvedScope = refreshed.scope ?? oauthData.scope;
+  const resolvedTokenType = refreshed.token_type ?? oauthData.token_type;
   const updatedTokens: OAuthTokenData = {
     __oauth: true,
     access_token: refreshed.access_token,
@@ -448,8 +450,8 @@ export async function refreshTokens(
     expires_at: refreshed.expires_in
       ? Date.now() + refreshed.expires_in * 1000
       : null,
-    scope: refreshed.scope ?? oauthData.scope,
-    token_type: refreshed.token_type ?? oauthData.token_type,
+    ...(resolvedScope != null ? { scope: resolvedScope } : {}),
+    ...(resolvedTokenType != null ? { token_type: resolvedTokenType } : {}),
   };
 
   // Re-read config to avoid stale data races, then update

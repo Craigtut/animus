@@ -226,7 +226,7 @@ export function DownloadToast() {
           <div css={css`
             display: flex;
             flex-direction: column;
-            gap: ${theme.spacing[2.5]};
+            gap: ${theme.spacing[3]};
           `}>
             {itemList.map((item) => (
               <DownloadRow key={item.assetId} item={item} />

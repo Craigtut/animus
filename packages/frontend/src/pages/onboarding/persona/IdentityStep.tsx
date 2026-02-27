@@ -28,9 +28,16 @@ export function PersonaIdentityStep() {
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
-      <div>
-        <Typography.Title3 as="h2" serif>
-          Who are they?
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+        <Typography.Body color="secondary" serif css={css`
+          font-style: italic;
+        `}>
+          Identity
+        </Typography.Body>
+        <Typography.Title3 as="h2" css={css`
+          font-weight: ${theme.typography.fontWeight.medium};
+        `}>
+          Give them a name, an age, a face
         </Typography.Title3>
       </div>
 
@@ -84,7 +91,7 @@ export function PersonaIdentityStep() {
           value={age}
           onChange={(e) => setAge((e.target as HTMLInputElement).value)}
           placeholder="Age"
-          helperText="This shapes their perspective -- a 25-year-old and a 60-year-old experience the world differently."
+          helperText="This shapes their perspective. A 25-year-old and a 60-year-old experience the world differently."
         />
 
         <Input

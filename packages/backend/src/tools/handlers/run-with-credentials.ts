@@ -163,11 +163,11 @@ export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = a
     typeof value === 'object' &&
     value !== null &&
     '__oauth' in (value as Record<string, unknown>) &&
-    (value as Record<string, unknown>).__oauth === true
+    (value as Record<string, unknown>)['__oauth'] === true
   ) {
     // OAuth token object: extract access_token, auto-refresh if near expiry
     const oauthData = value as Record<string, unknown>;
-    const expiresAt = oauthData.expires_at as number | undefined;
+    const expiresAt = oauthData['expires_at'] as number | undefined;
     const fiveMinutes = 5 * 60 * 1000;
 
     if (expiresAt && expiresAt - Date.now() < fiveMinutes) {
@@ -177,13 +177,13 @@ export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = a
         // Re-read config after refresh
         const refreshedConfig = pm.getPluginConfig(pluginName);
         const refreshedOAuth = refreshedConfig?.[configKey] as Record<string, unknown> | undefined;
-        credentialValue = (refreshedOAuth?.access_token as string) ?? '';
+        credentialValue = (refreshedOAuth?.['access_token'] as string) ?? '';
       } catch (err) {
         log.warn(`OAuth token refresh failed for ${input.credentialRef}, using existing token:`, err);
-        credentialValue = (oauthData.access_token as string) ?? '';
+        credentialValue = (oauthData['access_token'] as string) ?? '';
       }
     } else {
-      credentialValue = (oauthData.access_token as string) ?? '';
+      credentialValue = (oauthData['access_token'] as string) ?? '';
     }
 
     if (!credentialValue) {

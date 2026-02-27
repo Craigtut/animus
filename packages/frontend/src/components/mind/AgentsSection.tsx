@@ -71,7 +71,7 @@ function ActiveSubAgentsSection() {
     { refetchInterval: 5_000 },
   );
 
-  const tasks = (activeTasks ?? []) as AgentTask[];
+  const tasks = (activeTasks ?? []) as unknown as AgentTask[];
 
   return (
     <section>
@@ -306,25 +306,29 @@ function getEventDisplay(event: SubAgentEventEntry): {
   const data = event.data ?? {};
 
   switch (event.eventType) {
-    case 'thinking':
+    case 'thinking_start':
+    case 'thinking_end':
       return {
         icon: Brain,
         label: 'Thinking',
         detail: (data['text'] as string)?.slice(0, 80) ?? '',
       };
-    case 'tool_call':
+    case 'tool_call_start':
       return {
         icon: Wrench,
         label: `Tool: ${(data['toolName'] as string) ?? 'unknown'}`,
         detail: '',
       };
-    case 'tool_result':
+    case 'tool_call_end':
+    case 'tool_error':
       return {
         icon: Wrench,
         label: `Tool result`,
         detail: (data['error'] as string) ? `Error: ${(data['error'] as string).slice(0, 60)}` : 'OK',
       };
-    case 'response':
+    case 'response_start':
+    case 'response_chunk':
+    case 'response_end':
       return {
         icon: ChatText,
         label: 'Response',
@@ -375,7 +379,7 @@ function RecentSubAgentsSection() {
 
   const entries: ActivityEntry[] = useMemo(() => {
     const result: ActivityEntry[] = [];
-    const tasks = (recentTasks ?? []) as AgentTask[];
+    const tasks = (recentTasks ?? []) as unknown as AgentTask[];
 
     // Agent tasks (exclude active statuses — those show above)
     for (const task of tasks) {

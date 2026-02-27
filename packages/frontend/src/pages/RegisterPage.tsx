@@ -22,7 +22,8 @@ export function RegisterPage() {
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string; confirmPassword?: string }>({});
 
   const { data: status } = trpc.auth.status.useQuery(undefined, {
-    retry: false,
+    retry: 3,
+    retryDelay: 1000,
   });
 
   const registerMutation = trpc.auth.register.useMutation({
@@ -81,6 +82,16 @@ export function RegisterPage() {
         transition={{ duration: 0.4, ease: 'easeOut' }}
         css={css`width: 100%; max-width: 400px;`}
       >
+        <img
+          src="/favicon.svg"
+          alt="Animus"
+          css={css`
+            display: block;
+            margin: 0 auto ${theme.spacing[5]};
+            width: 48px;
+            height: 48px;
+          `}
+        />
         <Typography.Title serif css={css`text-align: center; margin-bottom: ${theme.spacing[1]};`}>
           Create your account
         </Typography.Title>
