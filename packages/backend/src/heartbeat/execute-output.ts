@@ -23,7 +23,7 @@ import type { MemoryManager } from '../memory/index.js';
 import { processAllStreams } from '../memory/observational-memory/index.js';
 import { OBSERVATIONAL_MEMORY_CONFIG } from '../config/observational-memory.config.js';
 import type { SeedManager } from '../goals/index.js';
-import { getDeferredQueue } from '../tasks/index.js';
+import type { DeferredQueue } from '../tasks/index.js';
 
 import type { GatherResult } from './gather-context.js';
 import { applyDelta } from './emotion-engine.js';
@@ -46,6 +46,7 @@ export interface ExecuteOutputDeps {
   agentManager: AgentManager | null;
   compiledPersona: CompiledPersona | null;
   tickQueue: TickQueue;
+  deferredQueue: DeferredQueue;
 }
 
 // ============================================================================
@@ -530,7 +531,7 @@ export async function executeOutput(
   // 9b. Periodic deferred task staleness processing (~every 50 ticks)
   if (tickNumber % 50 === 0) {
     try {
-      const { boosted, cancelled } = getDeferredQueue().processStaleness();
+      const { boosted, cancelled } = deps.deferredQueue.processStaleness();
       if (boosted > 0 || cancelled > 0) {
         log.info(`Deferred task staleness: boosted=${boosted}, cancelled=${cancelled}`);
       }

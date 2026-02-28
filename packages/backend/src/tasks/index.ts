@@ -15,3 +15,5 @@ export {
   DEFERRED_STALENESS_BOOST_RATE,
   DEFERRED_AUTO_CANCEL_DAYS,
 } from './deferred-queue.js';
+
+export { TaskSubsystem } from './task-subsystem.js';

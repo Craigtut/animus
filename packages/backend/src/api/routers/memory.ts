@@ -1,21 +1,12 @@
 /**
- * Memory Router — tRPC procedures for memory data (working memory, core self, long-term).
+ * Memory Router - tRPC procedures for memory data (working memory, core self, long-term).
  */
 
 import { z } from 'zod';
 import { observable } from '@trpc/server/observable';
-import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../trpc.js';
-import { getMemoryDb } from '../../db/index.js';
-import * as memoryStore from '../../db/stores/memory-store.js';
 import { getEventBus } from '../../lib/event-bus.js';
-import { getMemoryManager } from '../../heartbeat/index.js';
-import type { LongTermMemory } from '@animus-labs/shared';
-
-/** Map a LongTermMemory to the browse response shape (null scores). */
-function toScoredItem(m: LongTermMemory) {
-  return { ...m, relevance: null as number | null, recency: null as number | null, score: null as number | null };
-}
+import { getMemoryService } from '../../services/memory-service.js';
 
 export const memoryRouter = router({
   /**
@@ -24,24 +15,21 @@ export const memoryRouter = router({
   getWorkingMemory: protectedProcedure
     .input(z.object({ contactId: z.string() }))
     .query(({ input }) => {
-      const db = getMemoryDb();
-      return memoryStore.getWorkingMemory(db, input.contactId);
+      return getMemoryService().getWorkingMemory(input.contactId);
     }),
 
   /**
    * List all working memories across contacts.
    */
   listWorkingMemories: protectedProcedure.query(() => {
-    const db = getMemoryDb();
-    return memoryStore.listAllWorkingMemories(db);
+    return getMemoryService().listWorkingMemories();
   }),
 
   /**
    * Get the core self (singleton).
    */
   getCoreSelf: protectedProcedure.query(() => {
-    const db = getMemoryDb();
-    return memoryStore.getCoreSelf(db);
+    return getMemoryService().getCoreSelf();
   }),
 
   /**
@@ -60,50 +48,7 @@ export const memoryRouter = router({
       })
     )
     .query(async ({ input }) => {
-      const { query, contactId, memoryType, limit, cursor } = input;
-
-      // Search mode: semantic search via MemoryManager
-      if (query && query.trim().length > 0) {
-        const manager = getMemoryManager();
-        if (!manager) {
-          return { items: [] as Array<ReturnType<typeof toScoredItem>>, nextCursor: undefined };
-        }
-
-        let results = await manager.retrieveRelevant(query.trim(), limit, false);
-
-        // Post-filter by contactId/memoryType if provided
-        if (contactId) {
-          results = results.filter((m) => m.contactId === contactId);
-        }
-        if (memoryType) {
-          results = results.filter((m) => m.memoryType === memoryType);
-        }
-
-        return {
-          items: results.map((m) => ({
-            ...m,
-            relevance: m.relevance as number | null,
-            recency: m.recency as number | null,
-            score: m.score as number | null,
-          })),
-          nextCursor: undefined,
-        };
-      }
-
-      // Browse mode: cursor-paginated
-      const db = getMemoryDb();
-      const rows = memoryStore.getLongTermMemoriesPaginated(db, limit + 1, cursor, {
-        ...(contactId != null ? { contactId } : {}),
-        ...(memoryType != null ? { memoryType } : {}),
-      });
-
-      const hasMore = rows.length > limit;
-      const pageItems = hasMore ? rows.slice(0, limit) : rows;
-
-      return {
-        items: pageItems.map((m) => toScoredItem(m)),
-        nextCursor: hasMore ? pageItems[pageItems.length - 1]?.createdAt : undefined,
-      };
+      return getMemoryService().browseLongTermMemories(input);
     }),
 
   /**
@@ -112,11 +57,7 @@ export const memoryRouter = router({
   deleteLongTermMemory: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ input }) => {
-      const manager = getMemoryManager();
-      if (!manager) throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'Memory system not initialized' });
-      const deleted = await manager.deleteLongTermMemory(input.id);
-      if (!deleted) throw new TRPCError({ code: 'NOT_FOUND', message: 'Memory not found' });
-      return { success: true };
+      return getMemoryService().deleteLongTermMemory(input.id);
     }),
 
   /**

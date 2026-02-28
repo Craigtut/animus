@@ -10,7 +10,7 @@ import path from 'path';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../trpc.js';
-import { getPluginManager } from '../../services/plugin-manager.js';
+import { getPluginManager } from '../../plugins/index.js';
 import { verifyPackage } from '../../services/package-verifier.js';
 import { PluginManifestSchema, pluginSourceSchema } from '@animus-labs/shared';
 

@@ -223,7 +223,7 @@ Returns an array of detected methods per provider, used by the onboarding UI to 
 
 ### Store Methods
 
-**File:** `packages/backend/src/db/stores/system-store.ts`
+**File:** `packages/backend/src/db/stores/credential-store.ts` (re-exported via `system-store.ts` barrel)
 
 | Method | Purpose |
 |--------|---------|
@@ -307,7 +307,7 @@ Plugins declare MCP servers in `tools.json` with placeholder syntax:
 }
 ```
 
-**File:** `packages/backend/src/services/plugin-manager.ts` — `getMcpConfigs()`
+**File:** `packages/backend/src/plugins/plugin-manager.ts` — `getMcpConfigs()`
 
 At MCP server spawn time, `PluginManager` decrypts the plugin config and resolves all `${config.KEY}` placeholders in `env`, `url`, and `headers` via regex replacement. The resolved config is passed to the agent SDK, which spawns the MCP server process with credentials already injected. The mind just calls MCP tools by name — it never touches the underlying credentials.
 
@@ -459,7 +459,7 @@ The mind has no visibility into bot tokens, API keys, or channel configuration. 
 
 During the GATHER phase, the heartbeat builds a credential manifest from all enabled plugins with `secret` config fields.
 
-**File:** `packages/backend/src/services/plugin-manager.ts` — `getCredentialManifest()`
+**File:** `packages/backend/src/plugins/plugin-manager.ts` — `getCredentialManifest()`
 
 ```typescript
 interface CredentialManifestEntry {
@@ -642,7 +642,7 @@ All three credential types (providers, plugins, channels) follow the same UI pat
 | File | Purpose |
 |------|---------|
 | `packages/backend/src/services/credential-service.ts` | Save, validate, detect, load-into-env |
-| `packages/backend/src/db/stores/system-store.ts` | Credential CRUD (lines 448–553) |
+| `packages/backend/src/db/stores/credential-store.ts` | Credential CRUD (re-exported via `system-store.ts` barrel) |
 | `packages/backend/src/db/migrations/system/003_credentials.sql` | Table schema |
 | `packages/backend/src/db/migrations/system/008_encryption_key_check.sql` | Sentinel column |
 | `packages/backend/src/api/routers/provider.ts` | tRPC endpoints |
@@ -652,7 +652,7 @@ All three credential types (providers, plugins, channels) follow the same UI pat
 
 | File | Purpose |
 |------|---------|
-| `packages/backend/src/services/plugin-manager.ts` | Config encrypt/decrypt, manifest, MCP resolution, handler execution |
+| `packages/backend/src/plugins/plugin-manager.ts` | Config encrypt/decrypt, manifest, MCP resolution, handler execution |
 | `packages/backend/src/db/stores/plugin-store.ts` | Plugin config persistence |
 | `packages/backend/src/db/migrations/system/006_plugins.sql` | Table schema |
 | `packages/backend/src/api/routers/plugins.ts` | tRPC endpoints (masked config) |
@@ -668,7 +668,7 @@ All three credential types (providers, plugins, channels) follow the same UI pat
 | `packages/backend/src/channels/process-host.ts` | IPC init with decrypted config |
 | `packages/backend/src/channels/sdk/adapter-context.ts` | Child process bootstrap, config access |
 | `packages/backend/src/channels/ipc/protocol.ts` | IPC message types (`init`, `config_update`) |
-| `packages/backend/src/db/stores/system-store.ts` | Channel config encrypt/decrypt (lines 701–736) |
+| `packages/backend/src/db/stores/channel-package-store.ts` | Channel config encrypt/decrypt (re-exported via `system-store.ts` barrel) |
 | `packages/backend/src/db/migrations/system/007_channel_packages.sql` | Table schema |
 | `packages/backend/src/api/routers/channels.ts` | tRPC endpoints (masked config) |
 

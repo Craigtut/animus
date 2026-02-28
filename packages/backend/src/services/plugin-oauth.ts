@@ -12,7 +12,7 @@
  */
 
 import { randomBytes, createHash } from 'node:crypto';
-import { getPluginManager } from './plugin-manager.js';
+import { getPluginManager } from '../plugins/index.js';
 import { env } from '../utils/env.js';
 import { createLogger } from '../lib/logger.js';
 

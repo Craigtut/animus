@@ -185,7 +185,7 @@ export const dataRouter = router({
       await channelManager.stopAll();
 
       // 4. Stop plugin trigger watchers and clean up skill symlinks
-      const { getPluginManager } = await import('../../services/plugin-manager.js');
+      const { getPluginManager } = await import('../../plugins/index.js');
       const pluginManager = getPluginManager();
       await pluginManager.stopTriggers();
       await pluginManager.cleanupSkills();

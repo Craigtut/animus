@@ -39,7 +39,7 @@ import {
 } from '../tools/servers/mcp-bridge.js';
 import type { ToolHandlerContext } from '../tools/types.js';
 import { getToolPermissions } from '../db/stores/system-store.js';
-import { getPluginManager } from '../services/plugin-manager.js';
+import { getPluginManager } from '../plugins/index.js';
 import { getAllowedTools, ANIMUS_TOOL_DEFS } from '@animus-labs/shared';
 
 const log = createLogger('AgentOrchestrator', 'agents');

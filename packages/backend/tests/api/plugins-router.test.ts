@@ -11,7 +11,7 @@ import path from 'path';
 import os from 'os';
 
 // Mock the plugin-manager module before importing the router
-vi.mock('../../src/services/plugin-manager.js', () => {
+vi.mock('../../src/plugins/index.js', () => {
   const mockManager = {
     getAllPlugins: vi.fn(),
     getPlugin: vi.fn(),
@@ -33,7 +33,7 @@ vi.mock('../../src/services/plugin-manager.js', () => {
 });
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
-type PluginManagerModule = typeof import('../../src/services/plugin-manager.js') & {
+type PluginManagerModule = typeof import('../../src/plugins/index.js') & {
   __mockManager: {
     getAllPlugins: ReturnType<typeof vi.fn>;
     getPlugin: ReturnType<typeof vi.fn>;
@@ -56,7 +56,7 @@ import { initTRPC } from '@trpc/server';
 import type { TRPCContext } from '../../src/api/trpc.js';
 
 // Access mock manager
-const { __mockManager: mockManager } = await import('../../src/services/plugin-manager.js') as PluginManagerModule;
+const { __mockManager: mockManager } = await import('../../src/plugins/index.js') as PluginManagerModule;
 
 // Create a test caller using tRPC's createCallerFactory
 const testRouter = router({ plugins: pluginsRouter });

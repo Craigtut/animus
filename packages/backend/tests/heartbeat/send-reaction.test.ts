@@ -25,25 +25,8 @@ vi.mock('../../src/lib/logger.js', () => ({
 
 const mockPerformAction = vi.fn();
 
-vi.mock('../../src/channels/channel-manager.js', () => ({
-  getChannelManager: vi.fn(() => ({
-    performAction: mockPerformAction,
-  })),
-}));
-
-vi.mock('../../src/services/plugin-manager.js', () => ({
-  getPluginManager: vi.fn(() => ({
-    executeDecision: vi.fn(async () => ({ success: true })),
-  })),
-}));
-
 vi.mock('../../src/db/stores/heartbeat-store.js', () => ({
   insertTickDecision: vi.fn(),
-}));
-
-vi.mock('../../src/tasks/index.js', () => ({
-  getTaskScheduler: vi.fn(() => ({ registerTask: vi.fn(), unregisterTask: vi.fn() })),
-  getTaskRunner: vi.fn(() => ({ completeTask: vi.fn(), cancelTask: vi.fn() })),
 }));
 
 // ============================================================================
@@ -67,6 +50,20 @@ const deps: DecisionExecutorDeps = {
   seedManager: null,
   goalManager: null,
   buildSystemPrompt: () => '',
+  pluginManager: {
+    executeDecision: vi.fn(async () => ({ success: true })),
+  } as any,
+  taskScheduler: {
+    registerTask: vi.fn(),
+    unregisterTask: vi.fn(),
+  } as any,
+  taskRunner: {
+    completeTask: vi.fn(),
+    cancelTask: vi.fn(),
+  } as any,
+  channelManager: {
+    performAction: mockPerformAction,
+  } as any,
 };
 
 const mockEventBus = {

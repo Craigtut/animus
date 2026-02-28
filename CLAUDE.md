@@ -187,6 +187,17 @@ npm run clean         # Remove dist folders and caches
 - Use meaningful variable names
 - Add comments only for non-obvious logic
 
+### Backend Architecture
+
+The backend follows a **modular monolith** architecture. Before adding new backend features, services, stores, or modifying the heartbeat pipeline, read `docs/architecture/backend-architecture.md` for the required patterns.
+
+**Key rules:**
+- **Stores**: One file per domain entity group. Stateless functions, `db` as first arg, no business logic.
+- **Services**: Every router delegates to a service. Services own business logic. Follow the `ContactService`/`TaskService` singleton getter pattern.
+- **Subsystems**: New subsystems implement `SubsystemLifecycle` (start/stop/healthCheck hooks) and register with the `LifecycleManager`.
+- **Pipeline deps**: Heartbeat pipeline functions receive all dependencies via typed parameter objects. No ambient singleton calls inside function bodies.
+- **Decision handlers**: New decision types register a handler via `registerDecisionHandler()`. Never add cases to a central switch.
+
 ### Backend Logging
 
 **All backend logging MUST use the logger from `packages/backend/src/lib/logger.ts`.** Never use raw `console.log/warn/error` in backend code (the only exception is `utils/env.ts` which runs before the logger is available).
@@ -318,6 +329,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - **Architecture**: `docs/architecture/tts-licensing-and-distribution.md` (TTS model licensing, CC-BY-4.0 redistribution, weight bundling approach, voice cloning consent flow, attribution requirements)
 - **Architecture**: `docs/architecture/data-directory.md` (data directory layout, `ANIMUS_DATA_DIR` resolution, secrets lifecycle, deployment modes)
 - **Architecture**: `docs/architecture/package-installation.md` (package distribution — .anpk install flow, verification chain, rollback, update checking, config migration, store browser UI, AI self-management MCP tools)
+- **Architecture**: `docs/architecture/backend-architecture.md` (modular monolith patterns, store/service/lifecycle/pipeline conventions, anti-patterns)
 - **Open Questions**: `docs/architecture/open-questions.md` (all 7 resolved)
 - **Open Concerns**: `docs/architecture/open-concerns.md` (known acceptable concerns)
 - **Frontend Design**: `docs/frontend/design-principles.md`, `docs/frontend/onboarding.md`
@@ -350,6 +362,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on Pi adapter/transformContext → `/doc-explorer pi`
 - Building a new plugin → see the `build-plugin` skill in the `animus-extensions` repo; for architecture context use `/doc-explorer plugin-system`
 - Working on package distribution/packaging/.anpk format → `/doc-explorer package-installation` and see `docs/architecture/distribution-system.md` (workspace root) for the master overview
+- Working on backend architecture/stores/services/new modules → `/doc-explorer backend-architecture`
 - Working on backend/API → `/doc-explorer architecture`
 - Unsure about project conventions → `/doc-explorer` (no args, see everything)
 

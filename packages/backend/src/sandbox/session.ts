@@ -14,7 +14,7 @@ import type {
   IAgentSession,
   AgentManager,
 } from '@animus-labs/agents';
-import { getPluginManager } from '../services/plugin-manager.js';
+import { getPluginManager } from '../plugins/index.js';
 import { buildSandboxMcpServer } from './mcp-server.js';
 import { buildCognitiveMcpServer, type CognitiveSnapshot } from './cognitive-tools.js';
 import { PROJECT_ROOT } from '../utils/env.js';

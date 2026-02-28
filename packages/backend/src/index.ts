@@ -18,7 +18,12 @@ import { fileURLToPath } from 'url';
 import { initializeDatabases, closeDatabases, getSystemDb, DATABASE_COUNT } from './db/index.js';
 import { createTRPCContext, appRouter } from './api/index.js';
 import authPlugin from './plugins/auth.js';
-import { initializeHeartbeat, stopHeartbeat } from './heartbeat/index.js';
+import { initializeHeartbeat, stopHeartbeat, handleAgentComplete, handleScheduledTask } from './heartbeat/index.js';
+import { LifecycleManager } from './lib/lifecycle.js';
+import { MemorySubsystem } from './memory/index.js';
+import { GoalSubsystem } from './goals/index.js';
+import { TaskSubsystem } from './tasks/index.js';
+import { AgentSubsystem } from './heartbeat/agent-subsystem.js';
 import { loadCredentialsIntoEnv, ensureClaudeOnboardingFile } from './services/credential-service.js';
 import { env, DATA_DIR } from './utils/env.js';
 import { resolveSecrets, persistSecretsIfNeeded } from './lib/secrets-manager.js';
@@ -322,7 +327,7 @@ async function main() {
   }
 
   // Initialize plugin manager (must be before heartbeat so plugins are available)
-  const { getPluginManager } = await import('./services/plugin-manager.js');
+  const { getPluginManager } = await import('./plugins/index.js');
   const pluginManager = getPluginManager();
   await pluginManager.loadAll();
 
@@ -365,6 +370,19 @@ async function main() {
     log.debug(`Tool permissions count after re-seed: ${reseeded}`);
   });
 
+  // Re-seed tool permissions when the agent provider changes at runtime.
+  // Without this, switching providers leaves stale SDK tools in the DB
+  // (e.g. Codex tools when switching to Claude) and the new provider's
+  // unique tools (Read, Glob, WebFetch, etc.) never get permission records.
+  getEventBus().on('system:settings_updated', (payload) => {
+    if ('defaultAgentProvider' in payload) {
+      const provider = (payload as Record<string, unknown>)['defaultAgentProvider'] as string;
+      const reseeded = seedToolPermissions(getSystemDb(), provider, collectPluginTools());
+      log.info(`Re-seeded tool permissions after provider change to "${provider}"`);
+      log.debug(`Tool permissions count after re-seed: ${reseeded}`);
+    }
+  });
+
   // Initialize speech service (lazy-loads models on first use)
   const { initSpeechService } = await import('./speech/index.js');
   const speechService = await initSpeechService({ dataDir: DATA_DIR });
@@ -395,8 +413,25 @@ async function main() {
   // Load installed channel packages
   await channelManager.loadAll();
 
-  // Initialize heartbeat system
-  const heartbeatInit = await initializeHeartbeat();
+  // Construct and start subsystems via lifecycle manager
+  const memorySubsystem = new MemorySubsystem();
+  const goalSubsystem = new GoalSubsystem(memorySubsystem);
+  const agentSubsystem = new AgentSubsystem(handleAgentComplete);
+  const taskSubsystem = new TaskSubsystem(handleScheduledTask);
+
+  const lifecycle = new LifecycleManager();
+  lifecycle.register(memorySubsystem)
+    .register(goalSubsystem)
+    .register(agentSubsystem)
+    .register(taskSubsystem);
+  await lifecycle.startAll();
+
+  // Initialize heartbeat system (receives pre-started subsystem references)
+  const heartbeatInit = await initializeHeartbeat({
+    memory: memorySubsystem,
+    goals: goalSubsystem,
+    agents: agentSubsystem,
+  });
 
   // Auto-download missing speech models if onboarding is complete
   const onboardingState = systemStore.getOnboardingState(getSystemDb());
@@ -445,6 +480,7 @@ async function main() {
   const shutdown = async () => {
     log.info('Shutting down...');
     await stopHeartbeat();
+    await lifecycle.stopAll();
     await pluginManager.stopTriggers();
     await pluginManager.cleanupSkills();
     // Cancel any in-progress downloads

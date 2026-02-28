@@ -7,7 +7,7 @@
  *
  *   1. record_thought  — called FIRST, captures inner monologue
  *   2. (natural language reply streams between tool calls)
- *   3. record_cognitive_state — called LAST, captures experience, emotions, etc.
+ *   3. record_cognitive_state — called LAST (mandatory), captures experience, emotions, etc.
  *
  * Phase tracking: getPhase() returns 'pre-thought' | 'replying' | 'done'
  * to control reply streaming (only stream during 'replying' phase).
@@ -322,9 +322,10 @@ export async function buildCognitiveMcpServer(): Promise<{
   // --- record_cognitive_state --- (delegates to standalone handler)
   const stateTool = sdk.tool(
     'record_cognitive_state',
-    'Your absolute last action. Call this exactly once after you have delivered your ' +
-    'final reply and completed all other work. After calling this tool, STOP IMMEDIATELY — ' +
-    'do not generate any more text, tool calls, or start another cycle. You are done.',
+    'MANDATORY — call this exactly once after your reply. Your response is not complete ' +
+    'until you call this tool. record_thought bookends the start of your turn; this ' +
+    'bookends the end. Without it, your thoughts, emotions, and experiences are lost. ' +
+    'Call it after your final reply text, then you are done.',
     recordCognitiveStateSchema.shape,
     async (args: z.infer<typeof recordCognitiveStateSchema>) => handleRecordCognitiveState(args),
   );

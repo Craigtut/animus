@@ -133,9 +133,10 @@ export function getToolDefs(toolSet: ToolSet): BridgeToolDef[] {
       {
         name: 'record_cognitive_state',
         description:
-          'Your absolute last action. Call this exactly once after you have delivered your ' +
-          'final reply and completed all other work. After calling this tool, STOP IMMEDIATELY — ' +
-          'do not generate any more text, tool calls, or start another cycle. You are done.',
+          'MANDATORY — call this exactly once after your reply. Your response is not complete ' +
+          'until you call this tool. record_thought bookends the start of your turn; this ' +
+          'bookends the end. Without it, your thoughts, emotions, and experiences are lost. ' +
+          'Call it after your final reply text, then you are done.',
         inputSchema: convertZodToJsonSchema(recordCognitiveStateSchema),
       },
     ];

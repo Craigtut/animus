@@ -41,7 +41,7 @@ export async function buildSandboxMcpServer(): Promise<{
       log.info('Sandbox run_with_credentials call');
       // The handler's _context param is unused — it only needs getPluginManager() singleton
       const result = await runWithCredentialsHandler(args as any, null as any);
-      return result;
+      return result as { [x: string]: unknown; content: Array<{ type: 'text'; text: string }> };
     },
   );
 

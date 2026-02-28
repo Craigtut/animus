@@ -14,33 +14,26 @@
  * See docs/architecture/heartbeat.md for the full design.
  */
 
-import { getHeartbeatDb, getSystemDb, getPersonaDb, getAgentLogsDb, getMemoryDb } from '../db/index.js';
+import { getHeartbeatDb, getSystemDb, getPersonaDb, getAgentLogsDb } from '../db/index.js';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import * as agentLogStore from '../db/stores/agent-log-store.js';
 import * as systemStore from '../db/stores/system-store.js';
 import * as personaStore from '../db/stores/persona-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
-import { env, LANCEDB_PATH } from '../utils/env.js';
 import { now } from '@animus-labs/shared';
 import type { HeartbeatState, MindOutput } from '@animus-labs/shared';
 
-import { MemoryManager, LocalEmbeddingProvider, VectorStore } from '../memory/index.js';
-import { SeedManager, GoalManager } from '../goals/index.js';
-import { getTaskScheduler } from '../tasks/index.js';
-
-import {
-  createAgentManager,
-  type AgentManager,
-  type AgentLogStore,
-} from '@animus-labs/agents';
+import type { VectorStore } from '../memory/index.js';
+import type { MemorySubsystem } from '../memory/memory-subsystem.js';
+import type { GoalSubsystem } from '../goals/goal-subsystem.js';
+import type { AgentSubsystem } from './agent-subsystem.js';
 
 import { TickQueue, type QueuedTick } from './tick-queue.js';
 import { type TriggerContext, type CompiledContext, buildMindContext, buildSystemPrompt } from './context-builder.js';
 import { computeBaselines, type PersonaDimensions } from './emotion-engine.js';
 import { compilePersona, type PersonaConfig, type CompiledPersona } from './persona-compiler.js';
-import { createAgentLogStoreAdapter } from './agent-log-adapter.js';
-import { AgentOrchestrator, type AgentTaskStore, type AgentTaskRecord } from './agent-orchestrator.js';
+import type { AgentOrchestrator } from './agent-orchestrator.js';
 
 // Extracted modules
 import { gatherContext, type GatherResult } from './gather-context.js';
@@ -53,6 +46,9 @@ import {
 } from './mind-session.js';
 import { safeMindOutput, snapshotToMindOutput, isNonResponse } from './cognitive-tools.js';
 import { executeOutput } from './execute-output.js';
+import { getPluginManager } from '../plugins/index.js';
+import { getChannelManager } from '../channels/channel-manager.js';
+import { getDeferredQueue, getTaskScheduler, getTaskRunner } from '../tasks/index.js';
 
 const log = createLogger('Heartbeat', 'heartbeat');
 
@@ -61,15 +57,13 @@ const log = createLogger('Heartbeat', 'heartbeat');
 // ============================================================================
 
 class HeartbeatContext {
-  agentManager: AgentManager | null = null;
-  agentLogStoreAdapter: AgentLogStore | null = null;
-  agentOrchestrator: AgentOrchestrator | null = null;
+  // Subsystem references (set during init, accessed via getters)
+  memory: MemorySubsystem | null = null;
+  goals: GoalSubsystem | null = null;
+  agents: AgentSubsystem | null = null;
+
+  // HeartbeatContext-owned state (NOT part of subsystems)
   compiledPersona: CompiledPersona | null = null;
-  memoryManager: MemoryManager | null = null;
-  vectorStore: VectorStore | null = null;
-  seedManager: SeedManager | null = null;
-  goalManager: GoalManager | null = null;
-  embeddingProvider: LocalEmbeddingProvider | null = null;
   mindSession: MindSessionState;
 
   constructor() {
@@ -215,7 +209,7 @@ async function mindQuery(
   };
 
   // If no agent manager configured, fall back to safe output
-  if (!ctx.agentManager || ctx.agentManager.getConfiguredProviders().length === 0) {
+  if (!ctx.agents?.agentManager || ctx.agents.agentManager.getConfiguredProviders().length === 0) {
     log.warn('No agent provider configured, using safe output');
     return { output: safeMindOutput(triggerInfo), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged: false, allThoughts: [], replyTurnsSent: 0 };
   }
@@ -236,21 +230,21 @@ async function mindQuery(
 
     // Get or create the mind session
     const mindStart = Date.now();
-    log.info(`Mind query: session=${gathered.sessionState}, provider=${ctx.agentManager.getConfiguredProviders()[0] ?? 'none'}`);
+    log.info(`Mind query: session=${gathered.sessionState}, provider=${ctx.agents!.agentManager!.getConfiguredProviders()[0] ?? 'none'}`);
 
     const session = await getOrCreateMindSession(
       ctx.mindSession,
       gathered.sessionState,
       effectiveSystemPrompt,
-      ctx.agentManager,
-      ctx.agentLogStoreAdapter,
+      ctx.agents!.agentManager!,
+      ctx.agents!.agentLogStoreAdapter,
     );
 
     log.info(`Mind session ready: id=${session.id}, hasTools=${!!ctx.mindSession.mcpServer}, hasCognitive=${!!ctx.mindSession.cognitiveServer}`);
 
     // Update the mutable tool context for this tick so tool handlers
     // can access the current contact/channel/conversation
-    ctx.mindSession.toolContext.current = buildMindToolContext(gathered, ctx.memoryManager);
+    ctx.mindSession.toolContext.current = buildMindToolContext(gathered, ctx.memory?.memoryManager ?? null);
 
     const eventBus = getEventBus();
 
@@ -539,7 +533,7 @@ async function mindQuery(
     }
 
     // End the leaked session before nulling references
-    await resetMindSession(ctx.mindSession, ctx.agentManager);
+    await resetMindSession(ctx.mindSession, ctx.agents?.agentManager ?? null);
 
     return { output: safeMindOutput(triggerInfo), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged: false, allThoughts: [], replyTurnsSent: 0 };
   }
@@ -580,12 +574,15 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     // Stage 1: GATHER CONTEXT
     const gathered = await gatherContext(queuedTick.trigger, {
       tickQueue,
-      memoryManager: ctx.memoryManager,
-      seedManager: ctx.seedManager,
-      goalManager: ctx.goalManager,
-      agentOrchestrator: ctx.agentOrchestrator,
+      memoryManager: ctx.memory?.memoryManager ?? null,
+      seedManager: ctx.goals?.seedManager ?? null,
+      goalManager: ctx.goals?.goalManager ?? null,
+      agentOrchestrator: ctx.agents?.agentOrchestrator ?? null,
       sessionInvalidated: ctx.mindSession.invalidated,
       clearSessionInvalidation: () => { ctx.mindSession.invalidated = false; },
+      pluginManager: getPluginManager(),
+      channelManager: getChannelManager(),
+      deferredQueue: getDeferredQueue(),
     });
     const tickStart = Date.now();
 
@@ -595,7 +592,6 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
       const triggerMetadata = queuedTick.trigger.metadata as Record<string, unknown> | undefined;
       const channelId = triggerMetadata?.['channelId'] as string | undefined;
 
-      const { getChannelManager } = await import('../channels/channel-manager.js');
       const cm = getChannelManager();
       const manifest = cm.getChannelManifest(triggerChannel);
 
@@ -662,17 +658,22 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     // Stage 3: EXECUTE
     await executeOutput(output, tickNumber, gathered, {
       decisionDeps: {
-        agentOrchestrator: ctx.agentOrchestrator,
+        agentOrchestrator: ctx.agents?.agentOrchestrator ?? null,
         compiledPersona: ctx.compiledPersona,
-        seedManager: ctx.seedManager,
-        goalManager: ctx.goalManager,
+        seedManager: ctx.goals?.seedManager ?? null,
+        goalManager: ctx.goals?.goalManager ?? null,
         buildSystemPrompt: (persona: CompiledPersona) => buildSystemPrompt(persona),
+        pluginManager: getPluginManager(),
+        taskScheduler: getTaskScheduler(),
+        taskRunner: getTaskRunner(),
+        channelManager: getChannelManager(),
       },
-      memoryManager: ctx.memoryManager,
-      seedManager: ctx.seedManager,
-      agentManager: ctx.agentManager,
+      memoryManager: ctx.memory?.memoryManager ?? null,
+      seedManager: ctx.goals?.seedManager ?? null,
+      agentManager: ctx.agents?.agentManager ?? null,
       compiledPersona: ctx.compiledPersona,
       tickQueue,
+      deferredQueue: getDeferredQueue(),
     }, eventBus, {
       replySentEarly,
       earlyReplyContent,
@@ -761,13 +762,22 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
 
 /**
  * Initialize the heartbeat system.
- * Creates the AgentManager, recovers from crashes, and sets up the tick queue.
+ * Receives pre-started subsystems, recovers from crashes, and sets up the tick queue.
  */
-export async function initializeHeartbeat(): Promise<{ resumedAfterRestart: boolean; nextTickInMs: number | null }> {
+export async function initializeHeartbeat(subsystems: {
+  memory: MemorySubsystem;
+  goals: GoalSubsystem;
+  agents: AgentSubsystem;
+}): Promise<{ resumedAfterRestart: boolean; nextTickInMs: number | null }> {
   const hbDb = getHeartbeatDb();
   const state = heartbeatStore.getHeartbeatState(hbDb);
   let resumedAfterRestart = false;
   let nextTickInMs: number | null = null;
+
+  // Store subsystem references
+  ctx.memory = subsystems.memory;
+  ctx.goals = subsystems.goals;
+  ctx.agents = subsystems.agents;
 
   // Recover from interrupted tick
   if (state.currentStage !== 'idle') {
@@ -780,130 +790,17 @@ export async function initializeHeartbeat(): Promise<{ resumedAfterRestart: bool
     log.info('Recovered from interrupted tick');
   }
 
-  // Mark orphaned agent tasks from previous crash
-  const orphaned = heartbeatStore.markOrphanedAgentTasks(hbDb);
-  if (orphaned > 0) {
-    log.info(`Marked ${orphaned} orphaned agent tasks as failed`);
-  }
-
-  // Initialize the AgentManager (1 mind + 3 sub-agents + 2 observer/reflector + 2 buffer = 8 max)
-  ctx.agentManager = createAgentManager({ maxConcurrentSessions: 8 });
-  const configuredProviders = ctx.agentManager.getConfiguredProviders();
-  if (configuredProviders.length > 0) {
-    log.debug(`Agent providers configured: ${configuredProviders.join(', ')}`);
-  } else {
-    log.warn('No agent providers configured. Mind query will use safe defaults.');
-  }
-
-  // Initialize the agent log store adapter
-  try {
-    const agentLogsDb = getAgentLogsDb();
-    ctx.agentLogStoreAdapter = createAgentLogStoreAdapter(agentLogsDb);
-
-    // Mark orphaned agent sessions from previous crash
-    const orphanedSessions = agentLogStore.markOrphanedSessions(agentLogsDb);
-    if (orphanedSessions > 0) {
-      log.info(`Marked ${orphanedSessions} orphaned agent sessions as error`);
-    }
-  } catch (err) {
-    log.warn('Agent log store not available:', err);
-  }
-
-  // Initialize memory system
-  try {
-    const memDb = getMemoryDb();
-    ctx.embeddingProvider = new LocalEmbeddingProvider();
-    ctx.vectorStore = new VectorStore(LANCEDB_PATH, ctx.embeddingProvider.dimensions);
-    await ctx.vectorStore.initialize();
-    ctx.memoryManager = new MemoryManager(memDb, ctx.vectorStore, ctx.embeddingProvider);
-    log.debug('Memory system initialized');
-  } catch (err) {
-    log.warn('Memory system not available:', err);
-  }
-
-  // Initialize goal system
-  try {
-    ctx.goalManager = new GoalManager(hbDb);
-    if (ctx.embeddingProvider) {
-      ctx.seedManager = new SeedManager(hbDb, ctx.embeddingProvider);
-    }
-    log.debug('Goal system initialized');
-  } catch (err) {
-    log.warn('Goal system not available:', err);
-  }
-
-  // Initialize the agent orchestrator with DB-backed task store
-  if (ctx.agentManager && ctx.agentLogStoreAdapter) {
-    const agentTaskStore: AgentTaskStore = {
-      insertAgentTask: (data) => heartbeatStore.insertAgentTask(hbDb, data),
-      updateAgentTask: (id, data) => heartbeatStore.updateAgentTask(hbDb, id, data),
-      getAgentTask: (id) => heartbeatStore.getAgentTask(hbDb, id) as unknown as AgentTaskRecord | null,
-      getRunningAgentTasks: () => heartbeatStore.getRunningAgentTasks(hbDb) as unknown as AgentTaskRecord[],
-    };
-    ctx.agentOrchestrator = new AgentOrchestrator({
-      manager: ctx.agentManager,
-      taskStore: agentTaskStore,
-      logStore: ctx.agentLogStoreAdapter,
-      eventBus: getEventBus(),
-      getPreferredProvider: () => {
-        try {
-          const settings = systemStore.getSystemSettings(getSystemDb());
-          return settings.defaultAgentProvider ?? null;
-        } catch {
-          return null;
-        }
-      },
-      getPreferredModel: () => {
-        try {
-          const settings = systemStore.getSystemSettings(getSystemDb());
-          return settings.defaultModel ?? undefined;
-        } catch {
-          return undefined;
-        }
-      },
-      onAgentComplete: handleAgentComplete,
-    });
-  }
-
-  // Initialize task scheduler
-  try {
-    const taskScheduler = getTaskScheduler();
-    taskScheduler.setTaskDueHandler((task) => {
-      // Look up goal/plan context so the mind sees full task details
-      const hbDb = getHeartbeatDb();
-      const goal = task.goalId ? heartbeatStore.getGoal(hbDb, task.goalId) : null;
-      const plan = task.planId ? heartbeatStore.getPlan(hbDb, task.planId) : null;
-      const milestone = plan && task.milestoneIndex != null
-        ? (plan.milestones as Array<{ title: string }>)?.[task.milestoneIndex]?.title
-        : undefined;
-
-      handleScheduledTask({
-        taskId: task.id,
-        taskTitle: task.title,
-        taskType: task.scheduleType,
-        taskInstructions: task.instructions || '',
-        ...(goal ? { goalTitle: goal.title } : {}),
-        ...(plan ? { planTitle: plan.strategy } : {}),
-        ...(milestone ? { currentMilestone: milestone } : {}),
-      });
-    });
-    taskScheduler.start();
-    log.debug('Task scheduler started');
-  } catch (err) {
-    log.warn('Task scheduler not available:', err);
-  }
-
   // Listen for plugin changes to invalidate the session
   getEventBus().on('plugin:changed', async (payload) => {
     // Hot-swap Codex skills via JSON-RPC if the app-server is running
-    if (ctx.agentManager) {
+    if (ctx.agents?.agentManager) {
       try {
         const settings = systemStore.getSystemSettings(getSystemDb());
         if (settings.defaultAgentProvider === 'codex') {
           const { CodexAdapter } = await import('@animus-labs/agents');
-          const adapter = ctx.agentManager.getAdapter('codex');
+          const adapter = ctx.agents.agentManager.getAdapter('codex');
           if (adapter instanceof CodexAdapter) {
-            const { getPluginManager } = await import('../services/plugin-manager.js');
+            const { getPluginManager } = await import('../plugins/index.js');
             const pm = getPluginManager();
             const codexSkillPaths = pm.getDeployedCodexSkillPaths();
             const enabled = payload?.action !== 'uninstalled' && payload?.action !== 'disabled';
@@ -996,24 +893,7 @@ export async function stopHeartbeat(): Promise<void> {
   tickQueue.clear();
 
   // End mind session
-  await resetMindSession(ctx.mindSession, ctx.agentManager);
-
-  // Stop task scheduler
-  try {
-    getTaskScheduler().stop();
-  } catch (err) {
-    log.warn('Failed to stop task scheduler:', err);
-  }
-
-  // Clean up orchestrator
-  if (ctx.agentOrchestrator) {
-    await ctx.agentOrchestrator.cleanup();
-  }
-
-  // Clean up agent manager
-  if (ctx.agentManager) {
-    await ctx.agentManager.cleanup();
-  }
+  await resetMindSession(ctx.mindSession, ctx.agents?.agentManager ?? null);
 
   const hbDb = getHeartbeatDb();
   heartbeatStore.updateHeartbeatState(hbDb, { isRunning: false });
@@ -1103,7 +983,7 @@ export function getHeartbeatStatus(): HeartbeatState {
  * Used by heartbeat router for sub-agent management.
  */
 export function getAgentOrchestrator(): AgentOrchestrator | null {
-  return ctx.agentOrchestrator ?? null;
+  return ctx.agents?.agentOrchestrator ?? null;
 }
 
 /**
@@ -1111,15 +991,15 @@ export function getAgentOrchestrator(): AgentOrchestrator | null {
  * Used by data router for full reset cleanup.
  */
 export function getVectorStore(): VectorStore | null {
-  return ctx.vectorStore;
+  return ctx.memory?.vectorStore ?? null;
 }
 
 /**
  * Get the MemoryManager instance (if initialized).
  * Used by memory router for semantic search.
  */
-export function getMemoryManager(): MemoryManager | null {
-  return ctx.memoryManager;
+export function getMemoryManager(): import('../memory/index.js').MemoryManager | null {
+  return ctx.memory?.memoryManager ?? null;
 }
 
 /**

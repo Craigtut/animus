@@ -98,7 +98,7 @@ async function boot(args: SandboxCliArgs) {
   // 4. Load plugins (unless --no-plugins)
   let pluginCount = 0;
   if (!args.noPlugins) {
-    const { getPluginManager } = await import('../services/plugin-manager.js');
+    const { getPluginManager } = await import('../plugins/index.js');
     const pm = getPluginManager();
     await pm.loadAll();
     pluginCount = pm.getAllPlugins().filter((p) => p.enabled).length;

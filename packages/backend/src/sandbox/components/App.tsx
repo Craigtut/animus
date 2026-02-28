@@ -14,7 +14,7 @@ import { MessageThread } from './MessageThread.js';
 import { CommandInput } from './CommandInput.js';
 import type { SandboxSession } from '../session.js';
 import type { DisplayItem, SandboxState } from '../types.js';
-import { getPluginManager } from '../../services/plugin-manager.js';
+import { getPluginManager } from '../../plugins/index.js';
 import { COGNITIVE_SYSTEM_PROMPT } from '../cognitive-prompt.js';
 import type { CognitiveSnapshot } from '../cognitive-tools.js';
 

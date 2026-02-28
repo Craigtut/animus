@@ -1028,7 +1028,7 @@ export class ChannelManager {
     }
 
     const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
-    const { getPluginManager } = await import('../services/plugin-manager.js');
+    const { getPluginManager } = await import('../plugins/index.js');
     const pluginManager = getPluginManager();
     const bridgePath = pluginManager.getSkillBridgePath();
     const targetSkillsDir = path.join(bridgePath, 'skills');
@@ -1064,7 +1064,7 @@ export class ChannelManager {
     if (!fs.existsSync(skillsDir)) return;
 
     const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
-    const { getPluginManager } = await import('../services/plugin-manager.js');
+    const { getPluginManager } = await import('../plugins/index.js');
     const pluginManager = getPluginManager();
     const bridgePath = pluginManager.getSkillBridgePath();
     const targetSkillsDir = path.join(bridgePath, 'skills');

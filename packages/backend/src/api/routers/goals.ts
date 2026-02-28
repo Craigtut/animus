@@ -1,15 +1,12 @@
 /**
- * Goals Router — tRPC procedures for goals, seeds, and plans.
+ * Goals Router - tRPC procedures for goals, seeds, and plans.
  */
 
 import { z } from 'zod';
 import { observable } from '@trpc/server/observable';
-import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../trpc.js';
-import { getHeartbeatDb } from '../../db/index.js';
-import * as heartbeatStore from '../../db/stores/heartbeat-store.js';
 import { getEventBus } from '../../lib/event-bus.js';
-import { now } from '@animus-labs/shared';
+import { getGoalService } from '../../services/goal-service.js';
 import type { Goal, GoalSeed } from '@animus-labs/shared';
 
 export const goalsRouter = router({
@@ -23,12 +20,7 @@ export const goalsRouter = router({
       }).optional()
     )
     .query(({ input }) => {
-      const db = getHeartbeatDb();
-      if (input?.status) {
-        return heartbeatStore.getGoalsByStatus(db, input.status);
-      }
-      // Return active goals by default
-      return heartbeatStore.getActiveGoals(db, 50);
+      return getGoalService().getGoals(input?.status);
     }),
 
   /**
@@ -37,8 +29,7 @@ export const goalsRouter = router({
   getGoal: protectedProcedure
     .input(z.object({ goalId: z.string() }))
     .query(({ input }) => {
-      const db = getHeartbeatDb();
-      return heartbeatStore.getGoal(db, input.goalId);
+      return getGoalService().getGoal(input.goalId);
     }),
 
   /**
@@ -51,11 +42,7 @@ export const goalsRouter = router({
       }).optional()
     )
     .query(({ input }) => {
-      const db = getHeartbeatDb();
-      if (input?.status) {
-        return heartbeatStore.getSeedsByStatus(db, input.status);
-      }
-      return heartbeatStore.getActiveSeeds(db);
+      return getGoalService().getSeeds(input?.status);
     }),
 
   /**
@@ -64,8 +51,7 @@ export const goalsRouter = router({
   getPlansByGoal: protectedProcedure
     .input(z.object({ goalId: z.string() }))
     .query(({ input }) => {
-      const db = getHeartbeatDb();
-      return heartbeatStore.getPlansByGoal(db, input.goalId);
+      return getGoalService().getPlansByGoal(input.goalId);
     }),
 
   /**
@@ -74,8 +60,7 @@ export const goalsRouter = router({
   getActivePlan: protectedProcedure
     .input(z.object({ goalId: z.string() }))
     .query(({ input }) => {
-      const db = getHeartbeatDb();
-      return heartbeatStore.getActivePlan(db, input.goalId);
+      return getGoalService().getActivePlan(input.goalId);
     }),
 
   /**
@@ -84,26 +69,7 @@ export const goalsRouter = router({
   activateGoal: protectedProcedure
     .input(z.object({ goalId: z.string() }))
     .mutation(({ input }) => {
-      const db = getHeartbeatDb();
-      const goal = heartbeatStore.getGoal(db, input.goalId);
-      if (!goal) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Goal not found' });
-      }
-      if (goal.status !== 'proposed' && goal.status !== 'paused') {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Cannot activate a goal with status '${goal.status}'. Must be 'proposed' or 'paused'.`,
-        });
-      }
-      const state = heartbeatStore.getHeartbeatState(db);
-      heartbeatStore.updateGoal(db, input.goalId, {
-        status: 'active',
-        activatedAt: now(),
-        activatedAtTick: state.tickNumber,
-      });
-      const updated = heartbeatStore.getGoal(db, input.goalId)!;
-      getEventBus().emit('goal:updated', updated);
-      return updated;
+      return getGoalService().activateGoal(input.goalId);
     }),
 
   /**
@@ -112,21 +78,7 @@ export const goalsRouter = router({
   pauseGoal: protectedProcedure
     .input(z.object({ goalId: z.string() }))
     .mutation(({ input }) => {
-      const db = getHeartbeatDb();
-      const goal = heartbeatStore.getGoal(db, input.goalId);
-      if (!goal) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Goal not found' });
-      }
-      if (goal.status !== 'active') {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Cannot pause a goal with status '${goal.status}'. Must be 'active'.`,
-        });
-      }
-      heartbeatStore.updateGoal(db, input.goalId, { status: 'paused' });
-      const updated = heartbeatStore.getGoal(db, input.goalId)!;
-      getEventBus().emit('goal:updated', updated);
-      return updated;
+      return getGoalService().pauseGoal(input.goalId);
     }),
 
   /**
@@ -135,26 +87,7 @@ export const goalsRouter = router({
   resumeGoal: protectedProcedure
     .input(z.object({ goalId: z.string() }))
     .mutation(({ input }) => {
-      const db = getHeartbeatDb();
-      const goal = heartbeatStore.getGoal(db, input.goalId);
-      if (!goal) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Goal not found' });
-      }
-      if (goal.status !== 'paused') {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Cannot resume a goal with status '${goal.status}'. Must be 'paused'.`,
-        });
-      }
-      const state = heartbeatStore.getHeartbeatState(db);
-      heartbeatStore.updateGoal(db, input.goalId, {
-        status: 'active',
-        activatedAt: now(),
-        activatedAtTick: state.tickNumber,
-      });
-      const updated = heartbeatStore.getGoal(db, input.goalId)!;
-      getEventBus().emit('goal:updated', updated);
-      return updated;
+      return getGoalService().resumeGoal(input.goalId);
     }),
 
   /**
@@ -163,25 +96,7 @@ export const goalsRouter = router({
   abandonGoal: protectedProcedure
     .input(z.object({ goalId: z.string(), reason: z.string().optional() }))
     .mutation(({ input }) => {
-      const db = getHeartbeatDb();
-      const goal = heartbeatStore.getGoal(db, input.goalId);
-      if (!goal) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Goal not found' });
-      }
-      if (goal.status === 'completed' || goal.status === 'abandoned') {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Cannot abandon a goal with status '${goal.status}'.`,
-        });
-      }
-      heartbeatStore.updateGoal(db, input.goalId, {
-        status: 'abandoned',
-        abandonedAt: now(),
-        abandonedReason: input.reason ?? null,
-      });
-      const updated = heartbeatStore.getGoal(db, input.goalId)!;
-      getEventBus().emit('goal:updated', updated);
-      return updated;
+      return getGoalService().abandonGoal(input.goalId, input.reason);
     }),
 
   /**

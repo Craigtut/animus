@@ -32,9 +32,9 @@ import { loadStreamContext, type StreamContext } from '../memory/observational-m
 import { OBSERVATIONAL_MEMORY_CONFIG } from '../config/observational-memory.config.js';
 import { SeedManager, GoalManager, buildGoalContext } from '../goals/index.js';
 import type { GoalContext } from '../goals/index.js';
-import { getDeferredQueue } from '../tasks/index.js';
+import type { DeferredQueue } from '../tasks/index.js';
 
-import { getChannelManager } from '../channels/channel-manager.js';
+import type { ChannelManager } from '../channels/channel-manager.js';
 import type { TriggerContext } from './context-builder.js';
 import { applyDecay } from './emotion-engine.js';
 import { AgentOrchestrator } from './agent-orchestrator.js';
@@ -47,7 +47,7 @@ import {
   type WakeUpContext,
 } from './energy-engine.js';
 import type { TickQueue } from './tick-queue.js';
-import { getPluginManager } from '../services/plugin-manager.js';
+import type { PluginManager } from '../plugins/index.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('GatherContext', 'heartbeat');
@@ -105,6 +105,9 @@ export interface GatherDeps {
   sessionInvalidated: boolean;
   /** Callback to clear the invalidation flag after reading it */
   clearSessionInvalidation: () => void;
+  pluginManager: PluginManager;
+  channelManager: ChannelManager;
+  deferredQueue: DeferredQueue;
 }
 
 // ============================================================================
@@ -313,7 +316,7 @@ export async function gatherContext(
   let externalHistory: GatherResult['externalHistory'] = null;
   if (recentMessages.length > 0) {
     try {
-      const channelManager = getChannelManager();
+      const channelManager = deps.channelManager;
       // Collect unique external conversation IDs with their channel types
       const externalConvos = new Map<string, string>(); // conversationId -> channelType
       for (const msg of recentMessages) {
@@ -380,7 +383,7 @@ export async function gatherContext(
   let deferredTasks: Task[] = [];
   if (trigger.type === 'interval') {
     try {
-      deferredTasks = getDeferredQueue().getTopTasks(5);
+      deferredTasks = deps.deferredQueue.getTopTasks(5);
     } catch (err) {
       log.warn('Deferred task context failed:', err);
     }
@@ -408,7 +411,7 @@ export async function gatherContext(
   let pluginContextSources = '';
   let credentialManifest = '';
   try {
-    const pluginManager = getPluginManager();
+    const pluginManager = deps.pluginManager;
     pluginDecisionDescriptions = pluginManager.getDecisionDescriptions();
 
     const staticSources = pluginManager.getStaticContextSources();

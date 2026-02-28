@@ -13,7 +13,7 @@ import type { ToolHandlerContext } from '../../src/tools/types.js';
 
 // Mock the plugin manager before importing the handler
 const mockGetPluginConfig = vi.fn();
-vi.mock('../../src/services/plugin-manager.js', () => ({
+vi.mock('../../src/plugins/index.js', () => ({
   getPluginManager: () => ({
     getPluginConfig: mockGetPluginConfig,
   }),

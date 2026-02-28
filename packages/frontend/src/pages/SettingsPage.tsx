@@ -131,22 +131,34 @@ function useSaveFlash() {
 function HeartbeatSection() {
   const theme = useTheme();
 
+  const utils = trpc.useUtils();
+
   const { data: hbState } = trpc.heartbeat.getState.useQuery(undefined, {
     refetchInterval: 10000,
   });
   const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
 
-  const startMutation = trpc.heartbeat.start.useMutation();
-  const stopMutation = trpc.heartbeat.stop.useMutation();
+  const startMutation = trpc.heartbeat.start.useMutation({
+    onSuccess: () => utils.heartbeat.getState.invalidate(),
+  });
+  const stopMutation = trpc.heartbeat.stop.useMutation({
+    onSuccess: () => utils.heartbeat.getState.invalidate(),
+  });
   const updateIntervalMutation = trpc.heartbeat.updateInterval.useMutation();
   const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation();
 
   const [showPauseConfirm, setShowPauseConfirm] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
   const intervalSave = useSaveFlash();
   const warmthSave = useSaveFlash();
   const budgetSave = useSaveFlash();
 
   const isRunning = hbState?.isRunning ?? false;
+
+  // Clear resuming state once the heartbeat is confirmed running
+  useEffect(() => {
+    if (isRunning && isResuming) setIsResuming(false);
+  }, [isRunning, isResuming]);
   const tickNumber = hbState?.tickNumber ?? 0;
   const currentStage = hbState?.currentStage ?? 'idle';
   const sessionState = hbState?.sessionState ?? 'cold';
@@ -224,7 +236,10 @@ function HeartbeatSection() {
   };
 
   const handleResume = () => {
-    startMutation.mutate();
+    setIsResuming(true);
+    startMutation.mutate(undefined, {
+      onError: () => setIsResuming(false),
+    });
   };
 
   return (
@@ -271,10 +286,15 @@ function HeartbeatSection() {
           <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
             <div css={css`
               width: 8px; height: 8px; border-radius: 50%;
-              background: ${isRunning ? theme.colors.success.main : theme.colors.warning.main};
+              background: ${isRunning ? theme.colors.success.main : isResuming ? theme.colors.info.main : theme.colors.warning.main};
+              ${isResuming && !isRunning ? `animation: pulse 1.5s ease-in-out infinite;` : ''}
+              @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.4; }
+              }
             `} />
             <Typography.SmallBodyAlt as="span">
-              {isRunning ? 'Running' : 'Paused'}
+              {isRunning ? 'Running' : isResuming ? 'Starting...' : 'Paused'}
             </Typography.SmallBodyAlt>
           </div>
           <Typography.SmallBody as="div" color="secondary">
@@ -293,11 +313,13 @@ function HeartbeatSection() {
         {!isRunning && (
           <div css={css`
             padding: ${theme.spacing[3]} ${theme.spacing[4]};
-            background: ${theme.colors.warning.main}1a;
+            background: ${isResuming ? theme.colors.info.main : theme.colors.warning.main}1a;
             border-radius: ${theme.borderRadius.default};
           `}>
-            <Typography.SmallBody color={theme.colors.warning.dark}>
-              Heartbeat is paused. Your Animus is not thinking.
+            <Typography.SmallBody color={isResuming ? theme.colors.info.dark : theme.colors.warning.dark}>
+              {isResuming
+                ? 'Starting heartbeat. Waiting for first tick...'
+                : 'Heartbeat is paused. Your Animus is not thinking.'}
             </Typography.SmallBody>
           </div>
         )}
@@ -308,8 +330,8 @@ function HeartbeatSection() {
               Pause heartbeat
             </Button>
           ) : (
-            <Button size="sm" onClick={handleResume} loading={startMutation.isPending}>
-              Resume heartbeat
+            <Button size="sm" onClick={handleResume} loading={isResuming || startMutation.isPending} disabled={isResuming}>
+              {isResuming ? 'Starting...' : 'Resume heartbeat'}
             </Button>
           )}
         </div>
@@ -584,7 +606,12 @@ function ProviderSection() {
     },
   });
   const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation({
-    onSuccess: () => utils.settings.getSystemSettings.invalidate(),
+    onSuccess: () => {
+      utils.settings.getSystemSettings.invalidate();
+      // Provider changes re-seed tool permissions on the backend;
+      // invalidate the tools cache so the UI picks up the new set.
+      utils.tools.listTools.invalidate();
+    },
   });
 
   // Codex OAuth mutations
@@ -798,9 +825,9 @@ function ProviderSection() {
     // If already the active model, do nothing
     if (model.id === activeModel && model.provider === activeProvider) return;
 
-    const mutation: { defaultModel: string; defaultAgentProvider?: string } = { defaultModel: model.id };
+    const mutation: { defaultModel: string; defaultAgentProvider?: 'claude' | 'codex' | 'opencode' } = { defaultModel: model.id };
     if (model.provider !== activeProvider) {
-      mutation.defaultAgentProvider = model.provider;
+      mutation.defaultAgentProvider = model.provider as 'claude' | 'codex' | 'opencode';
     }
 
     const prevModel = activeModel;
@@ -828,9 +855,9 @@ function ProviderSection() {
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
     undoTimerRef.current = null;
 
-    const mutation: { defaultModel: string | null; defaultAgentProvider?: string } = { defaultModel: recentSwitch.fromModel };
+    const mutation: { defaultModel: string | null; defaultAgentProvider?: 'claude' | 'codex' | 'opencode' } = { defaultModel: recentSwitch.fromModel };
     if (recentSwitch.fromProvider !== recentSwitch.toProvider) {
-      mutation.defaultAgentProvider = recentSwitch.fromProvider;
+      mutation.defaultAgentProvider = recentSwitch.fromProvider as 'claude' | 'codex' | 'opencode';
     }
     updateSettingsMutation.mutate(mutation);
     setRecentSwitch(null);
@@ -1045,7 +1072,7 @@ function ProviderSection() {
             transition={{ duration: 0.2 }}
           >
             <div css={css`
-              padding: ${theme.spacing[2.5]} ${theme.spacing[4]};
+              padding: ${theme.spacing[3]} ${theme.spacing[4]};
               border: 1px solid ${theme.colors.success.main}33;
               border-radius: ${theme.borderRadius.md};
               background: ${theme.colors.success.main}08;

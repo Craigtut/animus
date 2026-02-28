@@ -1,5 +1,5 @@
 /**
- * Settings Router — tRPC procedures for system and personality settings.
+ * Settings Router - tRPC procedures for system and personality settings.
  */
 
 import fs from 'node:fs';
@@ -9,23 +9,20 @@ import {
   updateSystemSettingsInputSchema,
   updatePersonalitySettingsInputSchema,
 } from '@animus-labs/shared';
-import type { SystemSettings, PersonalitySettings } from '@animus-labs/shared';
 import { router, protectedProcedure } from '../trpc.js';
 import * as systemStore from '../../db/stores/system-store.js';
 import * as memoryStore from '../../db/stores/memory-store.js';
-import * as personaStore from '../../db/stores/persona-store.js';
-import { getSystemDb, getPersonaDb, getMemoryDb } from '../../db/index.js';
-import { updateCategoryCache } from '../../lib/logger.js';
-import { getEventBus } from '../../lib/event-bus.js';
+import { getSystemDb, getMemoryDb } from '../../db/index.js';
 import { isConfigured, verifyEncryptionKey } from '../../lib/encryption-service.js';
 import { DATA_DIR } from '../../utils/env.js';
 import { getChannelManager } from '../../channels/channel-manager.js';
+import { getSettingsService } from '../../services/settings-service.js';
 
 // ============================================================================
 // Health Check Types & Implementation
 // ============================================================================
 
-interface HealthCheck {
+export interface HealthCheck {
   id: string;
   label: string;
   status: 'pass' | 'warn' | 'fail';
@@ -64,7 +61,7 @@ function runHealthChecks(): { status: 'healthy' | 'degraded' | 'unhealthy'; chec
       checks.push({ id: 'secrets_permissions', label: 'Secrets file permissions', status: 'warn', severity: 'critical', detail: `File mode is ${mode.toString(8)}, expected 600` });
     }
   } catch {
-    // .secrets might not exist yet (first run) — not a failure
+    // .secrets might not exist yet (first run) -- not a failure
     checks.push({ id: 'secrets_permissions', label: 'Secrets file permissions', status: 'pass', severity: 'critical', detail: 'Secrets file not yet created' });
   }
 
@@ -118,7 +115,7 @@ function runHealthChecks(): { status: 'healthy' | 'degraded' | 'unhealthy'; chec
       checks.push({ id: 'channel_health', label: 'Channel health', status: 'warn', severity: 'warning', detail: `${unhealthy.length} channel(s) in error state: ${unhealthy.map(c => c.displayName || c.channelType).join(', ')}` });
     }
   } catch {
-    // Channel manager not initialized yet — skip
+    // Channel manager not initialized yet -- skip
     checks.push({ id: 'channel_health', label: 'Channel health', status: 'pass', severity: 'warning' });
   }
 
@@ -165,47 +162,32 @@ export const settingsRouter = router({
   }),
 
   getSystemSettings: protectedProcedure.query(() => {
-    return systemStore.getSystemSettings(getSystemDb());
+    return getSettingsService().getSystemSettings();
   }),
 
   updateSystemSettings: protectedProcedure
     .input(updateSystemSettingsInputSchema)
     .mutation(({ input }) => {
-      const clean: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(input)) {
-        if (v !== undefined) clean[k] = v;
-      }
-      systemStore.updateSystemSettings(getSystemDb(), clean as Partial<SystemSettings>);
-      if (Object.keys(clean).length > 0) {
-        getEventBus().emit('system:settings_updated', clean);
-      }
-      return systemStore.getSystemSettings(getSystemDb());
+      return getSettingsService().updateSystemSettings(input);
     }),
 
   getPersonalitySettings: protectedProcedure.query(() => {
-    return personaStore.getPersonalitySettings(getPersonaDb());
+    return getSettingsService().getPersonalitySettings();
   }),
 
   updatePersonalitySettings: protectedProcedure
     .input(updatePersonalitySettingsInputSchema)
     .mutation(({ input }) => {
-      const clean: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(input)) {
-        if (v !== undefined) clean[k] = v;
-      }
-      personaStore.updatePersonalitySettings(getPersonaDb(), clean as Partial<PersonalitySettings>);
-      return personaStore.getPersonalitySettings(getPersonaDb());
+      return getSettingsService().updatePersonalitySettings(input);
     }),
 
   getLogCategories: protectedProcedure.query(() => {
-    return systemStore.getLogCategories(getSystemDb());
+    return getSettingsService().getLogCategories();
   }),
 
   updateLogCategories: protectedProcedure
     .input(z.record(z.string(), z.boolean()))
     .mutation(({ input }) => {
-      const updated = systemStore.updateLogCategories(getSystemDb(), input);
-      updateCategoryCache(updated);
-      return updated;
+      return getSettingsService().updateLogCategories(input);
     }),
 });

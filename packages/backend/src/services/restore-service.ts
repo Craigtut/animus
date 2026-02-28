@@ -254,9 +254,24 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     await initializeDatabases();
     log.info('Databases reopened and migrations applied');
 
-    // 14. Reinitialize heartbeat
-    const { initializeHeartbeat, startHeartbeat } = await import('../heartbeat/index.js');
-    await initializeHeartbeat();
+    // 14. Reinitialize subsystems and heartbeat
+    const { initializeHeartbeat, startHeartbeat, handleAgentComplete, handleScheduledTask } = await import('../heartbeat/index.js');
+    const { MemorySubsystem } = await import('../memory/memory-subsystem.js');
+    const { GoalSubsystem } = await import('../goals/goal-subsystem.js');
+    const { AgentSubsystem } = await import('../heartbeat/agent-subsystem.js');
+    const { TaskSubsystem } = await import('../tasks/task-subsystem.js');
+    const { LifecycleManager } = await import('../lib/lifecycle.js');
+
+    const memSub = new MemorySubsystem();
+    const goalSub = new GoalSubsystem(memSub);
+    const agentSub = new AgentSubsystem(handleAgentComplete);
+    const taskSub = new TaskSubsystem(handleScheduledTask);
+
+    const lifecycle = new LifecycleManager();
+    lifecycle.register(memSub).register(goalSub).register(agentSub).register(taskSub);
+    await lifecycle.startAll();
+
+    await initializeHeartbeat({ memory: memSub, goals: goalSub, agents: agentSub });
     log.info('Heartbeat reinitialized');
 
     // 15. Reload channels

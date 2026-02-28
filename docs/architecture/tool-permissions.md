@@ -561,7 +561,7 @@ interface ToolApprovalRequest {
 
 ### Complete
 - Database schema: `tool_permissions` (system.db) + `tool_approval_requests` (heartbeat.db)
-- Store layer: CRUD for both tables in `system-store.ts` and `heartbeat-store.ts`
+- Store layer: CRUD in `tool-permission-store.ts` and `tool-approval-store.ts` (re-exported via `system-store.ts` and `heartbeat-store.ts` barrels)
 - Shared types: `ToolPermission`, `ToolApprovalRequest`, `RiskTier`, `ToolPermissionMode`
 - Event bus: Four tool permission events
 - Permission gate: `checkToolPermission()` in `registry.ts` for core MCP tools
@@ -593,8 +593,8 @@ interface ToolApprovalRequest {
 | `packages/shared/src/tools/definitions.ts` | `resolve_tool_approval` tool definition |
 | `packages/backend/src/db/migrations/system/010_tool_permissions.sql` | `tool_permissions` table |
 | `packages/backend/src/db/migrations/heartbeat/003_tool_approvals.sql` | `tool_approval_requests` table |
-| `packages/backend/src/db/stores/system-store.ts` | `tool_permissions` CRUD functions |
-| `packages/backend/src/db/stores/heartbeat-store.ts` | `tool_approval_requests` CRUD functions |
+| `packages/backend/src/db/stores/tool-permission-store.ts` | `tool_permissions` CRUD functions (re-exported via `system-store.ts` barrel) |
+| `packages/backend/src/db/stores/tool-approval-store.ts` | `tool_approval_requests` CRUD functions (re-exported via `heartbeat-store.ts` barrel) |
 | `packages/backend/src/tools/permission-seeder.ts` | Seeds default permissions on startup |
 | `packages/backend/src/tools/approval-notifier.ts` | Routes approval requests to channels |
 | `packages/backend/src/tools/registry.ts` | Permission gate for core Animus MCP tools |

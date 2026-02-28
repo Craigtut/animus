@@ -1406,7 +1406,7 @@ export type PluginMcpServer = z.infer<typeof PluginMcpServerSchema>;
 
 | Component | Status | Key Files |
 |-----------|--------|-----------|
-| **Plugin Manager** | Complete (~1,500 lines) | `packages/backend/src/services/plugin-manager.ts` |
+| **Plugin Manager** | Complete (~1,500 lines) | `packages/backend/src/plugins/plugin-manager.ts` |
 | **Zod Schemas** | Complete | `packages/shared/src/schemas/plugin.ts` |
 | **Database (plugins table)** | Complete | `packages/backend/src/db/migrations/system/006_plugins.sql` |
 | **Plugin Store (DB)** | Complete | `packages/backend/src/db/stores/plugin-store.ts` |

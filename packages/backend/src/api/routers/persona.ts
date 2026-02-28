@@ -1,114 +1,41 @@
 /**
- * Persona Router — tRPC procedures for persona (personality) management.
+ * Persona Router - tRPC procedures for persona (personality) management.
  *
  * Supports progressive save during onboarding, finalization with
  * emotion baseline computation, and post-creation updates.
  */
 
 import { router, protectedProcedure } from '../trpc.js';
-import { getSystemDb, getPersonaDb } from '../../db/index.js';
-import * as systemStore from '../../db/stores/system-store.js';
-import * as personaStore from '../../db/stores/persona-store.js';
-import {
-  startHeartbeat,
-  recompilePersona,
-  recomputeEmotionBaselines,
-} from '../../heartbeat/index.js';
+import { getPersonaService } from '../../services/persona-service.js';
 import {
   personaDraftInputSchema,
   personaUpdateInputSchema,
 } from '@animus-labs/shared';
-import type { Persona } from '@animus-labs/shared';
-import type { PersonaDimensions } from '../../heartbeat/emotion-engine.js';
-
-type DraftFields = Partial<Omit<Persona, 'isFinalized' | 'communicationStyle'>>;
-
-/**
- * Build a store-compatible draft object from Zod-parsed input.
- * Strips keys whose value is undefined so we satisfy exactOptionalPropertyTypes.
- */
-function buildDraft(input: Record<string, unknown>): DraftFields {
-  const result: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(input)) {
-    if (v !== undefined) result[k] = v;
-  }
-  return result as DraftFields;
-}
-
-/**
- * Map shared PersonalityDimensions (confidence) to emotion-engine
- * PersonaDimensions (confidence_dim).
- */
-function toEmotionDimensions(dims: Persona['personalityDimensions']): PersonaDimensions {
-  return {
-    extroversion: dims.extroversion,
-    trust: dims.trust,
-    leadership: dims.leadership,
-    optimism: dims.optimism,
-    confidence_dim: dims.confidence,
-    empathy: dims.empathy,
-    cautious: dims.cautious,
-    patience: dims.patience,
-    orderly: dims.orderly,
-    altruism: dims.altruism,
-  };
-}
 
 export const personaRouter = router({
   /**
    * Get full persona data.
    */
   get: protectedProcedure.query(() => {
-    return personaStore.getPersona(getPersonaDb());
+    return getPersonaService().get();
   }),
 
   /**
    * Save partial persona during onboarding (progressive save).
-   * Does not finalize — persona remains a draft.
+   * Does not finalize; persona remains a draft.
    */
   saveDraft: protectedProcedure
     .input(personaDraftInputSchema)
     .mutation(({ input }) => {
-      const db = getPersonaDb();
-      personaStore.savePersonaDraft(db, buildDraft(input));
-      return personaStore.getPersona(db);
+      return getPersonaService().saveDraft(input);
     }),
 
   /**
-   * Finalize persona — compiles prompt, computes emotion baselines,
+   * Finalize persona: compiles prompt, computes emotion baselines,
    * marks onboarding complete, and starts the heartbeat.
    */
   finalize: protectedProcedure.mutation(() => {
-    const db = getPersonaDb();
-
-    // Mark persona as finalized
-    personaStore.finalizePersona(db);
-
-    // Mark onboarding as complete
-    systemStore.updateOnboardingState(getSystemDb(), { isComplete: true, currentStep: 8 });
-
-    // Recompile persona prompt
-    recompilePersona();
-
-    // Compute emotion baselines from personality dimensions
-    const persona = personaStore.getPersona(db);
-    recomputeEmotionBaselines(toEmotionDimensions(persona.personalityDimensions));
-
-    // Start the heartbeat — the moment of "birth"
-    startHeartbeat();
-
-    // Trigger speech model downloads (fire-and-forget)
-    import('../../downloads/index.js').then(({ getDownloadManager, getSpeechAssets }) => {
-      try {
-        const dm = getDownloadManager();
-        const missing = getSpeechAssets().filter((a) => !dm.isAssetPresent(a));
-        if (missing.length > 0) dm.enqueue(missing);
-      } catch {
-        // Download manager may not be initialized yet in tests
-      }
-    }).catch(() => {});
-
-    return persona;
+    return getPersonaService().finalize();
   }),
 
   /**
@@ -118,18 +45,6 @@ export const personaRouter = router({
   update: protectedProcedure
     .input(personaUpdateInputSchema)
     .mutation(({ input }) => {
-      const db = getPersonaDb();
-      personaStore.savePersonaDraft(db, buildDraft(input));
-
-      // Recompile persona prompt
-      recompilePersona();
-
-      // Recompute emotion baselines if dimensions changed
-      if (input.personalityDimensions) {
-        const persona = personaStore.getPersona(db);
-        recomputeEmotionBaselines(toEmotionDimensions(persona.personalityDimensions));
-      }
-
-      return personaStore.getPersona(db);
+      return getPersonaService().update(input);
     }),
 });

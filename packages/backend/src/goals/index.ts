@@ -17,3 +17,5 @@ export {
   PLANNING_PROMPT_MESSAGES,
 } from './planning.js';
 export type { PlanningPromptUrgency } from './planning.js';
+
+export { GoalSubsystem } from './goal-subsystem.js';

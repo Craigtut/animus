@@ -42,7 +42,7 @@ import {
   getHeartbeatState,
 } from '../db/stores/heartbeat-store.js';
 import { getHeartbeatDb } from '../db/index.js';
-import { getPluginManager } from '../services/plugin-manager.js';
+import { getPluginManager } from '../plugins/index.js';
 import { prepareCodexSessionAuth, copyCodexCliAuth } from '../services/codex-oauth.js';
 import { getChannelRouter } from '../channels/index.js';
 import type { MemoryManager } from '../memory/index.js';

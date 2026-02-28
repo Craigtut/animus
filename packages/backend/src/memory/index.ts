@@ -9,3 +9,4 @@ export { MemoryManager, MEMORY_DEDUP_THRESHOLD, MEMORY_SKIP_THRESHOLD, MEMORY_RE
 export type { MemoryCandidate, ScoredMemory } from './memory-manager.js';
 export { buildMemoryContext } from './memory-context.js';
 export type { MemoryContext } from './memory-context.js';
+export { MemorySubsystem } from './memory-subsystem.js';

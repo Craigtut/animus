@@ -64,7 +64,7 @@ vi.mock('child_process', () => ({
 
 // Import after mocks
 const { getPluginManager, resetPluginManager } = await import(
-  '../../src/services/plugin-manager.js'
+  '../../src/plugins/index.js'
 );
 import * as pluginStore from '../../src/db/stores/plugin-store.js';
 

@@ -223,7 +223,7 @@ export async function buildCognitiveMcpServer(): Promise<{
     async (args: z.infer<typeof recordThoughtSchema>) => {
       if (snapshotBox.current.thought) {
         log.warn('record_thought called again — already recorded, ignoring duplicate');
-        return '';
+        return { content: [{ type: 'text' as const, text: 'Already recorded.' }] };
       }
       log.info('record_thought called', { importance: args.importance });
       snapshotBox.current.thought = { content: args.content, importance: args.importance };
