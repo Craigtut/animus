@@ -205,6 +205,11 @@ export function getLongTermMemoriesPaginated(
   });
 }
 
+export function getLongTermMemoryCount(db: Database.Database): number {
+  const row = db.prepare('SELECT COUNT(*) as count FROM long_term_memories').get() as { count: number };
+  return row.count;
+}
+
 export function updateMemoryAccess(db: Database.Database, id: string): void {
   db.prepare(
     'UPDATE long_term_memories SET strength = strength + 1, last_accessed_at = ?, updated_at = ? WHERE id = ?'

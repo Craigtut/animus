@@ -68,7 +68,11 @@ describe('EncryptionService', () => {
   });
 
   it('throws on invalid ciphertext format', () => {
-    expect(() => decrypt('not-valid')).toThrow();
+    expect(() => decrypt('not-valid')).toThrow('Invalid ciphertext format');
+  });
+
+  it('rejects legacy plain: format', () => {
+    expect(() => decrypt('plain:dGVzdA==')).toThrow('Invalid ciphertext format');
   });
 });
 
@@ -91,9 +95,8 @@ describe('EncryptionService (unconfigured)', () => {
     expect(() => mod.encrypt('my-key')).toThrow('resolveSecrets()');
   });
 
-  it('still decrypts legacy plain: format for migration', async () => {
+  it('rejects legacy plain: format', async () => {
     const mod = await import('../../src/lib/encryption-service.js');
-    const legacy = `plain:${Buffer.from('my-key').toString('base64')}`;
-    expect(mod.decrypt(legacy)).toBe('my-key');
+    expect(() => mod.decrypt('plain:dGVzdA==')).toThrow('resolveSecrets()');
   });
 });

@@ -480,7 +480,7 @@ Remove stored Codex credentials.
 Tokens are stored **encrypted** in `system.db`:
 
 ```sql
--- In system.db, within the api_keys or a new credentials table
+-- In system.db, within the credentials table
 CREATE TABLE credentials (
   id TEXT PRIMARY KEY,
   provider TEXT NOT NULL,          -- 'codex'

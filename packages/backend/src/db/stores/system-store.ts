@@ -309,6 +309,7 @@ export function updateSystemSettings(
     sleepEndHour: 'sleep_end_hour',
     sleepTickIntervalMs: 'sleep_tick_interval_ms',
     reasoningEffort: 'reasoning_effort',
+    memoryPoolMaxSize: 'memory_pool_max_size',
   };
 
   // Boolean fields need int conversion
@@ -390,34 +391,6 @@ export function updateOnboardingState(
   fields.push('updated_at = ?');
   values.push(now());
   db.prepare(`UPDATE system_settings SET ${fields.join(', ')} WHERE id = 1`).run(...values);
-}
-
-// ============================================================================
-// API Keys
-// ============================================================================
-
-export function getApiKey(db: Database.Database, provider: string): string | null {
-  const row = db
-    .prepare('SELECT encrypted_key FROM api_keys WHERE provider = ?')
-    .get(provider) as { encrypted_key: string } | undefined;
-  return row?.encrypted_key ?? null;
-}
-
-export function setApiKey(db: Database.Database, provider: string, encryptedKey: string): void {
-  const existing = db
-    .prepare('SELECT id FROM api_keys WHERE provider = ?')
-    .get(provider) as { id: string } | undefined;
-  if (existing) {
-    db.prepare('UPDATE api_keys SET encrypted_key = ?, updated_at = ? WHERE provider = ?').run(
-      encryptedKey,
-      now(),
-      provider
-    );
-  } else {
-    db.prepare(
-      'INSERT INTO api_keys (id, provider, encrypted_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
-    ).run(generateUUID(), provider, encryptedKey, now(), now());
-  }
 }
 
 // ============================================================================

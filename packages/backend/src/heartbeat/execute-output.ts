@@ -515,6 +515,18 @@ export async function executeOutput(
   heartbeatStore.expirePendingApprovals(hbDb);
   heartbeatStore.cleanupOldApprovals(hbDb, 7);
 
+  // 9a. Memory pool pruning -- interval ticks only
+  if (gathered.trigger.type === 'interval' && deps.memoryManager) {
+    try {
+      const pruned = await deps.memoryManager.pruneToCapacity(settings.memoryPoolMaxSize);
+      if (pruned > 0) {
+        log.info(`Memory pruning: removed ${pruned} decayed/excess memories`);
+      }
+    } catch (err) {
+      log.warn('Memory pruning failed (non-fatal):', err);
+    }
+  }
+
   // 9b. Periodic deferred task staleness processing (~every 50 ticks)
   if (tickNumber % 50 === 0) {
     try {

@@ -54,7 +54,7 @@ Six separate SQLite databases with distinct purposes and lifecycles, all stored 
    - Users and authentication
    - Contacts and contact channels (identity resolution)
    - System settings
-   - API keys (encrypted)
+   - Credentials (encrypted API keys, OAuth tokens)
 
 2. **persona.db** - Personality settings (separate lifecycle from system.db)
 

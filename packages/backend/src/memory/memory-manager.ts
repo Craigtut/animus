@@ -191,31 +191,59 @@ export class MemoryManager {
   // --------------------------------------------------------------------------
 
   /**
-   * Prune decayed memories.
-   * retention = e^(-hours / (strength * 720))
-   * Prune when retention < 0.1 AND importance < 0.3
+   * Size-aware pruning. When the memory pool exceeds maxPoolSize,
+   * rank non-core memories by composite score and prune lowest-scoring.
+   * Also prunes any decay-eligible memories regardless of pool size.
    */
-  async pruneDecayed(): Promise<number> {
-    const allMemories = memoryStore.searchLongTermMemories(this.memoryDb, { limit: 1000 });
-    let pruned = 0;
+  async pruneToCapacity(maxPoolSize: number): Promise<number> {
+    const totalCount = memoryStore.getLongTermMemoryCount(this.memoryDb);
 
-    for (const memory of allMemories) {
-      // Never auto-delete core memories
-      if (memory.importance >= MEMORY_CORE_IMPORTANCE_FLOOR) continue;
+    // Load all non-core memories for scoring
+    const allMemories = memoryStore.searchLongTermMemories(this.memoryDb, { limit: 100000 });
+    const candidates = allMemories.filter(m => m.importance < MEMORY_CORE_IMPORTANCE_FLOOR);
 
+    // Score each candidate
+    const scored = candidates.map(memory => {
       const elapsedHours = DecayEngine.hoursSince(memory.lastAccessedAt);
       const retention = DecayEngine.computeRetention(memory.strength, elapsedHours);
+      const recency = Math.max(0, Math.min(1, 1 - (elapsedHours / (24 * 365))));
+      const score = 0.4 * retention + 0.3 * memory.importance + 0.3 * recency;
+      const isDecayEligible = retention < MEMORY_PRUNE_RETENTION_THRESHOLD
+        && memory.importance < MEMORY_PRUNE_IMPORTANCE_FLOOR;
+      return { memory, score, isDecayEligible };
+    });
 
-      if (DecayEngine.shouldPrune(retention, memory.importance)) {
-        // Delete from both SQLite and LanceDB
-        this.memoryDb.prepare('DELETE FROM long_term_memories WHERE id = ?').run(memory.id);
-        await this.vectorStore.deleteMemory(memory.id);
-        pruned++;
-      }
+    // Sort by score ascending (lowest = most prunable)
+    scored.sort((a, b) => a.score - b.score);
+
+    // Calculate how many to prune
+    const excess = Math.max(0, totalCount - maxPoolSize);
+    const decayEligibleCount = scored.filter(s => s.isDecayEligible).length;
+    const pruneCount = Math.max(excess, decayEligibleCount);
+
+    if (pruneCount === 0) return 0;
+
+    // Take the lowest-scored memories up to pruneCount
+    const toPrune = scored.slice(0, pruneCount);
+
+    for (const { memory } of toPrune) {
+      this.memoryDb.prepare('DELETE FROM long_term_memories WHERE id = ?').run(memory.id);
+      await this.vectorStore.deleteMemory(memory.id);
     }
 
-    if (pruned > 0) getEventBus().emit('memory:pruned', { count: pruned });
-    return pruned;
+    if (toPrune.length > 0) {
+      getEventBus().emit('memory:pruned', { count: toPrune.length });
+    }
+
+    return toPrune.length;
+  }
+
+  /**
+   * Prune decayed memories (decay-only, no size cap).
+   * Kept for backward compatibility.
+   */
+  async pruneDecayed(): Promise<number> {
+    return this.pruneToCapacity(Infinity);
   }
 
   // --------------------------------------------------------------------------

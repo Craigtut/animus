@@ -93,7 +93,7 @@ Animus is built as a self-contained, self-hosted application. The guiding princi
 
 All databases live under `data/databases/` (see `docs/architecture/data-directory.md`).
 
-1. **system.db** - Core config that should never be accidentally deleted (users, contacts, contact channels, settings, API keys)
+1. **system.db** - Core config that should never be accidentally deleted (users, contacts, contact channels, settings, credentials)
 2. **persona.db** - Personality settings with a separate lifecycle from system.db
 3. **heartbeat.db** - AI state that might be reset for fresh start (thoughts, emotions, experiences, agent tasks)
 4. **memory.db** - Accumulated knowledge: working memory (per-contact notepad), core self (agent self-knowledge), long-term memories (extracted knowledge metadata). Reset with heartbeat for full AI reset, or preserved independently for soft reset.
@@ -404,9 +404,9 @@ interface IEncryptionService {
 - IV: Random per-encryption, prepended to ciphertext
 - Format: `{iv}:{ciphertext}:{authTag}` (base64-encoded)
 
-If the encryption key is not set, the service should log a warning on startup and fall back to storing secrets as plaintext (acceptable for local development but not production). The `isConfigured()` method lets the UI warn users about unencrypted storage.
+The encryption key is auto-generated and persisted in the `.secrets` file at startup. The `isConfigured()` method lets the UI verify encryption is active.
 
-Used by the channel configuration system (see `docs/architecture/channel-packages.md`) and API key storage in `system.db`.
+Used by the credentials table in `system.db` (API keys, OAuth tokens) and channel configuration (see `docs/architecture/channel-packages.md`).
 
 ---
 
@@ -476,7 +476,7 @@ packages/backend/src/db/
   migrations/
     system/
       001_initial.sql
-      002_add_api_keys.sql
+      003_credentials.sql
     heartbeat/
       001_initial.sql
       002_add_tick_decisions.sql
@@ -525,8 +525,7 @@ This approach is robust for long-term use: as the schema evolves, new `.sql` fil
 ## Security Considerations
 
 - **Authentication**: Email/password with argon2 hashing, JWT in httpOnly cookies (web) or Bearer tokens (API). See Authentication section above.
-- **API Keys**: Stored encrypted in system.db via the Encryption Service
-- **Channel Credentials**: Encrypted in system.db via the Encryption Service (Twilio keys, Discord tokens, etc.)
+- **Credentials**: All provider keys (API keys, OAuth tokens) and channel credentials stored encrypted in system.db `credentials` table via the Encryption Service
 - **CORS**: Configured for same-origin in production
 - **Input Validation**: All tRPC inputs validated with Zod
 - **SQL Injection**: Prevented by parameterized queries (better-sqlite3)

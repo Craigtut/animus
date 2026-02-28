@@ -757,7 +757,7 @@ All onboarding data is saved to `system.db` as the user progresses. If they clos
 
 | Step | Storage | Table |
 |------|---------|-------|
-| Agent Provider | Provider selection + credentials (encrypted API keys or credential references) | `settings`, `api_keys` |
+| Agent Provider | Provider selection + credentials (encrypted API keys or OAuth tokens) | `settings`, `credentials` |
 | Identity | Primary contact record (name, email) | `contacts`, `contact_channels` |
 | About You | Primary contact notes (freeform text) | `contacts.notes` |
 | Persona (all sub-steps) | Persona data as partial draft | `persona_draft` (JSON blob, or individual columns) |

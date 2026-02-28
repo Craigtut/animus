@@ -108,11 +108,9 @@ export const providerRouter = router({
         };
       }
 
-      // Fallback: check legacy api_keys table
-      const legacyKey = systemStore.getApiKey(db, input.provider);
       return {
-        hasKey: legacyKey !== null,
-        credentialType: legacyKey ? 'api_key' : null,
+        hasKey: false,
+        credentialType: null,
         provider: input.provider,
       };
     }),

@@ -186,24 +186,4 @@ describe('system-store', () => {
     });
   });
 
-  // ========================================================================
-  // API Keys
-  // ========================================================================
-
-  describe('api keys', () => {
-    it('sets and gets an API key', () => {
-      systemStore.setApiKey(db, 'anthropic', 'encrypted-value');
-      expect(systemStore.getApiKey(db, 'anthropic')).toBe('encrypted-value');
-    });
-
-    it('updates existing key', () => {
-      systemStore.setApiKey(db, 'anthropic', 'old-value');
-      systemStore.setApiKey(db, 'anthropic', 'new-value');
-      expect(systemStore.getApiKey(db, 'anthropic')).toBe('new-value');
-    });
-
-    it('returns null for missing key', () => {
-      expect(systemStore.getApiKey(db, 'nonexistent')).toBeNull();
-    });
-  });
 });

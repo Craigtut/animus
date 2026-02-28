@@ -431,7 +431,7 @@ interface PersonaDraft {
 - Persona: `persona` / `persona_draft` in `system.db` via tRPC query/mutation
 - Heartbeat config: `settings` table in `system.db` via tRPC query/mutation
 - Heartbeat status: `heartbeat_state` table in `heartbeat.db` via tRPC subscription (`onHeartbeatState`)
-- Provider: `settings` + `api_keys` tables in `system.db` via tRPC query/mutation
+- Provider: `settings` + `credentials` tables in `system.db` via tRPC query/mutation
 - Channels: `channels` table in `system.db` via tRPC query/mutation
 - Goal settings: `settings` table in `system.db` via tRPC query/mutation
 - System settings: `settings` table in `system.db` via tRPC query/mutation

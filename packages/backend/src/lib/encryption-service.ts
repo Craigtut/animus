@@ -59,15 +59,9 @@ export function encrypt(plaintext: string): string {
 }
 
 /**
- * Decrypt ciphertext.
- * Accepts both encrypted format and legacy `plain:` format (for migration).
+ * Decrypt ciphertext (AES-256-GCM format: `{iv}:{ciphertext}:{authTag}`).
  */
 export function decrypt(ciphertext: string): string {
-  // Handle legacy plaintext values from before encryption was mandatory
-  if (ciphertext.startsWith('plain:')) {
-    return Buffer.from(ciphertext.slice(6), 'base64').toString('utf8');
-  }
-
   const key = getKey();
   if (!key) {
     throw new Error('Cannot decrypt: no encryption key configured');

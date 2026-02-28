@@ -20,6 +20,26 @@ import pc from 'picocolors';
 import { env, DATA_DIR } from '../utils/env.js';
 
 // ---------------------------------------------------------------------------
+// Secret redaction
+// ---------------------------------------------------------------------------
+
+const REDACTION_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
+  // Anthropic API keys
+  { pattern: /sk-ant-[a-zA-Z0-9_-]{20,}/g, replacement: '[REDACTED:sk-ant-***]' },
+  // OpenAI API keys
+  { pattern: /sk-proj-[a-zA-Z0-9_-]{20,}/g, replacement: '[REDACTED:sk-proj-***]' },
+  { pattern: /sk-[a-zA-Z0-9]{20,}/g, replacement: '[REDACTED:sk-***]' },
+];
+
+export function redactSecrets(text: string): string {
+  let result = text;
+  for (const { pattern, replacement } of REDACTION_PATTERNS) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -126,7 +146,8 @@ function writeToLogFile(level: LogLevel, name: string, args: unknown[]): void {
       )
       .join(' ');
 
-    fs.appendFileSync(LOG_FILE_PATH, `[${ts}] ${PLAIN_LEVEL_LABELS[level]} [${name}] ${msg}\n`);
+    const line = `[${ts}] ${PLAIN_LEVEL_LABELS[level]} [${name}] ${msg}\n`;
+    fs.appendFileSync(LOG_FILE_PATH, redactSecrets(line));
   } catch { /* never crash on log write failure */ }
 }
 
@@ -199,7 +220,8 @@ export function createLogger(name: string, category?: string): Logger {
     const prefix = `${timestamp()} ${LEVEL_LABELS[level]} ${ctx}`;
     const method =
       level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
-    method(prefix, ...args);
+    const redactedArgs = args.map(a => typeof a === 'string' ? redactSecrets(a) : a);
+    method(prefix, ...redactedArgs);
   }
 
   return {

@@ -4312,8 +4312,88 @@ function SystemSection() {
     },
   };
 
+  // Health check
+  const { data: healthData } = trpc.settings.healthCheck.useQuery(undefined, { refetchInterval: 30_000 });
+
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[8]};`}>
+      {/* System Health */}
+      {healthData && (
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+          <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+            System Health
+          </Typography.Subtitle>
+
+          {healthData.status === 'healthy' ? (
+            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; color: ${theme.colors.success.main};`}>
+              <CheckCircle size={18} weight="fill" />
+              <Typography.SmallBody css={css`color: ${theme.colors.success.main};`}>
+                Animus Engine is healthy
+              </Typography.SmallBody>
+            </div>
+          ) : (
+            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+              <AnimatePresence>
+                {/* Critical failures first */}
+                {healthData.checks
+                  .filter(c => c.status !== 'pass' && c.severity === 'critical')
+                  .map(check => (
+                    <motion.div
+                      key={check.id}
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      css={css`display: flex; align-items: flex-start; gap: ${theme.spacing[2]};`}
+                    >
+                      <XCircle size={18} weight="fill" css={css`color: ${theme.colors.error.main}; flex-shrink: 0; margin-top: 2px;`} />
+                      <div>
+                        <Typography.SmallBody css={css`color: ${theme.colors.error.main};`}>{check.label}</Typography.SmallBody>
+                        {check.detail && <Typography.Caption color="hint">{check.detail}</Typography.Caption>}
+                      </div>
+                    </motion.div>
+                  ))}
+                {/* Warnings */}
+                {healthData.checks
+                  .filter(c => c.status !== 'pass' && c.severity === 'warning')
+                  .map(check => (
+                    <motion.div
+                      key={check.id}
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      css={css`display: flex; align-items: flex-start; gap: ${theme.spacing[2]};`}
+                    >
+                      <Warning size={18} weight="fill" css={css`color: ${theme.colors.warning.main}; flex-shrink: 0; margin-top: 2px;`} />
+                      <div>
+                        <Typography.SmallBody css={css`color: ${theme.colors.warning.main};`}>{check.label}</Typography.SmallBody>
+                        {check.detail && <Typography.Caption color="hint">{check.detail}</Typography.Caption>}
+                      </div>
+                    </motion.div>
+                  ))}
+                {/* Info */}
+                {healthData.checks
+                  .filter(c => c.status !== 'pass' && c.severity === 'info')
+                  .map(check => (
+                    <motion.div
+                      key={check.id}
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      css={css`display: flex; align-items: flex-start; gap: ${theme.spacing[2]};`}
+                    >
+                      <Warning size={18} css={css`color: ${theme.colors.text.hint}; flex-shrink: 0; margin-top: 2px;`} />
+                      <div>
+                        <Typography.SmallBody color="secondary">{check.label}</Typography.SmallBody>
+                        {check.detail && <Typography.Caption color="hint">{check.detail}</Typography.Caption>}
+                      </div>
+                    </motion.div>
+                  ))}
+              </AnimatePresence>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Desktop App */}
       {isTauri() && (
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
