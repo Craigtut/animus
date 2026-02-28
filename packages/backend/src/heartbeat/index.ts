@@ -894,7 +894,32 @@ export async function initializeHeartbeat(): Promise<{ resumedAfterRestart: bool
   }
 
   // Listen for plugin changes to invalidate the session
-  getEventBus().on('plugin:changed', () => {
+  getEventBus().on('plugin:changed', async (payload) => {
+    // Hot-swap Codex skills via JSON-RPC if the app-server is running
+    if (ctx.agentManager) {
+      try {
+        const settings = systemStore.getSystemSettings(getSystemDb());
+        if (settings.defaultAgentProvider === 'codex') {
+          const { CodexAdapter } = await import('@animus-labs/agents');
+          const adapter = ctx.agentManager.getAdapter('codex');
+          if (adapter instanceof CodexAdapter) {
+            const { getPluginManager } = await import('../services/plugin-manager.js');
+            const pm = getPluginManager();
+            const codexSkillPaths = pm.getDeployedCodexSkillPaths();
+            const enabled = payload?.action !== 'uninstalled' && payload?.action !== 'disabled';
+            for (const skillPath of codexSkillPaths) {
+              await adapter.syncSkill(skillPath, enabled);
+            }
+            if (codexSkillPaths.length > 0) {
+              log.debug(`Synced ${codexSkillPaths.length} Codex skills (enabled=${enabled})`);
+            }
+          }
+        }
+      } catch (err) {
+        log.debug('Codex skill hot-swap failed (non-critical):', err);
+      }
+    }
+
     ctx.mindSession.invalidated = true;
     log.info('Plugin changed -- next tick will force cold session');
   });

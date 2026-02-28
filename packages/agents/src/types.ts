@@ -284,6 +284,14 @@ export interface AgentSessionConfig {
     | { behavior: 'deny'; message?: string }
   >;
 
+  /**
+   * Unified reasoning effort level.
+   * Controls how much the model thinks before responding.
+   * When set, takes precedence over provider-specific thinking config.
+   * Currently supported: Codex (maps to model_reasoning_effort).
+   */
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'max';
+
   // Provider-specific options (see typed config interfaces)
 
   // Claude-specific
@@ -477,6 +485,12 @@ export interface ModelInfo {
   id: string;
   /** Human-readable model name */
   name: string;
+  /** Whether this model is recommended for general use */
+  recommended?: boolean;
+  /** Whether this is the default model for the provider */
+  isDefault?: boolean;
+  /** ISO date string from API (e.g. model creation date) */
+  createdAt?: string;
 }
 
 // ============================================================================

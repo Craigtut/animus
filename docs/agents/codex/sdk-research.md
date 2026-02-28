@@ -163,14 +163,15 @@ const thread = codex.resumeThread(threadId);
 await thread.run("Continue where you left off");
 ```
 
-### ⚠️ No Abort/Cancel (Yet)
+### ~~No Abort/Cancel~~ (Resolved via App Server Protocol)
 
-The Codex TypeScript SDK **does not currently** provide a way to cancel or abort an active `thread.run()` call once started. This is an [open feature request](https://github.com/openai/codex/issues/5494).
+The Codex TypeScript SDK's per-turn API does not provide cancel/abort. However, the **App Server Protocol** provides `turn/interrupt` for real cancellation.
 
-**For Animus**: When `session.cancel()` is called on a Codex session, the adapter will:
-- Log a warning that cancel is not supported
-- No-op (do nothing)
-- Let the operation complete naturally in the background
+**For Animus**: The adapter now uses the App Server Protocol. When `session.cancel()` is called:
+- Sends `turn/interrupt` to the app-server process
+- The server cancels the current operation
+- Emits `turn/completed` with `status: "interrupted"`
+- Clean, immediate cancellation
 
 ## Approval Modes
 
@@ -294,27 +295,60 @@ case "turn.completed":
 
 75% prompt caching discount available.
 
-## App Server Protocol (Advanced)
+## App Server Protocol
 
-For deeper integration, Codex exposes a JSON-RPC based protocol:
+> **Status**: This is now the primary transport used by the Animus Codex adapter. See [app-server-protocol.md](./app-server-protocol.md) for the full reference.
 
-```typescript
-// Types from codex-rs/app-server-protocol/schema/typescript/v2/
-import type { ThreadStartParams, TurnStartParams } from './v2/';
+The App Server Protocol (`codex app-server`) provides a long-lived JSON-RPC 2.0 process over stdio. This is the same protocol powering the VS Code extension and CLI TUI. It replaces the SDK's per-turn `codex exec` approach in the Animus adapter.
 
-// Lifecycle:
-// 1. initialize request + initialized notification
-// 2. thread/start or thread/resume
-// 3. turn/start with user input
-// 4. Stream item/started, item/completed, deltas
-// 5. turn/completed or turn/interrupt
-```
+### Why App Server over SDK
 
-### Notifications
+The SDK wraps `codex exec`, spawning a disposable process per turn with write-once stdin. This makes mid-turn injection and cancellation impossible. The App Server maintains a persistent bidirectional channel.
 
-- `codex/event` - Codex event payload
-- `loginChatGptComplete` - Auth complete
-- `authStatusChange` - Auth status changed
+| Capability | SDK (`codex exec`) | App Server |
+|------------|-------------------|------------|
+| Cancel | Not possible | `turn/interrupt` |
+| Mid-turn injection | Not possible | `turn/steer` |
+| Tool approval | Policy-only | Interactive request/response |
+| Session forking | Not available | `thread/fork` |
+| Process lifecycle | Disposable per turn | Long-lived, shared |
+
+### Key Methods
+
+- `initialize` / `initialized`: Protocol handshake
+- `thread/start`, `thread/resume`, `thread/fork`: Thread lifecycle
+- `turn/start`: Begin a turn with user input
+- `turn/steer`: Mid-turn message injection (cancel-and-recreate at Responses API level)
+- `turn/interrupt`: Cancel active turn
+- `item/requestApproval` / `item/approvalResponse`: Tool execution approval flow
+
+### Under the Hood: turn/steer
+
+Steering works via cancel-and-recreate at the Responses API level:
+1. Cancel the current response
+2. Preserve all context (conversation history, tool results)
+3. Append the steer message as a new user turn
+4. Create a new response
+
+This gives the appearance of injecting a message mid-stream while maintaining conversation coherence.
+
+### Notification Types
+
+| Notification | Description |
+|-------------|-------------|
+| `turn/started` | Turn began |
+| `turn/completed` | Turn finished (completed/interrupted/failed) |
+| `item/started` | Work item started (command, MCP tool, file change, reasoning) |
+| `item/completed` | Work item completed |
+| `item/agentMessage/delta` | Streaming agent text |
+| `item/reasoning/textDelta` | Streaming reasoning text |
+| `thread/tokenUsage/updated` | Token usage stats |
+| `item/requestApproval` | Tool needs approval |
+| `error` | Error notification |
+
+### Binary Requirement
+
+The `@openai/codex-sdk` package is still required for the bundled `codex` binary. The SDK's JavaScript API is no longer used by the adapter; only the binary at `vendor/{triple}/codex/codex` is needed to run `codex app-server`.
 
 ## Sandbox Modes
 
@@ -370,47 +404,50 @@ OpenAI's recommended pattern uses a "Project Manager" agent that:
 
 ## Unified Hook Model Mapping
 
-Codex has **limited hook support** - no pre-execution hooks, observe-only:
+With the App Server Protocol, Codex now supports pre-execution blocking via the approval request/response flow:
 
 | Unified Hook | Codex Support | How It Works |
 |--------------|---------------|--------------|
-| `onPreToolUse` | ⚠️ Emit only | Listen to `item.started` event, **cannot block or modify** |
-| `onPostToolUse` | ✅ Full | Listen to `item.completed` event |
-| `onToolError` | ✅ Full | Listen to `turn.failed` event |
-| `onSessionStart` | ✅ Full | Listen to `thread.started` event |
-| `onSessionEnd` | ✅ Full | Listen to `turn.completed` event |
+| `onPreToolUse` | ✅ Can block | Via approval request/response flow (accept/decline) |
+| `onPostToolUse` | ✅ Full | Listen to `item/completed` notification |
+| `onToolError` | ✅ Full | Listen to `turn/completed` with `status: "failed"` |
+| `onSessionStart` | ✅ Full | Emitted on thread start |
+| `onSessionEnd` | ✅ Full | Emitted on session end |
 | `onSubagentStart` | ❌ N/A | Codex doesn't support native subagents |
 | `onSubagentEnd` | ❌ N/A | Codex doesn't support native subagents |
 
-**Critical Limitation**: Codex does NOT support blocking or modifying tool execution. The `onPreToolUse` hook will emit events for logging/auditing purposes only. If a user's hook returns `{ allow: false }`, the adapter will log a warning but execution will proceed anyway.
+**Remaining Limitation**: While `onPreToolUse` can now block execution (by declining the approval), it cannot modify tool input. The approval flow is accept/decline only; there is no mechanism to change the command or arguments before execution.
 
-**Implementation**: Adapter listens to the `runStreamed()` event iterator and emits normalized events to user's hook callbacks.
+**Implementation**: Adapter listens to App Server notification events and processes approval requests using the `canUseTool` callback and `onPreToolUse` hook.
 
 ## Key Concerns for Abstraction Layer
 
-1. **Thread-based model** vs Claude's query-based - fundamental difference
-2. **Subscription auth supported** - Users can use ChatGPT accounts
-3. **No abort/cancel yet** - Can't stop running operations (adapter will no-op with warning)
-4. **CLI-wrapped architecture** - Spawns subprocess, JSONL over stdio
-5. **Approval policies** - Maps to unified permission model (see above)
-6. **Built-in sandbox modes** - Combined with approval policies for permission mapping
-7. **Session persistence** - Automatic to ~/.codex/sessions
-8. **No native subagents** - Requires MCP + Agents SDK for multi-agent orchestration
-9. **No pre-execution hooks** - Cannot block or modify tool calls (observe-only)
+1. **Thread-based model** vs Claude's query-based: fundamental difference
+2. **Subscription auth supported**: Users can use ChatGPT accounts
+3. ~~**No abort/cancel**~~: **Resolved** via App Server Protocol `turn/interrupt`
+4. **App Server Protocol architecture**: Long-lived JSON-RPC process over stdio
+5. **Approval policies**: Maps to unified permission model with interactive approval flow
+6. **Built-in sandbox modes**: Combined with approval policies for permission mapping
+7. **Session persistence**: Automatic to ~/.codex/sessions
+8. **No native subagents**: Requires MCP + Agents SDK for multi-agent orchestration
+9. **Pre-execution hooks can block** (via approval): Cannot modify input, only accept/decline
+10. **Mid-turn injection**: Supported via `turn/steer` (cancel-and-recreate at Responses API level)
 
 ## Comparison to Claude Agent SDK
 
-| Aspect | Claude Agent SDK | Codex SDK |
-|--------|------------------|-----------|
-| Entry point | `query()` async generator | `Codex.startThread()` |
-| Streaming | `for await (msg of query())` | `runStreamed()` returns events |
-| Session | `resume: sessionId` option | `resumeThread(id)` method |
-| Cancel | `abortController.abort()` | Not supported (no-op with warning) |
+| Aspect | Claude Agent SDK | Codex (App Server) |
+|--------|------------------|--------------------|
+| Entry point | `query()` async generator | `thread/start` + `turn/start` |
+| Streaming | `for await (msg of query())` | JSON-RPC notifications |
+| Session | `resume: sessionId` option | `thread/resume` method |
+| Cancel | `abortController.abort()` | `turn/interrupt` |
+| Mid-turn injection | `injectMessage()` via AsyncIterable | `turn/steer` |
 | Auth | API key OR OAuth token | API key OR ChatGPT OAuth |
-| Architecture | Async generator | Thread/Turn model |
-| Pre-execution hooks | ✅ Can block/modify | ❌ Observe only |
+| Architecture | Async generator (subprocess) | Long-lived JSON-RPC process |
+| Pre-execution hooks | ✅ Can block/modify | ✅ Can block (accept/decline), cannot modify |
+| Session forking | ✅ `forkSession` | ✅ `thread/fork` |
 | Subagents | ✅ Task tool | ❌ Not native |
-| Hooks | PreToolUse, PostToolUse, etc | Via approval policies |
+| Hooks | PreToolUse, PostToolUse, etc | Via approval request/response |
 
 ## References
 

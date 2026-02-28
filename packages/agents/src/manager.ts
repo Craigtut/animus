@@ -27,6 +27,7 @@ import { ClaudeAdapter } from './adapters/claude.js';
 import { CodexAdapter } from './adapters/codex.js';
 import { OpenCodeAdapter } from './adapters/opencode.js';
 import { BaseAdapter } from './adapters/base.js';
+import { getModelRegistry } from './model-registry.js';
 
 // ============================================================================
 // Session Warmth Tracking
@@ -198,10 +199,16 @@ export class AgentManager {
    * Register an adapter for a provider.
    *
    * Replaces any existing adapter for the same provider.
+   * Also registers the adapter's listModels as a discovery function
+   * on the model registry for dynamic model discovery.
    */
   registerAdapter(adapter: IAgentAdapter): void {
     this.adapters.set(adapter.provider, adapter);
     this.logger.debug('Adapter registered', { provider: adapter.provider });
+
+    // Register discovery function on model registry
+    const registry = getModelRegistry();
+    registry.registerDiscoveryFn(adapter.provider, () => adapter.listModels());
   }
 
   /**

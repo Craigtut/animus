@@ -32,12 +32,14 @@ const CORE_TOOL_RISK_TIERS: Record<string, RiskTier> = {
 };
 
 // ---------------------------------------------------------------------------
-// Known SDK built-in tools and their risk tiers
+// Known SDK built-in tools and their risk tiers (per provider)
 // ---------------------------------------------------------------------------
 
-// Keys MUST match the exact tool names the Claude SDK uses (PascalCase).
-// The SDK calls canUseTool/hooks with these exact names.
-const SDK_TOOLS: Record<string, { displayName: string; description: string; riskTier: RiskTier }> = {
+type SdkToolDef = { displayName: string; description: string; riskTier: RiskTier };
+
+// All known SDK tool definitions. Each provider selects a subset below.
+const ALL_SDK_TOOLS: Record<string, SdkToolDef> = {
+  // Claude Code SDK tools (PascalCase, matches canUseTool names)
   Read: { displayName: 'Read File', description: 'Read contents of a file', riskTier: 'safe' },
   Glob: { displayName: 'Glob Search', description: 'Find files matching a glob pattern', riskTier: 'safe' },
   Grep: { displayName: 'Grep Search', description: 'Search file contents with regex', riskTier: 'safe' },
@@ -49,7 +51,31 @@ const SDK_TOOLS: Record<string, { displayName: string; description: string; risk
   WebSearch: { displayName: 'Web Search', description: 'Search the web', riskTier: 'acts' },
   NotebookEdit: { displayName: 'Notebook Edit', description: 'Edit Jupyter notebook cells', riskTier: 'acts' },
   NotebookRead: { displayName: 'Notebook Read', description: 'Read Jupyter notebook contents', riskTier: 'safe' },
+  // Codex-specific tools (mapped from app-server item types)
+  CollabAgent: { displayName: 'Collab Agent', description: 'Multi-agent collaboration tool calls', riskTier: 'acts' },
 };
+
+// Per-provider tool sets. Keys must exist in ALL_SDK_TOOLS.
+// Claude: Has discrete tools for read, search, write, etc.
+// Codex: Uses commandExecution (Bash), fileChange (Write/Edit), webSearch, collabAgentToolCall.
+//        Does NOT have separate Read/Glob/Grep/LS/WebFetch/Notebook tools.
+// OpenCode: Tools are dynamic (arbitrary names from the LLM provider); seed a minimal set.
+const PROVIDER_SDK_TOOLS: Record<string, string[]> = {
+  claude: ['Read', 'Glob', 'Grep', 'LS', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch', 'NotebookEdit', 'NotebookRead'],
+  codex: ['Bash', 'Write', 'Edit', 'WebSearch', 'CollabAgent'],
+  opencode: ['Bash', 'Write', 'Edit', 'WebSearch'],
+};
+
+/** Get the SDK tools for a given provider, falling back to the Claude set. */
+function getSdkToolsForProvider(provider: string): Record<string, SdkToolDef> {
+  const toolNames = PROVIDER_SDK_TOOLS[provider] ?? PROVIDER_SDK_TOOLS['claude']!;
+  const result: Record<string, SdkToolDef> = {};
+  for (const name of toolNames) {
+    const def = ALL_SDK_TOOLS[name];
+    if (def) result[name] = def;
+  }
+  return result;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -101,24 +127,25 @@ export function seedToolPermissions(
     seeded++;
   }
 
-  // 2. Active SDK tools
+  // 2. Active SDK tools (provider-specific)
   const sdkSource = `sdk:${activeProvider}`;
+  const providerTools = getSdkToolsForProvider(activeProvider);
+  const providerToolNames = new Set(Object.keys(providerTools));
 
-  // Clean up stale lowercase SDK tool records from older versions.
-  // The SDK uses PascalCase names (WebSearch, not websearch), so old lowercase
-  // records are orphaned and should be removed to avoid confusion.
-  const sdkToolNames = new Set(Object.keys(SDK_TOOLS));
+  // Clean up SDK tool records that don't belong to the active provider's set.
+  // This handles: stale lowercase records from older versions, and tools from
+  // a previous provider that don't apply to the current one.
   const existingPerms = systemDb
     .prepare(`SELECT tool_name FROM tool_permissions WHERE tool_source LIKE 'sdk:%'`)
     .all() as Array<{ tool_name: string }>;
   for (const row of existingPerms) {
-    if (!sdkToolNames.has(row.tool_name)) {
-      systemDb.prepare('DELETE FROM tool_permissions WHERE tool_name = ?').run(row.tool_name);
-      log.info(`Removed stale SDK tool permission: "${row.tool_name}"`);
+    if (!providerToolNames.has(row.tool_name)) {
+      systemDb.prepare('DELETE FROM tool_permissions WHERE tool_name = ? AND tool_source LIKE ?').run(row.tool_name, 'sdk:%');
+      log.debug(`Removed SDK tool not in ${activeProvider} set: "${row.tool_name}"`);
     }
   }
 
-  for (const [name, tool] of Object.entries(SDK_TOOLS)) {
+  for (const [name, tool] of Object.entries(providerTools)) {
     upsertToolPermission(systemDb, {
       toolName: name,
       toolSource: sdkSource,

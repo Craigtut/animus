@@ -43,12 +43,12 @@ describe('CLAUDE_CAPABILITIES', () => {
 });
 
 describe('CODEX_CAPABILITIES', () => {
-  it('does NOT support cancellation', () => {
-    expect(CODEX_CAPABILITIES.canCancel).toBe(false);
+  it('supports cancellation via turn/interrupt', () => {
+    expect(CODEX_CAPABILITIES.canCancel).toBe(true);
   });
 
-  it('does NOT support blocking in pre-tool-use hooks', () => {
-    expect(CODEX_CAPABILITIES.canBlockInPreToolUse).toBe(false);
+  it('supports blocking in pre-tool-use hooks via approval', () => {
+    expect(CODEX_CAPABILITIES.canBlockInPreToolUse).toBe(true);
   });
 
   it('does NOT support modifying tool input', () => {
@@ -63,8 +63,8 @@ describe('CODEX_CAPABILITIES', () => {
     expect(CODEX_CAPABILITIES.supportsThinking).toBe(true);
   });
 
-  it('does NOT support session forking', () => {
-    expect(CODEX_CAPABILITIES.supportsFork).toBe(false);
+  it('supports session forking via thread/fork', () => {
+    expect(CODEX_CAPABILITIES.supportsFork).toBe(true);
   });
 
   it('has supported models', () => {
@@ -121,8 +121,8 @@ describe('hasCapability', () => {
     expect(hasCapability('claude', 'canCancel')).toBe(true);
   });
 
-  it('returns false for unsupported boolean capability', () => {
-    expect(hasCapability('codex', 'canCancel')).toBe(false);
+  it('returns true for codex canCancel (via turn/interrupt)', () => {
+    expect(hasCapability('codex', 'canCancel')).toBe(true);
   });
 
   it('returns true for non-empty array capability', () => {

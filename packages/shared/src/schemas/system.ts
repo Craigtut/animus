@@ -92,6 +92,7 @@ export const systemSettingsSchema = z.object({
   sleepStartHour: z.number().int().min(0).max(23).default(22),
   sleepEndHour: z.number().int().min(0).max(23).default(7),
   sleepTickIntervalMs: z.number().int().positive().default(1800000),
+  reasoningEffort: z.enum(['low', 'medium', 'high', 'max']).nullable().default(null),
 });
 
 export const updateSystemSettingsInputSchema = systemSettingsSchema.partial();

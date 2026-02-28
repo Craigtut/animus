@@ -22,6 +22,8 @@ const SAMPLE_LOCAL_DATA = {
       outputPricePer1M: 25.0,
       supportsVision: true,
       supportsThinking: true,
+      recommended: true,
+      isDefault: true,
     },
     'claude-haiku-4-5-20251001': {
       name: 'Claude Haiku 4.5',
@@ -31,6 +33,7 @@ const SAMPLE_LOCAL_DATA = {
       outputPricePer1M: 5.0,
       supportsVision: true,
       supportsThinking: true,
+      recommended: true,
     },
   },
   codex: {
@@ -42,6 +45,7 @@ const SAMPLE_LOCAL_DATA = {
       outputPricePer1M: 6.0,
       supportsVision: true,
       supportsThinking: true,
+      recommended: true,
     },
   },
   opencode: {},
@@ -304,6 +308,179 @@ describe('ModelRegistry', () => {
       } finally {
         globalThis.fetch = originalFetch;
       }
+    });
+  });
+
+  describe('registerDiscoveryFn', () => {
+    it('stores and invokes callbacks', async () => {
+      const fn = vi.fn().mockResolvedValue([
+        { id: 'new-model-1', name: 'New Model 1' },
+      ]);
+      registry.registerDiscoveryFn('claude', fn);
+
+      const models = await registry.discoverModels('claude');
+      expect(fn).toHaveBeenCalledOnce();
+      expect(models.some((m) => m.id === 'new-model-1')).toBe(true);
+    });
+  });
+
+  describe('discoverModels', () => {
+    it('returns discovered and enriched models', async () => {
+      const fn = vi.fn().mockResolvedValue([
+        { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' }, // existing
+        { id: 'claude-new-model', name: 'Claude New' }, // new, not in models.json
+      ]);
+      registry.registerDiscoveryFn('claude', fn);
+
+      const models = await registry.discoverModels('claude');
+
+      // Should include the existing model with its original metadata
+      const existing = models.find((m) => m.id === 'claude-opus-4-6');
+      expect(existing).not.toBeNull();
+      expect(existing!.contextWindow).toBe(200000); // preserved from models.json
+
+      // Should include the new model with minimal metadata
+      const newModel = models.find((m) => m.id === 'claude-new-model');
+      expect(newModel).not.toBeNull();
+      expect(newModel!.name).toBe('Claude New');
+      expect(newModel!.provider).toBe('claude');
+    });
+
+    it('caches results within TTL', async () => {
+      const fn = vi.fn().mockResolvedValue([
+        { id: 'cached-model', name: 'Cached' },
+      ]);
+      registry = new ModelRegistry({
+        disableRemoteFetch: true,
+        discoveryCacheTtlMs: 60_000, // 1 minute
+      });
+      registry.loadFromJson(SAMPLE_LOCAL_DATA);
+      registry.registerDiscoveryFn('claude', fn);
+
+      await registry.discoverModels('claude');
+      await registry.discoverModels('claude');
+      await registry.discoverModels('claude');
+
+      // Should only call the discovery function once
+      expect(fn).toHaveBeenCalledOnce();
+    });
+
+    it('falls back to static on discovery failure', async () => {
+      const fn = vi.fn().mockRejectedValue(new Error('API down'));
+      registry.registerDiscoveryFn('claude', fn);
+
+      const models = await registry.discoverModels('claude');
+
+      // Should return static models from models.json
+      expect(models.length).toBeGreaterThan(0);
+      expect(models.every((m) => m.provider === 'claude')).toBe(true);
+      // Should include our known claude model
+      expect(models.some((m) => m.id === 'claude-opus-4-6')).toBe(true);
+    });
+
+    it('falls back to static when no fn registered', async () => {
+      // No discovery fn registered for 'claude'
+      const models = await registry.discoverModels('claude');
+
+      expect(models.length).toBeGreaterThan(0);
+      expect(models.every((m) => m.provider === 'claude')).toBe(true);
+    });
+
+    it('preserves existing registry entries (models.json takes precedence)', async () => {
+      const fn = vi.fn().mockResolvedValue([
+        { id: 'claude-opus-4-6', name: 'Different Name' },
+      ]);
+      registry.registerDiscoveryFn('claude', fn);
+
+      const models = await registry.discoverModels('claude');
+      const model = models.find((m) => m.id === 'claude-opus-4-6');
+
+      // Name should be from models.json, not from SDK
+      expect(model!.name).toBe('Claude Opus 4.6');
+      // Pricing should also be from models.json
+      expect(model!.inputCostPerToken).toBeCloseTo(0.000005, 10);
+    });
+
+    it('propagates recommended/isDefault from models.json', async () => {
+      const fn = vi.fn().mockResolvedValue([
+        { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
+        { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
+      ]);
+      registry.registerDiscoveryFn('claude', fn);
+
+      const models = await registry.discoverModels('claude');
+      const opus = models.find((m) => m.id === 'claude-opus-4-6');
+      const haiku = models.find((m) => m.id === 'claude-haiku-4-5-20251001');
+
+      // models.json has recommended: true, isDefault: true for opus
+      expect(opus!.recommended).toBe(true);
+      expect(opus!.isDefault).toBe(true);
+
+      // models.json has recommended: true, no isDefault for haiku
+      expect(haiku!.recommended).toBe(true);
+      expect(haiku!.isDefault).toBeUndefined();
+    });
+
+    it('uses SDK discovery flags when models.json has no flags', async () => {
+      const fn = vi.fn().mockResolvedValue([
+        { id: 'new-sdk-model', name: 'SDK Model', recommended: true, isDefault: true },
+      ]);
+      registry.registerDiscoveryFn('claude', fn);
+
+      const models = await registry.discoverModels('claude');
+      const model = models.find((m) => m.id === 'new-sdk-model');
+
+      expect(model!.recommended).toBe(true);
+      expect(model!.isDefault).toBe(true);
+    });
+
+    it('models.json editorial flags take precedence over SDK discovery', async () => {
+      const fn = vi.fn().mockResolvedValue([
+        // SDK says not recommended, but models.json says recommended
+        { id: 'claude-opus-4-6', name: 'Opus', recommended: false, isDefault: false },
+      ]);
+      registry.registerDiscoveryFn('claude', fn);
+
+      const models = await registry.discoverModels('claude');
+      const model = models.find((m) => m.id === 'claude-opus-4-6');
+
+      // models.json flags should win
+      expect(model!.recommended).toBe(true);
+      expect(model!.isDefault).toBe(true);
+    });
+
+    it('creates minimal entries for models not in LiteLLM', async () => {
+      const fn = vi.fn().mockResolvedValue([
+        { id: 'totally-unknown-model', name: 'Unknown' },
+      ]);
+      registry.registerDiscoveryFn('claude', fn);
+
+      const models = await registry.discoverModels('claude');
+      const unknown = models.find((m) => m.id === 'totally-unknown-model');
+
+      expect(unknown).not.toBeNull();
+      expect(unknown!.name).toBe('Unknown');
+      expect(unknown!.provider).toBe('claude');
+      expect(unknown!.contextWindow).toBe(0);
+      expect(unknown!.maxOutputTokens).toBe(0);
+      expect(unknown!.inputCostPerToken).toBe(0);
+      expect(unknown!.outputCostPerToken).toBe(0);
+      expect(unknown!.supportsVision).toBe(false);
+      expect(unknown!.supportsThinking).toBe(false);
+    });
+
+    it('registers newly discovered models for cost calculations', async () => {
+      const fn = vi.fn().mockResolvedValue([
+        { id: 'new-discoverable', name: 'Discoverable' },
+      ]);
+      registry.registerDiscoveryFn('claude', fn);
+
+      await registry.discoverModels('claude');
+
+      // The newly discovered model should be accessible via getModel
+      const model = registry.getModel('new-discoverable');
+      expect(model).not.toBeNull();
+      expect(model!.id).toBe('new-discoverable');
     });
   });
 

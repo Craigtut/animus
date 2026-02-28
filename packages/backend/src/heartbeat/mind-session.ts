@@ -199,6 +199,7 @@ export async function getOrCreateMindSession(
 
   let provider = configuredProviders[0]!;
   let model: string | undefined;
+  let reasoningEffort: 'low' | 'medium' | 'high' | 'max' | undefined;
   try {
     const settings = systemStore.getSystemSettings(getSystemDb());
     const preferred = settings.defaultAgentProvider;
@@ -206,6 +207,7 @@ export async function getOrCreateMindSession(
       provider = preferred;
     }
     model = settings.defaultModel ?? undefined;
+    reasoningEffort = settings.reasoningEffort ?? undefined;
   } catch {
     // Settings table may not exist yet on fresh install
   }
@@ -355,6 +357,7 @@ export async function getOrCreateMindSession(
   const session = await agentManager.createSession({
     provider,
     ...(model != null ? { model } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     cwd: PROJECT_ROOT,
     ...(systemPrompt != null ? {
       systemPrompt: {

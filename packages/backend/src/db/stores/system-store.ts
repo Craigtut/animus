@@ -308,6 +308,7 @@ export function updateSystemSettings(
     sleepStartHour: 'sleep_start_hour',
     sleepEndHour: 'sleep_end_hour',
     sleepTickIntervalMs: 'sleep_tick_interval_ms',
+    reasoningEffort: 'reasoning_effort',
   };
 
   // Boolean fields need int conversion

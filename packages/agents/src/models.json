@@ -9,6 +9,8 @@
       "outputPricePer1M": 25.00,
       "supportsVision": true,
       "supportsThinking": true,
+      "recommended": true,
+      "isDefault": true,
       "notes": "Latest and most capable model. Supports 1M context in beta. Uses adaptive thinking."
     },
     "claude-sonnet-4-6": {
@@ -19,6 +21,7 @@
       "outputPricePer1M": 15.00,
       "supportsVision": true,
       "supportsThinking": true,
+      "recommended": true,
       "notes": "Latest Sonnet. Fast output mode available. Excellent balance of speed and capability."
     },
     "claude-sonnet-4-5-20250929": {
@@ -39,6 +42,7 @@
       "outputPricePer1M": 5.00,
       "supportsVision": true,
       "supportsThinking": true,
+      "recommended": true,
       "notes": "Fastest model with near-frontier intelligence."
     },
     "claude-opus-4-5-20251101": {
@@ -121,6 +125,8 @@
       "outputPricePer1M": 10.00,
       "supportsVision": true,
       "supportsThinking": true,
+      "recommended": true,
+      "isDefault": true,
       "notes": "Latest and most capable. 77.3% on SWE-Bench Verified. Recommended for most tasks."
     },
     "gpt-5.2-codex": {
@@ -131,7 +137,8 @@
       "outputPricePer1M": 14.00,
       "supportsVision": true,
       "supportsThinking": true,
-      "notes": "Advanced coding model with context compaction and enhanced cybersecurity."
+      "recommended": true,
+      "notes": "Frontier agentic coding model."
     },
     "gpt-5.1-codex": {
       "name": "GPT-5.1 Codex",
@@ -151,7 +158,8 @@
       "outputPricePer1M": 10.00,
       "supportsVision": true,
       "supportsThinking": true,
-      "notes": "Optimized for long-horizon agentic tasks. Can work 24+ hours via context compaction."
+      "recommended": true,
+      "notes": "Codex-optimized flagship for deep and fast reasoning."
     },
     "gpt-5.1-codex-mini": {
       "name": "GPT-5.1 Codex Mini",
@@ -161,7 +169,19 @@
       "outputPricePer1M": 2.00,
       "supportsVision": true,
       "supportsThinking": true,
-      "notes": "Smaller, faster, cost-effective version of GPT-5.1-Codex."
+      "recommended": true,
+      "notes": "Optimized for codex. Cheaper, faster, but less capable."
+    },
+    "gpt-5.2": {
+      "name": "GPT-5.2",
+      "contextWindow": 200000,
+      "maxOutputTokens": 100000,
+      "inputPricePer1M": 2.50,
+      "outputPricePer1M": 10.00,
+      "supportsVision": true,
+      "supportsThinking": true,
+      "recommended": true,
+      "notes": "Latest frontier model with improvements across knowledge, reasoning and coding."
     },
     "codex-mini-latest": {
       "name": "Codex Mini",

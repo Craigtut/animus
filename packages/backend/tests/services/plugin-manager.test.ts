@@ -303,7 +303,7 @@ describe('PluginManager', () => {
       expect(mockRm).toHaveBeenCalled();
     });
 
-    it('builds isolated CODEX_HOME config with plugin skill paths', async () => {
+    it('builds isolated CODEX_HOME with skills directory (no config.toml)', async () => {
       mockReaddir.mockImplementation(async (dir: string) => {
         if (dir.endsWith('backend/plugins')) {
           return [{ name: 'codex-skill-plugin', isDirectory: () => true, isFile: () => false }];
@@ -334,16 +334,19 @@ describe('PluginManager', () => {
       const pm = getPluginManager();
       await pm.loadAll();
 
-      mockWriteFile.mockClear();
+      mockMkdir.mockClear();
       const runtimeEnv = await pm.buildCodexRuntimeEnv();
 
       expect(runtimeEnv['CODEX_HOME']).toContain('runtime/providers/codex/home');
+      // Should create CODEX_HOME and its skills/ subdirectory
+      const mkdirCalls = mockMkdir.mock.calls.map((call: unknown[]) => call[0]);
+      expect(mkdirCalls.some((p: unknown) => typeof p === 'string' && p === runtimeEnv['CODEX_HOME'])).toBe(true);
+      expect(mkdirCalls.some((p: unknown) => typeof p === 'string' && (p as string).endsWith('/skills'))).toBe(true);
+      // Should NOT write a config.toml (skills are synced via JSON-RPC at runtime)
       const configWrite = mockWriteFile.mock.calls.find(
         (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).endsWith('/config.toml')
       );
-      expect(configWrite).toBeDefined();
-      expect(configWrite![1]).toContain('[[skills.config]]');
-      expect(configWrite![1]).toContain('/codex-skill-plugin/skills/codex-skill');
+      expect(configWrite).toBeUndefined();
     });
   });
 

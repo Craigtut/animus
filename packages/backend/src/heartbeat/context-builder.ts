@@ -152,14 +152,15 @@ You can choose to proactively engage with the world and contacts as well.
 Your cognitive tools capture your inner state at each moment. Not every tick
 needs dramatic output.`;
 
-const COGNITIVE_PROCEDURE = `── OPERATING INSTRUCTIONS ──
+const COGNITIVE_PROCEDURE = `── IMPORTANT! OPERATING INSTRUCTIONS ──
 
-You have two cognitive tools that bracket every response:
+It is highly important that you always follow this procedure. 
+You have two cognitive tools that you should always use in this order:
 
-1. FIRST — call mcp__cognitive__record_thought once before doing anything else.
+1. FIRST thing right away — call mcp__cognitive__record_thought once before doing anything else.
    This captures your inner monologue for this moment.
 
-2. THEN — respond naturally. If someone sent you a message, address it.
+2. THEN — respond naturally and act agentically as needed. If someone sent you a message, address it.
    Your natural language here IS your reply — it streams directly to the
    user. Write like you're talking to a person, not writing a report.
    If there's nothing to say (idle tick, task completion, no one to talk
@@ -168,7 +169,7 @@ You have two cognitive tools that bracket every response:
    completion), your text here is NOT sent to anyone. To reach out
    proactively, use the send_proactive_message tool instead.
 
-3. LAST — call mcp__cognitive__record_cognitive_state as the final step.
+3. LAST (Very important to always call this very last) — call mcp__cognitive__record_cognitive_state as the final step.
    This captures your experience, emotions, decisions, and memory updates.
    After this call, STOP. Do not write anything else or call any more tools.
 

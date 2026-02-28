@@ -14,6 +14,7 @@ import type {
   AdapterCapabilities,
   IAgentSession,
   AgentResponse,
+  ModelInfo,
   SessionUsage,
   AgentCost,
   PromptOptions,
@@ -282,7 +283,7 @@ interface StreamEvent {
   };
 }
 
-interface ModelInfo {
+interface LocalModelInfo {
   id: string;
   name: string;
 }
@@ -375,13 +376,73 @@ export class ClaudeAdapter extends BaseAdapter {
   }
 
   /**
-   * List available models from the Claude SDK.
+   * List available models from the Anthropic REST API.
    *
-   * Returns the hardcoded capability list. Runtime discovery via
-   * `supportedModels()` requires an active query, so we cache results
-   * from the first session and update the list when available.
+   * Calls GET /v1/models with pagination (up to 3 pages).
+   * Only attempts if ANTHROPIC_API_KEY is available (CLI/OAuth auth
+   * can't call the REST models endpoint).
+   * Falls back to the static capability list on any failure.
    */
-  async listModels(): Promise<Array<{ id: string; name: string }>> {
+  async listModels(): Promise<ModelInfo[]> {
+    const apiKey = process.env['ANTHROPIC_API_KEY'];
+    if (!apiKey) {
+      return this.capabilities.supportedModels.map((id) => ({ id, name: id }));
+    }
+
+    try {
+      const rawModels: Array<{ id: string; name: string; createdAt?: string }> = [];
+      let afterId: string | undefined;
+      const maxPages = 3;
+
+      for (let page = 0; page < maxPages; page++) {
+        const url = new URL('https://api.anthropic.com/v1/models');
+        url.searchParams.set('limit', '100');
+        if (afterId) {
+          url.searchParams.set('after_id', afterId);
+        }
+
+        const response = await fetch(url.toString(), {
+          headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          signal: AbortSignal.timeout(10_000),
+        });
+
+        if (!response.ok) {
+          this.logger.warn('Anthropic models API returned error', {
+            status: response.status,
+          });
+          break;
+        }
+
+        const body = await response.json() as {
+          data: Array<{ id: string; display_name?: string; created_at?: string }>;
+          has_more?: boolean;
+          last_id?: string;
+        };
+
+        for (const m of body.data) {
+          rawModels.push({
+            id: m.id,
+            name: m.display_name ?? m.id,
+            createdAt: m.created_at,
+          });
+        }
+
+        if (!body.has_more || !body.last_id) break;
+        afterId = body.last_id;
+      }
+
+      if (rawModels.length > 0) {
+        return applyClaudeFamilyHeuristic(rawModels);
+      }
+    } catch (err) {
+      this.logger.warn('Failed to fetch models from Anthropic API, using static list', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     return this.capabilities.supportedModels.map((id) => ({ id, name: id }));
   }
 
@@ -1468,4 +1529,94 @@ class ClaudeSession extends BaseSession {
         return 'complete';
     }
   }
+}
+
+// ============================================================================
+// Claude Family Heuristic
+// ============================================================================
+
+/**
+ * Parse the model family from a Claude model ID.
+ * E.g. "claude-sonnet-4-6" -> "sonnet", "claude-opus-4-6" -> "opus"
+ */
+function parseClaudeFamily(id: string): string | null {
+  // Handle patterns like "claude-{family}-{version}" and "claude-{version}-{family}-{date}"
+  const match = id.match(/^claude-(\d+-\d+-)?([\w]+)/);
+  if (match) {
+    const segment = match[2];
+    // If the segment is a known family name, use it
+    if (['opus', 'sonnet', 'haiku'].includes(segment!)) {
+      return segment!;
+    }
+  }
+  // Also try the simpler pattern
+  const simple = id.match(/^claude-(opus|sonnet|haiku)/);
+  return simple?.[1] ?? null;
+}
+
+/**
+ * Apply family-based recommendation heuristic to Claude models.
+ *
+ * Groups models by family (opus, sonnet, haiku), sorts by createdAt
+ * descending, and marks the newest model per family as recommended.
+ * The newest sonnet model is marked as isDefault (Anthropic's typical
+ * balanced pick for agentic use).
+ */
+function applyClaudeFamilyHeuristic(
+  models: Array<{ id: string; name: string; createdAt?: string }>,
+): ModelInfo[] {
+  // Group by family
+  const families = new Map<string, Array<{ id: string; name: string; createdAt?: string }>>();
+
+  for (const m of models) {
+    const family = parseClaudeFamily(m.id);
+    if (family) {
+      const group = families.get(family) ?? [];
+      group.push(m);
+      families.set(family, group);
+    }
+  }
+
+  // Find newest per family
+  const newestPerFamily = new Set<string>();
+  let defaultModelId: string | null = null;
+
+  for (const [family, group] of families) {
+    // Sort by createdAt descending (newest first)
+    group.sort((a, b) => {
+      if (!a.createdAt && !b.createdAt) return 0;
+      if (!a.createdAt) return 1;
+      if (!b.createdAt) return -1;
+      return b.createdAt.localeCompare(a.createdAt);
+    });
+
+    const newest = group[0];
+    if (newest) {
+      newestPerFamily.add(newest.id);
+
+      // Use newest sonnet as default (balanced pick for agentic use)
+      if (family === 'sonnet' && !defaultModelId) {
+        defaultModelId = newest.id;
+      }
+    }
+  }
+
+  // If no sonnet found, use the overall newest model
+  if (!defaultModelId && models.length > 0) {
+    const sorted = [...models].sort((a, b) => {
+      if (!a.createdAt && !b.createdAt) return 0;
+      if (!a.createdAt) return 1;
+      if (!b.createdAt) return -1;
+      return b.createdAt.localeCompare(a.createdAt);
+    });
+    defaultModelId = sorted[0]!.id;
+  }
+
+  return models.map(m => ({
+    id: m.id,
+    name: m.name,
+    createdAt: m.createdAt,
+    recommended: newestPerFamily.has(m.id),
+    isDefault: m.id === defaultModelId,
+  }));
 }

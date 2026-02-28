@@ -11,15 +11,15 @@ This document outlines the architectural approach for building a unified abstrac
 
 | Feature | Claude Agent SDK | Codex SDK | OpenCode SDK |
 |---------|------------------|-----------|--------------|
-| **Architecture** | Async generator | CLI subprocess (Rust) | Client/Server (REST) |
-| **Streaming** | Yield messages | Event iterator | SSE subscription |
+| **Architecture** | Async generator | Long-lived JSON-RPC process (App Server) | Client/Server (REST) |
+| **Streaming** | Yield messages | JSON-RPC notifications | SSE subscription |
 | **Session Model** | ID-based resume | Thread-based | Server-side sessions |
 | **Entry Point** | `query()` function | `Codex.startThread()` | `client.session.prompt()` |
-| **Cancel/Abort** | AbortController | ❌ Not supported | `session.abort()` |
+| **Cancel/Abort** | AbortController | `turn/interrupt` | `session.abort()` |
 | **Providers** | Anthropic only | OpenAI only | 75+ providers |
 | **Auth: API Key** | ✅ | ✅ | ✅ (per-provider) |
 | **Auth: Subscription** | ✅ Via OAuth token | ✅ OAuth supported | N/A |
-| **Hooks/Lifecycle** | PreToolUse, PostToolUse, etc. | Approval policies | Plugin hooks |
+| **Hooks/Lifecycle** | PreToolUse, PostToolUse, etc. | Approval request/response + notifications | Plugin hooks |
 | **Permission Modes** | default/acceptEdits/bypass/plan | untrusted/on-failure/on-request/never | Tool-level permissions |
 | **Built-in Tools** | Read, Write, Edit, Bash, etc. | Similar | read, write, edit, bash, etc. |
 | **MCP Support** | ✅ Native | ✅ stdio-based | ✅ Via config |
@@ -109,15 +109,14 @@ interface IAgentAdapter {
 | SDK | Cancellation |
 |-----|-------------|
 | Claude | ✅ AbortController |
-| Codex | ❌ Not supported |
+| Codex | ✅ `turn/interrupt` (via App Server Protocol) |
 | OpenCode | ✅ session.abort() |
 
-**Concern**: Codex cannot cancel running operations. This is a [known limitation](https://github.com/openai/codex/issues/5494).
+All three providers now support cancellation. Codex uses the App Server Protocol's `turn/interrupt` method, which cleanly cancels the current operation and emits `turn/completed` with `status: "interrupted"`.
 
 **Recommendation**:
 - Interface supports `cancel()` method
-- Codex adapter throws `UnsupportedOperationError` or waits for natural completion
-- Document this limitation clearly
+- All three adapters implement real cancellation
 
 ### 5. Hook/Lifecycle Event Mapping
 
@@ -352,7 +351,7 @@ type AgentErrorCategory =
 | Execution failed | `error_during_execution` → execution | `turn.failed` → execution | `session.error` → execution |
 | Auth failed | Native error → authentication | Native error → authentication | HTTP 401 → authentication |
 | Rate limited | Native error → rate_limit | `turn.failed` → rate_limit | HTTP 429 → rate_limit |
-| Cancel unsupported | N/A | Always → unsupported | N/A |
+| Cancelled | N/A | `turn/interrupt` → cancelled | N/A |
 
 ## Proposed Architecture
 
@@ -536,14 +535,14 @@ interface AgentUsage {
 }
 ```
 
-### 6. Codex Cancel/Abort Limitation
-**Decision: No-op with warning.**
+### 6. Codex Cancel/Abort
+**Decision: Real cancellation via App Server Protocol.**
 
-Codex SDK does not support cancel/abort operations. When `session.cancel()` is called on a Codex session:
-- Log a warning that cancel is not supported for this provider
-- Do not return anything / no-op
-- Let the operation complete naturally in the background
-- Document this limitation clearly for consumers
+The Codex adapter uses the App Server Protocol's `turn/interrupt` method for real cancellation. When `session.cancel()` is called on a Codex session:
+- Sends `turn/interrupt` to the app-server process
+- The server cancels the current operation
+- Emits `turn/completed` with `status: "interrupted"`
+- Clean, immediate cancellation (no longer a no-op)
 
 ### 7. Unified Permission Model
 **Decision: Two-tier permission model with tool overrides.**
@@ -594,9 +593,9 @@ Based on research, hook capabilities vary significantly:
 
 | Capability | Claude | Codex | OpenCode |
 |------------|--------|-------|----------|
-| Pre-execution hooks | ✅ Can block/modify | ❌ Not available | ✅ Cannot block |
-| Post-execution hooks | ✅ Full | ✅ Via events | ✅ Full |
-| Session lifecycle | ✅ Full | ✅ Via events | ✅ Full |
+| Pre-execution hooks | ✅ Can block/modify | ✅ Can block (via approval) | ✅ Cannot block |
+| Post-execution hooks | ✅ Full | ✅ Via notifications | ✅ Full |
+| Session lifecycle | ✅ Full | ✅ Via notifications | ✅ Full |
 | Subagent hooks | ✅ Full | ❌ No subagents | ✅ Full |
 
 **Unified Hook Interface:**
@@ -629,9 +628,9 @@ interface HookResult {
 
 | Hook | Claude | Codex | OpenCode |
 |------|--------|-------|----------|
-| onPreToolUse | Full (block/modify) | Emits event only | Can block (throw) + modify args |
-| onPostToolUse | Full | Full (via event stream) | Full |
-| onToolError | Full | Full (via event stream) | Full |
+| onPreToolUse | Full (block/modify) | Can block (via approval), cannot modify | Can block (throw) + modify args |
+| onPostToolUse | Full | Full (via notifications) | Full |
+| onToolError | Full | Full (via notifications) | Full |
 | onSessionStart | Full | Full | Full |
 | onSessionEnd | Full | Full | Full |
 | onSubagentStart | Full | Warning + no-op | Full |
@@ -766,15 +765,15 @@ const CLAUDE_CAPABILITIES: AdapterCapabilities = {
 };
 
 const CODEX_CAPABILITIES: AdapterCapabilities = {
-  canCancel: false,  // Critical limitation
-  canBlockInPreToolUse: false,
-  canModifyToolInput: false,
+  canCancel: true,  // Via turn/interrupt (App Server Protocol)
+  canBlockInPreToolUse: true,  // Via approval request/response
+  canModifyToolInput: false,  // Approval is accept/decline only
   supportsSubagents: false,
   supportsThinking: true,  // Via reasoning items
   supportsVision: true,
   supportsStreaming: true,
   supportsResume: true,
-  supportsFork: false,
+  supportsFork: true,  // Via thread/fork
   maxConcurrentSessions: null,
   supportedModels: ['codex-mini-latest', 'gpt-5-codex', ...]
 };

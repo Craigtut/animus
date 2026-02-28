@@ -17,7 +17,7 @@ import {
   removeCredential,
   inferCredentialType,
 } from '../../services/credential-service.js';
-import { getModelRegistry } from '@animus-labs/agents';
+import { getModelRegistry, type ModelEntry } from '@animus-labs/agents';
 
 const providerSchema = z.enum(['claude', 'codex']);
 
@@ -129,14 +129,18 @@ export const providerRouter = router({
 
   /**
    * List available models for a provider (or all providers).
-   * Returns model metadata from the unified model registry.
+   * Uses dynamic discovery when a provider is specified and discovery
+   * functions are registered (after heartbeat init). Falls back to
+   * static models.json data otherwise.
    */
   listModels: protectedProcedure
     .input(z.object({ provider: z.enum(['claude', 'codex', 'opencode']).optional() }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const registry = getModelRegistry();
-      const models = registry.listModels(input.provider);
-      return models.map(m => ({
+      const models = input.provider
+        ? await registry.discoverModels(input.provider)
+        : registry.listModels();
+      return models.map((m: ModelEntry) => ({
         id: m.id,
         name: m.name,
         provider: m.provider,
@@ -146,6 +150,9 @@ export const providerRouter = router({
         outputPricePer1M: m.outputCostPerToken * 1_000_000,
         supportsVision: m.supportsVision,
         supportsThinking: m.supportsThinking,
+        recommended: m.recommended ?? false,
+        isDefault: m.isDefault ?? false,
+        createdAt: m.createdAt ?? null,
       }));
     }),
 });

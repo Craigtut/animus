@@ -30,6 +30,7 @@ export const CLAUDE_CAPABILITIES: AdapterCapabilities = {
   supportedModels: [
     // Latest models
     'claude-opus-4-6',
+    'claude-sonnet-4-6',
     'claude-sonnet-4-5-20250929',
     'claude-haiku-4-5-20251001',
     // Previous generation
@@ -45,23 +46,29 @@ export const CLAUDE_CAPABILITIES: AdapterCapabilities = {
 };
 
 /**
- * OpenAI Codex SDK capabilities.
+ * OpenAI Codex capabilities via App Server Protocol.
  *
- * Key limitations:
- * - No cancel/abort support (critical limitation)
- * - No pre-execution hook blocking or modification
- * - No native subagent support
+ * Uses the `codex app-server` JSON-RPC protocol for a long-lived process,
+ * enabling features not available through the per-turn SDK approach:
+ * - Cancel via `turn/interrupt`
+ * - Pre-execution blocking via approval request/response
+ * - Session forking via `thread/fork`
+ * - Mid-turn injection via `turn/steer`
+ *
+ * Remaining limitations:
+ * - No input modification in pre-tool hooks (approval is accept/decline)
+ * - No native subagent support (requires separate Agents SDK)
  */
 export const CODEX_CAPABILITIES: AdapterCapabilities = {
-  canCancel: false, // Critical limitation - see docs/agents/02-openai-codex-sdk.md
-  canBlockInPreToolUse: false,
-  canModifyToolInput: false,
+  canCancel: true, // Via turn/interrupt
+  canBlockInPreToolUse: true, // Via approval request/response
+  canModifyToolInput: false, // Approval is accept/decline only
   supportsSubagents: false, // Requires separate Agents SDK
   supportsThinking: true, // Via reasoning items
   supportsVision: true,
   supportsStreaming: true,
   supportsResume: true,
-  supportsFork: false,
+  supportsFork: true, // Via thread/fork
   maxConcurrentSessions: null,
   supportedModels: [
     // Latest Codex models
@@ -71,6 +78,8 @@ export const CODEX_CAPABILITIES: AdapterCapabilities = {
     'gpt-5.1-codex-max',
     'gpt-5.1-codex-mini',
     'codex-mini-latest', // Default in Codex CLI
+    // Frontier models
+    'gpt-5.2',
     // Reasoning models
     'o3',
     'o4-mini',

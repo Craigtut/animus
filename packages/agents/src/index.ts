@@ -202,6 +202,7 @@ export {
   resetModelRegistry,
   type ModelEntry,
   type ModelRegistryConfig,
+  type DiscoveryFn,
 } from './model-registry.js';
 
 // ============================================================================
@@ -212,6 +213,7 @@ export { BaseAdapter, BaseSession, type AdapterOptions } from './adapters/base.j
 export { ClaudeAdapter } from './adapters/claude.js';
 export { CodexAdapter } from './adapters/codex.js';
 export { OpenCodeAdapter } from './adapters/opencode.js';
+export type { SkillEntry } from './adapters/codex-protocol-types.js';
 
 // ============================================================================
 // Capabilities
@@ -224,6 +226,15 @@ export {
   getCapabilities,
   hasCapability,
 } from './capabilities.js';
+
+// ============================================================================
+// Reasoning
+// ============================================================================
+
+export {
+  getCodexReasoningEffort,
+  type ReasoningEffort,
+} from './reasoning.js';
 
 // ============================================================================
 // Utilities

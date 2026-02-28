@@ -13,6 +13,7 @@ docs/agents/
 │   └── sdk-research.md          # Claude Agent SDK deep dive
 ├── codex/
 │   ├── sdk-research.md          # OpenAI Codex SDK deep dive
+│   ├── app-server-protocol.md   # App Server Protocol reference (JSON-RPC 2.0)
 │   └── oauth.md                 # Codex OAuth device code proxy design
 ├── opencode/
 │   └── sdk-research.md          # OpenCode SDK deep dive
@@ -37,12 +38,14 @@ docs/agents/
 
 | Document | Description |
 |----------|-------------|
-| [codex/sdk-research.md](./codex/sdk-research.md) | SDK API, thread model, auth, streaming, approval policies |
+| [codex/sdk-research.md](./codex/sdk-research.md) | SDK API, thread model, auth, streaming, approval policies, App Server Protocol |
+| [codex/app-server-protocol.md](./codex/app-server-protocol.md) | App Server Protocol reference: JSON-RPC 2.0 methods, notifications, approval flow |
 | [codex/oauth.md](./codex/oauth.md) | Device code OAuth proxy design for web UI |
 
-- **Architecture**: CLI subprocess (Rust core), thread/turn model
+- **Architecture**: App Server Protocol (JSON-RPC 2.0 over stdio, long-lived process)
 - **Auth**: API key or ChatGPT OAuth (device code flow)
-- **Limitations**: No cancel/abort, no native subagents, observe-only hooks
+- **Strengths**: Real cancellation via `turn/interrupt`, mid-turn message injection via `turn/steer`, pre-execution approval flow, session forking via `thread/fork`
+- **Limitations**: No native subagents, approval hooks can block but cannot modify tool input
 
 ### OpenCode (`@opencode-ai/sdk`)
 
@@ -81,15 +84,16 @@ docs/agents/
 | Aspect | Claude | Codex | OpenCode | Pi |
 |--------|--------|-------|----------|-----|
 | Package | `@anthropic-ai/claude-agent-sdk` | `@openai/codex-sdk` | `@opencode-ai/sdk` | `@mariozechner/pi-ai` + `pi-agent-core` |
-| Architecture | Async generator (spawns CLI) | CLI subprocess | Client/Server | In-process library |
+| Architecture | Async generator (spawns CLI) | App Server (JSON-RPC over stdio) | Client/Server | In-process library |
 | Auth | API key / OAuth token | API key / ChatGPT OAuth | Per-provider API keys | Per-provider + dynamic + OAuth |
-| Streaming | Generator yield | Event iterator | SSE subscription | Async iterable + result promise |
-| Cancel/Abort | AbortController | Not supported | session.abort() | AbortController |
-| Pre-exec hooks | Can block/modify | Observe only | Can block (throw) + modify | Via tool wrapping (adapter) |
+| Streaming | Generator yield | JSON-RPC notifications | SSE subscription | Async iterable + result promise |
+| Cancel/Abort | AbortController | `turn/interrupt` | session.abort() | AbortController |
+| Pre-exec hooks | Can block/modify | Can block (accept/decline) | Can block (throw) + modify | Via tool wrapping (adapter) |
 | Subagents | Task tool | Not native | @mentions | Not native |
 | MCP Support | Native (in-process + stdio) | stdio-based | Via config | None (bridged at adapter) |
 | Context Transform | Not supported | Not supported | Not supported | transformContext hook |
-| Mid-exec Steering | injectMessage | Not supported | Not supported | steer() (best) |
+| Mid-exec Steering | injectMessage | `turn/steer` | Not supported | steer() (best) |
+| Session Forking | forkSession | `thread/fork` | Not supported | Not supported |
 
 ### Design Decisions
 
@@ -100,7 +104,7 @@ docs/agents/
 | MCP tools | Cross-provider via MCP protocol (all three support it) |
 | Subagents | Unified API with graceful fallback (error for Codex) |
 | Context window | Expose metrics, let SDKs handle compaction |
-| Codex cancel | No-op with warning |
+| Codex cancel | Real cancellation via App Server Protocol `turn/interrupt` |
 | Permissions | Two-tier: `executionMode` (plan/build) + `approvalLevel` (strict/normal/trusted/none) |
 | Hooks | Event emitter with graceful degradation |
 | Session IDs | Provider prefix: `{provider}:{native_id}` |
