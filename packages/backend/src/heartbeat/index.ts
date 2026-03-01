@@ -1002,7 +1002,8 @@ export async function triggerTick(trigger?: TriggerContext): Promise<void> {
  */
 export function getHeartbeatStatus(): HeartbeatState {
   const hbDb = getHeartbeatDb();
-  return heartbeatStore.getHeartbeatState(hbDb);
+  const state = heartbeatStore.getHeartbeatState(hbDb);
+  return { ...state, nextTickAt: tickQueue.nextTickAt };
 }
 
 /**

@@ -203,6 +203,25 @@ function HeartbeatSection() {
     return `${mins} minutes ago`;
   };
 
+  const formatCountdown = (ts: string | null) => {
+    if (!ts) return null;
+    const diff = new Date(ts).getTime() - Date.now();
+    if (diff <= 0) return 'Any moment';
+    const secs = Math.ceil(diff / 1000);
+    const mins = Math.floor(secs / 60);
+    const remainSecs = secs % 60;
+    if (mins === 0) return `${remainSecs}s`;
+    return `${mins}m ${remainSecs.toString().padStart(2, '0')}s`;
+  };
+
+  // Re-render every second for the countdown
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!isRunning || !hbState?.nextTickAt) return;
+    const timer = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(timer);
+  }, [isRunning, hbState?.nextTickAt]);
+
   const handleIntervalChange = (mins: number) => {
     const ms = mins * 60000;
     setLocalIntervalMs(ms);
@@ -303,6 +322,11 @@ function HeartbeatSection() {
           <Typography.SmallBody as="div" color="secondary">
             Last tick: {formatAgo(lastTickAt)}
           </Typography.SmallBody>
+          {isRunning && currentStage === 'idle' && hbState?.nextTickAt && (
+            <Typography.SmallBody as="div" color="secondary">
+              Next tick: {formatCountdown(hbState.nextTickAt)}
+            </Typography.SmallBody>
+          )}
           {isRunning && currentStage !== 'idle' && (
             <Typography.SmallBody as="div" color="secondary">
               Currently: {currentStage === 'gather' ? 'Gathering context' : currentStage === 'mind' ? 'Thinking' : currentStage === 'execute' ? 'Executing' : currentStage}
@@ -2856,6 +2880,7 @@ function ChannelsSection() {
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       toast.error('Could not verify this package. It may be corrupted or incompatible.', { detail });
+      throw err;
     }
   };
 
@@ -2899,6 +2924,7 @@ function ChannelsSection() {
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       toast.error('Could not verify this package. It may be corrupted or incompatible.', { detail });
+      throw err;
     }
   };
 
@@ -3550,6 +3576,7 @@ function PluginsSection() {
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       toast.error('Could not verify this package. It may be corrupted or incompatible.', { detail });
+      throw err;
     }
   };
 
@@ -3593,6 +3620,7 @@ function PluginsSection() {
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       toast.error('Could not verify this package. It may be corrupted or incompatible.', { detail });
+      throw err;
     }
   };
 

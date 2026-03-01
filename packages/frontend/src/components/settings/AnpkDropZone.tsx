@@ -2,12 +2,12 @@
 import { css, useTheme } from '@emotion/react';
 import { useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Upload, File, XCircle, CircleNotch } from '@phosphor-icons/react';
+import { Upload, XCircle, CircleNotch } from '@phosphor-icons/react';
 import { Typography } from '../ui';
 
 interface AnpkDropZoneProps {
-  /** Called with the server-side file path after successful upload */
-  onFileReady: (filePath: string) => void;
+  /** Called with the server-side file path after successful upload. Awaited for verification feedback. */
+  onFileReady: (filePath: string) => Promise<void>;
   /** Whether the parent is performing an action (disables interactions) */
   disabled?: boolean;
   /** Label for the file type (e.g., "plugin" or "channel") */
@@ -17,7 +17,7 @@ interface AnpkDropZoneProps {
 type UploadState =
   | { status: 'idle' }
   | { status: 'uploading'; filename: string; progress: number }
-  | { status: 'ready'; filename: string; filePath: string; sizeBytes: number }
+  | { status: 'verifying'; filename: string; filePath: string; sizeBytes: number }
   | { status: 'error'; message: string };
 
 export function AnpkDropZone({ onFileReady, disabled, packageType = 'package' }: AnpkDropZoneProps) {
@@ -34,6 +34,8 @@ export function AnpkDropZone({ onFileReady, disabled, packageType = 'package' }:
 
     setUploadState({ status: 'uploading', filename: file.name, progress: 0 });
 
+    // Phase 1: Upload file to server
+    let result: { filePath: string; originalFilename: string; sizeBytes: number };
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -49,20 +51,29 @@ export function AnpkDropZone({ onFileReady, disabled, packageType = 'package' }:
         throw new Error(err.message || `Upload failed (${resp.status})`);
       }
 
-      const result = await resp.json() as { filePath: string; originalFilename: string; sizeBytes: number };
-      setUploadState({
-        status: 'ready',
-        filename: result.originalFilename,
-        filePath: result.filePath,
-        sizeBytes: result.sizeBytes,
-      });
-      onFileReady(result.filePath);
+      result = await resp.json() as { filePath: string; originalFilename: string; sizeBytes: number };
     } catch (err) {
       setUploadState({
         status: 'error',
         message: err instanceof Error ? err.message : 'Upload failed',
       });
+      return;
     }
+
+    // Phase 2: Verify package (parent handles toast on error)
+    setUploadState({
+      status: 'verifying',
+      filename: result.originalFilename,
+      filePath: result.filePath,
+      sizeBytes: result.sizeBytes,
+    });
+
+    try {
+      await onFileReady(result.filePath);
+    } catch {
+      // Parent already shows error toast; reset to idle so user can try again
+    }
+    setUploadState({ status: 'idle' });
   }, [onFileReady]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -97,10 +108,6 @@ export function AnpkDropZone({ onFileReady, disabled, packageType = 'package' }:
     // Reset input so same file can be re-selected
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [uploadFile]);
-
-  const handleReset = useCallback(() => {
-    setUploadState({ status: 'idle' });
-  }, []);
 
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -209,57 +216,70 @@ export function AnpkDropZone({ onFileReady, disabled, packageType = 'package' }:
           </motion.div>
         )}
 
-        {uploadState.status === 'ready' && (
+        {uploadState.status === 'verifying' && (
           <motion.div
-            key="ready"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
+            key="verifying"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
             css={css`
               display: flex;
-              align-items: center;
-              gap: ${theme.spacing[3]};
-              padding: ${theme.spacing[3]} ${theme.spacing[4]};
-              border: 1px solid ${theme.colors.success.main}33;
+              flex-direction: column;
+              gap: ${theme.spacing[2]};
+              padding: ${theme.spacing[4]};
+              border: 1px solid ${theme.colors.border.default};
               border-radius: ${theme.borderRadius.lg};
-              background: ${theme.colors.success.main}0d;
+              background: ${theme.colors.background.paper};
             `}
           >
-            <File
-              size={20}
-              weight="fill"
-              css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`}
-            />
-            <div css={css`flex: 1; min-width: 0;`}>
-              <Typography.SmallBody css={css`
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-              `}>
-                {uploadState.filename}
-              </Typography.SmallBody>
-              <Typography.Caption as="div" color="hint">
-                {formatSize(uploadState.sizeBytes)}
-              </Typography.Caption>
+            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+              <CircleNotch
+                size={20}
+                css={css`
+                  color: ${theme.colors.accent};
+                  flex-shrink: 0;
+                  animation: spin 1s linear infinite;
+                  @keyframes spin { to { transform: rotate(360deg); } }
+                `}
+              />
+              <div css={css`flex: 1; min-width: 0; display: flex; align-items: baseline; gap: ${theme.spacing[2]};`}>
+                <Typography.SmallBody css={css`
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+                  white-space: nowrap;
+                  min-width: 0;
+                `}>
+                  {uploadState.filename}
+                </Typography.SmallBody>
+                <Typography.Caption color="hint" css={css`flex-shrink: 0;`}>
+                  {formatSize(uploadState.sizeBytes)}
+                </Typography.Caption>
+              </div>
             </div>
-            <button
-              onClick={(e) => { e.stopPropagation(); handleReset(); }}
-              css={css`
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: ${theme.spacing[1]};
-                color: ${theme.colors.text.hint};
-                cursor: pointer;
-                border-radius: ${theme.borderRadius.default};
-                transition: all ${theme.transitions.micro};
-                &:hover { color: ${theme.colors.text.primary}; background: ${theme.colors.background.elevated}; }
-              `}
-              title="Remove and choose a different file"
-            >
-              <XCircle size={16} />
-            </button>
+            {/* Indeterminate shimmer progress bar */}
+            <div css={css`
+              width: 100%;
+              height: 2px;
+              background: ${theme.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'};
+              border-radius: 1px;
+              overflow: hidden;
+            `}>
+              <div css={css`
+                height: 100%;
+                border-radius: 1px;
+                background: ${theme.colors.accent};
+                width: 40%;
+                animation: shimmer 1.5s ease-in-out infinite;
+                @keyframes shimmer {
+                  0% { transform: translateX(-100%); }
+                  100% { transform: translateX(350%); }
+                }
+              `} />
+            </div>
+            <Typography.Caption color="hint" css={css`text-align: center;`}>
+              Verifying package...
+            </Typography.Caption>
           </motion.div>
         )}
       </AnimatePresence>

@@ -63,6 +63,9 @@ export class TickQueue {
   private intervalTimer: ReturnType<typeof setInterval> | null = null;
   private intervalMs: number = 300000;
 
+  /** Timestamp when the interval timer was last started/reset */
+  private _intervalResetAt: number | null = null;
+
   /**
    * Set the processor function that handles each tick.
    */
@@ -150,6 +153,7 @@ export class TickQueue {
   startInterval(intervalMs: number): void {
     this.stopInterval();
     this.intervalMs = intervalMs;
+    this._intervalResetAt = Date.now();
     this.intervalTimer = setInterval(() => {
       this.enqueueInterval();
     }, intervalMs);
@@ -163,6 +167,7 @@ export class TickQueue {
       clearInterval(this.intervalTimer);
       this.intervalTimer = null;
     }
+    this._intervalResetAt = null;
   }
 
   /**
@@ -199,6 +204,14 @@ export class TickQueue {
    */
   get isProcessing(): boolean {
     return this.processing;
+  }
+
+  /**
+   * Get the estimated next tick timestamp (ISO string), or null if no interval is active.
+   */
+  get nextTickAt(): string | null {
+    if (!this._intervalResetAt || !this.intervalTimer) return null;
+    return new Date(this._intervalResetAt + this.intervalMs).toISOString();
   }
 
   /**

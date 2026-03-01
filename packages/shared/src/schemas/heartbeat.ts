@@ -45,6 +45,7 @@ export const heartbeatStateSchema = z.object({
   sessionTokenCount: z.number().int().nonnegative().default(0),
   startedAt: timestampSchema,
   lastTickAt: timestampSchema.nullable(),
+  nextTickAt: timestampSchema.nullable().default(null),
   sessionWarmSince: timestampSchema.nullable(),
   isRunning: z.boolean(),
   // Energy system
