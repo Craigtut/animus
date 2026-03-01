@@ -525,7 +525,7 @@ CREATE TABLE tasks (
 
   -- Origin & Contact
   created_by TEXT NOT NULL,              -- 'mind' | 'planning_agent' | 'user'
-  contact_id TEXT,                       -- FK reference to system.db contacts.id
+  contact_id TEXT,                       -- FK reference to contacts.db contacts.id
                                          -- Who this task is for / who gets result messages
                                          -- User-created: the requesting contact (always primary)
                                          -- Mind-created: primary contact

@@ -8,67 +8,70 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import type Database from 'better-sqlite3';
-import { createTestSystemDb, createTestPersonaDb } from '../../helpers.js';
+import { createTestSystemDb, createTestPersonaDb, createTestContactsDb } from '../../helpers.js';
 import * as systemStore from '../../../src/db/stores/system-store.js';
+import * as contactStore from '../../../src/db/stores/contact-store.js';
 import * as personaStore from '../../../src/db/stores/persona-store.js';
 
 describe('system-store (expanded)', () => {
   let db: Database.Database;
   let personaDb: Database.Database;
+  let contactsDb: Database.Database;
 
   beforeEach(() => {
     db = createTestSystemDb();
     personaDb = createTestPersonaDb();
+    contactsDb = createTestContactsDb();
   });
 
   // ========================================================================
-  // Delete Contact
+  // Delete Contact (contacts.db)
   // ========================================================================
 
   describe('deleteContact', () => {
     it('deletes an existing contact', () => {
-      const contact = systemStore.createContact(db, { fullName: 'To Delete' });
-      const result = systemStore.deleteContact(db, contact.id);
+      const contact = contactStore.createContact(contactsDb, { fullName: 'To Delete' });
+      const result = contactStore.deleteContact(contactsDb, contact.id);
       expect(result).toBe(true);
-      expect(systemStore.getContact(db, contact.id)).toBeNull();
+      expect(contactStore.getContact(contactsDb, contact.id)).toBeNull();
     });
 
     it('returns false for nonexistent contact', () => {
-      const result = systemStore.deleteContact(db, 'nonexistent-id');
+      const result = contactStore.deleteContact(contactsDb, 'nonexistent-id');
       expect(result).toBe(false);
     });
 
     it('cascades to contact_channels', () => {
-      const contact = systemStore.createContact(db, { fullName: 'Test' });
-      systemStore.createContactChannel(db, {
+      const contact = contactStore.createContact(contactsDb, { fullName: 'Test' });
+      contactStore.createContactChannel(contactsDb, {
         contactId: contact.id,
         channel: 'sms',
         identifier: '+15551234567',
       });
-      systemStore.deleteContact(db, contact.id);
-      const channels = systemStore.getContactChannelsByContactId(db, contact.id);
+      contactStore.deleteContact(contactsDb, contact.id);
+      const channels = contactStore.getContactChannelsByContactId(contactsDb, contact.id);
       expect(channels).toHaveLength(0);
     });
   });
 
   // ========================================================================
-  // Delete Contact Channel
+  // Delete Contact Channel (contacts.db)
   // ========================================================================
 
   describe('deleteContactChannel', () => {
     it('deletes an existing channel', () => {
-      const contact = systemStore.createContact(db, { fullName: 'Test' });
-      const channel = systemStore.createContactChannel(db, {
+      const contact = contactStore.createContact(contactsDb, { fullName: 'Test' });
+      const channel = contactStore.createContactChannel(contactsDb, {
         contactId: contact.id,
         channel: 'sms',
         identifier: '+15551234567',
       });
-      const result = systemStore.deleteContactChannel(db, channel.id);
+      const result = contactStore.deleteContactChannel(contactsDb, channel.id);
       expect(result).toBe(true);
     });
 
     it('returns false for nonexistent channel', () => {
-      const result = systemStore.deleteContactChannel(db, 'nonexistent-id');
+      const result = contactStore.deleteContactChannel(contactsDb, 'nonexistent-id');
       expect(result).toBe(false);
     });
   });

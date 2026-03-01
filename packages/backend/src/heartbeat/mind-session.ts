@@ -7,11 +7,13 @@
  * Extracted from heartbeat/index.ts — pure structural refactor.
  */
 
-import { getSystemDb, getMessagesDb, getMemoryDb } from '../db/index.js';
+import { getSystemDb, getContactsDb, getMessagesDb, getMemoryDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
+import * as contactStore from '../db/stores/contact-store.js';
 import * as messageStore from '../db/stores/message-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
+import path from 'path';
 import { env, PROJECT_ROOT } from '../utils/env.js';
 
 import {
@@ -119,7 +121,7 @@ export function buildMindToolContext(
     if (conv) conversationId = conv.id;
   }
 
-  const sysDb = getSystemDb();
+  const cDb = getContactsDb();
 
   return {
     agentTaskId: 'mind',
@@ -138,9 +140,9 @@ export function buildMindToolContext(
         },
       },
       contacts: {
-        getContact: (id) => systemStore.getContact(sysDb, id),
-        listContacts: () => systemStore.listContacts(sysDb),
-        getContactChannels: (contactId) => systemStore.getContactChannelsByContactId(sysDb, contactId),
+        getContact: (id) => contactStore.getContact(cDb, id),
+        listContacts: () => contactStore.listContacts(cDb),
+        getContactChannels: (contactId) => contactStore.getContactChannelsByContactId(cDb, contactId),
       },
       channels: {
         sendOutbound: async (params) => {
@@ -290,9 +292,38 @@ export async function getOrCreateMindSession(
     ...filteredPluginAllowedTools,
   ];
 
-  // For Claude provider: use the skill bridge plugin to expose Animus plugin skills
-  // without needing settingSources: ['project'] (which would also load CLAUDE.md).
-  // For Codex provider: inject a generated runtime config.toml via CODEX_HOME.
+  // Build the session env. The Claude SDK replaces process.env entirely when
+  // options.env is provided, so we MUST start from a full copy of process.env
+  // and then override specific keys. Without this, child processes would get
+  // a sparse env missing HOME, USER, SHELL, etc.
+  const baseSessionEnv: Record<string, string> = {};
+  let needsEnvOverride = false;
+
+  // Ensure the running node binary's directory is on PATH for all providers.
+  // In the bundled Tauri app, the Rust launcher sets PATH before spawning the
+  // sidecar, but child processes spawned by the SDK need it too.
+  const nodeDir = path.dirname(process.execPath);
+  const currentPath = process.env['PATH'] || '';
+  if (!currentPath.split(path.delimiter).includes(nodeDir)) {
+    baseSessionEnv['PATH'] = `${nodeDir}${path.delimiter}${currentPath}`;
+    needsEnvOverride = true;
+    log.debug(`Prepended node directory to session PATH: ${nodeDir}`);
+  }
+
+  // macOS dock icon suppression for child processes. The Rust launcher sets
+  // ANIMUS_DOCK_SUPPRESS_ADDON to the path of a native addon that calls
+  // NSApp.setActivationPolicy(.accessory). We translate this to
+  // DYLD_INSERT_LIBRARIES for child processes so macOS injects the addon
+  // at process load time. We don't set DYLD on the sidecar itself because
+  // it can interfere with native addons (onnxruntime, etc.).
+  const dockAddonPath = process.env['ANIMUS_DOCK_SUPPRESS_ADDON'];
+  if (dockAddonPath) {
+    baseSessionEnv['DYLD_INSERT_LIBRARIES'] = dockAddonPath;
+    needsEnvOverride = true;
+    log.info(`Dock suppression: DYLD_INSERT_LIBRARIES=${dockAddonPath}`);
+  }
+
+  // Provider-specific configuration: skill bridge plugins, runtime env, auth.
   // Also add 'Skill' to allowedTools so Claude SDK enables its built-in Skill tool.
   let sdkPlugins: Array<{ type: 'local'; path: string }> | undefined;
   let sessionEnv: Record<string, string> | undefined;
@@ -323,6 +354,25 @@ export async function getOrCreateMindSession(
     sessionEnv = await pluginMgr.buildCodexRuntimeEnv(sessionEnv);
     log.info('Codex runtime config prepared for session', {
       codexHome: sessionEnv['CODEX_HOME'],
+    });
+  }
+
+  // Merge envs. When the SDK receives options.env, it uses it as the COMPLETE
+  // env for the spawned CLI process (no automatic inheritance from process.env).
+  // We must start from a full copy of process.env, then layer overrides on top.
+  // Provider-specific keys win over base overrides, which win over process.env.
+  if (needsEnvOverride || sessionEnv) {
+    const fullEnv: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v !== undefined) fullEnv[k] = v;
+    }
+    sessionEnv = { ...fullEnv, ...baseSessionEnv, ...sessionEnv };
+    log.info('Session env verification', {
+      hasDYLD: !!sessionEnv['DYLD_INSERT_LIBRARIES'],
+      dyldPath: sessionEnv['DYLD_INSERT_LIBRARIES']?.substring(0, 50),
+      hasNodeOptions: !!sessionEnv['NODE_OPTIONS'],
+      pathStartsWith: sessionEnv['PATH']?.substring(0, 80),
+      totalVars: Object.keys(sessionEnv).length,
     });
   }
 

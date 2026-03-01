@@ -218,6 +218,164 @@ fn main() {
         log!(log_file, "Node binary: {:?} (exists: {})", node_bin, node_bin.exists());
         log!(log_file, "Entry point: {:?} (exists: {})", entry_point, entry_point.exists());
 
+        // On macOS, create a minimal "node-helper.app" bundle with
+        // LSBackgroundOnly=true in its Info.plist. When macOS launches a binary
+        // from inside an .app bundle, Launch Services reads the bundle's
+        // Info.plist BEFORE the process starts — this is fundamentally different
+        // from runtime API calls (setActivationPolicy, TransformProcessType)
+        // which macOS 26 Tahoe accepts but silently ignores.
+        //
+        // This is the same pattern Electron uses for its helper processes.
+        // The helper app lives in the data directory (writable) and hard-links
+        // to the real node binary (no disk duplication on APFS).
+        let mut effective_node_bin = node_bin.clone();
+        #[cfg(target_os = "macos")]
+        {
+            let helper_app = data_dir.join("node-helper.app");
+            let helper_contents = helper_app.join("Contents");
+            let helper_macos = helper_contents.join("MacOS");
+            let helper_node = helper_macos.join("node");
+            let helper_plist = helper_contents.join("Info.plist");
+
+            let plist_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.animus.node-helper</string>
+    <key>CFBundleName</key>
+    <string>Animus Helper</string>
+    <key>CFBundleExecutable</key>
+    <string>node</string>
+    <key>LSBackgroundOnly</key>
+    <true/>
+    <key>LSUIElement</key>
+    <true/>
+</dict>
+</plist>"#;
+
+            match std::fs::create_dir_all(&helper_macos) {
+                Ok(_) => {
+                    // Always write the Info.plist (in case it changed)
+                    let _ = std::fs::write(&helper_plist, plist_content);
+
+                    // Remove stale hard link if the node binary was updated
+                    // (e.g., after an app update, the inode changes)
+                    if helper_node.exists() {
+                        // Check if hard link still points to same inode
+                        use std::os::unix::fs::MetadataExt;
+                        let src_ino = std::fs::metadata(&node_bin).map(|m| m.ino()).unwrap_or(0);
+                        let dst_ino = std::fs::metadata(&helper_node).map(|m| m.ino()).unwrap_or(1);
+                        if src_ino != dst_ino {
+                            let _ = std::fs::remove_file(&helper_node);
+                        }
+                    }
+
+                    // Create hard link (same inode, no disk duplication)
+                    if !helper_node.exists() {
+                        match std::fs::hard_link(&node_bin, &helper_node) {
+                            Ok(_) => {
+                                log!(log_file, "Helper app: hard-linked node binary");
+                            }
+                            Err(e) => {
+                                // Fall back to copy if hard link fails
+                                // (e.g., cross-volume)
+                                log!(log_file, "Helper app: hard link failed ({}), copying", e);
+                                let _ = std::fs::copy(&node_bin, &helper_node);
+                            }
+                        }
+                    }
+
+                    // Ad-hoc sign the helper app so macOS trusts it
+                    let _ = std::process::Command::new("codesign")
+                        .args(["--sign", "-", "--force"])
+                        .arg(helper_app.to_str().unwrap_or(""))
+                        .output();
+
+                    if helper_node.exists() {
+                        log!(log_file, "Helper app: using {}", helper_node.display());
+                        effective_node_bin = helper_node;
+                    } else {
+                        log!(log_file, "WARN: Helper app setup failed, using direct node binary");
+                    }
+                }
+                Err(e) => {
+                    log!(log_file, "WARN: Failed to create helper app dir: {}", e);
+                }
+            }
+        }
+
+        // Ensure node binary directories are on PATH so that child processes
+        // (Claude Agent SDK, MCP stdio servers) can find `node`.
+        // On macOS, the helper app's directory comes FIRST so `node` resolves
+        // to the LSBackgroundOnly-protected binary. The original MacOS/ dir
+        // is kept as fallback.
+        let node_dir = effective_node_bin.parent().unwrap_or(&exe_dir);
+        let orig_node_dir = node_bin.parent().unwrap_or(&exe_dir);
+        let mut path_env = std::env::var("PATH").unwrap_or_default();
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        // Add helper app dir first (highest priority)
+        if !path_env.split(sep).any(|p| std::path::Path::new(p) == node_dir) {
+            path_env = format!("{}{}{}", node_dir.display(), sep, path_env);
+        }
+        // Add original MacOS dir as fallback
+        if node_dir != orig_node_dir {
+            if !path_env.split(sep).any(|p| std::path::Path::new(p) == orig_node_dir) {
+                path_env = format!("{}{}{}", path_env, sep, orig_node_dir.display());
+            }
+        }
+
+        // On macOS, suppress dock icons for ALL child processes using a
+        // four-layer strategy:
+        //
+        // Layer 0 (PRIMARY): node-helper.app bundle (above)
+        //    The sidecar runs from inside a minimal .app bundle that has
+        //    LSBackgroundOnly=true in its Info.plist. Launch Services reads
+        //    this BEFORE the process starts, preventing dock registration
+        //    entirely. This works on macOS 26 Tahoe where runtime APIs
+        //    (setActivationPolicy, TransformProcessType) are silently ignored.
+        //    Child processes inherit the helper app's node binary via
+        //    process.execPath and PATH, so all Node.js processes get coverage.
+        //
+        // Layer 1: DYLD_INSERT_LIBRARIES=<addon path>
+        //    Fallback for non-Node processes (ripgrep, ffmpeg) that don't
+        //    launch from the helper app. The addon's constructor calls
+        //    setActivationPolicy as a best-effort secondary measure.
+        //
+        // Layer 2: NODE_OPTIONS=--require=preload-bg-policy.js
+        //    Redundant safety net: if DYLD_INSERT_LIBRARIES is stripped by a
+        //    security policy, the preload script loads the same addon via require().
+        //
+        // Layer 3: ANIMUS_DOCK_SUPPRESS_ADDON=<path>
+        //    The sidecar propagates DYLD_INSERT_LIBRARIES to grandchild processes
+        //    (Claude Agent SDK, MCP servers) via process.env.
+        let mut node_options = std::env::var("NODE_OPTIONS").unwrap_or_default();
+        let mut dock_addon_path = String::new();
+        #[cfg(target_os = "macos")]
+        {
+            let addon = resources_dir.join("resources").join("macos_bg_policy.node");
+            let preload = resources_dir.join("resources").join("preload-bg-policy.js");
+
+            if addon.exists() {
+                dock_addon_path = addon.to_string_lossy().to_string();
+                log!(log_file, "Dock suppress addon: {}", dock_addon_path);
+            } else {
+                log!(log_file, "WARN: macos_bg_policy.node not found at {:?}", addon);
+            }
+
+            if preload.exists() {
+                let require_flag = format!("--require={}", preload.display());
+                if node_options.is_empty() {
+                    node_options = require_flag;
+                } else {
+                    node_options = format!("{} {}", require_flag, node_options);
+                }
+                log!(log_file, "Dock suppress preload: {}", preload.display());
+            } else {
+                log!(log_file, "WARN: preload-bg-policy.js not found at {:?}", preload);
+            }
+        }
+
         // Open log file for sidecar stdout/stderr
         let sidecar_log_path = data_dir.join("sidecar.log");
         let sidecar_stdout = File::create(&sidecar_log_path)
@@ -228,15 +386,40 @@ fn main() {
         log!(log_file, "Sidecar log: {:?}", sidecar_log_path);
 
         // Spawn the Node.js sidecar — secrets are auto-generated by the backend
-        let child = Command::new(&node_bin)
-            .arg(&entry_point)
+        let mut cmd = Command::new(&effective_node_bin);
+        cmd.arg(&entry_point)
             .env("PORT", port.to_string())
             .env("HOST", "127.0.0.1")
             .env("NODE_ENV", "production")
             .env("ANIMUS_DATA_DIR", &data_dir_str)
+            .env("PATH", &path_env)
+            .env("NODE_OPTIONS", &node_options)
             .stdout(Stdio::from(sidecar_stdout))
-            .stderr(Stdio::from(sidecar_stderr))
-            .spawn()
+            .stderr(Stdio::from(sidecar_stderr));
+
+        // Pass the addon path for child process propagation, and set
+        // DYLD_INSERT_LIBRARIES so the addon loads in the sidecar itself
+        // (before Node.js initialization — the constructor fires during dlopen).
+        if !dock_addon_path.is_empty() {
+            cmd.env("ANIMUS_DOCK_SUPPRESS_ADDON", &dock_addon_path);
+            cmd.env("DYLD_INSERT_LIBRARIES", &dock_addon_path);
+        }
+
+        // Put the sidecar in its own process group so we can kill ALL descendant
+        // processes (Claude SDK, MCP servers, channels, FFmpeg) on exit, even if
+        // the sidecar has already crashed.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            unsafe {
+                cmd.pre_exec(|| {
+                    libc::setpgid(0, 0);
+                    Ok(())
+                });
+            }
+        }
+
+        let child = cmd.spawn()
             .expect("Failed to start Node.js sidecar");
 
         log!(log_file, "Sidecar spawned (pid: {})", child.id());
@@ -295,15 +478,19 @@ fn main() {
 
         app.run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {
-                // Graceful shutdown: SIGTERM → wait 5s → SIGKILL
+                // Graceful shutdown: SIGTERM to process group → wait 5s → SIGKILL
                 let state = app_handle.state::<Sidecar>();
                 let child_opt = state.0.lock().ok().and_then(|mut g| g.take());
                 if let Some(mut child) = child_opt {
+                    let child_pid = child.id();
                     #[cfg(unix)]
                     {
-                        // Send SIGTERM for graceful shutdown
+                        // Send SIGTERM to the entire process group (negative PID).
+                        // This ensures ALL descendant processes (Claude SDK,
+                        // MCP servers, channels, FFmpeg) receive SIGTERM, even
+                        // if the sidecar has already crashed.
                         unsafe {
-                            libc::kill(child.id() as i32, libc::SIGTERM);
+                            libc::kill(-(child_pid as i32), libc::SIGTERM);
                         }
                     }
                     #[cfg(windows)]
@@ -319,8 +506,15 @@ fn main() {
                         }
                     }
 
-                    // Force kill if still running
-                    let _ = child.kill();
+                    // Force kill the process group if still running
+                    #[cfg(unix)]
+                    unsafe {
+                        libc::kill(-(child_pid as i32), libc::SIGKILL);
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        let _ = child.kill();
+                    }
                     let _ = child.wait();
                 }
             }

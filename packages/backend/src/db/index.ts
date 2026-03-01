@@ -1,13 +1,14 @@
 /**
  * Database Module
  *
- * Manages six SQLite databases:
- * - system.db: Users, contacts, settings, API keys (rarely reset)
+ * Manages seven SQLite databases:
+ * - system.db: Users, settings, API keys, credentials (rarely reset)
  * - persona.db: Personality settings (separate lifecycle from system.db)
  * - heartbeat.db: Thoughts, experiences, emotions, goals, tasks (the "life state")
  * - memory.db: Working memory, core self, long-term memories (knowledge)
  * - messages.db: Conversations, messages, media (long-term history)
  * - agent_logs.db: SDK logs, events, token usage (frequent cleanup)
+ * - contacts.db: Contacts, contact channels (backed up with AI state)
  *
  * All DDL is managed via versioned .sql migration files.
  */
@@ -25,6 +26,7 @@ import {
   DB_MEMORY_PATH,
   DB_MESSAGES_PATH,
   DB_AGENT_LOGS_PATH,
+  DB_CONTACTS_PATH,
 } from '../utils/env.js';
 import { createLogger } from '../lib/logger.js';
 import { runMigrations } from './migrate.js';
@@ -41,7 +43,8 @@ let heartbeatDb: Database.Database;
 let memoryDb: Database.Database;
 let messagesDb: Database.Database;
 let agentLogsDb: Database.Database;
-export const DATABASE_COUNT = 6;
+let contactsDb: Database.Database;
+export const DATABASE_COUNT = 7;
 
 export function getSystemDb(): Database.Database {
   if (!systemDb) throw new Error('System database not initialized');
@@ -73,6 +76,11 @@ export function getAgentLogsDb(): Database.Database {
   return agentLogsDb;
 }
 
+export function getContactsDb(): Database.Database {
+  if (!contactsDb) throw new Error('Contacts database not initialized');
+  return contactsDb;
+}
+
 /**
  * Open a database, set WAL mode and enable foreign keys.
  */
@@ -97,8 +105,10 @@ export async function initializeDatabases(): Promise<void> {
   memoryDb = openDb(DB_MEMORY_PATH);
   messagesDb = openDb(DB_MESSAGES_PATH);
   agentLogsDb = openDb(DB_AGENT_LOGS_PATH);
+  contactsDb = openDb(DB_CONTACTS_PATH);
 
-  // Run migrations
+  // Run migrations — contacts.db first so tables exist before system.db drops them
+  runMigrations(contactsDb, path.join(MIGRATIONS_DIR, 'contacts'), 'contacts.db');
   runMigrations(systemDb, path.join(MIGRATIONS_DIR, 'system'), 'system.db');
   runMigrations(personaDb, path.join(MIGRATIONS_DIR, 'persona'), 'persona.db');
   runMigrations(heartbeatDb, path.join(MIGRATIONS_DIR, 'heartbeat'), 'heartbeat.db');
@@ -108,6 +118,9 @@ export async function initializeDatabases(): Promise<void> {
 
   // One-time migration: copy finalized persona from system.db → persona.db
   migratePersonaFromSystem(systemDb, personaDb);
+
+  // One-time migration: copy timezone from system.db → persona.db
+  migrateTimezoneToPersona(systemDb, personaDb);
 
   // Check for orphaned rollback backup from a previous failed restore
   const { checkForOrphanedRollback } = await import('../services/restore-service.js');
@@ -188,6 +201,48 @@ function migratePersonaFromSystem(
 }
 
 /**
+ * One-time migration: copy timezone from system.db to persona.db.
+ *
+ * Runs when system.db still has a timezone column with a non-UTC value
+ * and persona.db timezone is still the default 'UTC'. After copying,
+ * the code stops reading/writing system.db timezone (dead column).
+ */
+function migrateTimezoneToPersona(
+  sysDb: Database.Database,
+  persDb: Database.Database
+): void {
+  try {
+    // Check if system_settings still has a timezone column
+    const columns = sysDb
+      .prepare("PRAGMA table_info('system_settings')")
+      .all() as Array<{ name: string }>;
+    const hasTimezoneColumn = columns.some((c) => c.name === 'timezone');
+    if (!hasTimezoneColumn) return;
+
+    // Read the value from system.db
+    const sysRow = sysDb
+      .prepare('SELECT timezone FROM system_settings WHERE id = 1')
+      .get() as { timezone: string } | undefined;
+    if (!sysRow || !sysRow.timezone || sysRow.timezone === 'UTC') return;
+
+    // Only copy if persona.db is still at the default
+    const persRow = persDb
+      .prepare('SELECT timezone FROM personality_settings WHERE id = 1')
+      .get() as { timezone: string } | undefined;
+    if (!persRow || persRow.timezone !== 'UTC') return;
+
+    persDb
+      .prepare('UPDATE personality_settings SET timezone = ? WHERE id = 1')
+      .run(sysRow.timezone);
+
+    log.info(`Migrated timezone "${sysRow.timezone}" from system.db to persona.db`);
+  } catch (err) {
+    // Non-fatal: if columns don't exist yet, skip silently
+    log.debug('Timezone migration skipped:', err);
+  }
+}
+
+/**
  * Close all database connections.
  */
 export function closeDatabases(): void {
@@ -197,4 +252,5 @@ export function closeDatabases(): void {
   memoryDb?.close();
   messagesDb?.close();
   agentLogsDb?.close();
+  contactsDb?.close();
 }

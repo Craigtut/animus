@@ -48,7 +48,7 @@ interface IncomingMessage {
 }
 
 interface ResolvedContact {
-  id: string;                        // contacts.id from system.db
+  id: string;                        // contacts.id from contacts.db
   fullName: string;
   permissionTier: 'primary' | 'standard';
 }
@@ -96,7 +96,7 @@ The web UI is the primary admin interface. It communicates over tRPC (HTTP + Web
 
 **Inbound**: Messages sent through the web chat interface arrive via tRPC procedure calls. The authenticated user session identifies the sender.
 
-**Web User → Contact Linking**: The `contacts` table has a `user_id` foreign key pointing to the `users` table in `system.db` (see `docs/architecture/contacts.md`). When a web user sends a message, the adapter finds the contact record where `user_id` matches the authenticated user. On first setup, persona creation ("Bring to Life") creates the primary contact with `user_id` set to the web user automatically.
+**Web User → Contact Linking**: The `contacts` table in `contacts.db` has a `user_id` field referencing the `users` table in `system.db` (see `docs/architecture/contacts.md`). When a web user sends a message, the adapter finds the contact record where `user_id` matches the authenticated user. On first setup, persona creation ("Bring to Life") creates the primary contact with `user_id` set to the web user automatically.
 
 **Outbound**: Replies are pushed to the frontend in real-time via tRPC subscriptions. The web UI receives the full streamed response.
 

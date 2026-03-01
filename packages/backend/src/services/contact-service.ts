@@ -7,8 +7,8 @@
 
 import { TRPCError } from '@trpc/server';
 import { createLogger } from '../lib/logger.js';
-import { getSystemDb, getMessagesDb } from '../db/index.js';
-import * as systemStore from '../db/stores/system-store.js';
+import { getContactsDb, getMessagesDb } from '../db/index.js';
+import * as contactStore from '../db/stores/contact-store.js';
 import * as messageStore from '../db/stores/message-store.js';
 import type { Contact, ContactChannel, ChannelType, Message } from '@animus-labs/shared';
 
@@ -63,13 +63,13 @@ class ContactService {
    * List all contacts, enriched with channel info and last message.
    */
   listContacts(): ContactWithLastMessage[] {
-    const sysDb = getSystemDb();
+    const cDb = getContactsDb();
     const msgDb = getMessagesDb();
-    const contacts = systemStore.listContacts(sysDb);
+    const contacts = contactStore.listContacts(cDb);
 
     return contacts.map((contact) => {
       const lastMessage = messageStore.getLastMessageForContact(msgDb, contact.id);
-      const channels = systemStore.getContactChannelsByContactId(sysDb, contact.id);
+      const channels = contactStore.getContactChannelsByContactId(cDb, contact.id);
       return {
         ...contact,
         channels: channels.map((ch) => ({
@@ -94,14 +94,14 @@ class ContactService {
    * Get the primary contact.
    */
   getPrimaryContact(): Contact | null {
-    return systemStore.getPrimaryContact(getSystemDb());
+    return contactStore.getPrimaryContact(getContactsDb());
   }
 
   /**
    * Get a contact by ID. Throws NOT_FOUND if missing.
    */
   getContact(id: string): Contact {
-    const contact = systemStore.getContact(getSystemDb(), id);
+    const contact = contactStore.getContact(getContactsDb(), id);
     if (!contact) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Contact not found' });
     }
@@ -112,7 +112,7 @@ class ContactService {
    * Create a new contact.
    */
   createContact(data: CreateContactInput): Contact {
-    return systemStore.createContact(getSystemDb(), {
+    return contactStore.createContact(getContactsDb(), {
       fullName: data.fullName,
       phoneNumber: data.phoneNumber ?? null,
       email: data.email ?? null,
@@ -124,30 +124,30 @@ class ContactService {
    * Update a contact. Throws NOT_FOUND if missing.
    */
   updateContact(id: string, data: UpdateContactInput): Contact {
-    const db = getSystemDb();
-    const existing = systemStore.getContact(db, id);
+    const db = getContactsDb();
+    const existing = contactStore.getContact(db, id);
     if (!existing) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Contact not found' });
     }
 
-    const updateData: Parameters<typeof systemStore.updateContact>[2] = {};
+    const updateData: Parameters<typeof contactStore.updateContact>[2] = {};
     if (data.fullName !== undefined) updateData.fullName = data.fullName;
     if (data.phoneNumber !== undefined) updateData.phoneNumber = data.phoneNumber;
     if (data.email !== undefined) updateData.email = data.email;
     if (data.notes !== undefined) updateData.notes = data.notes;
 
-    systemStore.updateContact(db, id, updateData);
-    return systemStore.getContact(db, id)!;
+    contactStore.updateContact(db, id, updateData);
+    return contactStore.getContact(db, id)!;
   }
 
   /**
    * Delete a contact. Cannot delete the primary contact.
-   * Cascades: removes contact channels from system.db.
+   * Cascades: removes contact channels from contacts.db.
    * (Messages and memory are preserved as historical data.)
    */
   deleteContact(id: string): void {
-    const db = getSystemDb();
-    const contact = systemStore.getContact(db, id);
+    const db = getContactsDb();
+    const contact = contactStore.getContact(db, id);
     if (!contact) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Contact not found' });
     }
@@ -158,7 +158,7 @@ class ContactService {
       });
     }
 
-    systemStore.deleteContact(db, id);
+    contactStore.deleteContact(db, id);
     log.info(`Deleted contact ${id} (${contact.fullName})`);
   }
 
@@ -166,19 +166,19 @@ class ContactService {
    * Get channels for a contact.
    */
   getChannels(contactId: string): ContactChannel[] {
-    return systemStore.getContactChannelsByContactId(getSystemDb(), contactId);
+    return contactStore.getContactChannelsByContactId(getContactsDb(), contactId);
   }
 
   /**
    * Add a channel to a contact. Throws NOT_FOUND if contact missing.
    */
   addChannel(data: AddChannelInput): ContactChannel {
-    const db = getSystemDb();
-    const contact = systemStore.getContact(db, data.contactId);
+    const db = getContactsDb();
+    const contact = contactStore.getContact(db, data.contactId);
     if (!contact) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Contact not found' });
     }
-    return systemStore.createContactChannel(db, {
+    return contactStore.createContactChannel(db, {
       contactId: data.contactId,
       channel: data.channel,
       identifier: data.identifier,
@@ -190,7 +190,7 @@ class ContactService {
    * Remove a channel. Throws NOT_FOUND if channel missing.
    */
   removeChannel(channelId: string): void {
-    const deleted = systemStore.deleteContactChannel(getSystemDb(), channelId);
+    const deleted = contactStore.deleteContactChannel(getContactsDb(), channelId);
     if (!deleted) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found' });
     }

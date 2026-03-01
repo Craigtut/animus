@@ -21,6 +21,7 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 const TAURI_DIR = path.join(ROOT, 'packages', 'tauri');
 const BINARIES_DIR = path.join(TAURI_DIR, 'binaries');
 const RESOURCES_DIR = path.join(TAURI_DIR, 'resources');
+const NATIVE_DIR = path.join(TAURI_DIR, 'native');
 
 // ---------------------------------------------------------------------------
 // Platform mapping
@@ -81,7 +82,7 @@ async function downloadNodeBinary() {
   const destPath = path.join(BINARIES_DIR, targetTriple);
 
   if (fs.existsSync(destPath)) {
-    console.log(`[1/9] Node.js binary already exists at ${destPath}, skipping download`);
+    console.log(`[1/10] Node.js binary already exists at ${destPath}, skipping download`);
     return;
   }
 
@@ -89,7 +90,7 @@ async function downloadNodeBinary() {
   const archiveName = `node-${nodeVersion}-${nodePlatform}`;
   const url = `https://nodejs.org/dist/${nodeVersion}/${archiveName}${ext}`;
 
-  console.log(`[1/9] Downloading Node.js ${nodeVersion} for ${nodePlatform}...`);
+  console.log(`[1/10] Downloading Node.js ${nodeVersion} for ${nodePlatform}...`);
   console.log(`      URL: ${url}`);
 
   fs.mkdirSync(BINARIES_DIR, { recursive: true });
@@ -155,7 +156,7 @@ async function downloadNodeBinary() {
 // ---------------------------------------------------------------------------
 
 function cleanResources() {
-  console.log('[2/9] Cleaning resources/ directory...');
+  console.log('[2/10] Cleaning resources/ directory...');
 
   if (!fs.existsSync(RESOURCES_DIR)) {
     fs.mkdirSync(RESOURCES_DIR, { recursive: true });
@@ -170,8 +171,61 @@ function cleanResources() {
   }
 }
 
+/**
+ * On macOS, compile the native addon that suppresses dock icons for child
+ * Node.js processes, then copy both the addon and its preload script into
+ * resources/. On other platforms this is a no-op.
+ */
+function prepareMacOSBgPolicy() {
+  if (process.platform !== 'darwin') {
+    console.log('[3/10] macOS background policy addon: skipped (not macOS)');
+    return;
+  }
+
+  console.log('[3/10] Compiling macOS background policy addon...');
+
+  const srcFile = path.join(NATIVE_DIR, 'macos_bg_policy.m');
+  const preloadSrc = path.join(NATIVE_DIR, 'preload-bg-policy.js');
+  const addonDest = path.join(RESOURCES_DIR, 'macos_bg_policy.node');
+  const preloadDest = path.join(RESOURCES_DIR, 'preload-bg-policy.js');
+
+  if (!fs.existsSync(srcFile)) {
+    console.log('      WARN: native/macos_bg_policy.m not found, skipping');
+    return;
+  }
+
+  // Compile universal binary (arm64 + x86_64)
+  // AppKit: NSApplication setActivationPolicy (primary dock icon suppression)
+  // ApplicationServices: Carbon TransformProcessType (fallback for non-Cocoa binaries)
+  execSync(
+    `clang -shared -undefined dynamic_lookup ` +
+    `-framework AppKit -framework ApplicationServices ` +
+    `-arch arm64 -arch x86_64 ` +
+    `-o "${addonDest}" "${srcFile}"`,
+    { stdio: 'inherit' }
+  );
+  console.log(`      Compiled ${addonDest}`);
+
+  // Ad-hoc code sign the addon so it can be loaded by a signed Node.js binary
+  // with hardened runtime. Without this, DYLD_INSERT_LIBRARIES may be rejected.
+  try {
+    execSync(`codesign --sign - --force "${addonDest}"`, { stdio: 'inherit' });
+    console.log('      Ad-hoc signed macos_bg_policy.node');
+  } catch (e) {
+    console.log('      WARN: Failed to ad-hoc sign addon (may cause DYLD load failures)');
+  }
+
+  // Copy preload script
+  if (fs.existsSync(preloadSrc)) {
+    fs.cpSync(preloadSrc, preloadDest);
+    console.log(`      Copied preload-bg-policy.js`);
+  } else {
+    console.log('      WARN: native/preload-bg-policy.js not found');
+  }
+}
+
 function copyBackendDist() {
-  console.log('[3/9] Copying backend dist to resources/backend/...');
+  console.log('[4/10] Copying backend dist to resources/backend/...');
 
   const src = path.join(ROOT, 'packages', 'backend', 'dist');
   const dest = path.join(RESOURCES_DIR, 'backend');
@@ -186,7 +240,7 @@ function copyBackendDist() {
 }
 
 function copyWorkspacePackages() {
-  console.log('[8/9] Copying workspace packages (@animus-labs/shared, @animus-labs/agents, @animus-labs/tts-native)...');
+  console.log('[9/10] Copying workspace packages (@animus-labs/shared, @animus-labs/agents, @animus-labs/tts-native)...');
 
   const packages = ['shared', 'agents', 'tts-native'];
 
@@ -221,7 +275,7 @@ function copyWorkspacePackages() {
 }
 
 function generatePackageJson() {
-  console.log('[4/9] Generating resources/package.json...');
+  console.log('[5/10] Generating resources/package.json...');
 
   const backendPkgPath = path.join(ROOT, 'packages', 'backend', 'package.json');
   const backendPkg = JSON.parse(fs.readFileSync(backendPkgPath, 'utf-8'));
@@ -247,7 +301,7 @@ function generatePackageJson() {
 }
 
 function installDependencies() {
-  console.log('[5/9] Installing production dependencies in resources/...');
+  console.log('[6/10] Installing production dependencies in resources/...');
 
   execSync('npm install --omit=dev', {
     cwd: RESOURCES_DIR,
@@ -287,7 +341,7 @@ function formatMB(bytes) {
  *   - @anthropic-ai/claude-agent-sdk: vendor/ripgrep/{arch}-{os}/
  */
 function prunePlatformBinaries() {
-  console.log('[6/9] Pruning foreign-platform binaries...');
+  console.log('[7/10] Pruning foreign-platform binaries...');
 
   const { platform, arch } = process;
   const nodeModules = path.join(RESOURCES_DIR, 'node_modules');
@@ -389,7 +443,7 @@ function prunePlatformBinaries() {
  * declarations, test directories, C/C++ source, documentation, etc.
  */
 function pruneNonEssentialFiles() {
-  console.log('[7/9] Pruning non-essential files from node_modules...');
+  console.log('[8/10] Pruning non-essential files from node_modules...');
 
   const nodeModules = path.join(RESOURCES_DIR, 'node_modules');
   if (!fs.existsSync(nodeModules)) return;
@@ -515,7 +569,7 @@ function pruneNonEssentialFiles() {
 }
 
 function verify() {
-  console.log('[9/9] Verifying sidecar payload...');
+  console.log('[10/10] Verifying sidecar payload...');
 
   const checks = [
     { path: path.join(RESOURCES_DIR, 'backend', 'index.js'), label: 'resources/backend/index.js' },
@@ -525,6 +579,14 @@ function verify() {
     { path: path.join(RESOURCES_DIR, 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'cli.js'), label: 'Claude SDK cli.js' },
     { path: path.join(RESOURCES_DIR, 'node_modules', '@openai', 'codex-sdk', 'vendor'), label: 'Codex SDK vendor/' },
   ];
+
+  // On macOS, verify the dock icon suppression files
+  if (process.platform === 'darwin') {
+    checks.push(
+      { path: path.join(RESOURCES_DIR, 'macos_bg_policy.node'), label: 'resources/macos_bg_policy.node (dock icon suppression)' },
+      { path: path.join(RESOURCES_DIR, 'preload-bg-policy.js'), label: 'resources/preload-bg-policy.js (dock icon preload)' },
+    );
+  }
 
   let allOk = true;
   for (const check of checks) {
@@ -554,6 +616,7 @@ async function main() {
   try {
     await downloadNodeBinary();
     cleanResources();
+    prepareMacOSBgPolicy();
     copyBackendDist();
     generatePackageJson();
     installDependencies();

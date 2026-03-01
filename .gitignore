@@ -68,4 +68,5 @@ packages/tauri/resources/backend/
 packages/tauri/resources/node_modules/
 packages/tauri/resources/package.json
 packages/tauri/resources/package-lock.json
+packages/tauri/resources/*.node
 packages/tauri/gen/

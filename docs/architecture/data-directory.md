@@ -14,12 +14,13 @@ The resolved path is exported as `DATA_DIR` from `packages/backend/src/utils/env
 ```
 $ANIMUS_DATA_DIR/
   databases/              # All SQLite databases + vector store
-    system.db             # Users, contacts, settings, API keys
+    system.db             # Users, settings, API keys
     persona.db            # Personality settings (separate lifecycle)
     heartbeat.db          # Thoughts, experiences, emotions, goals, tasks
     memory.db             # Working memory, core self, long-term memories
     messages.db           # Conversations, messages, media
     agent_logs.db         # SDK logs, events, token usage
+    contacts.db           # Contacts, contact channels (backed up with AI state)
     lancedb/              # Vector embeddings (LanceDB)
   media/                  # User uploads + generated speech
     speech/               # TTS-generated audio files

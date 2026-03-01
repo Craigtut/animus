@@ -17,14 +17,16 @@ import {
 // Auth
 // ============================================================================
 
+const emailSchema = z.string().email().transform((e) => e.toLowerCase());
+
 export const loginInputSchema = z.object({
-  email: z.string().email(),
+  email: emailSchema,
   password: z.string().min(8),
 });
 
 export const registerInputSchema = z
   .object({
-    email: z.string().email(),
+    email: emailSchema,
     password: z.string().min(8),
     confirmPassword: z.string().min(8),
   })
@@ -86,7 +88,6 @@ export const systemSettingsSchema = z.object({
   goalApprovalMode: z
     .enum(['always_approve', 'auto_approve', 'full_autonomy'])
     .default('always_approve'),
-  timezone: z.string().default('UTC'),
   // Sleep & energy system
   energySystemEnabled: z.boolean().default(true),
   sleepStartHour: z.number().int().min(0).max(23).default(22),
@@ -141,6 +142,7 @@ export const personaSchema = z.object({
   name: z.string().min(1),
   existenceParadigm: existenceParadigmSchema,
   location: z.string().nullable(),
+  timezone: z.string().default('UTC'),
   worldDescription: z.string().nullable(),
   gender: z.string().nullable(),
   age: z.number().int().positive().nullable(),

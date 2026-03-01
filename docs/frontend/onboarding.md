@@ -332,7 +332,7 @@ The exact validation call (which endpoint, what constitutes "success") will be d
 - **Email** (pre-filled from sign-up, editable) — For contact record, not for login.
 
 **What happens on save:**
-- Creates a `contacts` record in `system.db` with `is_primary = true`
+- Creates a `contacts` record in `contacts.db` with `is_primary = true`
 - Creates a `contact_channels` entry for the web channel: channel `web`, identifier = email
 
 **Actions:**
@@ -366,7 +366,7 @@ The exact validation call (which endpoint, what constitutes "success") will be d
 - **Continue** — Always enabled (even if the text area is empty).
 - **Skip** — Text link alternative for users who want to defer.
 
-**Data saved:** Stored as the `notes` field on the primary contact record in `system.db`. See `docs/architecture/contacts.md` (Contact Notes & "Notes About You") for how these notes are surfaced in the mind's context.
+**Data saved:** Stored as the `notes` field on the primary contact record in `contacts.db`. See `docs/architecture/contacts.md` (Contact Notes & "Notes About You") for how these notes are surfaced in the mind's context.
 
 ### Step 5: Persona Creation
 

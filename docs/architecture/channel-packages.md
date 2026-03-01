@@ -56,7 +56,7 @@ interface IncomingMessage {
 }
 
 interface ResolvedContact {
-  id: string;                          // contacts.id from system.db
+  id: string;                          // contacts.id from contacts.db
   fullName: string;
   permissionTier: 'primary' | 'standard';
 }

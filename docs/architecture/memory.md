@@ -109,7 +109,7 @@ Working memory lives in `memory.db`:
 
 ```sql
 CREATE TABLE working_memory (
-  contact_id TEXT PRIMARY KEY,          -- FK reference to system.db contacts.id
+  contact_id TEXT PRIMARY KEY,          -- FK reference to contacts.db contacts.id
   content TEXT NOT NULL DEFAULT '',     -- Free-form notepad content
   token_count INTEGER DEFAULT 0,       -- Tracked for context budget
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -387,7 +387,7 @@ CREATE TABLE long_term_memories (
   memory_type TEXT NOT NULL,                  -- 'fact' | 'experience' | 'procedure' | 'outcome'
   source_type TEXT,                           -- 'thought' | 'experience' | 'conversation' | 'agent_result' | 'goal' | 'explicit'
   source_id TEXT,                             -- FK to original record
-  contact_id TEXT,                            -- FK reference to system.db contacts.id (nullable)
+  contact_id TEXT,                            -- FK reference to contacts.db contacts.id (nullable)
   keywords TEXT,                              -- JSON array
   strength INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),

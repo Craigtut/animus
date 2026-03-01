@@ -9,9 +9,11 @@
  * See docs/architecture/heartbeat.md — "Stage 1: GATHER CONTEXT"
  */
 
-import { getHeartbeatDb, getSystemDb, getMessagesDb, getMemoryDb } from '../db/index.js';
+import { getHeartbeatDb, getSystemDb, getPersonaDb, getContactsDb, getMessagesDb, getMemoryDb } from '../db/index.js';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import * as systemStore from '../db/stores/system-store.js';
+import * as personaStore from '../db/stores/persona-store.js';
+import * as contactStore from '../db/stores/contact-store.js';
 import * as messageStore from '../db/stores/message-store.js';
 import * as memoryDbStore from '../db/stores/memory-store.js';
 import { DecayEngine } from '@animus-labs/shared';
@@ -88,6 +90,8 @@ export interface GatherResult {
   pendingApprovals: ToolApprovalRequest[];
   /** Trust ramp context for tools with repeated approvals (interval ticks only) */
   trustRampContext: string | null;
+  /** AI's timezone (from persona.db) */
+  aiTimezone: string;
   /** External conversation history from channel adapters (e.g., Slack, Discord) */
   externalHistory: Map<string, Array<{
     author: { identifier: string; displayName: string; isBot: boolean };
@@ -165,10 +169,13 @@ export async function gatherContext(
   let wakeUpContext: WakeUpContext | null = null;
   let emotionDecayMultiplier = 1.0;
 
+  // Read AI timezone from persona.db (moved from system.db)
+  const aiTimezone = personaStore.getPersona(getPersonaDb()).timezone || 'UTC';
+
   if (settings.energySystemEnabled) {
     const { energyLevel: rawEnergy, lastEnergyUpdate } = heartbeatStore.getEnergyLevel(hbDb);
     const currentTime = new Date();
-    const tz = settings.timezone || 'UTC';
+    const tz = aiTimezone;
 
     circadianBaseline = computeCircadianBaseline(
       currentTime, settings.sleepStartHour, settings.sleepEndHour, tz
@@ -216,6 +223,7 @@ export async function gatherContext(
     const targetInterval = energyBand === 'sleeping'
       ? settings.sleepTickIntervalMs
       : settings.heartbeatIntervalMs;
+    log.debug(`Energy: ${decayed.toFixed(4)} (${energyBand}), baseline: ${circadianBaseline.toFixed(2)}, elapsed: ${elapsed.toFixed(2)}h, interval: ${targetInterval}ms (${energyBand === 'sleeping' ? 'sleep' : 'regular'})`);
     deps.tickQueue.updateInterval(targetInterval);
 
     // Accelerated emotion decay during sleep
@@ -289,7 +297,7 @@ export async function gatherContext(
   }
 
   if (resolvedContactId) {
-    contact = systemStore.getContact(sysDb, resolvedContactId);
+    contact = contactStore.getContact(getContactsDb(), resolvedContactId);
     // Get active conversation for this contact + channel
     const channel = (resolvedChannel || 'web') as ChannelType;
     const conv = messageStore.getConversationByContactAndChannel(
@@ -390,9 +398,10 @@ export async function gatherContext(
   }
 
   // Load all contacts with their channels
-  const allContacts = systemStore.listContacts(sysDb).map((c) => ({
+  const cDb = getContactsDb();
+  const allContacts = contactStore.listContacts(cDb).map((c) => ({
     contact: c,
-    channels: systemStore.getContactChannelsByContactId(sysDb, c.id),
+    channels: contactStore.getContactChannelsByContactId(cDb, c.id),
   }));
 
   // Check spawn budget for context injection
@@ -478,7 +487,7 @@ export async function gatherContext(
     recentExperiences,
     recentMessages,
     previousDecisions,
-    tickIntervalMs: settings.heartbeatIntervalMs,
+    tickIntervalMs: energyBand === 'sleeping' ? settings.sleepTickIntervalMs : settings.heartbeatIntervalMs,
     sessionState,
     memoryContext: memCtx,
     goalContext: goalCtx,
@@ -497,6 +506,7 @@ export async function gatherContext(
     experienceContext,
     messageContext,
     pendingApprovals,
+    aiTimezone,
     trustRampContext,
     externalHistory,
   };

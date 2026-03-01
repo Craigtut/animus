@@ -41,18 +41,17 @@ Animus is an autonomous AI assistant designed to be genuinely helpful while main
 **Backend:**
 - Node.js + Fastify
 - tRPC for type-safe API
-- Six SQLite databases (see below)
+- Seven SQLite databases (see below)
 - LanceDB for vector storage/semantic search
 - Transformers.js + BGE-small-en-v1.5 for local embeddings
 - Agent SDKs: Claude (default), Codex, OpenCode
 
 ### Database Architecture
 
-Six separate SQLite databases with distinct purposes and lifecycles, all stored under `data/databases/`:
+Seven separate SQLite databases with distinct purposes and lifecycles, all stored under `data/databases/`:
 
 1. **system.db** - Core configuration (rarely reset)
    - Users and authentication
-   - Contacts and contact channels (identity resolution)
    - System settings
    - Credentials (encrypted API keys, OAuth tokens)
 
@@ -81,6 +80,11 @@ Six separate SQLite databases with distinct purposes and lifecycles, all stored 
    - Events (input, thinking, tool calls, responses)
    - Token usage and costs
    - Tool call logs
+
+7. **contacts.db** - Contact identity (backed up with AI state)
+   - Contacts and contact channels (identity resolution)
+   - Permission tiers
+   - Separated from system.db so contacts are included in .animus save/restore
 
 ### The Heartbeat System & The Mind
 

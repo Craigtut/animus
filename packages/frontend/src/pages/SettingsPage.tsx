@@ -789,6 +789,19 @@ function ProviderSection() {
   const claudeCliAvailable = detectData?.find((d) => d.provider === 'claude')?.methods.some((m) => m.method === 'cli' && m.available) ?? false;
   const codexCliAvailable = detectData?.find((d) => d.provider === 'codex')?.methods.some((m) => m.method === 'cli' && m.available) ?? false;
 
+  // Auto-persist cli_detected sentinel when live CLI auth is found but DB has no record.
+  // This keeps the DB in sync so backend consumers (heartbeat, etc.) also see credentials.
+  useEffect(() => {
+    if (claudeCliAvailable && claudeKey && !claudeKey.hasKey) {
+      useCliMutation.mutate({ provider: 'claude' });
+    }
+  }, [claudeCliAvailable, claudeKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (codexCliAvailable && codexKey && !codexKey.hasKey) {
+      useCliMutation.mutate({ provider: 'codex' });
+    }
+  }, [codexCliAvailable, codexKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Credential status helpers
   const getKeyData = (provider: string) => {
     if (provider === 'claude') return claudeKey;
@@ -796,7 +809,15 @@ function ProviderSection() {
     return null;
   };
 
-  const hasCredentials = (provider: string) => getKeyData(provider)?.hasKey ?? false;
+  const hasCredentials = (provider: string) => {
+    // Check DB-stored credentials first
+    if (getKeyData(provider)?.hasKey) return true;
+    // Also consider live CLI auth (detect query) so the badge stays
+    // consistent with the expanded "signed in" state
+    if (provider === 'claude') return claudeCliAvailable;
+    if (provider === 'codex') return codexCliAvailable;
+    return false;
+  };
 
   // Infer credential type from input prefix
   const inferredType = (() => {
@@ -4309,16 +4330,18 @@ function SystemSection() {
     if (confirmAction === 'full') fullResetMutation.mutate(undefined, { onSuccess });
     if (confirmAction === 'factory') {
       setFactoryResetting(true);
-      // Clear the httpOnly session cookie first — frontend JS can't delete
-      // httpOnly cookies, so we need the server to send a Set-Cookie clearing it.
-      try { await logoutMutation.mutateAsync(); } catch { /* ok */ }
       factoryResetMutation.mutate(undefined, {
-        onSuccess: () => {
-          // Server stays running with fresh databases — clear local state and
-          // redirect to register. No delay needed since the server is still up.
+        onSuccess: async () => {
+          // Clear the httpOnly session cookie — frontend JS can't delete
+          // httpOnly cookies, so we need the server to send a Set-Cookie clearing it.
+          // This must happen AFTER the reset (which is a protectedProcedure) succeeds.
+          try { await logoutMutation.mutateAsync(); } catch { /* ok */ }
           localStorage.clear();
           sessionStorage.clear();
           window.location.replace('/register');
+        },
+        onError: () => {
+          setFactoryResetting(false);
         },
       });
     }

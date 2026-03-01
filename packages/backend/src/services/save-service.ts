@@ -22,7 +22,7 @@ import extractZip from 'extract-zip';
 import { saveManifestSchema } from '@animus-labs/shared';
 import type { SaveManifest, SaveInfo } from '@animus-labs/shared';
 import { DATA_DIR, LANCEDB_PATH } from '../utils/env.js';
-import { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb, getAgentLogsDb } from '../db/index.js';
+import { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb, getAgentLogsDb, getContactsDb } from '../db/index.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('SaveService', 'saves');
@@ -33,7 +33,7 @@ const log = createLogger('SaveService', 'saves');
 
 const SAVES_DIR = path.join(DATA_DIR, 'saves');
 
-const DB_NAMES = ['persona', 'heartbeat', 'memory', 'messages', 'agent_logs'] as const;
+const DB_NAMES = ['persona', 'heartbeat', 'memory', 'messages', 'agent_logs', 'contacts'] as const;
 type DbName = (typeof DB_NAMES)[number];
 
 /** Read root package.json version. */
@@ -99,6 +99,7 @@ function getLiveDb(name: DbName): Database.Database {
     case 'memory': return getMemoryDb();
     case 'messages': return getMessagesDb();
     case 'agent_logs': return getAgentLogsDb();
+    case 'contacts': return getContactsDb();
   }
 }
 
@@ -403,11 +404,16 @@ export async function importSave(fileBuffer: Buffer): Promise<SaveInfo> {
       throw new Error(`Invalid or missing manifest.json in save archive: ${err}`);
     }
 
-    // Verify expected DB files exist
+    // Verify expected DB files exist (contacts.db is optional for old archives)
+    const OPTIONAL_DBS: ReadonlySet<string> = new Set(['contacts']);
     for (const dbName of DB_NAMES) {
       try {
         await fs.access(path.join(extractDir, `${dbName}.db`));
       } catch {
+        if (OPTIONAL_DBS.has(dbName)) {
+          log.info(`Optional database file ${dbName}.db not found in archive — will use fresh DB`);
+          continue;
+        }
         throw new Error(`Missing required database file: ${dbName}.db`);
       }
     }

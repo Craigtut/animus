@@ -89,16 +89,17 @@ Animus is built as a self-contained, self-hosted application. The guiding princi
 - ACID compliance
 - WAL mode for concurrent reads
 
-**Why six separate SQLite databases?**
+**Why seven separate SQLite databases?**
 
 All databases live under `data/databases/` (see `docs/architecture/data-directory.md`).
 
-1. **system.db** - Core config that should never be accidentally deleted (users, contacts, contact channels, settings, credentials)
+1. **system.db** - Core config that should never be accidentally deleted (users, settings, credentials)
 2. **persona.db** - Personality settings with a separate lifecycle from system.db
 3. **heartbeat.db** - AI state that might be reset for fresh start (thoughts, emotions, experiences, agent tasks)
 4. **memory.db** - Accumulated knowledge: working memory (per-contact notepad), core self (agent self-knowledge), long-term memories (extracted knowledge metadata). Reset with heartbeat for full AI reset, or preserved independently for soft reset.
 5. **messages.db** - Conversation history that persists across heartbeat resets (messages tagged with contact_id, conversations)
 6. **agent_logs.db** - High-volume logs with aggressive TTL cleanup (sessions, events, usage)
+7. **contacts.db** - Contact identity and channels, backed up with AI state (separated from system.db so contacts are included in .animus save/restore archives)
 
 **Why LanceDB?**
 - Embedded (no external server)
@@ -143,7 +144,7 @@ The abstraction layer will provide:
 
 **Approach: Roll your own** (~150-200 lines as a Fastify plugin).
 
-**Why not Better Auth?** Better Auth is the dominant TypeScript auth framework (24k+ stars, Y Combinator-backed, absorbed Lucia and Auth.js). However, it creates and manages its own 4 tables (user, session, account, verification) with its own schema management — this conflicts with Animus's existing `system.db` user/contact model. Its Fastify integration also works by bridging to the Fetch API internally, bypassing Fastify's native plugin and hook model. For a single-user self-hosted app with email/password only, it brings framework-level complexity for a ~150-line problem.
+**Why not Better Auth?** Better Auth is the dominant TypeScript auth framework (24k+ stars, Y Combinator-backed, absorbed Lucia and Auth.js). However, it creates and manages its own 4 tables (user, session, account, verification) with its own schema management — this conflicts with Animus's existing `system.db` user model. Its Fastify integration also works by bridging to the Fetch API internally, bypassing Fastify's native plugin and hook model. For a single-user self-hosted app with email/password only, it brings framework-level complexity for a ~150-line problem.
 
 **Why not Lucia?** Deprecated March 2025. Project archived. Official recommendation is to migrate to Better Auth.
 
@@ -445,15 +446,15 @@ export function cleanupExpired(db: Database, retentionDays: number): void { ... 
 
 Each function accepts the database instance as its first parameter. In production, the real database connection is passed. In tests, an in-memory SQLite database (`:memory:`) with the same schema can be used.
 
-**Cross-database references:** Contacts live in `system.db` but are referenced by `heartbeat.db`, `memory.db`, and `messages.db` via `contact_id` string fields (not SQLite foreign keys, since they cross database boundaries). Store functions accept the relevant database instance — a function that needs data from two databases accepts both.
+**Cross-database references:** Contacts live in `contacts.db` and are referenced by `heartbeat.db`, `memory.db`, and `messages.db` via `contact_id` string fields (not SQLite foreign keys, since they cross database boundaries). Store functions accept the relevant database instance — a function that needs data from two databases accepts both.
 
 ---
 
 ### Database Migrations (`@animus-labs/backend`)
 
-A lightweight, custom migration system for managing schema changes across all six SQLite databases. Zero external dependencies — just ~50 lines of migration runner code.
+A lightweight, custom migration system for managing schema changes across all seven SQLite databases. Zero external dependencies — just ~50 lines of migration runner code.
 
-**Why not an ORM migration tool (Drizzle, Kysely, Knex)?** Animus uses raw SQL by design (no ORM). Adding an ORM's migration runner purely for migrations introduces a heavy dependency for a narrow use case. The six separate databases also make ORM migration tools awkward — they typically assume a single database connection.
+**Why not an ORM migration tool (Drizzle, Kysely, Knex)?** Animus uses raw SQL by design (no ORM). Adding an ORM's migration runner purely for migrations introduces a heavy dependency for a narrow use case. The seven separate databases also make ORM migration tools awkward — they typically assume a single database connection.
 
 **Why not Umzug?** Viable option, but for SQLite with better-sqlite3, the migration problem is simple enough that a dependency isn't justified. Our runner is ~50 lines.
 
@@ -477,6 +478,8 @@ packages/backend/src/db/
     system/
       001_initial.sql
       003_credentials.sql
+    persona/
+      001_initial.sql
     heartbeat/
       001_initial.sql
       002_add_tick_decisions.sql
@@ -485,6 +488,8 @@ packages/backend/src/db/
     messages/
       001_initial.sql
     agent-logs/
+      001_initial.sql
+    contacts/
       001_initial.sql
 ```
 
@@ -507,12 +512,12 @@ function runMigrations(db: Database, migrationsDir: string): void {
 - Migration files are **append-only** — never edit or delete an applied migration
 - Each migration runs in a **transaction** — if it fails, nothing is applied (SQLite DDL is transactional)
 - Version numbers are extracted from the filename prefix (e.g., `001`, `002`)
-- The runner processes each of the six databases independently
+- The runner processes each of the seven databases independently
 - Migrations are **forward-only** — no rollback support (if needed, write a new migration that reverses the change)
 
 **Startup sequence:**
 ```
-1. Open all 6 database connections (WAL mode, pragmas)
+1. Open all 7 database connections (WAL mode, pragmas)
 2. Run migrations for each database
 3. Initialize services (auth, heartbeat, channels, etc.)
 4. Start HTTP server

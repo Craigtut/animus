@@ -220,7 +220,7 @@ CREATE TABLE agent_tasks (
   -- Task definition
   task_type TEXT NOT NULL,                 -- Category: 'research', 'code_gen', 'analysis', etc.
   task_description TEXT NOT NULL,          -- What the agent was asked to do
-  contact_id TEXT,                         -- FK reference to system.db contacts.id (who triggered this)
+  contact_id TEXT,                         -- FK reference to contacts.db contacts.id (who triggered this)
   source_channel TEXT,                     -- Channel that originated the request
 
   -- Progress tracking

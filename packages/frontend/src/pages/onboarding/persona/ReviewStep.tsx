@@ -14,7 +14,6 @@ export function ReviewStep() {
   const [isSaving, setIsSaving] = useState(false);
 
   const saveDraft = trpc.persona.saveDraft.useMutation();
-  const updateSettings = trpc.settings.updateSystemSettings.useMutation();
 
   const handleBringToLife = async () => {
     setIsSaving(true);
@@ -29,6 +28,7 @@ export function ReviewStep() {
         name: personaDraft.name || undefined,
         existenceParadigm: personaDraft.existenceParadigm || undefined,
         location: personaDraft.location || null,
+        timezone: personaDraft.timezone || undefined,
         worldDescription: personaDraft.worldDescription || null,
         gender: gender,
         age: !isNaN(parsedAge) && parsedAge > 0 ? parsedAge : null,
@@ -53,11 +53,6 @@ export function ReviewStep() {
         personalityNotes: personaDraft.personalityNotes || null,
         background: personaDraft.background || null,
       });
-
-      // Save timezone to system settings
-      if (personaDraft.timezone) {
-        await updateSettings.mutateAsync({ timezone: personaDraft.timezone });
-      }
 
       markStepComplete('persona_review');
       setCurrentStep('birth');

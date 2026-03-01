@@ -21,6 +21,7 @@ export const messagesRouter = router({
       content: z.string().min(1).max(10000),
       channel: channelTypeSchema.default('web'),
       attachmentIds: z.array(z.string().uuid()).max(10).optional(),
+      userTimezone: z.string().optional(),
     }))
     .mutation(({ input, ctx }) => {
       return getMessageService().sendMessage(
@@ -28,6 +29,7 @@ export const messagesRouter = router({
         input.content,
         input.channel,
         input.attachmentIds,
+        input.userTimezone,
       );
     }),
 

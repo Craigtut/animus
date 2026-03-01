@@ -89,6 +89,10 @@ export function WelcomeStep() {
         css={css`
           margin-top: ${theme.spacing[12]};
           position: relative;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: ${theme.spacing[4]};
 
           & > button {
             border-radius: 9999px !important;
@@ -104,6 +108,38 @@ export function WelcomeStep() {
           Begin
         </Button>
       </motion.div>
+
+      {/* Restore link */}
+      <motion.button
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.6, delay: 1.8, ease: 'easeOut' }}
+        onClick={() => navigate('/onboarding/restore')}
+        css={css`
+          margin-top: ${theme.spacing[2]};
+          background: none;
+          border: none;
+          padding: ${theme.spacing[1]} ${theme.spacing[2]};
+          font-family: inherit;
+          font-size: ${theme.typography.fontSize.sm};
+          color: ${theme.colors.text.hint};
+          cursor: pointer;
+          transition: color ${theme.transitions.fast};
+          position: relative;
+
+          &:hover {
+            color: ${theme.colors.text.secondary};
+          }
+
+          &:focus-visible {
+            outline: 2px solid ${theme.colors.border.focus};
+            outline-offset: 2px;
+            border-radius: ${theme.borderRadius.sm};
+          }
+        `}
+      >
+        Restore from a save
+      </motion.button>
     </div>
   );
 }

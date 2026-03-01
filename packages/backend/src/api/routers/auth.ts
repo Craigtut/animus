@@ -9,7 +9,8 @@ import * as argon2 from 'argon2';
 import { loginInputSchema, registerInputSchema } from '@animus-labs/shared';
 import { router, publicProcedure, protectedProcedure } from '../trpc.js';
 import * as systemStore from '../../db/stores/system-store.js';
-import { getSystemDb } from '../../db/index.js';
+import * as contactStore from '../../db/stores/contact-store.js';
+import { getSystemDb, getContactsDb } from '../../db/index.js';
 import { COOKIE_OPTIONS } from '../../plugins/auth.js';
 import type { JwtPayload } from '../../plugins/auth.js';
 
@@ -51,8 +52,9 @@ export const authRouter = router({
       passwordHash,
     });
 
-    // Create the primary contact linked to this user
-    const contact = systemStore.createContact(db, {
+    // Create the primary contact linked to this user (in contacts.db)
+    const contactsDb = getContactsDb();
+    const contact = contactStore.createContact(contactsDb, {
       fullName: input.email.split('@')[0] ?? 'User',
       userId: user.id,
       email: input.email,
@@ -60,11 +62,11 @@ export const authRouter = router({
       permissionTier: 'primary',
     });
 
-    // Link user to contact
+    // Link user to contact (in system.db)
     systemStore.updateUserContactId(db, user.id, contact.id);
 
-    // Create web channel for the contact
-    systemStore.createContactChannel(db, {
+    // Create web channel for the contact (in contacts.db)
+    contactStore.createContactChannel(contactsDb, {
       contactId: contact.id,
       channel: 'web',
       identifier: user.email,

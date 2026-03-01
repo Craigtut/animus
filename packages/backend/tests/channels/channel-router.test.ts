@@ -1,15 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type Database from 'better-sqlite3';
-import { createTestSystemDb, createTestMessagesDb } from '../helpers.js';
-import * as systemStore from '../../src/db/stores/system-store.js';
+import { createTestSystemDb, createTestMessagesDb, createTestContactsDb } from '../helpers.js';
+import * as contactStore from '../../src/db/stores/contact-store.js';
 
 // Mock DB access
 let mockSysDb: Database.Database;
 let mockMsgDb: Database.Database;
+let mockContactsDb: Database.Database;
 
 vi.mock('../../src/db/index.js', () => ({
   getSystemDb: () => mockSysDb,
   getMessagesDb: () => mockMsgDb,
+  getContactsDb: () => mockContactsDb,
   getHeartbeatDb: vi.fn(),
 }));
 
@@ -43,6 +45,7 @@ describe('channel-router', () => {
   beforeEach(() => {
     mockSysDb = createTestSystemDb();
     mockMsgDb = createTestMessagesDb();
+    mockContactsDb = createTestContactsDb();
     router = new ChannelRouter();
     mockSendToChannel.mockClear();
   });
@@ -59,11 +62,11 @@ describe('channel-router', () => {
 
     it('stores message and returns it for known contacts', async () => {
       // Create a known contact
-      const contact = systemStore.createContact(mockSysDb, {
+      const contact = contactStore.createContact(mockContactsDb, {
         fullName: 'Known User',
         isPrimary: true,
       });
-      systemStore.createContactChannel(mockSysDb, {
+      contactStore.createContactChannel(mockContactsDb, {
         contactId: contact.id,
         channel: 'sms',
         identifier: '+15559999999',
@@ -86,7 +89,7 @@ describe('channel-router', () => {
   describe('sendOutbound', () => {
     it('stores message and delivers via ChannelManager', async () => {
       // Create a contact
-      const contact = systemStore.createContact(mockSysDb, {
+      const contact = contactStore.createContact(mockContactsDb, {
         fullName: 'Test',
         isPrimary: true,
       });
@@ -106,7 +109,7 @@ describe('channel-router', () => {
     it('still stores message when delivery fails', async () => {
       mockSendToChannel.mockResolvedValueOnce(false);
 
-      const contact = systemStore.createContact(mockSysDb, {
+      const contact = contactStore.createContact(mockContactsDb, {
         fullName: 'Test',
         isPrimary: true,
       });

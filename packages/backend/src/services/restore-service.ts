@@ -21,7 +21,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { tmpdir } from 'os';
-import { DATA_DIR, DB_PERSONA_PATH, DB_HEARTBEAT_PATH, DB_MEMORY_PATH, DB_MESSAGES_PATH, DB_AGENT_LOGS_PATH, LANCEDB_PATH } from '../utils/env.js';
+import { DATA_DIR, DB_PERSONA_PATH, DB_HEARTBEAT_PATH, DB_MEMORY_PATH, DB_MESSAGES_PATH, DB_AGENT_LOGS_PATH, DB_CONTACTS_PATH, LANCEDB_PATH } from '../utils/env.js';
 import { createLogger } from '../lib/logger.js';
 import { setMaintenanceMode } from '../lib/maintenance.js';
 import { operationInProgress, getSave, extractArchive } from './save-service.js';
@@ -41,6 +41,7 @@ const AI_DB_FILES = [
   { name: 'memory.db', envPath: DB_MEMORY_PATH },
   { name: 'messages.db', envPath: DB_MESSAGES_PATH },
   { name: 'agent_logs.db', envPath: DB_AGENT_LOGS_PATH },
+  { name: 'contacts.db', envPath: DB_CONTACTS_PATH },
 ];
 
 // ---------------------------------------------------------------------------
@@ -200,8 +201,8 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     log.info('Observational memory operations complete');
 
     // 8. Checkpoint all AI databases (flush WAL into main file)
-    const { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb, getAgentLogsDb } = await import('../db/index.js');
-    const dbs = [getPersonaDb(), getHeartbeatDb(), getMemoryDb(), getMessagesDb(), getAgentLogsDb()];
+    const { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb, getAgentLogsDb, getContactsDb } = await import('../db/index.js');
+    const dbs = [getPersonaDb(), getHeartbeatDb(), getMemoryDb(), getMessagesDb(), getAgentLogsDb(), getContactsDb()];
     for (const db of dbs) {
       try {
         db.pragma('wal_checkpoint(TRUNCATE)');
@@ -221,9 +222,19 @@ export async function restoreFromSave(saveId: string): Promise<void> {
       await createRollbackBackup();
       log.info('Rollback backup created');
 
-      // Copy extracted DB files over live files
+      // Copy extracted DB files over live files (contacts.db may not exist in old archives)
       for (const { name, envPath } of AI_DB_FILES) {
-        await fs.copyFile(path.join(extractDir, name), envPath);
+        const extractedPath = path.join(extractDir, name);
+        try {
+          await fs.access(extractedPath);
+          await fs.copyFile(extractedPath, envPath);
+        } catch {
+          if (name === 'contacts.db') {
+            log.info('contacts.db not found in archive (old save format), skipping');
+            continue;
+          }
+          throw new Error(`Missing required database file in archive: ${name}`);
+        }
       }
 
       // Copy LanceDB
@@ -253,6 +264,41 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     // 13. Reopen databases (runs migrations to bring old schemas forward)
     await initializeDatabases();
     log.info('Databases reopened and migrations applied');
+
+    // 13b. Post-restore remap: link restored primary contact to current user
+    try {
+      const { getSystemDb: getSysDb, getContactsDb: getCtcDb } = await import('../db/index.js');
+      const sysDb = getSysDb();
+      const ctcDb = getCtcDb();
+
+      // Find the primary contact in the restored contacts.db
+      const primaryRow = ctcDb
+        .prepare('SELECT id FROM contacts WHERE is_primary = 1 LIMIT 1')
+        .get() as { id: string } | undefined;
+
+      // Get the current user from system.db
+      const userRow = sysDb
+        .prepare('SELECT id FROM users LIMIT 1')
+        .get() as { id: string } | undefined;
+
+      if (primaryRow && userRow) {
+        // Update users.contact_id to point at the restored primary contact
+        sysDb.prepare('UPDATE users SET contact_id = ? WHERE id = ?')
+          .run(primaryRow.id, userRow.id);
+
+        // Update the restored contact's user_id to point at the current user
+        ctcDb.prepare('UPDATE contacts SET user_id = ? WHERE id = ?')
+          .run(userRow.id, primaryRow.id);
+
+        log.info(`Remapped primary contact ${primaryRow.id} to user ${userRow.id}`);
+      } else {
+        log.warn('Could not remap primary contact: ' +
+          (primaryRow ? '' : 'no primary contact in restored contacts.db; ') +
+          (userRow ? '' : 'no user in system.db'));
+      }
+    } catch (err) {
+      log.error('Post-restore contact remap failed (non-fatal):', err);
+    }
 
     // 14. Reinitialize subsystems and heartbeat
     const { initializeHeartbeat, startHeartbeat, handleAgentComplete, handleScheduledTask } = await import('../heartbeat/index.js');

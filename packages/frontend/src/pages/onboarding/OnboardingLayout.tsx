@@ -42,6 +42,7 @@ export function OnboardingLayout() {
   const theme = useTheme();
   const location = useLocation();
 
+  const isRestore = location.pathname === '/onboarding/restore';
   const isPersona = location.pathname.includes('/persona/');
   const steps = isPersona ? personaSteps : setupSteps;
   const groupLabel = isPersona ? 'Persona' : 'Setup';
@@ -63,89 +64,92 @@ export function OnboardingLayout() {
       <FluidBackground mode={theme.mode} />
 
       {/* Progress indicator — transparent, sits on the WebGL background */}
-      <nav
-        css={css`
-          position: relative;
-          z-index: 2;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          padding: calc(${theme.spacing[5]} + var(--titlebar-area-height, 0px)) ${theme.spacing[4]} ${theme.spacing[2]};
-          gap: 5px;
-        `}
-        aria-label="Onboarding progress"
-      >
-        {/* Group label */}
-        <AnimatePresence mode="wait">
-          <Typography.Caption
-            as={motion.span}
-            key={groupLabel}
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 0.35, y: 0 }}
-            exit={{ opacity: 0, y: 4 }}
-            transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
-            css={css`
-              font-weight: ${theme.typography.fontWeight.medium};
-              text-transform: uppercase;
-              letter-spacing: 0.14em;
-            `}
-          >
-            {groupLabel}
-          </Typography.Caption>
-        </AnimatePresence>
-
-        {/* Dot track — only current group shown */}
-        <LayoutGroup>
+      {/* Hidden on the restore page since it doesn't fit the step progression */}
+      {!isRestore && (
+        <nav
+          css={css`
+            position: relative;
+            z-index: 2;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: calc(${theme.spacing[5]} + var(--titlebar-area-height, 0px)) ${theme.spacing[4]} ${theme.spacing[2]};
+            gap: 5px;
+          `}
+          aria-label="Onboarding progress"
+        >
+          {/* Group label */}
           <AnimatePresence mode="wait">
-            <motion.div
+            <Typography.Caption
+              as={motion.span}
               key={groupLabel}
-              initial={{ opacity: 0, scale: 0.85 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.85 }}
-              transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 0.35, y: 0 }}
+              exit={{ opacity: 0, y: 4 }}
+              transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
               css={css`
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                gap: 3px;
-                height: 18px;
+                font-weight: ${theme.typography.fontWeight.medium};
+                text-transform: uppercase;
+                letter-spacing: 0.14em;
               `}
             >
-              {steps.map((step, i) => (
-                <StepDot
-                  key={step.step}
-                  state={
-                    i < currentIndex
-                      ? 'complete'
-                      : i === currentIndex
-                        ? 'current'
-                        : 'upcoming'
-                  }
-                  distanceFromCurrent={i - currentIndex}
-                />
-              ))}
-            </motion.div>
+              {groupLabel}
+            </Typography.Caption>
           </AnimatePresence>
-        </LayoutGroup>
 
-        {/* Current step name — deblurs into focus */}
-        <AnimatePresence mode="wait">
-          <Typography.Caption
-            as={motion.span}
-            key={currentStepLabel}
-            initial={{ opacity: 0, y: 3, filter: 'blur(3px)' }}
-            animate={{ opacity: 0.6, y: 0, filter: 'blur(0px)' }}
-            exit={{ opacity: 0, y: -3, filter: 'blur(3px)' }}
-            transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
-            css={css`
-              font-weight: ${theme.typography.fontWeight.medium};
-              letter-spacing: 0.01em;
-            `}
-          >
-            {currentStepLabel}
-          </Typography.Caption>
-        </AnimatePresence>
-      </nav>
+          {/* Dot track — only current group shown */}
+          <LayoutGroup>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={groupLabel}
+                initial={{ opacity: 0, scale: 0.85 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.85 }}
+                transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
+                css={css`
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  gap: 3px;
+                  height: 18px;
+                `}
+              >
+                {steps.map((step, i) => (
+                  <StepDot
+                    key={step.step}
+                    state={
+                      i < currentIndex
+                        ? 'complete'
+                        : i === currentIndex
+                          ? 'current'
+                          : 'upcoming'
+                    }
+                    distanceFromCurrent={i - currentIndex}
+                  />
+                ))}
+              </motion.div>
+            </AnimatePresence>
+          </LayoutGroup>
+
+          {/* Current step name — deblurs into focus */}
+          <AnimatePresence mode="wait">
+            <Typography.Caption
+              as={motion.span}
+              key={currentStepLabel}
+              initial={{ opacity: 0, y: 3, filter: 'blur(3px)' }}
+              animate={{ opacity: 0.6, y: 0, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, y: -3, filter: 'blur(3px)' }}
+              transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+              css={css`
+                font-weight: ${theme.typography.fontWeight.medium};
+                letter-spacing: 0.01em;
+              `}
+            >
+              {currentStepLabel}
+            </Typography.Caption>
+          </AnimatePresence>
+        </nav>
+      )}
 
       {/* Content */}
       <div

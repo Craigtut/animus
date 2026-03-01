@@ -313,7 +313,7 @@ Each handler file follows the same pattern: typed input from the tool's Zod sche
 | `handlers/send-message.ts` | Writes outbound message to `messages.db`, emits `message:sent` event for frontend. If `media` is provided, routes through `ChannelRouter.sendOutbound()` for full delivery pipeline. |
 | `handlers/update-progress.ts` | Updates `current_activity` in `agent_tasks` table, emits `agent:progress` event. |
 | `handlers/read-memory.ts` | Calls `MemoryManager.retrieveRelevant()` which embeds the query and searches LanceDB. Returns formatted results. |
-| `handlers/lookup-contacts.ts` | Reads contacts from `system.db` with optional name/channel filtering. Returns contact names, IDs, tiers, and available channels. |
+| `handlers/lookup-contacts.ts` | Reads contacts from `contacts.db` with optional name/channel filtering. Returns contact names, IDs, tiers, and available channels. |
 | `handlers/send-proactive-message.ts` | Validates contact exists and has the specified channel, then calls `ChannelRouter.sendOutbound()` for full delivery (message storage, media attachments, IPC to channel adapters). |
 | `handlers/send-media.ts` | Validates files exist on disk, auto-detects media type from extension, then calls `ChannelRouter.sendOutbound()` using the trigger contact/channel from context. Supports multiple files per call. |
 | `handlers/run-with-credentials.ts` | Resolves a credential from encrypted storage, injects it as an environment variable into a subprocess, executes the command, and returns stdout/stderr. The LLM never sees the credential value. |

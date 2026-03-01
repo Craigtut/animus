@@ -378,12 +378,28 @@ export function AgentProviderStep() {
   };
 
   const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation();
+  const { data: persona } = trpc.persona.get.useQuery();
 
   const handleContinue = () => {
     // Persist selected provider to system settings (fire-and-forget; heartbeat
     // hasn't started yet so the write will land before the first tick)
     updateSettingsMutation.mutate({ defaultAgentProvider: provider });
+
+    // If using CLI auth, save the cli_detected sentinel so Settings page
+    // (which checks hasKey via the DB) knows credentials are configured
+    if (authMethod === 'cli') {
+      useCliMutation.mutate({ provider });
+    }
+
     markStepComplete('agent_provider');
+
+    // If persona is already finalized (restored from save), skip to main app
+    if (persona?.isFinalized) {
+      setCurrentStep('complete');
+      navigate('/');
+      return;
+    }
+
     setCurrentStep('identity');
     navigate('/onboarding/identity');
   };

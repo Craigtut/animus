@@ -32,6 +32,7 @@ import {
   recordCognitiveStateSchema,
 } from '../../heartbeat/cognitive-tools.js';
 import { createLogger } from '../../lib/logger.js';
+import { logProcessSpawn } from '../../lib/process-diagnostics.js';
 
 const log = createLogger('McpBridge', 'heartbeat');
 
@@ -386,13 +387,29 @@ export function buildMcpServerConfig(
     args = [scriptPath];
   }
 
-  return {
-    command,
-    args,
-    env: {
-      BRIDGE_PORT: String(port),
-      TOOL_SET: toolSet,
-      TASK_ID: taskId,
-    },
+  // The Claude SDK's CLI spawns MCP servers by merging a default env allowlist
+  // (HOME, PATH, USER, etc.) with our config env. We include vars that aren't
+  // on the allowlist but are needed for correct behavior.
+  const env: Record<string, string> = {
+    BRIDGE_PORT: String(port),
+    TOOL_SET: toolSet,
+    TASK_ID: taskId,
   };
+
+  // macOS dock icon suppression for MCP server processes.
+  if (process.platform === 'darwin') {
+    const dockAddon = process.env['ANIMUS_DOCK_SUPPRESS_ADDON'];
+    if (dockAddon) {
+      env['DYLD_INSERT_LIBRARIES'] = dockAddon;
+    }
+    // Pass data dir so the addon diagnostic log works in MCP servers
+    const dataDir = process.env['ANIMUS_DATA_DIR'];
+    if (dataDir) {
+      env['ANIMUS_DATA_DIR'] = dataDir;
+    }
+  }
+
+  logProcessSpawn(`mcp:${toolSet}:${taskId}`, command, args, env);
+
+  return { command, args, env };
 }

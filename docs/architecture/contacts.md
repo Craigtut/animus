@@ -58,7 +58,7 @@ This prevents unknown callers from consuming cognitive resources, triggering too
 
 ### Contact Record
 
-Contacts are stored in `system.db` as persistent configuration.
+Contacts are stored in `contacts.db` as persistent configuration. This database is backed up with AI state in `.animus` save/restore archives (unlike `system.db`, which holds user credentials and is excluded from saves).
 
 ```typescript
 interface Contact {
@@ -288,7 +288,7 @@ Messages live in `messages.db` — a dedicated database with long-term retention
 ```sql
 CREATE TABLE conversations (
   id TEXT PRIMARY KEY,
-  contact_id TEXT NOT NULL,         -- FK reference to system.db contacts.id
+  contact_id TEXT NOT NULL,         -- FK reference to contacts.db contacts.id
   channel TEXT NOT NULL,            -- Channel this conversation is on
   started_at TEXT NOT NULL DEFAULT (datetime('now')),
   last_message_at TEXT,
@@ -333,7 +333,7 @@ When the mind delegates work to a sub-agent, the sub-agent must be scoped to the
 The `agent_tasks` table in `heartbeat.db` needs a `contact_id` column:
 
 ```sql
-ALTER TABLE agent_tasks ADD COLUMN contact_id TEXT;  -- FK reference to system.db contacts.id
+ALTER TABLE agent_tasks ADD COLUMN contact_id TEXT;  -- FK reference to contacts.db contacts.id
 ```
 
 ### Prompt Template Changes
@@ -414,7 +414,7 @@ These are distinct concepts that serve different purposes:
 | **Owner** | User-defined, static | AI-maintained, dynamic |
 | **Content** | User-provided context about themselves (set during onboarding, editable in settings) | AI's evolving observations and relationship knowledge |
 | **Updated by** | The user only | The mind only (via `workingMemoryUpdate` structured output) |
-| **Storage** | `notes` field on `contacts` table in `system.db` | `working_memory` table in `memory.db` |
+| **Storage** | `notes` field on `contacts` table in `contacts.db` | `working_memory` table in `memory.db` |
 | **Example** | "I'm a software engineer, I have a dog named Max" | "Craig prefers concise responses. He's been stressed about work lately." |
 
 Contact notes are the user telling Animus about themselves. Working memory is Animus learning about the user through interaction. Both are loaded during GATHER CONTEXT — contact notes as part of the base persona context, working memory as the contact-specific notepad. See `docs/architecture/memory.md` for the working memory system.
@@ -467,11 +467,11 @@ This is a soft boundary. The mind is an LLM and may occasionally leak. Accept th
 The contacts system uses several shared abstractions (see `docs/architecture/tech-stack.md`):
 
 - **Context Builder** — Assembles contact permission blocks and privacy instructions for the mind's context (`docs/architecture/context-builder.md`)
-- **Database Stores** — Typed data access for contacts and contact_channels tables in `system.db`, and conversations/messages in `messages.db`
+- **Database Stores** — Typed data access for contacts and contact_channels tables in `contacts.db`, and conversations/messages in `messages.db`
 
 ## References
 
 - `docs/architecture/heartbeat.md` — Heartbeat pipeline where contact context flows through
 - `docs/architecture/context-builder.md` — How contact context is assembled into the mind's prompt
 - `docs/architecture/agent-orchestration.md` — Sub-agent prompt template and delegation
-- `docs/architecture/tech-stack.md` — Database architecture (six databases), shared abstractions
+- `docs/architecture/tech-stack.md` — Database architecture (seven databases), shared abstractions

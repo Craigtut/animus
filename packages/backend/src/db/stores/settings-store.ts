@@ -40,7 +40,6 @@ export function updateSystemSettings(
     defaultAgentProvider: 'default_agent_provider',
     defaultModel: 'default_model',
     goalApprovalMode: 'goal_approval_mode',
-    timezone: 'timezone',
     energySystemEnabled: 'energy_system_enabled',
     sleepStartHour: 'sleep_start_hour',
     sleepEndHour: 'sleep_end_hour',

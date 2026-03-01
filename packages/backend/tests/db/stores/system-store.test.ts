@@ -1,15 +1,18 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type Database from 'better-sqlite3';
-import { createTestSystemDb, createTestPersonaDb } from '../../helpers.js';
+import { createTestSystemDb, createTestPersonaDb, createTestContactsDb } from '../../helpers.js';
 import * as systemStore from '../../../src/db/stores/system-store.js';
+import * as contactStore from '../../../src/db/stores/contact-store.js';
 import * as personaStore from '../../../src/db/stores/persona-store.js';
 
 describe('system-store', () => {
   let db: Database.Database;
+  let contactsDb: Database.Database;
   let personaDb: Database.Database;
 
   beforeEach(() => {
     db = createTestSystemDb();
+    contactsDb = createTestContactsDb();
     personaDb = createTestPersonaDb();
   });
 
@@ -60,12 +63,12 @@ describe('system-store', () => {
   });
 
   // ========================================================================
-  // Contacts
+  // Contacts (contacts.db)
   // ========================================================================
 
   describe('contacts', () => {
     it('creates and retrieves a contact', () => {
-      const contact = systemStore.createContact(db, {
+      const contact = contactStore.createContact(contactsDb, {
         fullName: 'John Doe',
         email: 'john@example.com',
         isPrimary: true,
@@ -74,77 +77,77 @@ describe('system-store', () => {
       expect(contact.isPrimary).toBe(true);
       expect(contact.permissionTier).toBe('primary');
 
-      const found = systemStore.getContact(db, contact.id);
+      const found = contactStore.getContact(contactsDb, contact.id);
       expect(found).not.toBeNull();
       expect(found!.fullName).toBe('John Doe');
       expect(found!.isPrimary).toBe(true);
     });
 
     it('lists all contacts', () => {
-      systemStore.createContact(db, { fullName: 'Alice' });
-      systemStore.createContact(db, { fullName: 'Bob' });
-      const contacts = systemStore.listContacts(db);
+      contactStore.createContact(contactsDb, { fullName: 'Alice' });
+      contactStore.createContact(contactsDb, { fullName: 'Bob' });
+      const contacts = contactStore.listContacts(contactsDb);
       expect(contacts).toHaveLength(2);
     });
 
     it('gets primary contact', () => {
-      systemStore.createContact(db, { fullName: 'Standard User' });
-      systemStore.createContact(db, { fullName: 'Primary User', isPrimary: true });
-      const primary = systemStore.getPrimaryContact(db);
+      contactStore.createContact(contactsDb, { fullName: 'Standard User' });
+      contactStore.createContact(contactsDb, { fullName: 'Primary User', isPrimary: true });
+      const primary = contactStore.getPrimaryContact(contactsDb);
       expect(primary).not.toBeNull();
       expect(primary!.fullName).toBe('Primary User');
     });
 
     it('updates a contact', () => {
-      const contact = systemStore.createContact(db, { fullName: 'Old Name' });
-      systemStore.updateContact(db, contact.id, { fullName: 'New Name' });
-      const updated = systemStore.getContact(db, contact.id);
+      const contact = contactStore.createContact(contactsDb, { fullName: 'Old Name' });
+      contactStore.updateContact(contactsDb, contact.id, { fullName: 'New Name' });
+      const updated = contactStore.getContact(contactsDb, contact.id);
       expect(updated!.fullName).toBe('New Name');
     });
 
     it('gets contact by user ID', () => {
       const user = systemStore.createUser(db, { email: 'u@b.com', passwordHash: 'h' });
-      const contact = systemStore.createContact(db, {
+      const contact = contactStore.createContact(contactsDb, {
         fullName: 'Test',
         userId: user.id,
       });
-      const found = systemStore.getContactByUserId(db, user.id);
+      const found = contactStore.getContactByUserId(contactsDb, user.id);
       expect(found).not.toBeNull();
       expect(found!.id).toBe(contact.id);
     });
   });
 
   // ========================================================================
-  // Contact Channels
+  // Contact Channels (contacts.db)
   // ========================================================================
 
   describe('contact channels', () => {
     it('creates and retrieves channels', () => {
-      const contact = systemStore.createContact(db, { fullName: 'Test' });
-      systemStore.createContactChannel(db, {
+      const contact = contactStore.createContact(contactsDb, { fullName: 'Test' });
+      contactStore.createContactChannel(contactsDb, {
         contactId: contact.id,
         channel: 'web',
         identifier: 'test@example.com',
       });
-      const channels = systemStore.getContactChannelsByContactId(db, contact.id);
+      const channels = contactStore.getContactChannelsByContactId(contactsDb, contact.id);
       expect(channels).toHaveLength(1);
       expect(channels[0]!.channel).toBe('web');
     });
 
     it('resolves contact by channel', () => {
-      const contact = systemStore.createContact(db, { fullName: 'Test' });
-      systemStore.createContactChannel(db, {
+      const contact = contactStore.createContact(contactsDb, { fullName: 'Test' });
+      contactStore.createContactChannel(contactsDb, {
         contactId: contact.id,
         channel: 'sms',
         identifier: '+15551234567',
       });
-      const resolved = systemStore.resolveContactByChannel(db, 'sms', '+15551234567');
+      const resolved = contactStore.resolveContactByChannel(contactsDb, 'sms', '+15551234567');
       expect(resolved).not.toBeNull();
       expect(resolved!.id).toBe(contact.id);
     });
 
     it('returns null for unresolvable channel', () => {
-      const resolved = systemStore.resolveContactByChannel(db, 'web', 'nonexistent');
+      const resolved = contactStore.resolveContactByChannel(contactsDb, 'web', 'nonexistent');
       expect(resolved).toBeNull();
     });
   });

@@ -258,9 +258,9 @@ The Settings and Onboarding specs list 4 channels: Web, SMS, Discord, API. The V
 The People spec shows an "Unknown messages" section with "Dismiss" and "Add as contact" actions. It says dismissed messages "remain in the database for audit" but the message is removed from the log. This implies a separate tracking table (not just the messages table). The exact schema for this tracking needs design.
 
 ### 6. Contact Last Message Enrichment
-The People spec shows contacts sorted by last message with a preview. The `contacts` table is in `system.db` while messages are in `messages.db`. Cross-database joins are not possible with separate SQLite files. The backend needs either:
+The People spec shows contacts sorted by last message with a preview. The `contacts` table is in `contacts.db` while messages are in `messages.db`. Cross-database joins are not possible with separate SQLite files. The backend needs either:
 - A denormalized `last_message_at` and `last_message_preview` on the contacts table (updated on each message)
-- Or a composite query that fetches contacts from system.db and enriches with last-message data from messages.db
+- Or a composite query that fetches contacts from contacts.db and enriches with last-message data from messages.db
 
 ### 7. Auth Status and Onboarding Redirect
 The spec says login should redirect to "where they left off in onboarding" if onboarding is incomplete. The `auth.status` query returns `{ hasUser, isAuthenticated }` but nothing about onboarding state. Either `auth.status` needs an `onboardingComplete` field, or the frontend needs a separate `onboarding.getState` query after auth.

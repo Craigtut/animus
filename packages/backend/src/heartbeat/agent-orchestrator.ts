@@ -18,11 +18,13 @@ import type {
 import { attachSessionLogging, type AgentLogStore } from '@animus-labs/agents';
 import type { IEventBus } from '@animus-labs/shared';
 import { prepareCodexSessionAuth, copyCodexCliAuth } from '../services/codex-oauth.js';
-import { getSystemDb } from '../db/index.js';
+import { getSystemDb, getContactsDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
+import * as contactStore from '../db/stores/contact-store.js';
 import * as messageStore from '../db/stores/message-store.js';
 import { getMessagesDb, getMemoryDb } from '../db/index.js';
 import { createLogger } from '../lib/logger.js';
+import { logProcessSpawn } from '../lib/process-diagnostics.js';
 import { env, PROJECT_ROOT } from '../utils/env.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -368,6 +370,13 @@ export class AgentOrchestrator {
       // 'off' and 'ask' SDK built-in tools are disallowed.
       const disabledSdkTools = this.getDisabledSdkTools('off', 'ask');
 
+      logProcessSpawn(
+        `sub-agent:${taskId}`,
+        `sdk:${provider}`,
+        [params.taskType, params.description.substring(0, 60)],
+        sessionEnv,
+      );
+
       const session = await this.manager.createSession({
         provider,
         ...(model != null ? { model } : {}),
@@ -592,8 +601,8 @@ export class AgentOrchestrator {
   private resolveContactTier(contactId: string): PermissionTier {
     if (!contactId) return 'primary';
     try {
-      const sysDb = getSystemDb();
-      const contact = systemStore.getContact(sysDb, contactId);
+      const cDb = getContactsDb();
+      const contact = contactStore.getContact(cDb, contactId);
       return (contact?.permissionTier ?? 'primary') as PermissionTier;
     } catch {
       return 'primary';

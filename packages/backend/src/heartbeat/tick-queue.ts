@@ -178,6 +178,9 @@ export class TickQueue {
    * Update the interval duration.
    */
   updateInterval(intervalMs: number): void {
+    if (intervalMs !== this.intervalMs) {
+      log.debug(`Interval changed: ${this.intervalMs}ms → ${intervalMs}ms`);
+    }
     this.intervalMs = intervalMs;
     if (this.intervalTimer) {
       this.startInterval(intervalMs);

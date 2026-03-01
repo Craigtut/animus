@@ -1,5 +1,8 @@
+name: animus
+
 services:
   animus:
+    container_name: animus
     build: .
     ports:
       - "3000:3000"

@@ -235,7 +235,7 @@ interface UnknownMessage {
 
 ## Data Sources
 
-- `contacts` table via tRPC query (from `system.db`)
+- `contacts` table via tRPC query (from `contacts.db`)
 - `contact_channels` table via tRPC query
 - `messages` table via tRPC query (from `messages.db`, filtered by contact)
 - `working_memory` table via tRPC query (from `memory.db`)

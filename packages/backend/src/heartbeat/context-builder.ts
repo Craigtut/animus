@@ -58,6 +58,8 @@ export interface TriggerContext {
   /** For plugin_trigger triggers */
   pluginTriggerName?: string;
   pluginPayload?: Record<string, unknown>;
+  /** IANA timezone of the person sending the message (detected client-side) */
+  userTimezone?: string;
   /** Channel adapter metadata (e.g., Discord channelId for reply routing) */
   metadata?: Record<string, unknown>;
 }
@@ -674,14 +676,31 @@ function buildPluginTriggerSection(trigger: TriggerContext): string {
   return lines.join('\n');
 }
 
-function buildContactSection(contact: Contact): string {
+function buildContactSection(contact: Contact, userTimezone?: string): string {
   const lines = [
     '── WHO YOU\'RE TALKING TO ──',
     `Contact: ${contact.fullName} (${contact.permissionTier} tier)`,
+  ];
+
+  if (userTimezone) {
+    try {
+      const userLocalTime = new Date().toLocaleString('en-US', {
+        timeZone: userTimezone,
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+      lines.push(`Their local time: ${userLocalTime} (${userTimezone})`);
+    } catch {
+      // Invalid timezone string, skip
+    }
+  }
+
+  lines.push(
     '',
     'Privacy: Do not reference conversations with other contacts.',
     'Do not share personal information about other contacts.',
-  ];
+  );
 
   if (contact.notes) {
     lines.push('', `About ${contact.fullName}: ${contact.notes}`);
@@ -978,7 +997,7 @@ export function buildUserMessage(params: MindContextParams): string {
       'You can respond naturally — no contact record is needed for this interaction.'
     );
   } else if (params.contact && params.trigger.type === 'message') {
-    sections.push(buildContactSection(params.contact));
+    sections.push(buildContactSection(params.contact, params.trigger.userTimezone));
   }
 
   // 2b. Channel-specific reply guidance (if message-triggered)

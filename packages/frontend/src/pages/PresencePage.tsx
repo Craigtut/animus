@@ -93,6 +93,7 @@ export function PresencePage() {
       content,
       channel: 'web',
       ...(attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : {}),
+      userTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
   };
 

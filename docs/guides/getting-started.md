@@ -244,16 +244,17 @@ Secrets (`ANIMUS_ENCRYPTION_KEY`, `JWT_SECRET`) are auto-generated on first laun
 
 ## Database Management
 
-Animus uses six SQLite databases stored under `data/databases/`, created automatically on first run:
+Animus uses seven SQLite databases stored under `data/databases/`, created automatically on first run:
 
 | Database | Location | Purpose | Lifecycle |
 |----------|----------|---------|-----------|
-| system.db | `data/databases/system.db` | Users, contacts, settings, API keys | Rarely reset |
+| system.db | `data/databases/system.db` | Users, settings, API keys | Rarely reset |
 | persona.db | `data/databases/persona.db` | Personality settings | Separate lifecycle |
 | heartbeat.db | `data/databases/heartbeat.db` | Thoughts, emotions, tasks | Occasional reset |
 | memory.db | `data/databases/memory.db` | Working memory, core self, long-term memories | Knowledge |
 | messages.db | `data/databases/messages.db` | Conversations, messages, channels | Long-term history |
 | agent_logs.db | `data/databases/agent_logs.db` | Agent sessions, events | Frequent cleanup |
+| contacts.db | `data/databases/contacts.db` | Contacts, contact channels | Backed up with AI state |
 
 Vector embeddings are stored in `data/databases/lancedb/`. All data paths derive from `ANIMUS_DATA_DIR` (defaults to `./data/`). See `docs/architecture/data-directory.md` for the full directory structure.
 

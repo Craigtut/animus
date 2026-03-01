@@ -35,6 +35,7 @@ import { TraitsStep } from './pages/onboarding/persona/TraitsStep';
 import { ValuesStep } from './pages/onboarding/persona/ValuesStep';
 import { BackgroundStep } from './pages/onboarding/persona/BackgroundStep';
 import { ReviewStep } from './pages/onboarding/persona/ReviewStep';
+import { RestoreStep } from './pages/onboarding/RestoreStep';
 import { BirthPage } from './pages/onboarding/BirthPage';
 
 // App pages
@@ -166,6 +167,7 @@ export function App() {
               <Route path="/onboarding" element={<AuthGuard><OnboardingLayout /></AuthGuard>}>
                 <Route index element={<Navigate to="welcome" replace />} />
                 <Route path="welcome" element={<WelcomeStep />} />
+                <Route path="restore" element={<RestoreStep />} />
                 <Route path="agent" element={<AgentProviderStep />} />
                 <Route path="identity" element={<IdentityStep />} />
                 <Route path="about-you" element={<AboutYouStep />} />

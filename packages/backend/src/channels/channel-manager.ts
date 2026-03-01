@@ -13,8 +13,9 @@ import extractZip from 'extract-zip';
 import { createLogger } from '../lib/logger.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { env, DATA_DIR } from '../utils/env.js';
-import { getSystemDb } from '../db/index.js';
+import { getSystemDb, getContactsDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
+import * as contactStore from '../db/stores/contact-store.js';
 import { ChannelProcessHost } from './process-host.js';
 import { getChannelRouter } from './channel-router.js';
 import type {
@@ -101,7 +102,14 @@ export class ChannelManager {
         }
 
         if (pkg.enabled) {
-          await this.startProcess(pkg, manifest);
+          // Start channel process in the background. Channel startup involves
+          // network I/O (WebSocket connections, API handshakes) and can take 10s+
+          // if a service is unreachable. Starting in the background prevents a
+          // single failing channel from blocking server startup entirely.
+          this.startProcess(pkg, manifest).catch(err => {
+            log.error(`Failed to start channel ${pkg.name}:`, err);
+            systemStore.updateChannelPackageStatus(db, pkg.name, 'error', String(err));
+          });
         }
       } catch (err) {
         log.error(`Failed to load channel package ${pkg.name}:`, err);
@@ -109,7 +117,7 @@ export class ChannelManager {
       }
     }
 
-    log.debug(`Loaded ${this.manifests.size} channel packages (${this.processes.size} running)`);
+    log.debug(`Loaded ${this.manifests.size} channel packages (${this.processes.size} starting)`);
   }
 
   /**
@@ -223,7 +231,7 @@ export class ChannelManager {
     }
 
     // Clean up contact_channels for this channel type
-    const removedChannels = systemStore.deleteContactChannelsByChannel(db, pkg.channelType);
+    const removedChannels = contactStore.deleteContactChannelsByChannel(getContactsDb(), pkg.channelType);
     if (removedChannels > 0) {
       log.info(`Removed ${removedChannels} contact channel(s) for type: ${pkg.channelType}`);
     }
@@ -974,8 +982,8 @@ export class ChannelManager {
     statusText?: string;
     activity?: string;
   } | null {
-    const db = getSystemDb();
-    const channels = systemStore.getContactChannelsByContactId(db, contactId);
+    const cDb = getContactsDb();
+    const channels = contactStore.getContactChannelsByContactId(cDb, contactId);
     if (channels.length === 0) return null;
 
     // Priority: online > idle > dnd > offline
@@ -1120,10 +1128,11 @@ export class ChannelManager {
         log.info(`Channel ${pkg.name} registered route: ${method} ${routePath}`);
       },
       resolveContact: async (contactId) => {
-        const channels = systemStore.getContactChannelsByContactId(db, contactId);
+        const contactsDatabase = getContactsDb();
+        const channels = contactStore.getContactChannelsByContactId(contactsDatabase, contactId);
         const match = channels.find((c) => c.channel === pkg.channelType);
         if (!match) return null;
-        const contact = systemStore.getContact(db, contactId);
+        const contact = contactStore.getContact(contactsDatabase, contactId);
         const result: { identifier: string; displayName?: string } = {
           identifier: match.identifier,
         };

@@ -7,8 +7,8 @@
  * See docs/architecture/contacts.md — "Identity Resolution"
  */
 
-import { getSystemDb } from '../db/index.js';
-import * as systemStore from '../db/stores/system-store.js';
+import { getContactsDb } from '../db/index.js';
+import * as contactStore from '../db/stores/contact-store.js';
 import type { Contact, ChannelType, ResolvedContact } from '@animus-labs/shared';
 
 // ============================================================================
@@ -31,10 +31,10 @@ export function resolveContact(
   channel: ChannelType,
   identifier: string
 ): ResolveResult | null {
-  const db = getSystemDb();
+  const db = getContactsDb();
 
   // Step 1: Look up existing contact by channel + identifier
-  const existing = systemStore.resolveContactByChannel(db, channel, identifier);
+  const existing = contactStore.resolveContactByChannel(db, channel, identifier);
   if (existing) {
     return { contact: existing, isNew: false };
   }
@@ -69,8 +69,8 @@ export function resolveToResolvedContact(
  * not via contact_channels lookup.
  */
 export function resolveWebUser(userId: string): Contact | null {
-  const db = getSystemDb();
-  return systemStore.getContactByUserId(db, userId);
+  const db = getContactsDb();
+  return contactStore.getContactByUserId(db, userId);
 }
 
 /**
@@ -83,10 +83,10 @@ export function createContactForChannel(
   fullName: string,
   options?: { phoneNumber?: string; email?: string }
 ): Contact {
-  const db = getSystemDb();
+  const db = getContactsDb();
 
   // Create the contact
-  const contact = systemStore.createContact(db, {
+  const contact = contactStore.createContact(db, {
     fullName,
     phoneNumber: options?.phoneNumber ?? null,
     email: options?.email ?? null,
@@ -95,7 +95,7 @@ export function createContactForChannel(
   });
 
   // Link the channel
-  systemStore.createContactChannel(db, {
+  contactStore.createContactChannel(db, {
     contactId: contact.id,
     channel,
     identifier,

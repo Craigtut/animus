@@ -1,23 +1,18 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
-import { useCallback } from 'react';
 import { isTauri } from '../../utils/tauri';
 
 /**
  * Renders the Tauri window drag region (frosted glass titlebar strip + extended invisible drag target).
- * Safe to include on any page — renders nothing when not running inside Tauri.
+ * Safe to include on any page; renders nothing outside Tauri.
+ *
+ * Uses data-tauri-drag-region + app-region:drag CSS for native-level drag handling.
+ * The CSS property tells WKWebView (macOS) / WebView2 (Windows) to handle the drag
+ * at the platform layer, avoiding the IPC roundtrip that breaks startDragging().
+ * No JavaScript mouse handlers: they interfere with wry's native hit-testing.
  */
 export function TauriDragRegion() {
   const theme = useTheme();
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.buttons === 1) {
-      e.preventDefault();
-      import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
-        getCurrentWindow().startDragging();
-      });
-    }
-  }, []);
 
   if (!isTauri()) return null;
 
@@ -25,7 +20,7 @@ export function TauriDragRegion() {
     <>
       {/* Visual titlebar strip: frosted glass behind traffic lights */}
       <div
-        onMouseDown={handleMouseDown}
+        data-tauri-drag-region
         css={css`
           position: fixed;
           top: 0;
@@ -41,11 +36,15 @@ export function TauriDragRegion() {
           border-bottom: 1px solid ${theme.mode === 'light'
             ? 'rgba(0, 0, 0, 0.06)'
             : 'rgba(255, 255, 255, 0.06)'};
+          app-region: drag;
+          -webkit-app-region: drag;
+          user-select: none;
+          -webkit-user-select: none;
         `}
       />
       {/* Extended drag region: invisible, sits behind nav pill for wider drag target */}
       <div
-        onMouseDown={handleMouseDown}
+        data-tauri-drag-region
         css={css`
           position: fixed;
           top: var(--titlebar-area-height, 0px);
@@ -53,6 +52,10 @@ export function TauriDragRegion() {
           right: 0;
           height: 40px;
           z-index: ${theme.zIndex.navPill - 1};
+          app-region: drag;
+          -webkit-app-region: drag;
+          user-select: none;
+          -webkit-user-select: none;
         `}
       />
     </>

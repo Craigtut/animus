@@ -9,9 +9,9 @@
  */
 
 import { CronExpressionParser } from 'cron-parser';
-import { getHeartbeatDb, getSystemDb } from '../db/index.js';
+import { getHeartbeatDb, getPersonaDb } from '../db/index.js';
 import * as taskStore from '../db/stores/task-store.js';
-import * as systemStore from '../db/stores/system-store.js';
+import * as personaStore from '../db/stores/persona-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
 import { now } from '@animus-labs/shared';
@@ -318,9 +318,8 @@ export function validateCronExpression(
 
 function getTimezone(): string {
   try {
-    const db = getSystemDb();
-    const settings = systemStore.getSystemSettings(db);
-    return (settings as Record<string, unknown>)['timezone'] as string ?? 'UTC';
+    const persona = personaStore.getPersona(getPersonaDb());
+    return persona.timezone || 'UTC';
   } catch {
     return 'UTC';
   }

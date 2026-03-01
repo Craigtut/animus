@@ -10,9 +10,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { getMessagesDb, getSystemDb } from '../db/index.js';
+import { getMessagesDb, getContactsDb } from '../db/index.js';
 import * as messageStore from '../db/stores/message-store.js';
-import * as systemStore from '../db/stores/system-store.js';
+import * as contactStore from '../db/stores/contact-store.js';
 import { resolveContact } from '../contacts/identity-resolver.js';
 import { canPerformByTier } from '../contacts/permission-enforcer.js';
 import { handleIncomingMessage } from '../heartbeat/index.js';
@@ -353,8 +353,8 @@ export class ChannelRouter {
     );
 
     // Notify primary contact
-    const sysDb = getSystemDb();
-    const primary = systemStore.getPrimaryContact(sysDb);
+    const cDb = getContactsDb();
+    const primary = contactStore.getPrimaryContact(cDb);
     if (primary) {
       const preview =
         content.length > 100 ? content.substring(0, 100) + '...' : content;

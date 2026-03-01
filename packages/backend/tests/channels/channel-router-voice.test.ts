@@ -4,16 +4,18 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type Database from 'better-sqlite3';
-import { createTestSystemDb, createTestMessagesDb } from '../helpers.js';
-import * as systemStore from '../../src/db/stores/system-store.js';
+import { createTestSystemDb, createTestMessagesDb, createTestContactsDb } from '../helpers.js';
+import * as contactStore from '../../src/db/stores/contact-store.js';
 
 // Mock DB access
 let mockSysDb: Database.Database;
 let mockMsgDb: Database.Database;
+let mockContactsDb: Database.Database;
 
 vi.mock('../../src/db/index.js', () => ({
   getSystemDb: () => mockSysDb,
   getMessagesDb: () => mockMsgDb,
+  getContactsDb: () => mockContactsDb,
   getHeartbeatDb: vi.fn(),
 }));
 
@@ -74,6 +76,7 @@ describe('channel-router voice auto-transcription', () => {
   beforeEach(() => {
     mockSysDb = createTestSystemDb();
     mockMsgDb = createTestMessagesDb();
+    mockContactsDb = createTestContactsDb();
     router = new ChannelRouter();
     mockTranscribe.mockReset();
     mockSttIsAvailable.mockReturnValue(true);
@@ -81,11 +84,11 @@ describe('channel-router voice auto-transcription', () => {
   });
 
   function createTestContact() {
-    const contact = systemStore.createContact(mockSysDb, {
+    const contact = contactStore.createContact(mockContactsDb, {
       fullName: 'Test User',
       isPrimary: true,
     });
-    systemStore.createContactChannel(mockSysDb, {
+    contactStore.createContactChannel(mockContactsDb, {
       contactId: contact.id,
       channel: 'discord',
       identifier: 'user123',

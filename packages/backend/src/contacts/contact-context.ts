@@ -7,8 +7,8 @@
  * See docs/architecture/contacts.md — "Integration with the Heartbeat Pipeline"
  */
 
-import { getSystemDb, getMessagesDb } from '../db/index.js';
-import * as systemStore from '../db/stores/system-store.js';
+import { getContactsDb, getMessagesDb } from '../db/index.js';
+import * as contactStore from '../db/stores/contact-store.js';
 import * as messageStore from '../db/stores/message-store.js';
 import { getAvailableToolTypes } from './permission-enforcer.js';
 import type { Contact, ChannelType, PermissionTier } from '@animus-labs/shared';
@@ -37,13 +37,13 @@ export interface ContactContext {
  * Build context about a contact for inclusion in the mind prompt.
  */
 export function buildContactContext(contactId: string): ContactContext | null {
-  const sysDb = getSystemDb();
+  const cDb = getContactsDb();
   const msgDb = getMessagesDb();
 
-  const contact = systemStore.getContact(sysDb, contactId);
+  const contact = contactStore.getContact(cDb, contactId);
   if (!contact) return null;
 
-  const channels = systemStore.getContactChannelsByContactId(sysDb, contactId);
+  const channels = contactStore.getContactChannelsByContactId(cDb, contactId);
   const tier: PermissionTier = contact.isPrimary ? 'primary' : contact.permissionTier;
   const availableTools = getAvailableToolTypes(tier);
 

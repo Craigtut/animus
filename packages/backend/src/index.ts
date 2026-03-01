@@ -28,6 +28,7 @@ import { loadCredentialsIntoEnv, ensureClaudeOnboardingFile } from './services/c
 import { env, DATA_DIR } from './utils/env.js';
 import { resolveSecrets, persistSecretsIfNeeded } from './lib/secrets-manager.js';
 import { createLogger, updateCategoryCache } from './lib/logger.js';
+import { logProcessIdentity } from './lib/process-diagnostics.js';
 import { isMaintenanceMode, getMaintenanceReason } from './lib/maintenance.js';
 import { formatStartupSummary } from './lib/startup-summary.js';
 import * as systemStore from './db/stores/system-store.js';
@@ -39,12 +40,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 async function main() {
   const startupStartedAt = Date.now();
 
+  // macOS dock icon suppression: propagate the addon path into DYLD_INSERT_LIBRARIES
+  // so ALL child processes (including Observer/Reflector sessions that don't pass
+  // explicit env) automatically inherit it. The Claude SDK uses { ...process.env }
+  // as the default env for child processes, but strips NODE_OPTIONS. By setting
+  // DYLD_INSERT_LIBRARIES in process.env here, we ensure universal coverage.
+  // This runs AFTER the sidecar's own native addons are loaded, so it won't
+  // interfere with onnxruntime or other native modules in this process.
+  if (process.platform === 'darwin') {
+    const addonPath = process.env['ANIMUS_DOCK_SUPPRESS_ADDON'];
+    if (addonPath) {
+      process.env['DYLD_INSERT_LIBRARIES'] = addonPath;
+    }
+  }
+
+  // Create data subdirectories before anything that might log
+  const fsMod = await import('node:fs');
+  fsMod.mkdirSync(path.join(DATA_DIR, 'logs'), { recursive: true });
+  fsMod.mkdirSync(path.join(DATA_DIR, 'workspace'), { recursive: true });
+
+  // Log process identity for production diagnostics
+  logProcessIdentity('sidecar');
+
   // Resolve encryption key + JWT secret (auto-generate if needed)
   resolveSecrets();
-
-  // Create workspace directory for future agent use
-  const fsMod = await import('node:fs');
-  fsMod.mkdirSync(path.join(DATA_DIR, 'workspace'), { recursive: true });
 
   // Initialize databases (opens 6 DBs, runs migrations)
   await initializeDatabases();
@@ -477,8 +496,8 @@ async function main() {
   }
 
   // Graceful shutdown handler
-  const shutdown = async () => {
-    log.info('Shutting down...');
+  const shutdown = async (signal: string) => {
+    log.info(`Received ${signal}, shutting down all subsystems...`);
     await stopHeartbeat();
     await lifecycle.stopAll();
     await pluginManager.stopTriggers();
@@ -494,8 +513,8 @@ async function main() {
     process.exit(0);
   };
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 main().catch((err) => {

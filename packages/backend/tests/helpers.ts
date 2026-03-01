@@ -65,3 +65,10 @@ export function createTestAgentLogsDb(): Database.Database {
   applySql(db, path.join(MIGRATIONS_DIR, 'agent-logs', '001_initial.sql'));
   return db;
 }
+
+export function createTestContactsDb(): Database.Database {
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  applySql(db, path.join(MIGRATIONS_DIR, 'contacts', '001_initial.sql'));
+  return db;
+}

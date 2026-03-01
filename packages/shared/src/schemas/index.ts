@@ -3,7 +3,8 @@
  *
  * Organized by database:
  *   common    — Shared primitives, enums, pagination
- *   system    — system.db (users, contacts, channel configs, settings)
+ *   system    — system.db (users, channel configs, settings)
+ *   contacts  — contacts.db (contacts, contact channels)
  *   heartbeat — heartbeat.db (state, emotions, thoughts, goals, seeds, tasks, agent_tasks)
  *   memory    — memory.db (working memory, core self, long-term memories)
  *   messages  — messages.db (conversations, messages, media)

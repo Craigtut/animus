@@ -7,9 +7,10 @@
  */
 
 import { createLogger } from '../lib/logger.js';
-import { getMessagesDb, getSystemDb } from '../db/index.js';
+import { getMessagesDb, getSystemDb, getContactsDb } from '../db/index.js';
 import * as messageStore from '../db/stores/message-store.js';
 import * as systemStore from '../db/stores/system-store.js';
+import * as contactStore from '../db/stores/contact-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { handleIncomingMessage } from '../heartbeat/index.js';
 import { consumePendingUpload } from '../api/routes/media.js';
@@ -106,6 +107,7 @@ class MessageService {
     content: string,
     channel: ChannelType,
     attachmentIds?: string[],
+    userTimezone?: string,
   ): Message {
     const sysDb = getSystemDb();
     const msgDb = getMessagesDb();
@@ -115,7 +117,7 @@ class MessageService {
     if (!user?.contactId) {
       throw new Error('User has no associated contact');
     }
-    const contact = systemStore.getContact(sysDb, user.contactId);
+    const contact = contactStore.getContact(getContactsDb(), user.contactId);
     if (!contact) {
       throw new Error('Contact not found');
     }
@@ -165,16 +167,20 @@ class MessageService {
     getEventBus().emit('message:received', result);
 
     // Trigger heartbeat tick for this message
-    const metadata: Record<string, unknown> | undefined = attachments.length > 0
-      ? {
-          media: attachments.map((a) => ({
-            type: a.type,
-            mimeType: a.mimeType,
-            localPath: a.localPath,
-            originalFilename: a.originalFilename,
-          })),
-        }
-      : undefined;
+    const metadata: Record<string, unknown> | undefined =
+      (attachments.length > 0 || userTimezone)
+        ? {
+            ...(attachments.length > 0 ? {
+              media: attachments.map((a) => ({
+                type: a.type,
+                mimeType: a.mimeType,
+                localPath: a.localPath,
+                originalFilename: a.originalFilename,
+              })),
+            } : {}),
+            ...(userTimezone ? { userTimezone } : {}),
+          }
+        : undefined;
 
     handleIncomingMessage({
       contactId: contact.id,

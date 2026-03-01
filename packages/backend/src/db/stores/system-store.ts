@@ -6,7 +6,6 @@
  */
 
 export * from './user-store.js';
-export * from './contact-store.js';
 export * from './settings-store.js';
 export * from './credential-store.js';
 export * from './channel-package-store.js';

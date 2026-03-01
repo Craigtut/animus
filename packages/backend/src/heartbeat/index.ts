@@ -32,6 +32,7 @@ import type { AgentSubsystem } from './agent-subsystem.js';
 import { TickQueue, type QueuedTick } from './tick-queue.js';
 import { type TriggerContext, type CompiledContext, buildMindContext, buildSystemPrompt } from './context-builder.js';
 import { computeBaselines, type PersonaDimensions } from './emotion-engine.js';
+import { getEnergyBand } from './energy-engine.js';
 import { compilePersona, type PersonaConfig, type CompiledPersona } from './persona-compiler.js';
 import type { AgentOrchestrator } from './agent-orchestrator.js';
 
@@ -140,14 +141,10 @@ async function mindQuery(
   tickNumber: number
 ): Promise<MindQueryResult> {
   // Ensure persona is compiled and load full persona for existence info
-  const sysDb = getSystemDb();
   const fullPersona = personaStore.getPersona(getPersonaDb());
   if (!ctx.compiledPersona) {
     ctx.compiledPersona = compilePersona(buildPersonaConfig(fullPersona));
   }
-
-  // Load timezone for timestamp formatting
-  const settings = systemStore.getSystemSettings(sysDb);
 
   // Determine if session is approaching context limit (~85% of token budget)
   const SESSION_TOKEN_BUDGET = 100_000; // approx budget for a mind session
@@ -182,7 +179,7 @@ async function mindQuery(
     existenceLocation: fullPersona.existenceParadigm === 'simulated_life'
       ? fullPersona.location
       : fullPersona.worldDescription,
-    ...(settings.timezone ? { timezone: settings.timezone } : {}),
+    ...(gathered.aiTimezone ? { timezone: gathered.aiTimezone } : {}),
     energyLevel: gathered.energyLevel,
     energyBand: gathered.energyBand,
     circadianBaseline: gathered.circadianBaseline,
@@ -757,6 +754,28 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
 }
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Determine the correct tick interval based on current energy state.
+ * If the energy system is enabled and the AI is in the sleeping band,
+ * returns the sleep tick interval; otherwise the regular heartbeat interval.
+ */
+function resolveTickInterval(settings: import('@animus-labs/shared').SystemSettings): number {
+  if (settings.energySystemEnabled) {
+    const hbDb = getHeartbeatDb();
+    const { energyLevel } = heartbeatStore.getEnergyLevel(hbDb);
+    const band = getEnergyBand(energyLevel);
+    if (band === 'sleeping') {
+      log.info(`Energy band is sleeping (${energyLevel.toFixed(4)}), using sleep interval ${settings.sleepTickIntervalMs}ms`);
+      return settings.sleepTickIntervalMs;
+    }
+  }
+  return settings.heartbeatIntervalMs;
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 
@@ -850,9 +869,12 @@ export async function initializeHeartbeat(subsystems: {
   if (state.isRunning) {
     const sysDb = getSystemDb();
     const settings = systemStore.getSystemSettings(sysDb);
-    tickQueue.startInterval(settings.heartbeatIntervalMs);
+
+    // Use sleep interval if the AI is currently in the sleeping energy band
+    const intervalMs = resolveTickInterval(settings);
+    tickQueue.startInterval(intervalMs);
     resumedAfterRestart = true;
-    nextTickInMs = settings.heartbeatIntervalMs;
+    nextTickInMs = intervalMs;
   }
 
   return { resumedAfterRestart, nextTickInMs };
@@ -876,13 +898,14 @@ export function startHeartbeat(): void {
 
   heartbeatStore.updateHeartbeatState(hbDb, { isRunning: true });
 
-  // Start interval timer
-  tickQueue.startInterval(settings.heartbeatIntervalMs);
+  // Use sleep interval if the AI is currently in the sleeping energy band
+  const intervalMs = resolveTickInterval(settings);
+  tickQueue.startInterval(intervalMs);
 
   // Fire the first tick immediately
   tickQueue.enqueueInterval();
 
-  log.info(`Started with interval of ${settings.heartbeatIntervalMs}ms`);
+  log.info(`Started with interval of ${intervalMs}ms${intervalMs !== settings.heartbeatIntervalMs ? ' (sleep)' : ''}`);
 }
 
 /**
@@ -916,6 +939,9 @@ export function handleIncomingMessage(params: {
   // Messages are already written to messages.db by the channel adapter
   // before this function is called. We just trigger a tick.
 
+  // Extract userTimezone from metadata and promote to first-class trigger field
+  const userTimezone = params.metadata?.['userTimezone'] as string | undefined;
+
   tickQueue.enqueueMessage({
     type: 'message',
     contactId: params.contactId,
@@ -923,6 +949,7 @@ export function handleIncomingMessage(params: {
     channel: params.channel,
     messageContent: params.content,
     messageId: params.messageId,
+    ...(userTimezone ? { userTimezone } : {}),
     ...(params.metadata ? { metadata: params.metadata } : {}),
   });
 }

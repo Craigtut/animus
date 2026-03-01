@@ -620,7 +620,6 @@ export function PersonaPage() {
 
   // Data
   const { data: persona, isLoading } = trpc.persona.get.useQuery();
-  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
   const updateMutation = trpc.persona.update.useMutation({
     onSuccess: () => {
       utils.persona.get.invalidate();
@@ -629,10 +628,6 @@ export function PersonaPage() {
       setDirty(false);
     },
   });
-  const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation({
-    onSuccess: () => utils.settings.getSystemSettings.invalidate(),
-  });
-
   const [dirty, setDirty] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -675,14 +670,15 @@ export function PersonaPage() {
     setDirty(false);
   }, [persona]);
 
-  // Populate timezone from system settings
+  // Populate timezone from persona data
   useEffect(() => {
-    setTimezone(systemSettings?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
-  }, [systemSettings]);
+    setTimezone(persona?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
+  }, [persona]);
 
   const handleTimezoneChange = (tz: string) => {
     setTimezone(tz);
-    updateSettingsMutation.mutate({ timezone: tz }, { onSuccess: () => timezoneSave.flash() });
+    // Save timezone directly to persona (it's part of persona now, not system settings)
+    updateMutation.mutate({ timezone: tz }, { onSuccess: () => timezoneSave.flash() });
   };
 
   const markDirty = useCallback(() => setDirty(true), []);

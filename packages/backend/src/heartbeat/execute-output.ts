@@ -10,10 +10,11 @@
  * See docs/architecture/heartbeat.md — "Stage 3: EXECUTE"
  */
 
-import { getHeartbeatDb, getSystemDb, getMessagesDb, getAgentLogsDb, getMemoryDb } from '../db/index.js';
+import { getHeartbeatDb, getSystemDb, getContactsDb, getMessagesDb, getAgentLogsDb, getMemoryDb } from '../db/index.js';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import * as agentLogStore from '../db/stores/agent-log-store.js';
 import * as systemStore from '../db/stores/system-store.js';
+import * as contactStore from '../db/stores/contact-store.js';
 import * as taskStore from '../db/stores/task-store.js';
 import { expiresIn, now, clamp, builtInDecisionTypeSchema } from '@animus-labs/shared';
 import type { MindOutput, IEventBus, AgentEventType } from '@animus-labs/shared';
@@ -83,6 +84,7 @@ export async function executeOutput(
   const hbDb = getHeartbeatDb();
   const eventBusRef = eventBus;
   const settings = systemStore.getSystemSettings(getSystemDb());
+  const aiTimezone = gathered.aiTimezone || 'UTC';
 
   const replySentEarly = options?.replySentEarly ?? false;
   const earlyReplyContent = options?.earlyReplyContent ?? '';
@@ -154,7 +156,7 @@ export async function executeOutput(
     try {
       // On proactive ticks (no gathered.contact), validate the contact exists
       if (!gathered.contact) {
-        const contact = systemStore.getContact(getSystemDb(), replyContactId);
+        const contact = contactStore.getContact(getContactsDb(), replyContactId);
         if (!contact) {
           log.error(`Reply send failed: non-existent contactId "${replyContactId}" on tick #${tickNumber}`);
           heartbeatStore.insertTickDecision(getHeartbeatDb(), {
@@ -310,7 +312,7 @@ export async function executeOutput(
       // deltas that prevent energy from ever reaching the sleeping band.
       const inSleepHours = isInSleepHours(
         new Date(), settings.sleepStartHour, settings.sleepEndHour,
-        settings.timezone || 'UTC'
+        aiTimezone
       );
       const effectiveDelta = inSleepHours ? 0 : output.energyDelta.delta;
 
@@ -321,7 +323,7 @@ export async function executeOutput(
         energyBefore: before,
         energyAfter: after,
         delta: effectiveDelta,
-        reasoning: output.energyDelta.reasoning,
+        reasoning: output.energyDelta.reasoning ?? '',
         circadianBaseline: gathered.circadianBaseline ?? 0.85,
         energyBand: getEnergyBand(after),
       });
@@ -498,7 +500,7 @@ export async function executeOutput(
         messages: gathered.messageContext?.allFilteredItems ?? [],
         contactId: gathered.contact?.id ?? null,
         config: OBSERVATIONAL_MEMORY_CONFIG,
-        ...(settings.timezone ? { timezone: settings.timezone } : {}),
+        ...(aiTimezone ? { timezone: aiTimezone } : {}),
       }).catch(err => {
         log.warn('Observation processing failed (non-fatal):', err);
       });

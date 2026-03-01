@@ -5,7 +5,7 @@
 import { z } from 'zod';
 import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';
-import { getHeartbeatDb, getAgentLogsDb } from '../../db/index.js';
+import { getHeartbeatDb, getAgentLogsDb, getPersonaDb } from '../../db/index.js';
 import * as heartbeatStore from '../../db/stores/heartbeat-store.js';
 import * as agentLogStore from '../../db/stores/agent-log-store.js';
 import {
@@ -20,6 +20,7 @@ import {
 import { getEventBus } from '../../lib/event-bus.js';
 import type { HeartbeatState, EmotionState, Thought, Experience, TickDecision, EnergyBand, EnergyHistoryEntry, AgentEventType } from '@animus-labs/shared';
 import * as systemStore from '../../db/stores/system-store.js';
+import * as personaStore from '../../db/stores/persona-store.js';
 import { getSystemDb } from '../../db/index.js';
 import { getEnergyBand, computeCircadianBaseline } from '../../heartbeat/energy-engine.js';
 import { snakeToCamel } from '../../db/utils.js';
@@ -369,12 +370,13 @@ export const heartbeatRouter = router({
       return { energyLevel: null, energyBand: null, circadianBaseline: null, enabled: false };
     }
 
+    const persona = personaStore.getPersona(getPersonaDb());
     const { energyLevel } = heartbeatStore.getEnergyLevel(hbDb);
     const circadianBaseline = computeCircadianBaseline(
       new Date(),
       settings.sleepStartHour,
       settings.sleepEndHour,
-      settings.timezone || 'UTC'
+      persona.timezone || 'UTC'
     );
 
     return {

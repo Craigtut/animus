@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { createLogger } from '../lib/logger.js';
+import { logProcessSpawn, logProcessExit, logProcessError } from '../lib/process-diagnostics.js';
 import { generateCorrelationId } from './ipc/protocol.js';
 import { createParentHandler } from './ipc/parent-handler.js';
 import type { ChannelManifest, ChannelPackage } from '@animus-labs/shared';
@@ -140,9 +141,10 @@ export class ChannelProcessHost {
     };
 
     // In production, use --permission flag for sandboxing.
-    // The child process needs read access to:
-    //   1. The channel package directory (adapter code + bundled node_modules)
-    //   2. The bootstrapper directory (adapter-context.js that boots the child)
+    // The child process needs:
+    //   1. Read access to the channel package directory (adapter code + bundled node_modules)
+    //   2. Read access to the bootstrapper directory (adapter-context.js that boots the child)
+    //   3. Network access for outbound API calls (e.g., Slack, Discord, Twilio)
     const execArgv: string[] = [];
     if (process.env['NODE_ENV'] === 'production') {
       const sdkDir = path.join(__dirname, 'sdk');
@@ -150,6 +152,7 @@ export class ChannelProcessHost {
         '--permission',
         `--allow-fs-read=${this.config.pkg.path}`,
         `--allow-fs-read=${sdkDir}`,
+        '--allow-net',
       );
     }
     if (execArgv.length > 0) {
@@ -172,6 +175,31 @@ export class ChannelProcessHost {
         reject(err);
       };
     });
+
+    // Production path validation
+    if (process.env['NODE_ENV'] === 'production') {
+      if (!path.isAbsolute(this.config.pkg.path)) {
+        this.log.error(`Channel pkg.path is not absolute: ${this.config.pkg.path}`);
+      }
+    }
+
+    // Fork diagnostics
+    this.log.info('Channel fork diagnostics', {
+      bootstrapperPath,
+      bootstrapperExists: fs.existsSync(bootstrapperPath),
+      pkgPath: this.config.pkg.path,
+      pkgExists: fs.existsSync(this.config.pkg.path),
+      execPath: process.execPath,
+      nodeDir: path.dirname(process.execPath),
+      nodeEnv: process.env['NODE_ENV'],
+      execArgv,
+    });
+    logProcessSpawn(
+      `channel:${this.config.pkg.name}`,
+      'fork',
+      [bootstrapperPath, ...forkArgs],
+      forkOpts.env as Record<string, string | undefined>,
+    );
 
     this.log.debug(`Forking child process for ${this.config.pkg.name}`);
     this.childProcess = fork(bootstrapperPath, forkArgs, forkOpts);
@@ -344,8 +372,15 @@ export class ChannelProcessHost {
 
     this.childProcess.on('message', handler);
 
+    // Handle fork errors (fires when the process cannot be spawned at all)
+    this.childProcess.on('error', (err) => {
+      this.log.error(`Fork error for ${this.config.pkg.name}:`, err);
+      logProcessError(`channel:${this.config.pkg.name}`, err);
+    });
+
     // Handle unexpected exit
     this.childProcess.on('exit', (code, signal) => {
+      logProcessExit(`channel:${this.config.pkg.name}`, this.childProcess?.pid ?? 0, code, signal);
       this.handleExit(code, signal);
     });
 

@@ -1,28 +1,29 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type Database from 'better-sqlite3';
-import { createTestSystemDb } from '../helpers.js';
-import * as systemStore from '../../src/db/stores/system-store.js';
+import { createTestContactsDb } from '../helpers.js';
+import * as contactStore from '../../src/db/stores/contact-store.js';
 
-// Mock DB access
+// Mock DB access — identity-resolver now uses getContactsDb() for contact operations
 vi.mock('../../src/db/index.js', () => {
-  let mockSysDb: Database.Database;
+  let mockContactsDb: Database.Database;
   return {
-    getSystemDb: () => mockSysDb,
+    getContactsDb: () => mockContactsDb,
+    getSystemDb: vi.fn(),
     getHeartbeatDb: vi.fn(),
     getMessagesDb: vi.fn(),
-    _setMockSysDb: (db: Database.Database) => { mockSysDb = db; },
+    _setMockContactsDb: (db: Database.Database) => { mockContactsDb = db; },
   };
 });
 
 const { resolveContact, resolveWebUser, createContactForChannel } = await import('../../src/contacts/identity-resolver.js');
-const dbModule = await import('../../src/db/index.js') as unknown as { _setMockSysDb: (db: Database.Database) => void };
+const dbModule = await import('../../src/db/index.js') as unknown as { _setMockContactsDb: (db: Database.Database) => void };
 
 describe('identity-resolver', () => {
   let db: Database.Database;
 
   beforeEach(() => {
-    db = createTestSystemDb();
-    dbModule._setMockSysDb(db);
+    db = createTestContactsDb();
+    dbModule._setMockContactsDb(db);
   });
 
   describe('resolveContact', () => {
@@ -33,11 +34,11 @@ describe('identity-resolver', () => {
 
     it('resolves an existing contact by channel + identifier', () => {
       // Create a contact with a channel
-      const contact = systemStore.createContact(db, {
+      const contact = contactStore.createContact(db, {
         fullName: 'Test User',
         phoneNumber: '+15551234567',
       });
-      systemStore.createContactChannel(db, {
+      contactStore.createContactChannel(db, {
         contactId: contact.id,
         channel: 'sms',
         identifier: '+15551234567',
@@ -50,10 +51,10 @@ describe('identity-resolver', () => {
     });
 
     it('does not match across different channels', () => {
-      const contact = systemStore.createContact(db, {
+      const contact = contactStore.createContact(db, {
         fullName: 'Discord User',
       });
-      systemStore.createContactChannel(db, {
+      contactStore.createContactChannel(db, {
         contactId: contact.id,
         channel: 'discord',
         identifier: '123456789',
@@ -71,19 +72,15 @@ describe('identity-resolver', () => {
       expect(result).toBeNull();
     });
 
-    it('resolves a web user to their contact', () => {
-      const user = systemStore.createUser(db, {
-        email: 'test@example.com',
-        passwordHash: 'hash',
-      });
-      const contact = systemStore.createContact(db, {
+    it('resolves a web user to their contact via userId', () => {
+      const userId = 'test-user-id';
+      const contact = contactStore.createContact(db, {
         fullName: 'Web User',
-        userId: user.id,
+        userId,
         isPrimary: true,
       });
-      systemStore.updateUserContactId(db, user.id, contact.id);
 
-      const resolved = resolveWebUser(user.id);
+      const resolved = resolveWebUser(userId);
       expect(resolved).not.toBeNull();
       expect(resolved!.id).toBe(contact.id);
       expect(resolved!.fullName).toBe('Web User');
@@ -98,7 +95,7 @@ describe('identity-resolver', () => {
       expect(contact.permissionTier).toBe('standard');
 
       // Verify channel was linked
-      const channels = systemStore.getContactChannelsByContactId(db, contact.id);
+      const channels = contactStore.getContactChannelsByContactId(db, contact.id);
       expect(channels).toHaveLength(1);
       expect(channels[0]!.channel).toBe('sms');
       expect(channels[0]!.identifier).toBe('+15559876543');

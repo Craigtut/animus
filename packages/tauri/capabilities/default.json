@@ -2,6 +2,9 @@
   "identifier": "default",
   "description": "Default capabilities for the Animus desktop app",
   "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*", "http://localhost:*"]
+  },
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

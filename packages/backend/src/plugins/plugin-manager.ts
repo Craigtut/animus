@@ -14,6 +14,7 @@ import fsSync from 'node:fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import extractZip from 'extract-zip';
+import { logProcessSpawn, logProcessExit } from '../lib/process-diagnostics.js';
 import { env, DATA_DIR } from '../utils/env.js';
 
 import { getSystemDb } from '../db/index.js';
@@ -1263,6 +1264,8 @@ export class PluginManager {
     const cmd = parts[0]!;
     const args = parts.slice(1);
 
+    logProcessSpawn(`plugin-watcher:${watcher.pluginName}`, cmd, args);
+
     const proc = spawn(cmd, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env },
@@ -1298,6 +1301,7 @@ export class PluginManager {
     });
 
     proc.on('exit', (code) => {
+      logProcessExit(`plugin-watcher:${watcher.pluginName}`, proc.pid ?? 0, code, null);
       if (watcher.stopped) return;
 
       watcher.failures++;
