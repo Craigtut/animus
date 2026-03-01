@@ -314,7 +314,8 @@ export async function executeOutput(
         new Date(), settings.sleepStartHour, settings.sleepEndHour,
         aiTimezone
       );
-      const effectiveDelta = inSleepHours ? 0 : output.energyDelta.delta;
+      const rawDelta = output.energyDelta.delta;
+      const effectiveDelta = inSleepHours ? 0 : (typeof rawDelta === 'number' && !isNaN(rawDelta) ? rawDelta : 0);
 
       const after = clamp(before + effectiveDelta, 0, 1);
       heartbeatStore.updateEnergyLevel(hbDb, after);
@@ -413,13 +414,13 @@ export async function executeOutput(
     const memoryPromise = (async () => {
       if (!deps.memoryManager) return;
       try {
-        // Working memory update
-        if (output.workingMemoryUpdate && gathered.contact) {
+        // Working memory update (guard against LLM emitting the literal string "null")
+        if (output.workingMemoryUpdate && output.workingMemoryUpdate !== 'null' && gathered.contact) {
           deps.memoryManager.updateWorkingMemory(gathered.contact.id, output.workingMemoryUpdate);
         }
 
-        // Core self update
-        if (output.coreSelfUpdate) {
+        // Core self update (guard against LLM emitting the literal string "null")
+        if (output.coreSelfUpdate && output.coreSelfUpdate !== 'null') {
           deps.memoryManager.updateCoreSelf(output.coreSelfUpdate);
         }
 

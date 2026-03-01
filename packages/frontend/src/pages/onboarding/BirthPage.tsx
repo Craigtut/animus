@@ -30,7 +30,11 @@ export function BirthPage() {
   useEffect(() => {
     finalizeMutation.mutate(undefined, {
       onSuccess: () => {
-        utils.onboarding.getState.invalidate();
+        // Set cache directly instead of invalidating — avoids a race where
+        // navigate('/') fires before the background re-fetch completes,
+        // causing AuthGuard to read stale isComplete:false and redirect
+        // back to /onboarding.
+        utils.onboarding.getState.setData(undefined, { isComplete: true, currentStep: 8 });
         setFinalized(true);
       },
       onError: (err) => console.error('Failed to finalize persona:', err),

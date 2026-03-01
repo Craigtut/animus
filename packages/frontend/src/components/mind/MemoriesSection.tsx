@@ -108,7 +108,7 @@ interface WorkingMemoryItem {
   contactId: string;
   contactName?: string | null;
   content?: string | null;
-  tier?: string | null;
+  permissionTier?: string | null;
   updatedAt?: string | null;
 }
 
@@ -127,8 +127,8 @@ function WorkingMemoryCard({ memory }: { memory: WorkingMemoryItem }) {
         `}>
           {memory.contactName || memory.contactId}
         </Typography.BodyAlt>
-        {memory.tier && (
-          <Badge>{memory.tier}</Badge>
+        {memory.permissionTier && (
+          <Badge>{memory.permissionTier}</Badge>
         )}
       </div>
       {content ? (

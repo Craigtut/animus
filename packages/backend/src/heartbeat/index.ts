@@ -863,9 +863,9 @@ export async function initializeHeartbeat(subsystems: {
   // Set up the tick queue processor
   tickQueue.setProcessor(executeTick);
 
-  // Resume heartbeat if it was running before a crash / ungraceful restart.
-  // Graceful shutdown sets isRunning=false, so this only fires after crashes
-  // or dev-server restarts (tsx watch) where stopHeartbeat() didn't run.
+  // Resume heartbeat if the user had it enabled before the server stopped.
+  // Graceful shutdown preserves the isRunning flag so the user's toggle
+  // is respected across restarts. Only an explicit user stop clears it.
   if (state.isRunning) {
     const sysDb = getSystemDb();
     const settings = systemStore.getSystemSettings(sysDb);
@@ -910,17 +910,22 @@ export function startHeartbeat(): void {
 
 /**
  * Stop the heartbeat system.
+ * @param opts.preserveDesiredState - If true, keeps `isRunning=true` in the DB
+ *   so the heartbeat auto-resumes on the next server start. Used during graceful
+ *   shutdown to respect the user's toggle. Defaults to false (user-initiated stop).
  */
-export async function stopHeartbeat(): Promise<void> {
+export async function stopHeartbeat(opts?: { preserveDesiredState?: boolean }): Promise<void> {
   tickQueue.stopInterval();
   tickQueue.clear();
 
   // End mind session
   await resetMindSession(ctx.mindSession, ctx.agents?.agentManager ?? null);
 
-  const hbDb = getHeartbeatDb();
-  heartbeatStore.updateHeartbeatState(hbDb, { isRunning: false });
-  log.info('Stopped');
+  if (!opts?.preserveDesiredState) {
+    const hbDb = getHeartbeatDb();
+    heartbeatStore.updateHeartbeatState(hbDb, { isRunning: false });
+  }
+  log.info(opts?.preserveDesiredState ? 'Stopped (will resume on next start)' : 'Stopped');
 }
 
 /**

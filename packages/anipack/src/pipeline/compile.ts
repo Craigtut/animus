@@ -49,7 +49,8 @@ export async function compile(options: CompileOptions): Promise<boolean> {
       cwd: options.sourceDir,
     });
   } catch (err) {
-    const message = err instanceof Error ? (err as Error & { stderr?: string }).stderr ?? err.message : String(err);
+    const execErr = err as Error & { stdout?: string; stderr?: string };
+    const message = execErr.stdout || execErr.stderr || execErr.message || String(err);
     throw new Error(`TypeScript compilation failed:\n${message}`);
   }
 

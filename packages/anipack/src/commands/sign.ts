@@ -19,7 +19,6 @@ import * as os from 'node:os';
 import extractZip from 'extract-zip';
 import {
   SUPPORTED_FORMAT_VERSION,
-  DEFAULT_SIGNER_IDENTITY,
 } from '@animus-labs/shared';
 import type { SignatureFile } from '@animus-labs/shared';
 import * as logger from '../utils/logger.js';
@@ -117,7 +116,7 @@ export async function signPackage(
       signature: signature.toString('base64'),
       payload,
       signedAt: new Date().toISOString(),
-      signedBy: signerIdentity ?? DEFAULT_SIGNER_IDENTITY,
+      signedBy: signerIdentity!,
     };
 
     // Write SIGNATURE file into temp dir
@@ -153,7 +152,13 @@ export async function signCommand(
     process.exit(1);
   }
 
-  const signerIdentity = signer ?? DEFAULT_SIGNER_IDENTITY;
+  const signerIdentity = signer;
+  if (!signerIdentity) {
+    logger.error(
+      'Signer identity required. Use --signer <identity> to specify who is signing this package.',
+    );
+    process.exit(1);
+  }
 
   try {
     await signPackage(absolutePath, keyPath, signerIdentity);

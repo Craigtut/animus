@@ -527,9 +527,12 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
   const isNearBottomRef = useRef(true);
   const hasMountedRef = useRef(false);
 
-  // Sort chronologically -- newest at bottom
-  const sorted = [...messages].sort(
-    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  // Sort messages chronologically -- newest at bottom
+  const sortedMessages = useMemo(() =>
+    [...messages].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    ),
+    [messages],
   );
 
   // Track whether user is near the bottom of the scroll container
@@ -544,7 +547,7 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
   // Auto-scroll: instant on mount, smooth for new messages, only if near bottom
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || sorted.length === 0) return;
+    if (!el || sortedMessages.length === 0) return;
 
     requestAnimationFrame(() => {
       if (!hasMountedRef.current) {
@@ -557,7 +560,7 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
       }
       // If user has scrolled up, do nothing
     });
-  }, [sorted.length]);
+  }, [sortedMessages.length]);
 
   // Derived: is any turn currently streaming?
   const isAnyTurnStreaming = replyStream.turns.some((t) => t.isStreaming);
@@ -584,11 +587,11 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
   // Build a set of persisted assistant message content for dedup
   const persistedAssistantContents = useMemo(() => {
     const set = new Set<string>();
-    for (const m of sorted) {
+    for (const m of sortedMessages) {
       if (m.role === 'assistant') set.add(m.content);
     }
     return set;
-  }, [sorted]);
+  }, [sortedMessages]);
 
   // If all completed turns' content has been persisted, clear stream immediately
   useEffect(() => {
@@ -677,6 +680,25 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
       );
   }, [approvalMap]);
 
+  // Interleave messages and resolved approvals chronologically.
+  // Uses createdAt so resolved approvals appear where the tool was originally invoked.
+  type ChatItem =
+    | { kind: 'message'; data: MessageData }
+    | { kind: 'approval'; data: ToolApprovalRequest };
+
+  const interleavedItems = useMemo<ChatItem[]>(() => {
+    const items: ChatItem[] = sortedMessages.map((m) => ({ kind: 'message' as const, data: m }));
+    for (const req of resolvedApprovals) {
+      items.push({ kind: 'approval' as const, data: req });
+    }
+    items.sort((a, b) => {
+      const aTime = new Date(a.data.createdAt).getTime();
+      const bTime = new Date(b.data.createdAt).getTime();
+      return aTime - bTime;
+    });
+    return items;
+  }, [sortedMessages, resolvedApprovals]);
+
   // Prune resolved approvals after 5 minutes
   useEffect(() => {
     const interval = setInterval(() => {
@@ -720,7 +742,7 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
           justify-content: flex-end;
         `}
       >
-        {sorted.length === 0 && !isThinking && !isAnyTurnStreaming ? (
+        {sortedMessages.length === 0 && !isThinking && !isAnyTurnStreaming ? (
           <Typography.Body
             color="hint"
             css={css`
@@ -747,36 +769,40 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
               }
             `}
           >
-            {sorted.map((msg) => (
-              <FadingMessage key={msg.id}>
-                <div
-                  css={css`
-                    display: flex;
-                    justify-content: ${msg.role === 'user' ? 'flex-end' : 'flex-start'};
-                  `}
-                >
-                  <Typography.Body
-                    as="div"
-                    color="primary"
+            {interleavedItems.map((item) =>
+              item.kind === 'message' ? (
+                <FadingMessage key={item.data.id}>
+                  <div
                     css={css`
-                      max-width: ${msg.role === 'user' ? '80%' : '85%'};
-                      ${msg.role === 'user'
-                        ? `
-                          background: ${theme.mode === 'light' ? 'rgba(26, 24, 22, 0.06)' : 'rgba(250, 249, 244, 0.08)'};
-                          border-radius: 16px;
-                          padding: ${theme.spacing[3]} ${theme.spacing[4]};
-                        `
-                        : ''}
+                      display: flex;
+                      justify-content: ${item.data.role === 'user' ? 'flex-end' : 'flex-start'};
                     `}
                   >
-                    <MessageMarkdown content={msg.content} />
-                    {msg.attachments && msg.attachments.length > 0 && (
-                      <MessageAttachments attachments={msg.attachments} />
-                    )}
-                  </Typography.Body>
-                </div>
-              </FadingMessage>
-            ))}
+                    <Typography.Body
+                      as="div"
+                      color="primary"
+                      css={css`
+                        max-width: ${item.data.role === 'user' ? '80%' : '85%'};
+                        ${item.data.role === 'user'
+                          ? `
+                            background: ${theme.mode === 'light' ? 'rgba(26, 24, 22, 0.06)' : 'rgba(250, 249, 244, 0.08)'};
+                            border-radius: 16px;
+                            padding: ${theme.spacing[3]} ${theme.spacing[4]};
+                          `
+                          : ''}
+                      `}
+                    >
+                      <MessageMarkdown content={item.data.content} />
+                      {item.data.attachments && item.data.attachments.length > 0 && (
+                        <MessageAttachments attachments={item.data.attachments} />
+                      )}
+                    </Typography.Body>
+                  </div>
+                </FadingMessage>
+              ) : (
+                <ToolApprovalCard key={item.data.id} request={item.data} />
+              ),
+            )}
 
             {/* Thinking indicator -- shows while mind is processing before reply starts */}
             {isThinking && (
@@ -819,14 +845,7 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
               </AnimatePresence>
             )}
 
-            {/* Resolved approval pills — transient inline feedback */}
-            <AnimatePresence>
-              {resolvedApprovals.map((req) => (
-                <ToolApprovalCard key={req.id} request={req} />
-              ))}
-            </AnimatePresence>
-
-            {/* Pending approval cards — interactive requests */}
+            {/* Pending approval cards — interactive requests, always at the bottom */}
             {pendingApprovals.singles.map((req) => (
               <ToolApprovalCard key={req.id} request={req} />
             ))}

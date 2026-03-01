@@ -14,7 +14,7 @@ import * as systemStore from '../../db/stores/system-store.js';
 import * as memoryStore from '../../db/stores/memory-store.js';
 import { getSystemDb, getMemoryDb } from '../../db/index.js';
 import { isConfigured, verifyEncryptionKey } from '../../lib/encryption-service.js';
-import { DATA_DIR } from '../../utils/env.js';
+import { DATA_DIR, PROJECT_ROOT } from '../../utils/env.js';
 import { getChannelManager } from '../../channels/channel-manager.js';
 import { getSettingsService } from '../../services/settings-service.js';
 
@@ -157,6 +157,12 @@ function runHealthChecks(): { status: 'healthy' | 'degraded' | 'unhealthy'; chec
 }
 
 export const settingsRouter = router({
+  getVersion: protectedProcedure.query(() => {
+    const pkgPath = path.join(PROJECT_ROOT, 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    return { version: (pkg.version as string) ?? '0.0.0' };
+  }),
+
   healthCheck: protectedProcedure.query(() => {
     return runHealthChecks();
   }),

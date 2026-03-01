@@ -119,7 +119,13 @@ export async function buildCommand(
         );
         process.exit(1);
       }
-      const signerIdentity = options.signer ?? 'animus-labs';
+      const signerIdentity = options.signer;
+      if (!signerIdentity) {
+        logger.error(
+          'Signer identity required when using --sign. Provide --signer <identity>.',
+        );
+        process.exit(1);
+      }
 
       await signPackage(outputPath, keyPath, signerIdentity);
       logger.info(`Signing package...      done (signed by ${signerIdentity})`);

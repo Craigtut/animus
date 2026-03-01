@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "An agentic system with a mind, a spirit, and an inner will that moves with agency to act",
+  "license": "MIT",
   "workspaces": [
     "packages/*"
   ],

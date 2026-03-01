@@ -8,8 +8,9 @@
 
 import { TRPCError } from '@trpc/server';
 import { createLogger } from '../lib/logger.js';
-import { getMemoryDb } from '../db/index.js';
+import { getMemoryDb, getContactsDb } from '../db/index.js';
 import * as memoryStore from '../db/stores/memory-store.js';
+import * as contactStore from '../db/stores/contact-store.js';
 import { getMemoryManager } from '../heartbeat/index.js';
 import type { WorkingMemory, CoreSelf, LongTermMemory } from '@animus-labs/shared';
 
@@ -28,6 +29,11 @@ export interface ScoredMemoryItem extends LongTermMemory {
 export interface BrowseResult {
   items: ScoredMemoryItem[];
   nextCursor: string | undefined;
+}
+
+export interface WorkingMemoryWithContact extends WorkingMemory {
+  contactName: string | null;
+  permissionTier: string | null;
 }
 
 export interface BrowseInput {
@@ -56,10 +62,20 @@ class MemoryService {
   }
 
   /**
-   * List all working memories across contacts.
+   * List all working memories across contacts, enriched with contact names.
    */
-  listWorkingMemories(): WorkingMemory[] {
-    return memoryStore.listAllWorkingMemories(getMemoryDb());
+  listWorkingMemories(): WorkingMemoryWithContact[] {
+    const memories = memoryStore.listAllWorkingMemories(getMemoryDb());
+    const contactsDb = getContactsDb();
+
+    return memories.map((wm) => {
+      const contact = contactStore.getContact(contactsDb, wm.contactId);
+      return {
+        ...wm,
+        contactName: contact?.fullName ?? null,
+        permissionTier: contact?.permissionTier ?? null,
+      };
+    });
   }
 
   /**

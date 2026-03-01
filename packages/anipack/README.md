@@ -6,23 +6,22 @@ CLI tool for building, validating, signing, and inspecting `.anpk` packages for 
 
 ## Installation
 
-anipack is part of the Animus Engine monorepo. From the workspace root:
+```bash
+npm install -g anipack
+```
+
+Or run directly with npx:
+
+```bash
+npx anipack <command>
+```
+
+### Development (from the monorepo)
 
 ```bash
 npm install
-npm run build -w @animus-labs/anipack
-```
-
-Run via the built output:
-
-```bash
-node packages/anipack/dist/index.js <command>
-```
-
-Or link globally for development:
-
-```bash
-npm link -w @animus-labs/anipack
+npm run build -w anipack
+npm link -w anipack
 anipack <command>
 ```
 
@@ -165,7 +164,7 @@ Inspecting weather-1.0.0.anpk...
 
   Signature:
     Status:       VALID
-    Signed by:    animus-labs
+    Signed by:    my-org
     Signed at:    2026-02-23T02:44:47.588Z
 
   Checksums:
@@ -287,7 +286,7 @@ JSON file with Ed25519 signature:
   "signature": "<base64-encoded-signature>",
   "payload": "sha256:<archive-hash>",
   "signedAt": "2026-02-23T...",
-  "signedBy": "animus-labs"
+  "signedBy": "my-org"
 }
 ```
 
@@ -295,15 +294,10 @@ JSON file with Ed25519 signature:
 
 The `.anpk` format uses a 4-layer verification chain:
 
-1. **Format check** — Valid ZIP with `manifest.json` and `CHECKSUMS` at root
-2. **Signature verification** — Ed25519 signature against the embedded Animus Labs public key
-3. **Manifest validation** — Parsed and validated against the Zod schema
-4. **Checksum verification** — SHA-256 of every file checked against `CHECKSUMS`
-
-Signature status determines install behavior:
-- **Signed & valid** — Normal install flow
-- **Unsigned** — Warning shown, user can "Install Anyway"
-- **Invalid signature** — Install blocked (possible tampering)
+1. **Format check** -- Valid ZIP with `manifest.json` and `CHECKSUMS` at root
+2. **Signature verification** -- Ed25519 signature verified at install time
+3. **Manifest validation** -- Parsed and validated against the package schema
+4. **Checksum verification** -- SHA-256 of every file checked against `CHECKSUMS`
 
 ## CI/CD Usage
 
@@ -313,7 +307,8 @@ Signature status determines install behavior:
   run: |
     npx anipack build ./plugins/weather \
       --sign \
-      --key "base64:${{ secrets.ANIMUS_SIGNING_KEY }}" \
+      --key "base64:${{ secrets.SIGNING_KEY }}" \
+      --signer "your-org-name" \
       --output ./dist/weather.anpk
 
 - name: Verify package

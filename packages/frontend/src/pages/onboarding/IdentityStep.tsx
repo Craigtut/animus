@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Input, Typography } from '../../components/ui';
 import { useOnboardingStore } from '../../store';
+import { trpc } from '../../utils/trpc';
 import { OnboardingNav } from './OnboardingNav';
 
 export function IdentityStep() {
@@ -13,11 +14,19 @@ export function IdentityStep() {
 
   const [fullName, setFullName] = useState('');
 
+  const { data: primaryContact } = trpc.contacts.getPrimary.useQuery();
+
+  const updateMutation = trpc.contacts.update.useMutation({
+    onSuccess: () => {
+      markStepComplete('identity');
+      setCurrentStep('about_you');
+      navigate('/onboarding/about-you');
+    },
+  });
+
   const handleContinue = () => {
-    // TODO: save to backend via trpc.contacts.update when available
-    markStepComplete('identity');
-    setCurrentStep('about_you');
-    navigate('/onboarding/about-you');
+    if (!primaryContact) return;
+    updateMutation.mutate({ id: primaryContact.id, fullName: fullName.trim() });
   };
 
   const handleBack = () => navigate('/onboarding/agent');
@@ -47,7 +56,8 @@ export function IdentityStep() {
       <OnboardingNav
         onBack={handleBack}
         onContinue={handleContinue}
-        continueDisabled={!fullName.trim()}
+        continueDisabled={!fullName.trim() || !primaryContact}
+        continueLoading={updateMutation.isPending}
       />
     </div>
   );

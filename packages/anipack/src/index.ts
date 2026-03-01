@@ -1,12 +1,7 @@
-#!/usr/bin/env node
-
 /**
  * anipack — CLI tool for building, validating, signing, and inspecting .anpk packages.
  */
 
-import { readFileSync } from 'node:fs';
-import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { validateCommand } from './commands/validate.js';
 import { buildCommand } from './commands/build.js';
@@ -14,15 +9,12 @@ import { signCommand } from './commands/sign.js';
 import { inspectCommand } from './commands/inspect.js';
 import { keygenCommand } from './commands/keygen.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8')) as { version: string };
-
 const program = new Command();
 
 program
   .name('anipack')
   .description('Build, validate, sign, and inspect .anpk packages for Animus')
-  .version(pkg.version);
+  .version(__ANIPACK_VERSION__);
 
 program
   .command('validate <directory>')
@@ -37,7 +29,7 @@ program
   .option('-o, --output <path>', 'Output file path')
   .option('--sign', 'Sign the package with Ed25519 key')
   .option('--key <path>', 'Path to Ed25519 private key file')
-  .option('--signer <identity>', 'Signer identity string', 'animus-labs')
+  .option('--signer <identity>', 'Signer identity (required when using --sign)')
   .option('--no-vendor', 'Skip vendoring node_modules')
   .option('--no-compile', 'Skip TypeScript compilation')
   .option('-v, --verbose', 'Show detailed build output')
@@ -57,7 +49,7 @@ program
   .command('sign <package>')
   .description('Sign an .anpk package with Ed25519')
   .requiredOption('--key <path>', 'Path to Ed25519 private key file')
-  .option('--signer <identity>', 'Signer identity string', 'animus-labs')
+  .requiredOption('--signer <identity>', 'Signer identity (e.g. your name or org)')
   .action(async (packagePath: string, options: Record<string, unknown>) => {
     await signCommand(
       packagePath,

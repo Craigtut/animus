@@ -498,7 +498,7 @@ async function main() {
   // Graceful shutdown handler
   const shutdown = async (signal: string) => {
     log.info(`Received ${signal}, shutting down all subsystems...`);
-    await stopHeartbeat();
+    await stopHeartbeat({ preserveDesiredState: true });
     await lifecycle.stopAll();
     await pluginManager.stopTriggers();
     await pluginManager.cleanupSkills();

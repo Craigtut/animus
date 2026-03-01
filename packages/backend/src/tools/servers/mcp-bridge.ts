@@ -257,7 +257,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     // POST /cognitive/thought — records a thought
     if (req.method === 'POST' && path === '/cognitive/thought') {
       const body = JSON.parse(await readBody(req));
-      const result = handleRecordThought(body);
+      const parsed = recordThoughtSchema.safeParse(body);
+      if (!parsed.success) {
+        log.warn('Invalid record_thought input:', parsed.error.message);
+        jsonResponse(res, 200, { content: [{ type: 'text', text: `Invalid input: ${parsed.error.message}` }], isError: true });
+        return;
+      }
+      const result = handleRecordThought(parsed.data);
       jsonResponse(res, 200, result);
       return;
     }
@@ -265,7 +271,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     // POST /cognitive/state — records cognitive state
     if (req.method === 'POST' && path === '/cognitive/state') {
       const body = JSON.parse(await readBody(req));
-      const result = handleRecordCognitiveState(body);
+      const parsed = recordCognitiveStateSchema.safeParse(body);
+      if (!parsed.success) {
+        log.warn('Invalid record_cognitive_state input:', parsed.error.message);
+        jsonResponse(res, 200, { content: [{ type: 'text', text: `Invalid input: ${parsed.error.message}` }], isError: true });
+        return;
+      }
+      const result = handleRecordCognitiveState(parsed.data);
       jsonResponse(res, 200, result);
       return;
     }

@@ -1,36 +1,54 @@
 {
-  "name": "@animus-labs/anipack",
-  "version": "0.1.0",
-  "private": true,
+  "name": "anipack",
+  "version": "1.0.2",
+  "description": "Build, validate, sign, and inspect .anpk packages for Animus",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "anipack": "./dist/index.js"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "source": "./src/index.ts",
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/craigtut/animus",
+    "directory": "packages/anipack"
+  },
+  "homepage": "https://github.com/craigtut/animus/tree/main/packages/anipack",
+  "keywords": [
+    "animus",
+    "anpk",
+    "package",
+    "cli",
+    "build",
+    "plugin",
+    "channel"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=24.0.0"
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "typecheck": "tsc --noEmit"
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsup"
   },
   "dependencies": {
-    "@animus-labs/shared": "*",
     "archiver": "^7.0.0",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
-    "extract-zip": "^2.0.1"
+    "extract-zip": "^2.0.1",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
-    "@types/archiver": "^6.0.0"
+    "@animus-labs/shared": "*",
+    "@types/archiver": "^6.0.0",
+    "tsup": "^8.5.1"
   }
 }

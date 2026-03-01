@@ -37,6 +37,7 @@ import {
   Wrench,
   SignOut,
   MagnifyingGlass,
+  Info,
 } from '@phosphor-icons/react';
 import { Card, SelectionCard, Button, Input, Select, Modal, Badge, Toggle, Slider, Typography, Tooltip } from '../components/ui';
 import { trpc } from '../utils/trpc';
@@ -48,13 +49,14 @@ import { ToolsSection } from '../components/settings/ToolsSection';
 import { PackageConsentDialog } from '../components/settings/PackageConsentDialog';
 import { Upload, ArrowCounterClockwise } from '@phosphor-icons/react';
 import { AnpkDropZone } from '../components/settings/AnpkDropZone';
+import { AboutSection } from '../components/settings/AboutSection';
 import { toast } from '../store/toast-store';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-type SettingsSection = 'heartbeat' | 'provider' | 'channels' | 'plugins' | 'tools' | 'goals' | 'saves' | 'system';
+type SettingsSection = 'heartbeat' | 'provider' | 'channels' | 'plugins' | 'tools' | 'goals' | 'saves' | 'system' | 'about';
 
 interface ModelData {
   id: string;
@@ -86,6 +88,7 @@ const sections: SidebarItem[] = [
   { id: 'goals', label: 'Goals', icon: Target },
   { id: 'saves', label: 'Saves', icon: FloppyDisk },
   { id: 'system', label: 'System', icon: GearSix },
+  { id: 'about', label: 'About', icon: Info },
 ];
 
 // ============================================================================
@@ -4752,6 +4755,7 @@ export function SettingsPage() {
       case 'goals': return <GoalsSection />;
       case 'saves': return <SavesSection />;
       case 'system': return <SystemSection />;
+      case 'about': return <AboutSection />;
       default: return <HeartbeatSection />;
     }
   };

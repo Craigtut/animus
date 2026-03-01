@@ -1,17 +1,36 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
 import { useState, useMemo } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
+import { ArrowLeft } from '@phosphor-icons/react';
 import { trpc } from '../../utils/trpc';
 import { emotionColors } from '../../styles/theme';
 import { Card } from '../ui/Card';
 import { Typography } from '../ui';
 import { EmotionSparkline } from './EmotionSparkline';
+import type { SparklinePoint } from './EmotionSparkline';
 import { useHeartbeatStore } from '../../store/heartbeat-store';
+import {
+  getEmotionDescription,
+  getIntensityBand,
+  INTENSITY_BAND_LABELS,
+  EMOTION_CATEGORIES,
+} from '@animus-labs/shared';
 import type { EmotionState, EmotionName, EmotionHistoryEntry } from '@animus-labs/shared';
 
 // ============================================================================
-// Annotated Emotional Field (reduced height for Mind page)
+// Constants
+// ============================================================================
+
+const ALL_EMOTIONS: EmotionName[] = [
+  'joy', 'contentment', 'excitement', 'gratitude', 'confidence',
+  'stress', 'anxiety', 'frustration', 'sadness', 'boredom',
+  'curiosity', 'loneliness',
+];
+
+// ============================================================================
+// Annotated Emotional Field (aura gradient)
 // ============================================================================
 
 function AnnotatedEmotionalField({ emotions }: { emotions: EmotionState[] }) {
@@ -43,8 +62,8 @@ function AnnotatedEmotionalField({ emotions }: { emotions: EmotionState[] }) {
         width: 100%;
         height: clamp(120px, 15vh, 200px);
         overflow: hidden;
-        mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
-        -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+        mask-image: linear-gradient(to bottom, transparent 0%, black 25%, black 60%, transparent 100%);
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 25%, black 60%, transparent 100%);
         margin-bottom: ${theme.spacing[6]};
       `}
     >
@@ -114,6 +133,52 @@ function AnnotatedEmotionalField({ emotions }: { emotions: EmotionState[] }) {
 }
 
 // ============================================================================
+// Single-Emotion Aura (for detail page header)
+// ============================================================================
+
+function SingleEmotionAura({ color }: { color: string }) {
+  const theme = useTheme();
+  return (
+    <div
+      aria-hidden="true"
+      css={css`
+        position: relative;
+        width: 100%;
+        height: clamp(80px, 10vh, 120px);
+        overflow: hidden;
+        mask-image: linear-gradient(to bottom, transparent 0%, black 30%, black 60%, transparent 100%);
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 30%, black 60%, transparent 100%);
+        margin-bottom: ${theme.spacing[4]};
+      `}
+    >
+      <div
+        css={css`
+          position: absolute;
+          width: 60%;
+          height: 100%;
+          top: 0;
+          left: 20%;
+          border-radius: 50%;
+          filter: blur(60px);
+          background: ${color};
+          opacity: 0.35;
+          animation: emotion-aura-pulse 3s ease-in-out infinite alternate;
+
+          @keyframes emotion-aura-pulse {
+            0% { transform: scale(1); opacity: 0.3; }
+            100% { transform: scale(1.05); opacity: 0.4; }
+          }
+
+          @media (prefers-reduced-motion: reduce) {
+            animation: none;
+          }
+        `}
+      />
+    </div>
+  );
+}
+
+// ============================================================================
 // Intensity Bar
 // ============================================================================
 
@@ -131,12 +196,12 @@ function IntensityBar({
   const baselinePercent = baseline * 100;
 
   return (
-    <div css={css`position: relative; width: 100%; height: 4px; border-radius: 2px; background: ${theme.colors.background.elevated};`}>
+    <div css={css`position: relative; width: 100%; height: 6px; border-radius: 3px; background: ${theme.colors.background.elevated};`}>
       <div
         css={css`
           height: 100%;
           width: ${fillPercent}%;
-          border-radius: 2px;
+          border-radius: 3px;
           background: ${color};
           opacity: 0.7;
           transition: width ${theme.transitions.normal};
@@ -147,58 +212,86 @@ function IntensityBar({
         css={css`
           position: absolute;
           left: ${baselinePercent}%;
-          top: -2px;
+          top: -3px;
           width: 2px;
-          height: 8px;
+          height: 12px;
           background: ${theme.colors.text.hint};
           border-radius: 1px;
           transform: translateX(-50%);
         `}
+        title={`Personality baseline: ${Math.round(baseline * 100)}%`}
       />
     </div>
   );
 }
 
 // ============================================================================
-// Emotion Card
+// Category Badge
+// ============================================================================
+
+function CategoryBadge({ category }: { category: 'positive' | 'negative' | 'drive' }) {
+  const theme = useTheme();
+  const label = category === 'positive' ? 'Positive' : category === 'negative' ? 'Negative' : 'Drive';
+  const color = category === 'positive'
+    ? theme.colors.success.main
+    : category === 'negative'
+      ? theme.colors.error.main
+      : theme.colors.accent;
+
+  return (
+    <span css={css`
+      display: inline-block;
+      font-size: ${theme.typography.fontSize.xs};
+      font-weight: ${theme.typography.fontWeight.medium};
+      color: ${color};
+      border: 1px solid ${color}33;
+      background: ${color}11;
+      padding: 1px ${theme.spacing[1.5]};
+      border-radius: ${theme.borderRadius.sm};
+      white-space: nowrap;
+    `}>
+      {label}
+    </span>
+  );
+}
+
+// ============================================================================
+// Emotion Card (list view)
 // ============================================================================
 
 interface EmotionCardProps {
   emotion: EmotionState;
   color: string;
   historyEntries: EmotionHistoryEntry[];
-  isExpanded: boolean;
-  onToggle: () => void;
 }
 
-function EmotionCard({ emotion, color, historyEntries, isExpanded, onToggle }: EmotionCardProps) {
+function EmotionCard({ emotion, color, historyEntries }: EmotionCardProps) {
   const theme = useTheme();
+  const navigate = useNavigate();
 
-  const categoryLabel = emotion.category === 'positive'
-    ? 'Positive'
-    : emotion.category === 'negative'
-      ? 'Negative'
-      : 'Drive';
-
-  const sparklineData = useMemo(() => {
+  const sparklineData = useMemo((): SparklinePoint[] => {
     if (!historyEntries.length) return [];
-    // Take last 24 entries for sparkline
-    return historyEntries.slice(-24).map((h) => ({
+    // History arrives DESC (newest first). Take 24 most recent, reverse for chronological.
+    return historyEntries.slice(0, 24).reverse().map((h) => ({
       value: h.intensityAfter,
       isSignificant: Math.abs(h.delta) >= 0.1,
     }));
   }, [historyEntries]);
 
-  const lastDelta = historyEntries.length > 0
-    ? historyEntries[historyEntries.length - 1]
-    : null;
+  const band = getIntensityBand(emotion.intensity);
+  const bandLabel = INTENSITY_BAND_LABELS[band];
+  const description = getEmotionDescription(emotion.emotion, emotion.intensity);
+  const category = EMOTION_CATEGORIES[emotion.emotion];
 
-  const recentDeltas = useMemo(() => {
-    return historyEntries.slice(-10).reverse();
-  }, [historyEntries]);
+  const lastDelta = historyEntries.length > 0 ? historyEntries[0] : null;
 
   return (
-    <Card interactive variant="elevated" padding="md" onClick={onToggle}>
+    <Card
+      interactive
+      variant="elevated"
+      padding="md"
+      onClick={() => navigate(`/mind/emotions/${emotion.emotion}`)}
+    >
       {/* Header row */}
       <div css={css`display: flex; align-items: center; justify-content: space-between; margin-bottom: ${theme.spacing[2]};`}>
         <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
@@ -209,21 +302,42 @@ function EmotionCard({ emotion, color, historyEntries, isExpanded, onToggle }: E
           `}>
             {emotion.emotion}
           </Typography.Body>
-          <Typography.Caption color="hint">
-            {categoryLabel}
-          </Typography.Caption>
+          <CategoryBadge category={category} />
         </div>
         <EmotionSparkline data={sparklineData} color={color} />
       </div>
 
       {/* Intensity bar */}
       <IntensityBar intensity={emotion.intensity} baseline={emotion.baseline} color={color} />
-      <Typography.Caption color="hint" css={css`
+
+      {/* Percentage + band label */}
+      <div css={css`
+        display: flex;
+        align-items: baseline;
+        gap: ${theme.spacing[2]};
         margin-top: ${theme.spacing[1]};
-        display: block;
       `}>
-        {emotion.intensity.toFixed(2)}
-      </Typography.Caption>
+        <Typography.Caption css={css`
+          font-weight: ${theme.typography.fontWeight.medium};
+          color: ${color};
+        `}>
+          {Math.round(emotion.intensity * 100)}%
+        </Typography.Caption>
+        <Typography.Caption color="hint">
+          {bandLabel}
+        </Typography.Caption>
+      </div>
+
+      {/* Poetic description */}
+      {band !== 'dormant' && (
+        <Typography.Caption serif italic color="secondary" css={css`
+          margin-top: ${theme.spacing[1]};
+          display: block;
+          line-height: ${theme.typography.lineHeight.normal};
+        `}>
+          {description}
+        </Typography.Caption>
+      )}
 
       {/* Last delta */}
       {lastDelta && (
@@ -231,135 +345,40 @@ function EmotionCard({ emotion, color, historyEntries, isExpanded, onToggle }: E
           margin-top: ${theme.spacing[2]};
           line-height: ${theme.typography.lineHeight.normal};
         `}>
-          {lastDelta.delta >= 0 ? '+' : ''}{lastDelta.delta.toFixed(2)} &mdash; {`"${lastDelta.reasoning}"`}
+          {lastDelta.delta >= 0 ? '+' : ''}{lastDelta.delta.toFixed(2)}: &ldquo;{lastDelta.reasoning}&rdquo;
         </Typography.SmallBody>
       )}
-
-      {/* Expanded detail */}
-      <AnimatePresence>
-        {isExpanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }}
-            css={css`overflow: hidden;`}
-          >
-            <div css={css`
-              margin-top: ${theme.spacing[4]};
-              padding-top: ${theme.spacing[4]};
-              border-top: 1px solid ${theme.colors.border.light};
-            `}>
-              {/* 7-day chart placeholder -- using larger sparkline */}
-              <div css={css`margin-bottom: ${theme.spacing[4]};`}>
-                <Typography.Caption color="hint" css={css`
-                  margin-bottom: ${theme.spacing[2]};
-                  display: block;
-                `}>
-                  History
-                </Typography.Caption>
-                <EmotionSparkline
-                  data={historyEntries.map((h) => ({
-                    value: h.intensityAfter,
-                    isSignificant: Math.abs(h.delta) >= 0.1,
-                  }))}
-                  color={color}
-                  width={280}
-                  height={60}
-                />
-              </div>
-
-              {/* Recent deltas */}
-              <Typography.Caption color="hint" css={css`
-                margin-bottom: ${theme.spacing[2]};
-                display: block;
-              `}>
-                Recent changes
-              </Typography.Caption>
-              {recentDeltas.length === 0 ? (
-                <Typography.Caption color="hint">
-                  No changes recorded yet.
-                </Typography.Caption>
-              ) : (
-                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                  {recentDeltas.map((d) => (
-                    <div key={d.id} css={css`
-                      display: flex;
-                      align-items: baseline;
-                      gap: ${theme.spacing[2]};
-                      font-size: ${theme.typography.fontSize.xs};
-                      color: ${theme.colors.text.secondary};
-                    `}>
-                      <Typography.Caption as="span" css={css`
-                        font-weight: ${theme.typography.fontWeight.medium};
-                        color: ${d.delta >= 0 ? theme.colors.success.main : theme.colors.error.main};
-                        min-width: 40px;
-                      `}>
-                        {d.delta >= 0 ? '+' : ''}{d.delta.toFixed(2)}
-                      </Typography.Caption>
-                      <Typography.Caption as="span" color="secondary" css={css`flex: 1;`}>{d.reasoning}</Typography.Caption>
-                      <Typography.Caption as="span" color="hint" css={css`white-space: nowrap;`}>
-                        Tick #{d.tickNumber}
-                      </Typography.Caption>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Baseline info */}
-              <Typography.Caption as="div" color="hint" css={css`
-                margin-top: ${theme.spacing[3]};
-              `}>
-                Personality baseline: {emotion.baseline.toFixed(2)}
-              </Typography.Caption>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </Card>
   );
 }
 
 // ============================================================================
-// Emotions Section
+// Emotions List View
 // ============================================================================
 
-const ALL_EMOTIONS: EmotionName[] = [
-  'joy', 'contentment', 'excitement', 'gratitude', 'confidence',
-  'stress', 'anxiety', 'frustration', 'sadness', 'boredom',
-  'curiosity', 'loneliness',
-];
-
-export function EmotionsSection() {
+function EmotionsList() {
   const theme = useTheme();
   const mode = theme.mode;
   const colors = emotionColors[mode];
 
-  const [expandedEmotion, setExpandedEmotion] = useState<EmotionName | null>(null);
-
-  // Fetch current emotion states
   const { data: emotionStates } = trpc.heartbeat.getEmotions.useQuery(undefined, {
     retry: false,
   });
 
-  // Fetch emotion history for sparklines
   const { data: historyData } = trpc.heartbeat.getEmotionHistory.useQuery(
     { limit: 200 },
     { retry: false },
   );
 
-  // Real-time emotion data from centralized subscription manager
   const storeEmotions = useHeartbeatStore(s => s.emotions);
   const currentEmotions = useMemo(() => {
     const base = emotionStates ?? [];
     const map = new Map<string, EmotionState>();
     for (const e of base) map.set(e.emotion, e);
-    // Merge in store (real-time) data
     for (const [key, value] of storeEmotions) map.set(key, value);
     return map;
   }, [emotionStates, storeEmotions]);
 
-  // Group history by emotion
   const historyByEmotion = useMemo(() => {
     const map = new Map<string, EmotionHistoryEntry[]>();
     for (const entry of (historyData ?? [])) {
@@ -375,7 +394,7 @@ export function EmotionsSection() {
       const state = currentEmotions.get(name);
       return state ?? {
         emotion: name,
-        category: getCategoryForEmotion(name),
+        category: EMOTION_CATEGORIES[name],
         intensity: 0.3,
         baseline: 0.3,
         lastUpdatedAt: new Date().toISOString(),
@@ -404,12 +423,6 @@ export function EmotionsSection() {
             emotion={emotion}
             color={colors[emotion.emotion as keyof typeof colors] || colors.contentment}
             historyEntries={historyByEmotion.get(emotion.emotion) ?? []}
-            isExpanded={expandedEmotion === emotion.emotion}
-            onToggle={() =>
-              setExpandedEmotion((prev) =>
-                prev === emotion.emotion ? null : (emotion.emotion as EmotionName)
-              )
-            }
           />
         ))}
       </div>
@@ -417,11 +430,310 @@ export function EmotionsSection() {
   );
 }
 
-// Helper
-function getCategoryForEmotion(name: EmotionName): 'positive' | 'negative' | 'drive' {
-  const positive = new Set(['joy', 'contentment', 'excitement', 'gratitude', 'confidence']);
-  const negative = new Set(['stress', 'anxiety', 'frustration', 'sadness', 'loneliness']);
-  if (positive.has(name)) return 'positive';
-  if (negative.has(name)) return 'negative';
-  return 'drive';
+// ============================================================================
+// Emotion Detail Page
+// ============================================================================
+
+function EmotionDetailPage({ emotionName }: { emotionName: EmotionName }) {
+  const theme = useTheme();
+  const navigate = useNavigate();
+  const mode = theme.mode;
+  const colors = emotionColors[mode];
+  const color = colors[emotionName as keyof typeof colors] || colors.contentment;
+
+  const [showCount, setShowCount] = useState(10);
+
+  // Fetch current state
+  const { data: emotionStates } = trpc.heartbeat.getEmotions.useQuery(undefined, {
+    retry: false,
+  });
+
+  // Fetch deep history for this emotion
+  const { data: historyData } = trpc.heartbeat.getEmotionHistory.useQuery(
+    { emotion: emotionName, limit: 500 },
+    { retry: false },
+  );
+
+  const storeEmotions = useHeartbeatStore(s => s.emotions);
+
+  const emotionState = useMemo((): EmotionState => {
+    const fromStore = storeEmotions.get(emotionName);
+    if (fromStore) return fromStore;
+    const fromQuery = (emotionStates ?? []).find((e) => e.emotion === emotionName);
+    if (fromQuery) return fromQuery;
+    return {
+      emotion: emotionName,
+      category: EMOTION_CATEGORIES[emotionName],
+      intensity: 0,
+      baseline: 0,
+      lastUpdatedAt: new Date().toISOString(),
+    } as EmotionState;
+  }, [emotionStates, storeEmotions, emotionName]);
+
+  // History arrives DESC (newest first)
+  const history = historyData ?? [];
+
+  const sparklineData = useMemo((): SparklinePoint[] => {
+    if (!history.length) return [];
+    // Reverse for chronological (oldest left, newest right)
+    return [...history].reverse().map((h) => ({
+      value: h.intensityAfter,
+      isSignificant: Math.abs(h.delta) >= 0.1,
+      timestamp: h.createdAt,
+      tickNumber: h.tickNumber,
+      delta: h.delta,
+      emotionName: h.emotion,
+    }));
+  }, [history]);
+
+  const band = getIntensityBand(emotionState.intensity);
+  const bandLabel = INTENSITY_BAND_LABELS[band];
+  const description = getEmotionDescription(emotionName, emotionState.intensity);
+  const category = EMOTION_CATEGORIES[emotionName];
+
+  const recentChanges = history.slice(0, showCount);
+
+  return (
+    <div>
+      {/* Back button */}
+      <button
+        onClick={() => navigate('/mind/emotions')}
+        css={css`
+          display: flex;
+          align-items: center;
+          gap: ${theme.spacing[1]};
+          font-size: ${theme.typography.fontSize.sm};
+          color: ${theme.colors.text.secondary};
+          cursor: pointer;
+          padding: ${theme.spacing[1]} 0;
+          margin-bottom: ${theme.spacing[4]};
+          transition: color ${theme.transitions.micro};
+
+          &:hover { color: ${theme.colors.text.primary}; }
+        `}
+      >
+        <ArrowLeft size={14} />
+        Back to emotions
+      </button>
+
+      {/* Single-emotion aura */}
+      <SingleEmotionAura color={color} />
+
+      {/* Emotion name + category + percentage */}
+      <div css={css`margin-bottom: ${theme.spacing[6]};`}>
+        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]}; margin-bottom: ${theme.spacing[2]};`}>
+          <Typography.Subtitle serif css={css`text-transform: capitalize;`}>
+            {emotionName}
+          </Typography.Subtitle>
+          <CategoryBadge category={category} />
+        </div>
+
+        <div css={css`display: flex; align-items: baseline; gap: ${theme.spacing[2]}; margin-bottom: ${theme.spacing[2]};`}>
+          <Typography.Body as="span" serif css={css`
+            font-size: ${theme.typography.fontSize.xl};
+            font-weight: ${theme.typography.fontWeight.semibold};
+            color: ${color};
+          `}>
+            {Math.round(emotionState.intensity * 100)}%
+          </Typography.Body>
+          <Typography.Caption color="hint" css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
+            {bandLabel}
+          </Typography.Caption>
+        </div>
+
+        {/* Poetic description */}
+        {band !== 'dormant' && (
+          <Typography.Body serif italic color="secondary" css={css`
+            line-height: ${theme.typography.lineHeight.relaxed};
+          `}>
+            {description}
+          </Typography.Body>
+        )}
+      </div>
+
+      {/* Enhanced intensity bar */}
+      <div css={css`margin-bottom: ${theme.spacing[6]};`}>
+        <IntensityBar intensity={emotionState.intensity} baseline={emotionState.baseline} color={color} />
+        <Typography.Caption color="hint" css={css`
+          margin-top: ${theme.spacing[1]};
+          display: block;
+        `}>
+          Personality baseline: {Math.round(emotionState.baseline * 100)}%
+        </Typography.Caption>
+      </div>
+
+      {/* Full interactive sparkline chart */}
+      {sparklineData.length >= 2 && (
+        <div css={css`margin-bottom: ${theme.spacing[6]};`}>
+          <Typography.Caption
+            color="hint"
+            css={css`
+              text-transform: uppercase;
+              letter-spacing: 0.05em;
+              margin-bottom: ${theme.spacing[2]};
+              display: block;
+            `}
+          >
+            History
+          </Typography.Caption>
+          <EmotionSparkline
+            data={sparklineData}
+            color={color}
+            width={560}
+            height={120}
+            interactive
+          />
+        </div>
+      )}
+
+      {/* Recent changes */}
+      <div css={css`margin-bottom: ${theme.spacing[6]};`}>
+        <Typography.Caption
+          color="hint"
+          css={css`
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: ${theme.spacing[3]};
+            display: block;
+          `}
+        >
+          Recent changes
+        </Typography.Caption>
+
+        {recentChanges.length === 0 ? (
+          <Typography.Body serif italic color="hint">
+            No changes recorded yet.
+          </Typography.Body>
+        ) : (
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+            {recentChanges.map((d) => (
+              <Card key={d.id} variant="outlined" padding="sm">
+                {/* Row 1: delta + timestamp */}
+                <div css={css`
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                  margin-bottom: ${theme.spacing[1]};
+                `}>
+                  <Typography.SmallBody css={css`
+                    font-weight: ${theme.typography.fontWeight.medium};
+                    font-family: ${theme.typography.fontFamily.mono};
+                    color: ${d.delta >= 0 ? theme.colors.success.main : theme.colors.error.main};
+                  `}>
+                    {d.delta >= 0 ? '+' : ''}{d.delta.toFixed(3)}
+                  </Typography.SmallBody>
+                  <Typography.Caption color="hint" css={css`white-space: nowrap;`}>
+                    {formatRelativeTime(d.createdAt)}
+                  </Typography.Caption>
+                </div>
+
+                {/* Row 2: reasoning */}
+                <Typography.SmallBody serif italic color="secondary" css={css`
+                  line-height: ${theme.typography.lineHeight.normal};
+                  margin-bottom: ${theme.spacing[1]};
+                `}>
+                  {d.reasoning}
+                </Typography.SmallBody>
+
+                {/* Row 3: before -> after + tick */}
+                <div css={css`
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                `}>
+                  <Typography.Caption color="hint" css={css`font-family: ${theme.typography.fontFamily.mono};`}>
+                    {Math.round(d.intensityBefore * 100)}% &rarr; {Math.round(d.intensityAfter * 100)}%
+                  </Typography.Caption>
+                  <Typography.Caption color="disabled" css={css`white-space: nowrap;`}>
+                    Tick #{d.tickNumber}
+                  </Typography.Caption>
+                </div>
+              </Card>
+            ))}
+
+            {/* Show more */}
+            {history.length > showCount && (
+              <button
+                onClick={() => setShowCount((c) => c + 20)}
+                css={css`
+                  font-size: ${theme.typography.fontSize.sm};
+                  color: ${theme.colors.text.secondary};
+                  cursor: pointer;
+                  padding: ${theme.spacing[2]} 0;
+                  text-align: center;
+                  transition: color ${theme.transitions.micro};
+
+                  &:hover { color: ${theme.colors.text.primary}; }
+                `}
+              >
+                Show more ({history.length - showCount} remaining)
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Main Export: URL-based list/detail switching
+// ============================================================================
+
+export function EmotionsSection() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const { viewMode, emotionName } = useMemo(() => {
+    const subPath = location.pathname.replace('/mind/emotions', '').replace(/^\//, '');
+    if (subPath && ALL_EMOTIONS.includes(subPath as EmotionName)) {
+      return { viewMode: 'detail' as const, emotionName: subPath as EmotionName };
+    }
+    return { viewMode: 'list' as const, emotionName: null };
+  }, [location.pathname]);
+
+  return (
+    <AnimatePresence mode="wait">
+      {viewMode === 'list' ? (
+        <motion.div
+          key="list"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+        >
+          <EmotionsList />
+        </motion.div>
+      ) : emotionName ? (
+        <motion.div
+          key={`detail-${emotionName}`}
+          initial={{ opacity: 0, x: 12 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -12 }}
+          transition={{ duration: 0.15 }}
+        >
+          <EmotionDetailPage emotionName={emotionName} />
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  );
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function formatRelativeTime(isoString: string): string {
+  const now = Date.now();
+  const then = new Date(isoString).getTime();
+  const diffMs = now - then;
+
+  if (diffMs < 60_000) return 'just now';
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(isoString).toLocaleDateString();
 }

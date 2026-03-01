@@ -14,3 +14,4 @@ export type { IEmbeddingProvider } from './embedding-provider.js';
 export type { IEncryptionService } from './encryption-service.js';
 export * from './tools/index.js';
 export { estimateTokens } from './token-utils.js';
+export * from './emotions.js';

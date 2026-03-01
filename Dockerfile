@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM node:24 AS builder
+FROM node:25 AS builder
 
 WORKDIR /app
 
@@ -51,11 +51,11 @@ RUN npm prune --omit=dev && \
       "@img/sharp-linux-${ARCH}@${SHARP_VER}"
 
 # Stage 2: Production runtime
-FROM node:24-slim AS runtime
+FROM node:25-slim AS runtime
 
 LABEL org.opencontainers.image.title="Animus Engine"
 LABEL org.opencontainers.image.description="Autonomous AI assistant with persistent inner life"
-LABEL org.opencontainers.image.source="https://github.com/animus-engine/animus"
+LABEL org.opencontainers.image.source="https://github.com/craigtut/animus"
 
 WORKDIR /app
 
