@@ -24,10 +24,6 @@ Animus is an autonomous AI assistant designed to be genuinely helpful while main
 /docs           - Documentation
 ```
 
-**Note**: Channel adapters and plugins live in the separate [animus-extensions](https://github.com/animus-engine/animus-extensions) repository.
-
-**Repository hosting**: The open-source `animus` repo is published under the personal account [`craigtut`](https://github.com/craigtut/animus). The closed-source repos (`animus-extensions`, `animus-store`) are under the [`animus-engine`](https://github.com/animus-engine) organization. npm packages are published under the `@animus-labs` scope.
-
 ### Tech Stack
 
 **Frontend:**
@@ -366,7 +362,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on sleep/energy/circadian rhythm → `/doc-explorer sleep-energy`
 - Working on agent SDKs → `/doc-explorer agents`
 - Working on Pi adapter/transformContext → `/doc-explorer pi`
-- Building a new plugin → see the `build-plugin` skill in the `animus-extensions` repo; for architecture context use `/doc-explorer plugin-system`
+- Building a new plugin → `/doc-explorer plugin-system`
 - Working on package distribution/packaging/.anpk format → `/doc-explorer package-installation` and see `docs/architecture/distribution-system.md` (workspace root) for the master overview
 - Working on backend architecture/stores/services/new modules → `/doc-explorer backend-architecture`
 - Working on backend/API → `/doc-explorer architecture`
