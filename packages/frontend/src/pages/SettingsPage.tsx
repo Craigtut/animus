@@ -4667,7 +4667,7 @@ function PasswordChangeForm({ onClose }: { onClose: () => void }) {
       return;
     }
     // TODO: Wire to auth.changePassword mutation when available
-    setError('Password change not yet implemented in backend');
+    setError('Password management will be available in a future update');
   };
 
   return (

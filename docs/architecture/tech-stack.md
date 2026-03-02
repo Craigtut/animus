@@ -546,7 +546,7 @@ Animus supports three deployment methods:
 The simplest path — clone, install, build, and run directly:
 
 ```bash
-git clone https://github.com/your-username/animus.git
+git clone https://github.com/craigtut/animus.git
 cd animus
 npm install
 npm run build:prod

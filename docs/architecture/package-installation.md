@@ -787,10 +787,6 @@ Before extraction, estimate required space (uncompressed size from ZIP headers) 
 
 ## Related Documents
 
-- [Distribution System Overview](../../../docs/architecture/distribution-system.md)
-- [Distribution Security Model](../../../docs/architecture/distribution-security.md)
-- [Package Format Specification](../../../animus-extensions/docs/architecture/package-format.md)
-- [anipack CLI Tool](../../../animus-extensions/docs/architecture/anipack-cli.md)
-- [Store Architecture](../../../animus-store/docs/architecture/store-architecture.md)
-- [Plugin System Architecture](../../../animus-extensions/docs/plugin-system.md)
-- [Channel System Architecture](../../../animus-extensions/docs/channel-packages.md)
+- [Plugin System Architecture](plugin-system.md)
+- [Channel System Architecture](channel-packages.md)
+- [Credential Passing](credential-passing.md)

@@ -3,8 +3,6 @@
 > **Status**: Implemented
 > **Date**: 2026-02-13, updated 2026-02-15
 > **Supersedes**: `docs/agents/plugin-extension-systems.md` (research doc, retained for reference)
->
-> **Note**: First-party plugins (weather, agent-browser, giphy, google-suite, home-assistant, nano-banana-pro, remotion) have moved to the [animus-extensions](https://github.com/craigtut/animus-extensions) repository.
 
 ## Executive Summary
 
@@ -52,11 +50,10 @@ MCP isn't wrong — it's the right tool for specific problems:
 
 The rule of thumb: **start with a skill and a script. Reach for MCP when the script can't solve the problem.**
 
-Our own plugins demonstrate this hierarchy:
-- **Weather**: Pure skill — teaches `curl` commands against free APIs. Zero infrastructure.
-- **Agent Browser**: Pure skill — teaches CLI commands against an external tool. The agent runs `agent-browser open`, `agent-browser snapshot`, etc.
-- **Nano Banana Pro**: Skill + bundled script — teaches the agent to invoke a Node.js script through `run_with_credentials` for credential isolation.
-- **Home Assistant**: Skill + MCP — uses Home Assistant's own MCP server over HTTP because HA exposes hundreds of entities that benefit from structured tool access and persistent connection.
+As examples of this hierarchy:
+- **Pure skill**: Teaches `curl` commands against free APIs. Zero infrastructure.
+- **Skill + bundled script**: Teaches the agent to invoke a Node.js script through `run_with_credentials` for credential isolation.
+- **Skill + MCP**: Uses an external MCP server over HTTP for services that expose many entities and benefit from structured tool access and persistent connections.
 
 This gradient — from pure documentation to bundled scripts to MCP servers — is intentional. Plugin authors should use the lightest approach that solves their problem.
 
@@ -1116,27 +1113,10 @@ User opens Settings > Plugins > "Browse Store"
 
 **`.anpk` packages** are the primary distribution format. A `.anpk` file is a signed ZIP archive containing a unified `manifest.json`, all plugin files, SHA-256 checksums, and an Ed25519 signature. Both plugins and channels use the same format.
 
-### Repository Layout
-
-The engine separates built-in plugins (ship with engine) from first-party plugins (developed separately in [animus-extensions](https://github.com/craigtut/animus-extensions)):
+### Plugin Sources
 
 - **Built-in** (`packages/backend/plugins/`): Ship with the engine. Auto-discovered at startup. Can be disabled but not uninstalled.
-- **First-party** ([animus-extensions](https://github.com/craigtut/animus-extensions) repo): Built by the Animus team, packaged as `.anpk` files via the `anipack` CLI, distributed through the Animus Store. Users must explicitly install them.
-
-First-party plugins are built from source in `animus-extensions/plugins/` using `anipack build`, which produces signed `.anpk` archives for distribution.
-
-### Distribution Documents
-
-For complete specifications, see:
-
-| Topic | Document |
-|-------|----------|
-| System overview & implementation roadmap | `../../docs/architecture/distribution-system.md` |
-| `.anpk` format, manifest schema, checksums | `../../animus-extensions/docs/architecture/package-format.md` |
-| `anipack` CLI (build, sign, publish) | `../../animus-extensions/docs/architecture/anipack-cli.md` |
-| Security model (signing, threats, verification) | `../../docs/architecture/distribution-security.md` |
-| Store API, Polar.sh payments, CDN | `../../animus-store/docs/architecture/store-architecture.md` |
-| Engine install flow, rollback, updates, AI self-install | `docs/architecture/package-installation.md` |
+- **Installed** (`data/packages/plugins/`): Installed by the user from `.anpk` packages or local directory paths. Can be installed, configured, enabled, disabled, and removed at any time.
 
 ---
 
@@ -1424,133 +1404,16 @@ export type PluginMcpServer = z.infer<typeof PluginMcpServerSchema>;
 | **Hot-swap** | Complete (EventBus `plugin:changed`, session invalidation) | Plugin Manager + Heartbeat |
 | **`run_with_credentials`** | Complete (subprocess credential injection, provider key stripping) | `packages/backend/src/tools/handlers/run-with-credentials.ts` |
 
-### First-Party Plugins Shipped
-
-Four reference plugins demonstrate the full spectrum of plugin patterns:
-
-| Plugin | Pattern | Components | Requires Config |
-|--------|---------|------------|-----------------|
-| **Weather** | Pure skill (CLI docs) | 1 skill | No |
-| **Agent Browser** | Pure skill (CLI docs) | 1 skill | No |
-| **Nano Banana Pro** | Skill + bundled script + credentials | 1 skill, 1 script | Yes (API key) |
-| **Home Assistant** | Skill + MCP + credentials | 1 skill, 1 MCP server | Yes (URL + token) |
-
 ### Not Yet Implemented
 
 | Feature | Priority | Notes |
 |---------|----------|-------|
 | **Package distribution (.anpk)** | Designed | Full architecture specified — see `docs/architecture/package-installation.md` |
-| **Store API & browser** | Designed | See `../../animus-store/docs/architecture/store-architecture.md` |
+| **Store API & browser** | Designed | Store integration for browsing and installing packages |
 | **AI self-installation** | Designed | `browse_packages` / `install_package` / `uninstall_package` MCP tools — see `docs/architecture/package-installation.md` |
 | **Watcher tick enqueue** | Low | Watcher processes spawn but don't enqueue heartbeat ticks yet (TODO in code) |
 | **Container isolation** | Future | Docker-based sandbox for untrusted plugins |
 | **Dependency resolution** | Future | Check `dependencies.plugins` at install time |
-
-## Plugin Gallery: Real-World Examples
-
-These four plugins live in the [animus-extensions](https://github.com/craigtut/animus-extensions) repository as reference implementations. They demonstrate the skills-first philosophy in practice — ordered from simplest to most complex.
-
-### Weather (Pure Skill — Zero Infrastructure)
-
-The simplest possible plugin. A single SKILL.md that teaches the agent to use `curl` against free weather APIs.
-
-```
-plugins/weather/
-├── plugin.json          # Manifest: just a skill, no config needed
-├── icon.svg
-└── skills/
-    └── weather/
-        └── SKILL.md     # Teaches curl commands for wttr.in and Open-Meteo
-```
-
-**Why it works as a skill**: Weather data is a simple HTTP GET. The agent already knows `curl`. The SKILL.md documents the URL patterns and format codes — that's all the agent needs. An MCP server for this would add thousands of tokens of tool schema for the same result.
-
-**Token cost**: ~200 tokens for the skill metadata + full instructions. An equivalent MCP server would consume ~3,000+ tokens for tool definitions.
-
-### Agent Browser (Pure Skill — External CLI Docs)
-
-Teaches the agent to use the `agent-browser` CLI tool for browser automation. The tool is installed globally (`npm install -g agent-browser`), and the skill is pure documentation.
-
-```
-plugins/agent-browser/
-├── plugin.json
-├── icon.svg
-└── skills/
-    └── agent-browser/
-        ├── SKILL.md          # Core workflow: open → snapshot → interact → re-snapshot
-        ├── references/       # Deep-dive docs loaded on demand
-        │   ├── commands.md
-        │   ├── snapshot-refs.md
-        │   ├── session-management.md
-        │   └── ...
-        └── templates/        # Ready-to-use shell scripts
-            ├── form-automation.sh
-            └── ...
-```
-
-**Why it works as a skill**: This is the blog-post pattern in action. Instead of an MCP server with tools like `browser_navigate`, `browser_click`, `browser_screenshot` (each consuming context tokens for schemas), the skill teaches the agent shell commands: `agent-browser open <url>`, `agent-browser click @e1`. The agent composes commands naturally through Bash, and only the output enters the context window.
-
-**Contrast with Playwright MCP**: Playwright's MCP server defines 20+ tools consuming ~14,000 tokens. The agent-browser skill achieves equivalent capability with ~800 tokens of instructions. The `references/` directory provides deep-dive docs that the SDK loads on-demand only when needed — progressive disclosure in action.
-
-### Nano Banana Pro (Skill + Script + Credentials)
-
-Image generation using Google's Gemini 3 Pro. A skill teaches the agent how to invoke a bundled Node.js script, and credentials are handled through `run_with_credentials`.
-
-```
-plugins/nano-banana-pro/
-├── plugin.json
-├── config.schema.json        # Declares GEMINI_API_KEY (secret, required)
-├── icon.svg
-└── skills/
-    └── nano-banana-pro/
-        ├── SKILL.md           # Documents run_with_credentials usage
-        └── scripts/
-            └── generate-image.js  # Self-contained Node.js script
-```
-
-**Key pattern — `run_with_credentials`**: The SKILL.md teaches the agent to call the built-in `run_with_credentials` tool, which injects the API key as an environment variable into the script's subprocess. The agent never sees the raw API key — it only knows the credential reference (`nano-banana-pro.GEMINI_API_KEY`).
-
-```
-run_with_credentials({
-  command: "node plugins/nano-banana-pro/scripts/generate-image.js --prompt \"...\"",
-  credentialRef: "nano-banana-pro.GEMINI_API_KEY",
-  envVar: "GEMINI_API_KEY"
-})
-```
-
-**Why not MCP**: A single script with a few CLI flags is simpler than an MCP server. The credential isolation comes from `run_with_credentials`, not MCP transport. MCP would be warranted if the image generation needed persistent state (batch queues, progress tracking) — it doesn't.
-
-### Home Assistant (Skill + MCP + Credentials)
-
-Smart home control using Home Assistant's own MCP server. This is the one case where MCP is the right choice — HA exposes hundreds of entities through a structured API with persistent HTTP connection.
-
-```
-plugins/home-assistant/
-├── plugin.json
-├── config.schema.json         # HA_URL (text) + HA_ACCESS_TOKEN (secret)
-├── icon.svg
-├── skills/
-│   └── home-assistant/
-│       └── SKILL.md           # Teaches device control patterns
-└── tools.json                 # MCP server definition with ${config.*}
-```
-
-**MCP config with credential resolution**:
-```json
-{
-  "ha": {
-    "type": "http",
-    "url": "${config.HA_URL}/api/mcp",
-    "headers": {
-      "Authorization": "Bearer ${config.HA_ACCESS_TOKEN}"
-    }
-  }
-}
-```
-
-**Why MCP here**: Home Assistant exposes 100+ device entities, each with different capabilities (lights, switches, sensors, climate, media). The HA team already built and maintains an MCP server. The persistent HTTP connection means the agent doesn't re-authenticate on every call. And the structured tool definitions let the agent discover available devices without the skill needing to enumerate them.
-
-**The skill still matters**: Even with MCP providing the tools, the SKILL.md teaches the agent *how to think about* home automation — common patterns, device naming conventions, safety considerations. The MCP gives capability; the skill gives judgment.
 
 ---
 
@@ -1648,11 +1511,6 @@ System prompt injection was the previous approach but has critical flaws:
 - `docs/architecture/channel-packages.md` — Channel system architecture, config pattern (encrypted config, typed schemas, dynamic UI forms)
 - `docs/architecture/package-installation.md` — Package install flow, rollback, updates, AI self-management
 - `docs/agents/architecture-overview.md` — Adapter interface, session lifecycle
-- `../../docs/architecture/distribution-system.md` — Distribution system master overview
-- `../../docs/architecture/distribution-security.md` — Security model (signing, integrity, threats)
-- `../../animus-extensions/docs/architecture/package-format.md` — `.anpk` format specification
-- `../../animus-extensions/docs/architecture/anipack-cli.md` — `anipack` CLI tool
-- `../../animus-store/docs/architecture/store-architecture.md` — Store API, Polar.sh payments, CDN
 
 ### External References
 - [Agent Skills — agentskills.io](https://agentskills.io/home) (cross-vendor standard)
@@ -1677,6 +1535,4 @@ System prompt injection was the previous approach but has critical flaws:
 
 *Architecture v3: 2026-02-14 — Added hot-swap lifecycle, session invalidation, plugin sources & installation, monorepo layout, dynamic configuration (channels pattern), provider switching, handler timeouts, script dependencies, decision name collisions*
 
-*Architecture v4: 2026-02-15 — Marked as implemented. Added Skills-First Philosophy section (token efficiency, composability, self-modification principles). Replaced implementation plan with implementation status table. Added Plugin Gallery with real-world examples (weather, agent-browser, nano-banana-pro, home-assistant) demonstrating the skills-first gradient. See also: the `build-plugin` skill in [animus-extensions](https://github.com/craigtut/animus-extensions) for a practical plugin-building guide.*
-
-*Architecture v4.1: 2026-02-21 — Updated repository layout to reflect first-party plugins and channels moving to the [animus-extensions](https://github.com/craigtut/animus-extensions) repository.*
+*Architecture v4: 2026-02-15 — Marked as implemented. Added Skills-First Philosophy section (token efficiency, composability, self-modification principles). Replaced implementation plan with implementation status table.*

@@ -5,7 +5,7 @@
  * in a single manifest format. The `anipack` CLI normalizes plugin.json /
  * channel.json into this unified manifest.json at build time.
  *
- * See: animus-extensions/docs/architecture/package-format.md
+ * See: docs/architecture/package-installation.md
  */
 
 import { z } from 'zod';

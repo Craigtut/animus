@@ -263,7 +263,7 @@ rm data/databases/heartbeat.db
 
 ## Configuring Agent Providers
 
-Animus supports three agent providers: Claude (default), Codex, and OpenCode. Configure your preferred provider and API keys through the Settings page after first launch.
+Animus supports multiple agent providers, including Claude (default) and Codex. Configure your preferred provider and API keys through the Settings page after first launch.
 
 ## Next Steps
 

@@ -24,7 +24,9 @@ Animus is an autonomous AI assistant designed to be genuinely helpful while main
 /docs           - Documentation
 ```
 
-**Note**: Channel adapters and plugins live in the separate [animus-extensions](https://github.com/craigtut/animus-extensions) repository.
+**Note**: Channel adapters and plugins live in the separate [animus-extensions](https://github.com/animus-engine/animus-extensions) repository.
+
+**Repository hosting**: The open-source `animus` repo is published under the personal account [`craigtut`](https://github.com/craigtut/animus). The closed-source repos (`animus-extensions`, `animus-store`) are under the [`animus-engine`](https://github.com/animus-engine) organization. npm packages are published under the `@animus-labs` scope.
 
 ### Tech Stack
 

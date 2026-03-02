@@ -3,8 +3,6 @@
 > **Status**: Architecture finalized
 > **Date**: 2026-02-13, updated 2026-02-14
 > **Single source of truth** for the Animus channel system — packaging, protocol, isolation, and lifecycle.
->
-> **Note**: Reference channel implementations (twilio-sms, discord, api-compat) have moved to the [animus-extensions](https://github.com/craigtut/animus-extensions) repository. The channel SDK is published as `@animus-labs/channel-sdk` on npm.
 
 How Animus receives messages from the outside world and sends responses back through multiple communication channels. The channel adapter layer sits between external protocols (Twilio webhooks, Discord WebSocket, HTTP API endpoints, the web UI) and the heartbeat pipeline, normalizing everything into a common format.
 
@@ -14,9 +12,7 @@ The web channel is built directly into the backend — always on, no installatio
 
 ### Where channel packages live
 
-Channel packages are standalone directories that can exist **anywhere on disk**. They are **not part of the Animus engine**. When a user installs a channel, they point the Channel Manager at the directory path — the directory stays where it is.
-
-Reference channel implementations (SMS, Discord, API-compat) live in the [animus-extensions](https://github.com/craigtut/animus-extensions) repository. They are **not bundled into the engine** — they are independent packages that follow the exact same format and install process as any community-built channel. A user must install them via Settings > Channels > Install by pointing at the directory path.
+Channel packages are standalone directories that can exist **anywhere on disk**. They are **not part of the Animus engine**. When a user installs a channel, they point the Channel Manager at the directory path. There is no distinction between first-party and community-built channels at the engine level.
 
 - **`packages/channel-sdk/`** is a types-only package published as [`@animus-labs/channel-sdk`](https://www.npmjs.com/package/@animus-labs/channel-sdk) on npm. It provides `AdapterContext`, `ChannelAdapter`, and related types for channel adapter authors. It's a `devDependency` — types are erased at compile time, so compiled adapters have zero imports from it.
 
@@ -167,7 +163,7 @@ twilio-sms/
     icon.png              # Channel icon (required, 256x256 PNG)
 ```
 
-> **Distribution format**: For store distribution, channels are packaged as `.anpk` (ANimus PacKage) files — signed ZIP archives containing a unified `manifest.json` that wraps the channel-specific fields below. See `../../animus-extensions/docs/architecture/package-format.md` for the `.anpk` specification and unified manifest schema. The `channel.json` format described here remains the source format used during development.
+> **Distribution format**: For store distribution, channels are packaged as `.anpk` (ANimus PacKage) files, signed ZIP archives containing a unified `manifest.json` that wraps the channel-specific fields below. The `channel.json` format described here remains the source format used during development.
 
 ### Channel Manifest (`channel.json`)
 
@@ -1213,113 +1209,6 @@ The `performAction` method on `ChannelAdapter` is an optional extension point fo
 
 ---
 
-## Channel Reference Specs
-
-Implementation reference for channel package developers. These specs describe the external protocols and APIs that each channel adapter must interact with.
-
-### SMS (Twilio)
-
-**Protocol**: HTTP webhooks (inbound), REST API (outbound)
-**Dependencies**: `twilio` npm package
-
-**Inbound flow:**
-1. User sends SMS → Twilio sends POST webhook to `/channels/sms/webhook`
-2. **Signature validation**: Every request validated using `Twilio.validateRequest()` with auth token. `X-Twilio-Signature` header contains HMAC-SHA1 of URL + body. Requires `rawBody` from RouteRequest.
-3. Extract content from `Body` param, sender from `From` param (E.164 format)
-4. Check for MMS media: if `NumMedia > 0`, download each `MediaUrl{N}` via `ctx.downloadMedia()` (Twilio media URLs require HTTP Basic Auth: Account SID + Auth Token)
-5. Call `ctx.reportIncoming()` with identifier, content, media
-6. Return empty TwiML `<Response/>` to Twilio (replies sent separately via API)
-
-**Outbound**: `client.messages.create({ body, from: animusNumber, to: contactNumber })`
-
-**Configuration fields**: `accountSid`, `authToken` (secret), `phoneNumber`, `webhookUrl`
-
-**Notes**: Plain text only, 1600 char limit, publicly accessible webhook URL required.
-
-### Discord
-
-**Protocol**: WebSocket gateway (persistent connection)
-**Dependencies**: `discord.js` v14
-
-**Bot setup**: Requires Discord Application with Bot user. Gateway intents: `Guilds`, `GuildMessages`, `MessageContent` (privileged), `DirectMessages`. Partials: `Channel` (for DM support).
-
-**Inbound flow:**
-1. Bot receives `messageCreate` event via WebSocket
-2. Skip if `message.author.bot === true`
-3. Extract sender ID: `message.author.id` (stable numeric string)
-4. Determine conversation scope: DMs use `channel.id`, server channels use `channel.id`, threads use thread `channel.id`
-5. In server channels: only respond when mentioned (`@Animus`) or in threads the bot participates in
-6. Call `ctx.reportIncoming()` with identifier, content, conversationId
-
-**Outbound**: `message.reply(content)` or `channel.send(content)`
-
-**Formatting**: Discord supports markdown (bold, italic, code blocks, lists).
-
-**Bot presence**: Set status to `online` when heartbeat running, `idle` when stopped.
-
-**Configuration fields**: `botToken` (secret), `applicationId`, `allowedGuildIds` (text-list, optional)
-
-### OpenAI-Compatible API
-
-**Protocol**: HTTP REST API implementing the OpenAI Chat Completions spec
-**Namespace**: `/channels/api/openai/v1/...`
-
-**Endpoints:**
-- `GET /models` — Returns `[{ id: "animus", object: "model", ... }]`
-- `POST /chat/completions` — Chat completions (streaming or non-streaming)
-
-**Stateless design**: Extracts only the last user message from `messages` array. Animus maintains its own conversation state. System message is ignored.
-
-**Streaming (SSE)** when `stream: true`:
-```
-Content-Type: text/event-stream
-
-data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","choices":[{"delta":{"role":"assistant","content":""},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-xxx","object":"chat.completion.chunk","choices":[{"delta":{},"finish_reason":"stop"}]}
-
-data: [DONE]
-```
-
-Uses `route_response_stream_start` + `route_response_chunk` + `route_response_end` IPC messages.
-
-**Non-streaming**: Standard `chat.completion` JSON response with `message` (not `delta`).
-
-**Content format**: Handles both string and array (multimodal) format for `content` field.
-
-**Auth & contact resolution**: No API key auth currently. Maps to primary contact.
-
-### Ollama-Compatible API
-
-**Protocol**: HTTP REST API implementing the Ollama spec
-**Namespace**: `/channels/api/ollama/...`
-
-**Endpoints:**
-- `GET /api/tags` — Model discovery
-- `POST /api/chat` — Chat completion (primary)
-- `POST /api/generate` — Text generation (legacy)
-
-**Streaming (NDJSON)** — **NOT SSE**:
-```
-Content-Type: application/x-ndjson
-
-{"model":"animus","created_at":"...","message":{"role":"assistant","content":"Hello"},"done":false}
-{"model":"animus","created_at":"...","message":{"role":"assistant","content":"!"},"done":false}
-{"model":"animus","created_at":"...","message":{"role":"assistant","content":""},"done":true,"total_duration":0}
-```
-
-Key differences from OpenAI: no `data: ` prefix, `done: true` instead of `[DONE]`, `message.content` instead of `delta.content`.
-
-For `/api/generate`, uses `response` field instead of `message`.
-
-**Home Assistant integration**: HA supports both Ollama and OpenAI conversation integrations. User configures HA to point at `http://<animus-host>:<port>/channels/api/ollama` or `http://<animus-host>:<port>/channels/api/openai/v1`.
-
-**Auth & contact resolution**: Same as OpenAI — no auth, maps to primary contact.
-
----
-
 ## References
 
 - `docs/architecture/plugin-system.md` — Plugin architecture (shared concepts: manifests, installation UX, store distribution)
@@ -1329,8 +1218,3 @@ For `/api/generate`, uses `response` field instead of `message`.
 - `docs/architecture/tech-stack.md` — Database architecture, Encryption Service, Fastify server
 - `docs/architecture/voice-channel.md` — Voice channel (built on top of the API channel)
 - `docs/architecture/package-installation.md` — Package install flow, rollback, updates, AI self-management
-- `../../docs/architecture/distribution-system.md` — Distribution system master overview
-- `../../docs/architecture/distribution-security.md` — Security model (signing, integrity, threats)
-- `../../animus-extensions/docs/architecture/package-format.md` — `.anpk` format specification (unified manifest)
-- `../../animus-extensions/docs/architecture/anipack-cli.md` — `anipack` CLI tool
-- `../../animus-store/docs/architecture/store-architecture.md` — Store API, Polar.sh payments, CDN
