@@ -51,6 +51,7 @@ import { Upload, ArrowCounterClockwise } from '@phosphor-icons/react';
 import { AnpkDropZone } from '../components/settings/AnpkDropZone';
 import { AboutSection } from '../components/settings/AboutSection';
 import { toast } from '../store/toast-store';
+import DOMPurify from 'dompurify';
 
 // ============================================================================
 // Types
@@ -3762,7 +3763,7 @@ function PluginsSection() {
                           justify-content: center;
                           & svg { width: 100%; height: 100%; }
                         `}
-                        dangerouslySetInnerHTML={{ __html: plugin.iconSvg }}
+                        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(plugin.iconSvg, { USE_PROFILES: { svg: true, svgFilters: true } }) }}
                       />
                     )}
                     <div css={css`display: flex; align-items: baseline; gap: ${theme.spacing[1.5]};`}>

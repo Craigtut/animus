@@ -24,7 +24,7 @@ Animus is an autonomous AI assistant designed to be genuinely helpful while main
 /docs           - Documentation
 ```
 
-**Note**: Channel adapters and plugins live in the separate [animus-extensions](https://github.com/animus-engine/animus-extensions) repository.
+**Note**: Channel adapters and plugins live in the separate [animus-extensions](https://github.com/craigtut/animus-extensions) repository.
 
 ### Tech Stack
 

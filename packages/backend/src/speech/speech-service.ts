@@ -10,6 +10,7 @@ import path from 'node:path';
 import { STTEngine } from './stt-engine.js';
 import { TTSEngine, type TTSEngineConfig } from './tts-engine.js';
 import { VoiceManager } from './voice-manager.js';
+import { checkFfmpeg } from './audio-utils.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('SpeechService', 'speech');
@@ -22,6 +23,7 @@ export interface SpeechServiceConfig {
 export interface SpeechStatus {
   sttAvailable: boolean;
   ttsAvailable: boolean;
+  ffmpegAvailable: boolean;
   voiceCount: number;
 }
 
@@ -29,6 +31,10 @@ export class SpeechService {
   readonly stt: STTEngine;
   readonly tts: TTSEngine;
   readonly voices: VoiceManager;
+  private _ffmpegAvailable = false;
+
+  /** Set after async ffmpeg check during init. */
+  set ffmpegAvailable(value: boolean) { this._ffmpegAvailable = value; }
 
   constructor(config: SpeechServiceConfig) {
     const modelsPath = path.join(config.dataDir, 'models');
@@ -49,6 +55,7 @@ export class SpeechService {
     return {
       sttAvailable: this.stt.isAvailable(),
       ttsAvailable: this.tts.isAvailable(),
+      ffmpegAvailable: this._ffmpegAvailable,
       voiceCount: this.voices.listVoices().length,
     };
   }
@@ -84,8 +91,15 @@ export async function initSpeechService(config: SpeechServiceConfig): Promise<Sp
   instance = new SpeechService(config);
   await instance.voices.initialize();
 
+  // Check ffmpeg availability (needed for audio format conversion)
+  const ffmpegOk = await checkFfmpeg();
+  instance.ffmpegAvailable = ffmpegOk;
+  if (!ffmpegOk) {
+    log.warn('ffmpeg not found: audio format conversion (WebM to PCM, WAV to OGG) will not work');
+  }
+
   const status = instance.getStatus();
-  log.debug(`Speech service initialized — STT: ${status.sttAvailable ? 'available' : 'not available'}, TTS: ${status.ttsAvailable ? 'available' : 'not available'}, Voices: ${status.voiceCount}`);
+  log.info(`Speech service initialized: STT ${status.sttAvailable ? 'ready' : 'unavailable'}, TTS ${status.ttsAvailable ? 'ready' : 'unavailable'}, ffmpeg ${ffmpegOk ? 'yes' : 'no'}, voices ${status.voiceCount}`);
 
   return instance;
 }

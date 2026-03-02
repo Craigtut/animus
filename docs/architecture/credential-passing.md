@@ -368,7 +368,7 @@ Channel packages (Discord, SMS, etc.) receive decrypted config via IPC, not envi
 
 ### Config Schema
 
-Same format as plugins. Example (from the Discord channel in [animus-extensions](https://github.com/animus-engine/animus-extensions)):
+Same format as plugins. Example (from the Discord channel in [animus-extensions](https://github.com/craigtut/animus-extensions)):
 
 ```json
 {

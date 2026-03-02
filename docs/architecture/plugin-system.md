@@ -4,7 +4,7 @@
 > **Date**: 2026-02-13, updated 2026-02-15
 > **Supersedes**: `docs/agents/plugin-extension-systems.md` (research doc, retained for reference)
 >
-> **Note**: First-party plugins (weather, agent-browser, giphy, google-suite, home-assistant, nano-banana-pro, remotion) have moved to the [animus-extensions](https://github.com/animus-engine/animus-extensions) repository.
+> **Note**: First-party plugins (weather, agent-browser, giphy, google-suite, home-assistant, nano-banana-pro, remotion) have moved to the [animus-extensions](https://github.com/craigtut/animus-extensions) repository.
 
 ## Executive Summary
 
@@ -1118,10 +1118,10 @@ User opens Settings > Plugins > "Browse Store"
 
 ### Repository Layout
 
-The engine separates built-in plugins (ship with engine) from first-party plugins (developed separately in [animus-extensions](https://github.com/animus-engine/animus-extensions)):
+The engine separates built-in plugins (ship with engine) from first-party plugins (developed separately in [animus-extensions](https://github.com/craigtut/animus-extensions)):
 
 - **Built-in** (`packages/backend/plugins/`): Ship with the engine. Auto-discovered at startup. Can be disabled but not uninstalled.
-- **First-party** ([animus-extensions](https://github.com/animus-engine/animus-extensions) repo): Built by the Animus team, packaged as `.anpk` files via the `anipack` CLI, distributed through the Animus Store. Users must explicitly install them.
+- **First-party** ([animus-extensions](https://github.com/craigtut/animus-extensions) repo): Built by the Animus team, packaged as `.anpk` files via the `anipack` CLI, distributed through the Animus Store. Users must explicitly install them.
 
 First-party plugins are built from source in `animus-extensions/plugins/` using `anipack build`, which produces signed `.anpk` archives for distribution.
 
@@ -1448,7 +1448,7 @@ Four reference plugins demonstrate the full spectrum of plugin patterns:
 
 ## Plugin Gallery: Real-World Examples
 
-These four plugins live in the [animus-extensions](https://github.com/animus-engine/animus-extensions) repository as reference implementations. They demonstrate the skills-first philosophy in practice — ordered from simplest to most complex.
+These four plugins live in the [animus-extensions](https://github.com/craigtut/animus-extensions) repository as reference implementations. They demonstrate the skills-first philosophy in practice — ordered from simplest to most complex.
 
 ### Weather (Pure Skill — Zero Infrastructure)
 
@@ -1677,6 +1677,6 @@ System prompt injection was the previous approach but has critical flaws:
 
 *Architecture v3: 2026-02-14 — Added hot-swap lifecycle, session invalidation, plugin sources & installation, monorepo layout, dynamic configuration (channels pattern), provider switching, handler timeouts, script dependencies, decision name collisions*
 
-*Architecture v4: 2026-02-15 — Marked as implemented. Added Skills-First Philosophy section (token efficiency, composability, self-modification principles). Replaced implementation plan with implementation status table. Added Plugin Gallery with real-world examples (weather, agent-browser, nano-banana-pro, home-assistant) demonstrating the skills-first gradient. See also: the `build-plugin` skill in [animus-extensions](https://github.com/animus-engine/animus-extensions) for a practical plugin-building guide.*
+*Architecture v4: 2026-02-15 — Marked as implemented. Added Skills-First Philosophy section (token efficiency, composability, self-modification principles). Replaced implementation plan with implementation status table. Added Plugin Gallery with real-world examples (weather, agent-browser, nano-banana-pro, home-assistant) demonstrating the skills-first gradient. See also: the `build-plugin` skill in [animus-extensions](https://github.com/craigtut/animus-extensions) for a practical plugin-building guide.*
 
-*Architecture v4.1: 2026-02-21 — Updated repository layout to reflect first-party plugins and channels moving to the [animus-extensions](https://github.com/animus-engine/animus-extensions) repository.*
+*Architecture v4.1: 2026-02-21 — Updated repository layout to reflect first-party plugins and channels moving to the [animus-extensions](https://github.com/craigtut/animus-extensions) repository.*

@@ -23,6 +23,11 @@ vi.mock('../../src/lib/logger.js', () => ({
   }),
 }));
 
+// Mock checkFfmpeg (avoid spawning real ffmpeg in tests)
+vi.mock('../../src/speech/audio-utils.js', () => ({
+  checkFfmpeg: vi.fn().mockResolvedValue(false),
+}));
+
 import {
   SpeechService,
   getSpeechService,
@@ -92,6 +97,7 @@ describe('SpeechService', () => {
       expect(status).toEqual({
         sttAvailable: false, // no model files in temp dir
         ttsAvailable: false,
+        ffmpegAvailable: false, // mocked to false
         voiceCount: 0,
       });
     });

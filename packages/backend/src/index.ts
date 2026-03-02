@@ -418,6 +418,13 @@ async function main() {
     }
   });
 
+  // Log permanent download failures (all retries exhausted)
+  getEventBus().on('download:failed', (payload) => {
+    if (payload.retriesRemaining === 0) {
+      log.error(`Download permanently failed: ${payload.label} (${payload.category}) - ${payload.error}`);
+    }
+  });
+
   // Initialize channel manager (after plugins, before heartbeat)
   const { getChannelManager } = await import('./channels/channel-manager.js');
 
@@ -464,6 +471,7 @@ async function main() {
 
   const pluginStats = pluginManager.getRuntimeStats();
   const channelStats = channelManager.getRuntimeStats();
+  const speechStatus = speechService.getStatus();
   const startupSummary = formatStartupSummary({
     dbCount: DATABASE_COUNT,
     credentialsStored: credentialSummary.storedCount,
@@ -475,6 +483,9 @@ async function main() {
     toolsSeeded: seededToolPermissions,
     channelsInstalled: channelStats.installed,
     channelsRunning: channelStats.running,
+    speechSttReady: speechStatus.sttAvailable,
+    speechTtsReady: speechStatus.ttsAvailable,
+    speechFfmpegAvailable: speechStatus.ffmpegAvailable,
     resumedAfterRestart: heartbeatInit.resumedAfterRestart,
     nextTickInMs: heartbeatInit.nextTickInMs,
     startupMs: Date.now() - startupStartedAt,

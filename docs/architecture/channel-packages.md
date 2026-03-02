@@ -4,7 +4,7 @@
 > **Date**: 2026-02-13, updated 2026-02-14
 > **Single source of truth** for the Animus channel system — packaging, protocol, isolation, and lifecycle.
 >
-> **Note**: Reference channel implementations (twilio-sms, discord, api-compat) have moved to the [animus-extensions](https://github.com/animus-engine/animus-extensions) repository. The channel SDK is published as `@animus-labs/channel-sdk` on npm.
+> **Note**: Reference channel implementations (twilio-sms, discord, api-compat) have moved to the [animus-extensions](https://github.com/craigtut/animus-extensions) repository. The channel SDK is published as `@animus-labs/channel-sdk` on npm.
 
 How Animus receives messages from the outside world and sends responses back through multiple communication channels. The channel adapter layer sits between external protocols (Twilio webhooks, Discord WebSocket, HTTP API endpoints, the web UI) and the heartbeat pipeline, normalizing everything into a common format.
 
@@ -16,7 +16,7 @@ The web channel is built directly into the backend — always on, no installatio
 
 Channel packages are standalone directories that can exist **anywhere on disk**. They are **not part of the Animus engine**. When a user installs a channel, they point the Channel Manager at the directory path — the directory stays where it is.
 
-Reference channel implementations (SMS, Discord, API-compat) live in the [animus-extensions](https://github.com/animus-engine/animus-extensions) repository. They are **not bundled into the engine** — they are independent packages that follow the exact same format and install process as any community-built channel. A user must install them via Settings > Channels > Install by pointing at the directory path.
+Reference channel implementations (SMS, Discord, API-compat) live in the [animus-extensions](https://github.com/craigtut/animus-extensions) repository. They are **not bundled into the engine** — they are independent packages that follow the exact same format and install process as any community-built channel. A user must install them via Settings > Channels > Install by pointing at the directory path.
 
 - **`packages/channel-sdk/`** is a types-only package published as [`@animus-labs/channel-sdk`](https://www.npmjs.com/package/@animus-labs/channel-sdk) on npm. It provides `AdapterContext`, `ChannelAdapter`, and related types for channel adapter authors. It's a `devDependency` — types are erased at compile time, so compiled adapters have zero imports from it.
 

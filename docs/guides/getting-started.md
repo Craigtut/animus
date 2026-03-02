@@ -13,7 +13,7 @@ This guide will help you set up Animus for local development.
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/animus.git
+git clone https://github.com/craigtut/animus.git
 cd animus
 ```
 
@@ -33,22 +33,7 @@ Copy the environment template:
 cp .env.example .env
 ```
 
-The `.env` file configures server settings and optional API keys:
-
-```bash
-# Server
-NODE_ENV=development
-PORT=3000
-HOST=0.0.0.0
-LOG_LEVEL=info
-
-# Data directory (optional — defaults to ./data/ relative to project root)
-# ANIMUS_DATA_DIR=/custom/path/to/data
-
-# Agent API Keys (optional — configure via Settings UI or here)
-ANTHROPIC_API_KEY=your-anthropic-key
-OPENAI_API_KEY=your-openai-key
-```
+The `.env` file configures server settings. The defaults work out of the box for local development. API keys and agent providers are configured through the Settings UI after first launch.
 
 Secrets (`ANIMUS_ENCRYPTION_KEY`, `JWT_SECRET`) are **auto-generated** on first startup and stored in `data/.secrets`. You do not need to set them manually. See `docs/architecture/data-directory.md` for the full data layout.
 
@@ -278,23 +263,7 @@ rm data/databases/heartbeat.db
 
 ## Configuring Agent Providers
 
-Animus supports three agent providers. Configure API keys in `.env` or through the Settings page.
-
-### Claude (Default)
-
-```bash
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-### Codex
-
-```bash
-OPENAI_API_KEY=sk-...
-```
-
-### OpenCode
-
-OpenCode requires a running OpenCode server. See [OpenCode documentation](https://opencode.ai/docs/sdk/).
+Animus supports three agent providers: Claude (default), Codex, and OpenCode. Configure your preferred provider and API keys through the Settings page after first launch.
 
 ## Next Steps
 

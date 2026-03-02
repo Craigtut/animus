@@ -779,7 +779,7 @@ function buildShortTermMemorySection(params: {
         if (m.attachments && m.attachments.length > 0) {
           const summary = m.attachments.map((a) => {
             const name = a.originalFilename || a.type;
-            return `${name} (${a.mimeType})`;
+            return `${name} (${a.mimeType}, path: ${a.localPath})`;
           }).join(', ');
           line += ` [attachments: ${summary}]`;
         }
