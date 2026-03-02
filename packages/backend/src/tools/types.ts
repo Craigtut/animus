@@ -37,6 +37,7 @@ export interface ToolHandlerContext {
         channel: string;
         content: string;
         tickNumber?: number | null;
+        deliveryStatus?: 'pending' | 'sent' | 'failed';
       }): { id: string };
     };
     heartbeat: {

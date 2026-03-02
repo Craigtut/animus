@@ -722,14 +722,30 @@ async function sendOutbound(reply: MessageReply): Promise<void> {
 }
 ```
 
-### Failure Handling
+### Failure Handling & Retry
 
-If an outbound message fails to send (network error, API error, rate limit):
+Outbound messages are tracked through a delivery lifecycle: `pending` -> `sent` or `failed`. Each message's `delivery_status`, `external_id` (provider message ID), and `delivery_error` are stored in `messages.db`.
 
-1. Log the error with full context (channel, contact, content, error details)
-2. Do not retry automatically (avoid message duplication)
-3. Do not crash or block the EXECUTE stage — other operations continue
-4. Future: notify the primary contact that a message failed to deliver
+**Retry with exponential backoff**: When an adapter's `send()` call fails, the channel child process retries automatically with exponential backoff (up to 3 retries, 4 total attempts, delays of 1s/2s/4s). Only retryable errors trigger retries:
+
+| Error Type | Retryable? | Examples |
+|-----------|-----------|----------|
+| Network errors | Yes | ECONNRESET, ECONNREFUSED, ETIMEDOUT, fetch failed |
+| HTTP 5xx | Yes | 500, 502, 503, 504 |
+| Rate limits | Yes | 429 |
+| HTTP 4xx (non-429) | No | 400, 401, 403, 404 |
+| Auth/validation errors | No | "unauthorized", "invalid token" |
+
+Non-retryable errors fail immediately. Unknown errors default to retryable.
+
+**After all attempts**:
+1. On success: `delivery_status` is set to `'sent'` and `external_id` is populated with the provider's message ID (e.g., Twilio SID, Discord message ID, Slack `ts`)
+2. On failure: `delivery_status` is set to `'failed'` and `delivery_error` captures the error message
+3. The EXECUTE stage is never blocked; other operations continue regardless of delivery outcome
+
+**Mind notification**: Failed deliveries are surfaced to the mind on the next heartbeat tick. GATHER CONTEXT queries for unnotified failures and includes a "DELIVERY FAILURES" section in the mind's context, allowing the agent to decide whether to retry via a different channel or inform the user. Once the mind has seen a failure, it is marked as notified and not shown again.
+
+**External IDs**: Adapters return a `SendResult` containing the provider's message identifier. This enables future features like read receipts, delivery confirmation callbacks, and message threading.
 
 ---
 
@@ -750,8 +766,8 @@ interface IChannelAdapter {
   /** Whether the adapter is currently running */
   isEnabled(): boolean;
 
-  /** Send an outbound message to a contact */
-  send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<void>;
+  /** Send an outbound message to a contact. Returns SendResult with provider message ID on success. */
+  send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<SendResult | void>;
 
   /** Register Fastify routes (for webhook/API channels) */
   registerRoutes?(fastify: FastifyInstance): Promise<void>;

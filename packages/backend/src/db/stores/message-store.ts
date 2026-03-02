@@ -11,6 +11,7 @@ import type {
   Message,
   ChannelType,
   MessageDirection,
+  DeliveryStatus,
   StoredMediaAttachment as SharedStoredMediaAttachment,
 } from '@animus-labs/shared';
 import { snakeToCamel, intToBool } from '../utils.js';
@@ -89,13 +90,18 @@ export function createMessage(
     content: string;
     metadata?: Record<string, unknown> | null;
     tickNumber?: number | null;
+    deliveryStatus?: DeliveryStatus;
+    externalId?: string;
   }
 ): Message {
   const id = generateUUID();
   const timestamp = now();
+  // Outbound messages default to 'pending' unless explicitly set
+  const deliveryStatus = data.deliveryStatus ?? (data.direction === 'outbound' ? 'pending' : null);
+  const mindNotified = deliveryStatus === 'pending' ? 0 : null;
   db.prepare(
-    `INSERT INTO messages (id, conversation_id, contact_id, direction, channel, content, metadata, tick_number, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO messages (id, conversation_id, contact_id, direction, channel, content, metadata, tick_number, created_at, delivery_status, external_id, mind_notified)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     data.conversationId,
@@ -105,7 +111,10 @@ export function createMessage(
     data.content,
     data.metadata ? JSON.stringify(data.metadata) : null,
     data.tickNumber ?? null,
-    timestamp
+    timestamp,
+    deliveryStatus,
+    data.externalId ?? null,
+    mindNotified,
   );
 
   // Update conversation last_message_at
@@ -124,15 +133,78 @@ export function createMessage(
     metadata: data.metadata ?? null,
     tickNumber: data.tickNumber ?? null,
     createdAt: timestamp,
+    deliveryStatus: deliveryStatus as DeliveryStatus | null,
+    externalId: data.externalId ?? null,
+    deliveryError: null,
+    mindNotified: mindNotified === null ? null : mindNotified === 1,
   };
 }
 
 function rowToMessage(row: Record<string, unknown>): Message {
-  const m = snakeToCamel<Message>(row);
+  const m = snakeToCamel<Record<string, unknown>>(row);
   return {
     ...m,
-    metadata: typeof m.metadata === 'string' ? JSON.parse(m.metadata) : m.metadata,
-  };
+    metadata: typeof m['metadata'] === 'string' ? JSON.parse(m['metadata'] as string) : m['metadata'],
+    mindNotified: m['mindNotified'] === null || m['mindNotified'] === undefined
+      ? null
+      : (m['mindNotified'] as number) === 1,
+  } as Message;
+}
+
+// ============================================================================
+// Delivery Tracking
+// ============================================================================
+
+export function updateDeliveryStatus(
+  db: Database.Database,
+  messageId: string,
+  status: 'sent' | 'failed',
+  details?: { externalId?: string; error?: string }
+): void {
+  const sets = ['delivery_status = ?'];
+  const params: unknown[] = [status];
+
+  if (details?.externalId !== undefined) {
+    sets.push('external_id = ?');
+    params.push(details.externalId);
+  }
+
+  if (details?.error !== undefined) {
+    sets.push('delivery_error = ?');
+    params.push(details.error);
+  }
+
+  // Failures need mind notification; sent messages don't
+  sets.push('mind_notified = ?');
+  params.push(status === 'failed' ? 0 : null);
+
+  params.push(messageId);
+  db.prepare(`UPDATE messages SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+}
+
+export function getUnnotifiedFailures(
+  db: Database.Database,
+  limit: number = 10
+): Message[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM messages
+       WHERE delivery_status = 'failed' AND (mind_notified IS NULL OR mind_notified = 0)
+       ORDER BY created_at DESC LIMIT ?`
+    )
+    .all(limit) as Array<Record<string, unknown>>;
+  return rows.map(rowToMessage);
+}
+
+export function markFailuresNotified(
+  db: Database.Database,
+  messageIds: string[]
+): void {
+  if (messageIds.length === 0) return;
+  const placeholders = messageIds.map(() => '?').join(',');
+  db.prepare(
+    `UPDATE messages SET mind_notified = 1 WHERE id IN (${placeholders})`
+  ).run(...messageIds);
 }
 
 /**

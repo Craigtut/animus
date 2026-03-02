@@ -57,8 +57,15 @@ export interface ProcessHostConfig {
   }) => void;
 }
 
+export interface SendDeliveryResult {
+  ok: boolean;
+  externalId?: string;
+  error?: string;
+  attempts?: number;
+}
+
 interface PendingSend {
-  resolve: (ok: boolean) => void;
+  resolve: (result: SendDeliveryResult) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -88,7 +95,7 @@ const MAX_CONSECUTIVE_FAILURES = 5;
 const READY_TIMEOUT_MS = 10_000;
 const STOP_ACK_TIMEOUT_MS = 10_000;
 const KILL_TIMEOUT_MS = 5_000;
-const SEND_TIMEOUT_MS = 30_000;
+const SEND_TIMEOUT_MS = 45_000;
 const ACTION_TIMEOUT_MS = 10_000;
 const HISTORY_TIMEOUT_MS = 30_000;
 const ROUTE_TIMEOUT_MS = 30_000;
@@ -239,7 +246,12 @@ export class ChannelProcessHost {
         if (pending) {
           clearTimeout(pending.timer);
           this.pendingSendRequests.delete(msg.id);
-          pending.resolve(msg.ok);
+          pending.resolve({
+            ok: msg.ok,
+            ...(msg.externalId ? { externalId: msg.externalId } : {}),
+            ...(msg.error ? { error: msg.error } : {}),
+            ...(msg.attempts != null ? { attempts: msg.attempts } : {}),
+          });
         }
       },
 
@@ -471,10 +483,10 @@ export class ChannelProcessHost {
     content: string,
     metadata?: Record<string, unknown>,
     media?: Array<{ type: string; path: string; mimeType: string; filename?: string }>
-  ): Promise<boolean> {
+  ): Promise<SendDeliveryResult> {
     if (!this.childProcess || this.childProcess.killed) {
       this.log.error('Cannot send: process not running');
-      return false;
+      return { ok: false, error: 'Channel process not running' };
     }
 
     const id = generateCorrelationId();
@@ -501,10 +513,10 @@ export class ChannelProcessHost {
       if (ipcMedia.length === 0) ipcMedia = undefined;
     }
 
-    return new Promise<boolean>((resolve, reject) => {
+    return new Promise<SendDeliveryResult>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingSendRequests.delete(id);
-        reject(new Error(`Send timeout after ${SEND_TIMEOUT_MS}ms`));
+        resolve({ ok: false, error: `Send timeout after ${SEND_TIMEOUT_MS}ms` });
       }, SEND_TIMEOUT_MS);
 
       this.pendingSendRequests.set(id, { resolve, reject, timer });

@@ -201,6 +201,7 @@ A system-level operation that assembles the input for the mind query. No LLM inf
 - Load information about running sub-agents (status, current activity)
 - Load any environmental context (time of day, pending calendar events, etc.)
 - Load outcomes from previous tick's decisions (what was decided, what actually happened)
+- Load unnotified delivery failures (outbound messages that failed after retries)
 - Assemble the contact's permission block (available tools, allowed decision types, privacy instructions)
 
 For message-triggered ticks, the mind also receives an explicit permission and identity block describing who it's talking to and what it can/cannot do for this contact. See `docs/architecture/contacts.md` for the full permission tier system.
@@ -239,6 +240,7 @@ A system-level operation that processes the structured output from the mind quer
 - Spawn sub-agents for delegated tasks (primary contact only)
 - Update goals and task states (primary contact only)
 - Store messages in messages.db tagged with `contact_id`
+- Mark delivery failures as notified (so they are not shown again on the next tick)
 - Run TTL cleanup on expired data (thoughts, experiences, emotions)
 - **Log agent events to agent_logs.db** — the backend orchestrator subscribes to the mind session's event stream via `session.onEvent()` and writes selected events to `agent_logs.db`. This is non-blocking (fire-and-forget with error logging). Not all events are stored — `session_start`, `session_end`, `tool_call`, `thinking`, `turn_end`, and `error` events are persisted; individual `response_chunk` events are skipped to avoid excessive write volume. The session row in `agent_logs.db` is created before the SDK session starts, ensuring we have a record even if the session fails immediately.
 - Log the tick for observability

@@ -125,6 +125,8 @@ export interface SendResponseMessage {
   id: string;
   ok: boolean;
   error?: string;
+  externalId?: string;
+  attempts?: number;
 }
 
 export interface RouteResponseMessage {

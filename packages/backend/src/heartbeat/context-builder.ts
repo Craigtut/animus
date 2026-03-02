@@ -131,6 +131,8 @@ export interface MindContextParams {
     content: string;
     timestamp: string;
   }>> | null;
+  /** Outbound messages that failed delivery after retry attempts */
+  deliveryFailures?: Message[];
 }
 
 export interface CompiledContext {
@@ -814,7 +816,7 @@ function buildContactsSection(
     const isCurrent = contact.id === triggerContactId;
     const marker = isCurrent ? ' (current)' : '';
     const channelList = channels
-      .map((ch) => `${ch.channel}${ch.displayName ? `: ${ch.displayName}` : ''}`)
+      .map((ch) => ch.channel)
       .join(', ');
 
     let line = `${contact.fullName} [id: ${contact.id}] — ${contact.permissionTier}${marker}`;
@@ -894,6 +896,25 @@ function buildPendingApprovalsSection(approvals: ToolApprovalRequest[]): string 
     if (a.toolInput && Object.keys(a.toolInput).length > 0) {
       lines.push(`   Tool parameters: ${JSON.stringify(a.toolInput)}`);
     }
+  }
+
+  return lines.join('\n');
+}
+
+function buildDeliveryFailuresSection(failures: Message[]): string {
+  const lines = [
+    '── DELIVERY FAILURES ──',
+    'The following outbound messages failed to deliver after multiple retry',
+    'attempts. Consider resending via the same or a different channel.',
+    '',
+  ];
+
+  for (const msg of failures) {
+    const preview = msg.content.length > 60
+      ? msg.content.substring(0, 60) + '...'
+      : msg.content;
+    const error = msg.deliveryError ?? 'unknown error';
+    lines.push(`  - [${msg.channel}] to ${msg.contactId}: "${preview}" (error: ${error})`);
   }
 
   return lines.join('\n');
@@ -1145,6 +1166,11 @@ export function buildUserMessage(params: MindContextParams): string {
   const prevSection = buildPreviousDecisionsSection(params.previousDecisions);
   if (prevSection) {
     sections.push(prevSection);
+  }
+
+  // 9a-bis. Delivery failures
+  if (params.deliveryFailures && params.deliveryFailures.length > 0) {
+    sections.push(buildDeliveryFailuresSection(params.deliveryFailures));
   }
 
   // 9b. Pending tool approvals

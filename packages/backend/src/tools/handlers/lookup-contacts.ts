@@ -81,11 +81,13 @@ export const lookupContactsHandler: ToolHandler<LookupContactsInput> = async (
   const formatted = results
     .map(({ contact, channels }) => {
       const channelList = channels
-        .map((ch) =>
-          ch.displayName
-            ? `${ch.channel} (${ch.displayName})`
-            : ch.channel
-        )
+        .map((ch) => {
+          if (!ch.identifier) return ch.channel;
+          const label = ch.displayName && ch.displayName !== ch.identifier
+            ? `${ch.identifier} (${ch.displayName})`
+            : ch.identifier;
+          return `${ch.channel}: ${label}`;
+        })
         .join(', ');
 
       const lines = [

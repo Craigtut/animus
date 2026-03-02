@@ -177,6 +177,7 @@ export class ChannelRouter {
       direction: 'outbound',
       channel,
       content,
+      deliveryStatus: 'pending',
       ...(metadata ? { metadata } : {}),
     });
 
@@ -214,13 +215,23 @@ export class ChannelRouter {
     // Deliver via ChannelManager (handles both built-in and package channels)
     const channelManager = getChannelManager();
     try {
-      const delivered = await channelManager.sendToChannel(channel, contactId, params.channelContent ?? content, metadata, deliveryMedia);
-      if (!delivered) {
-        log.warn(`Message stored but delivery failed for channel ${channel}`);
+      const result = await channelManager.sendToChannel(channel, contactId, params.channelContent ?? content, metadata, deliveryMedia);
+      if (result.ok) {
+        messageStore.updateDeliveryStatus(msgDb, msg.id, 'sent', { externalId: result.externalId });
+        msg.deliveryStatus = 'sent';
+        msg.externalId = result.externalId ?? null;
+      } else {
+        log.warn(`Message stored but delivery failed for channel ${channel}: ${result.error}`);
+        messageStore.updateDeliveryStatus(msgDb, msg.id, 'failed', { error: result.error });
+        msg.deliveryStatus = 'failed';
+        msg.deliveryError = result.error ?? null;
       }
     } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
       log.error(`Failed to deliver via ${channel}:`, err);
-      // Message is already stored — don't crash, per docs: don't auto-retry
+      messageStore.updateDeliveryStatus(msgDb, msg.id, 'failed', { error: errorMsg });
+      msg.deliveryStatus = 'failed';
+      msg.deliveryError = errorMsg;
     }
 
     return msg;

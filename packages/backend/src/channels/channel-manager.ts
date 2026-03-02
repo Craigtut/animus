@@ -16,7 +16,7 @@ import { env, DATA_DIR } from '../utils/env.js';
 import { getSystemDb, getContactsDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
 import * as contactStore from '../db/stores/contact-store.js';
-import { ChannelProcessHost } from './process-host.js';
+import { ChannelProcessHost, type SendDeliveryResult } from './process-host.js';
 import { getChannelRouter } from './channel-router.js';
 import type {
   ChannelManifest,
@@ -757,16 +757,17 @@ export class ChannelManager {
     content: string,
     metadata?: Record<string, unknown>,
     media?: Array<{ type: string; path: string; mimeType: string; filename?: string }>
-  ): Promise<boolean> {
+  ): Promise<SendDeliveryResult> {
     // Check built-in channels first (e.g., web)
     const builtIn = this.builtInSenders.get(channelType);
     if (builtIn) {
       try {
         await builtIn(contactId, content, metadata);
-        return true;
+        return { ok: true };
       } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
         log.error(`Failed to send via built-in channel ${channelType}:`, err);
-        return false;
+        return { ok: false, error: errorMsg };
       }
     }
 
@@ -774,7 +775,7 @@ export class ChannelManager {
     const host = this.processes.get(channelType);
     if (!host || !host.isRunning) {
       log.error(`Cannot send to channel ${channelType}: not running`);
-      return false;
+      return { ok: false, error: `Channel ${channelType} not running` };
     }
     return host.send(contactId, content, metadata, media);
   }

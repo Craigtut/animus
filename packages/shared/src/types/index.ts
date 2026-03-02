@@ -72,6 +72,7 @@ import type {
   // Messages
   conversationSchema,
   messageDirectionSchema,
+  deliveryStatusSchema,
   messageSchema,
   mediaAttachmentTypeSchema,
   storedMediaAttachmentSchema,
@@ -213,6 +214,7 @@ export type MemoryCandidate = z.infer<typeof memoryCandidateSchema>;
 
 export type Conversation = z.infer<typeof conversationSchema>;
 export type MessageDirection = z.infer<typeof messageDirectionSchema>;
+export type DeliveryStatus = z.infer<typeof deliveryStatusSchema>;
 export type Message = z.infer<typeof messageSchema>;
 export type MediaAttachmentType = z.infer<typeof mediaAttachmentTypeSchema>;
 export type StoredMediaAttachment = z.infer<typeof storedMediaAttachmentSchema>;

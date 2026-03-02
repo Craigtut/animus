@@ -320,6 +320,35 @@ export function listTickEvents(
 }
 
 /**
+ * Batch-fetch tick_output durations for a set of tick numbers in a single query.
+ * Returns a Map keyed by tick number with { durationMs } values.
+ */
+export function getBatchTickOutputs(
+  db: Database.Database,
+  tickNumbers: number[]
+): Map<number, { durationMs: number | null }> {
+  const result = new Map<number, { durationMs: number | null }>();
+  if (tickNumbers.length === 0) return result;
+
+  const placeholders = tickNumbers.map(() => '?').join(', ');
+  const rows = db
+    .prepare(
+      `SELECT JSON_EXTRACT(data, '$.tickNumber') as tick_number,
+              JSON_EXTRACT(data, '$.durationMs') as duration_ms
+       FROM agent_events
+       WHERE event_type = 'tick_output'
+         AND JSON_EXTRACT(data, '$.tickNumber') IN (${placeholders})`
+    )
+    .all(...tickNumbers) as Array<{ tick_number: number; duration_ms: number | null }>;
+
+  for (const row of rows) {
+    result.set(row.tick_number, { durationMs: row.duration_ms ?? null });
+  }
+
+  return result;
+}
+
+/**
  * Find the most recent tick_input event with a non-null systemPrompt.
  * Used to resolve the system prompt for warm sessions.
  */

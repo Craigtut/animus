@@ -37,12 +37,14 @@ export const sendMessageHandler: ToolHandler<SendMessageInput> = async (
   }
 
   // 1. Write message to messages.db
+  // Web messages are delivered instantly via event bus, no retry needed.
   const msg = context.stores.messages.createMessage({
     conversationId: context.conversationId,
     contactId: context.contactId,
     direction: 'outbound',
     channel: context.sourceChannel,
     content: input.content,
+    deliveryStatus: 'sent',
   });
 
   // 2. Emit real-time event for frontend (tRPC subscription)

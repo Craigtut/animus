@@ -91,6 +91,11 @@ The primary compilation target. Produces the system prompt and user message for 
 │  │  Running sub-agents, recent completions       │  │
 │  └───────────────────────────────────────────────┘  │
 │  ┌───────────────────────────────────────────────┐  │
+│  │  DELIVERY FAILURES (conditional)              │  │
+│  │  Outbound messages that failed after retries  │  │
+│  │  Channel, recipient, content preview, error   │  │
+│  └───────────────────────────────────────────────┘  │
+│  ┌───────────────────────────────────────────────┐  │
 │  │  SESSION NOTES (conditional)                  │  │
 │  │  Memory flush warning if near context budget  │  │
 │  │  Seed graduation prompt if seed graduating    │  │

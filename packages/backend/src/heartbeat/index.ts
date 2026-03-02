@@ -196,6 +196,7 @@ async function mindQuery(
     ...(gathered.pendingApprovals.length > 0 ? { pendingApprovals: gathered.pendingApprovals } : {}),
     ...(gathered.trustRampContext ? { trustRampContext: gathered.trustRampContext } : {}),
     ...(gathered.externalHistory ? { externalHistory: gathered.externalHistory } : {}),
+    ...(gathered.deliveryFailures.length > 0 ? { deliveryFailures: gathered.deliveryFailures } : {}),
   });
 
   const triggerInfo = {

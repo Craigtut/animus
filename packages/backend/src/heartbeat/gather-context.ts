@@ -25,6 +25,7 @@ import type {
   Task,
   ContactChannel,
   ChannelType,
+  Message,
   ToolApprovalRequest,
 } from '@animus-labs/shared';
 
@@ -98,6 +99,8 @@ export interface GatherResult {
     content: string;
     timestamp: string;
   }>> | null;
+  /** Outbound messages that failed delivery and haven't been shown to the mind yet */
+  deliveryFailures: Message[];
 }
 
 export interface GatherDeps {
@@ -476,8 +479,16 @@ export async function gatherContext(
     }
   }
 
+  // Load unnotified delivery failures
+  let deliveryFailures: Message[] = [];
+  try {
+    deliveryFailures = messageStore.getUnnotifiedFailures(msgDb, 10);
+  } catch (err) {
+    log.warn('Failed to load delivery failures:', err);
+  }
+
   const gatherMs = Date.now() - gatherStart;
-  log.info(`Gather complete (${gatherMs}ms): ${recentMessages.length} messages, ${recentThoughts.length} recent thoughts, ${emotions.filter(e => e.intensity > 0.1).length} active emotions${energyBand ? `, energy=${energyBand}` : ''}${memCtx ? ', memory=yes' : ''}${goalCtx ? ', goals=yes' : ''}${pendingApprovals.length > 0 ? `, approvals=${pendingApprovals.length}` : ''}`);
+  log.info(`Gather complete (${gatherMs}ms): ${recentMessages.length} messages, ${recentThoughts.length} recent thoughts, ${emotions.filter(e => e.intensity > 0.1).length} active emotions${energyBand ? `, energy=${energyBand}` : ''}${memCtx ? ', memory=yes' : ''}${goalCtx ? ', goals=yes' : ''}${pendingApprovals.length > 0 ? `, approvals=${pendingApprovals.length}` : ''}${deliveryFailures.length > 0 ? `, deliveryFailures=${deliveryFailures.length}` : ''}`);
 
   return {
     trigger,
@@ -509,5 +520,6 @@ export async function gatherContext(
     aiTimezone,
     trustRampContext,
     externalHistory,
+    deliveryFailures,
   };
 }

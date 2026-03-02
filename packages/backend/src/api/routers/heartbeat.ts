@@ -451,24 +451,41 @@ export const heartbeatRouter = router({
         durationMs?: number | null;
       }
 
+      // Batch queries instead of per-tick N+1 loop
+      const tickNumbers = events.map(
+        (e) => (e.data as unknown as TickInputData).tickNumber
+      );
+
+      // Single query: thought previews for all ticks on this page
+      const thoughtMap = new Map<number, string>();
+      if (tickNumbers.length > 0) {
+        const placeholders = tickNumbers.map(() => '?').join(', ');
+        const thoughtRows = hbDb
+          .prepare(
+            `SELECT tick_number, content FROM thoughts
+             WHERE tick_number IN (${placeholders})
+             GROUP BY tick_number`
+          )
+          .all(...tickNumbers) as Array<{ tick_number: number; content: string }>;
+        for (const row of thoughtRows) {
+          thoughtMap.set(row.tick_number, row.content);
+        }
+      }
+
+      // Single query: tick_output durations for all ticks on this page
+      const outputMap = agentLogStore.getBatchTickOutputs(agentLogsDb, tickNumbers);
+
       const ticks = events.map((event) => {
         const data = event.data as unknown as TickInputData;
-
-        // Get thought preview from heartbeat.db
-        const thought = hbDb
-          .prepare('SELECT content FROM thoughts WHERE tick_number = ? LIMIT 1')
-          .get(data.tickNumber) as { content: string } | undefined;
-
-        // Get duration from tick_output event
-        const { output } = agentLogStore.getTickEvents(agentLogsDb, data.tickNumber);
-        const outData = output ? (output.data as unknown as TickOutputData) : null;
+        const thoughtContent = thoughtMap.get(data.tickNumber);
+        const outData = outputMap.get(data.tickNumber);
 
         return {
           tickNumber: data.tickNumber,
           triggerType: data.triggerType,
           sessionState: data.sessionState,
           tokenBreakdown: data.tokenBreakdown,
-          thoughtPreview: thought?.content?.slice(0, 100) ?? null,
+          thoughtPreview: thoughtContent?.slice(0, 100) ?? null,
           durationMs: outData?.durationMs ?? null,
           createdAt: event.createdAt,
         };

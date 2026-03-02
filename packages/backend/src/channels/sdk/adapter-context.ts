@@ -189,10 +189,14 @@ export interface ExternalMessage {
   attachments?: Array<{ type: string; url: string; filename?: string }>;
 }
 
+export interface SendResult {
+  externalId?: string;
+}
+
 export interface ChannelAdapter {
   start(): Promise<void>;
   stop(): Promise<void>;
-  send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<void>;
+  send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<SendResult | void>;
   performAction?(action: ChannelAction): Promise<void>;
   getHistory?(params: {
     conversationId: string;
@@ -202,6 +206,61 @@ export interface ChannelAdapter {
 }
 
 export type CreateAdapterFn = (ctx: AdapterContext) => ChannelAdapter;
+
+// ============================================================================
+// Retry constants
+// ============================================================================
+
+const MAX_RETRIES = 3;
+const BASE_BACKOFF_MS = 1000;
+
+function isRetryableError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+
+  // Network errors — always retryable
+  if (
+    msg.includes('fetch failed') ||
+    msg.includes('econnreset') ||
+    msg.includes('econnrefused') ||
+    msg.includes('etimedout') ||
+    msg.includes('socket hang up') ||
+    msg.includes('network') ||
+    msg.includes('dns')
+  ) {
+    return true;
+  }
+
+  // HTTP status code patterns
+  const statusMatch = msg.match(/\b(4\d{2}|5\d{2})\b/);
+  if (statusMatch) {
+    const status = parseInt(statusMatch[1]!, 10);
+    if (status === 429) return true;      // Rate limit
+    if (status >= 500) return true;       // Server errors
+    if (status >= 400 && status < 500) return false; // Client errors (except 429)
+  }
+
+  // Rate limit keywords
+  if (msg.includes('rate limit') || msg.includes('too many requests')) return true;
+
+  // Auth / validation errors — not retryable
+  if (
+    msg.includes('unauthorized') ||
+    msg.includes('invalid token') ||
+    msg.includes('forbidden') ||
+    msg.includes('not found') ||
+    msg.includes('invalid') ||
+    msg.includes('bad request')
+  ) {
+    return false;
+  }
+
+  // Default: retry unknown errors
+  return true;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 // ============================================================================
 // IPC send helper
@@ -427,17 +486,59 @@ function handleParentMessage(raw: unknown): void {
       const sendMetadata = msg.media
         ? { ...msg.metadata, media: msg.media }
         : msg.metadata;
-      adapter
-        .send(msg.contactId, msg.content, sendMetadata)
-        .then(() => sendToParent({ type: 'send_response', id: msg.id, ok: true }))
-        .catch((err: unknown) =>
-          sendToParent({
-            type: 'send_response',
-            id: msg.id,
-            ok: false,
-            error: err instanceof Error ? err.message : String(err),
-          })
-        );
+
+      // Retry loop with exponential backoff
+      (async () => {
+        let lastError: unknown;
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            const result = await adapter!.send(msg.contactId, msg.content, sendMetadata);
+            const externalId = result && typeof result === 'object' && 'externalId' in result
+              ? (result as SendResult).externalId
+              : undefined;
+            sendToParent({
+              type: 'send_response',
+              id: msg.id,
+              ok: true,
+              ...(externalId ? { externalId } : {}),
+              attempts: attempt + 1,
+            });
+            return;
+          } catch (err: unknown) {
+            lastError = err;
+            const errorMsg = err instanceof Error ? err.message : String(err);
+
+            if (attempt < MAX_RETRIES && isRetryableError(err)) {
+              const backoffMs = BASE_BACKOFF_MS * 2 ** attempt;
+              sendToParent({
+                type: 'log',
+                level: 'warn',
+                message: `Send attempt ${attempt + 1} failed (retrying in ${backoffMs}ms): ${errorMsg}`,
+                args: [],
+              });
+              await sleep(backoffMs);
+            } else {
+              // Permanent failure or retries exhausted
+              sendToParent({
+                type: 'send_response',
+                id: msg.id,
+                ok: false,
+                error: errorMsg,
+                attempts: attempt + 1,
+              });
+              return;
+            }
+          }
+        }
+        // Should not reach here, but safety net
+        sendToParent({
+          type: 'send_response',
+          id: msg.id,
+          ok: false,
+          error: lastError instanceof Error ? lastError.message : String(lastError),
+          attempts: MAX_RETRIES + 1,
+        });
+      })();
       break;
     }
 

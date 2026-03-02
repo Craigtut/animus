@@ -83,10 +83,14 @@ export interface ExternalMessage {
   attachments?: Array<{ type: string; url: string; filename?: string }>;
 }
 
+export interface SendResult {
+  externalId?: string;
+}
+
 export interface ChannelAdapter {
   start(): Promise<void>;
   stop(): Promise<void>;
-  send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<void>;
+  send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<SendResult | void>;
   performAction?(action: ChannelAction): Promise<void>;
   getHistory?(params: {
     conversationId: string;

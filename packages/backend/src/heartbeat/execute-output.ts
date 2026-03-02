@@ -16,6 +16,7 @@ import * as agentLogStore from '../db/stores/agent-log-store.js';
 import * as systemStore from '../db/stores/system-store.js';
 import * as contactStore from '../db/stores/contact-store.js';
 import * as taskStore from '../db/stores/task-store.js';
+import * as messageStore from '../db/stores/message-store.js';
 import { expiresIn, now, clamp, builtInDecisionTypeSchema } from '@animus-labs/shared';
 import type { MindOutput, IEventBus, AgentEventType } from '@animus-labs/shared';
 
@@ -540,6 +541,18 @@ export async function executeOutput(
       }
     } catch (err) {
       log.warn('Deferred task staleness processing failed:', err);
+    }
+  }
+
+  // 10. Mark delivery failures as notified (the mind has now seen them in context)
+  if (gathered.deliveryFailures && gathered.deliveryFailures.length > 0) {
+    try {
+      const msgDb = getMessagesDb();
+      const failureIds = gathered.deliveryFailures.map(f => f.id);
+      messageStore.markFailuresNotified(msgDb, failureIds);
+      log.info(`Marked ${failureIds.length} delivery failure(s) as notified`);
+    } catch (err) {
+      log.warn('Failed to mark delivery failures as notified:', err);
     }
   }
 

@@ -49,6 +49,8 @@ export const storedMediaAttachmentSchema = z.object({
 
 export const messageDirectionSchema = z.enum(['inbound', 'outbound']);
 
+export const deliveryStatusSchema = z.enum(['pending', 'sent', 'failed']);
+
 export const messageSchema = z.object({
   id: uuidSchema,
   conversationId: uuidSchema,
@@ -60,6 +62,10 @@ export const messageSchema = z.object({
   tickNumber: z.number().int().nonnegative().nullable(),
   createdAt: timestampSchema,
   attachments: z.array(storedMediaAttachmentSchema).optional(),
+  deliveryStatus: deliveryStatusSchema.nullable().optional(),
+  externalId: z.string().nullable().optional(),
+  deliveryError: z.string().nullable().optional(),
+  mindNotified: z.boolean().nullable().optional(),
 });
 
 export const sendMessageInputSchema = z.object({
