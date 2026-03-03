@@ -598,18 +598,17 @@ function buildTriggerSection(trigger: TriggerContext): string {
         );
       }
 
-      // Annotate media attachments so the mind knows they exist
+      // Annotate media attachments so the mind knows they exist and where to find them
       const media = trigger.metadata?.['media'];
       if (Array.isArray(media) && media.length > 0) {
         lines.push('');
         lines.push(`Attached media (${media.length}):`);
         for (const item of media) {
-          const m = item as { type?: string; mimeType?: string; originalFilename?: string };
-          const name = m.originalFilename || 'unnamed';
-          lines.push(`  - [${m.type || 'file'}] ${name} (${m.mimeType || 'unknown'})`);
+          const m = item as { type?: string; mimeType?: string; url?: string; filename?: string; originalFilename?: string };
+          const name = m.filename || m.originalFilename || 'unnamed';
+          const pathInfo = m.url ? `, path: ${m.url}` : '';
+          lines.push(`  - [${m.type || 'file'}] ${name} (${m.mimeType || 'unknown'}${pathInfo})`);
         }
-        lines.push('');
-        lines.push('Note: You cannot view the attached files directly, but you know they were sent.');
       }
 
       return lines.join('\n');

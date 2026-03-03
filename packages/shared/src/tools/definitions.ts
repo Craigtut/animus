@@ -177,14 +177,15 @@ export const sendMediaDef: AnimusToolDef = {
 export const runWithCredentialsDef: AnimusToolDef = {
   name: 'run_with_credentials',
   description:
-    'Execute a command with a plugin credential injected as an environment variable. ' +
+    'Execute a command with a credential injected as an environment variable. ' +
     'The credential is resolved from encrypted storage and injected only into the ' +
-    'subprocess — you never see the raw value. Use this for plugin scripts that need ' +
-    'API keys.',
+    'subprocess — you never see the raw value. Supports two reference formats: ' +
+    '"pluginName.configKey" for plugin credentials, or "vault:<id>" for password ' +
+    'vault entries (use list_vault_entries to find vault IDs).',
   inputSchema: z.object({
     command: z.string().describe('The full command to execute'),
     credentialRef: z.string().describe(
-      'Credential reference from the credential manifest (e.g., "nano-banana-pro.GEMINI_API_KEY")'
+      'Credential reference: "pluginName.configKey" (e.g., "nano-banana-pro.GEMINI_API_KEY") or "vault:<id>" for vault entries'
     ),
     envVar: z.string().describe(
       'Environment variable name to inject the credential as (e.g., "GEMINI_API_KEY")'
@@ -266,6 +267,26 @@ export const generateSpeechDef: AnimusToolDef = {
 };
 
 /**
+ * list_vault_entries - List stored password vault entries (metadata only, no passwords).
+ * Mind-only tool.
+ */
+export const listVaultEntriesDef: AnimusToolDef = {
+  name: 'list_vault_entries',
+  description:
+    'List all entries in the password vault. Returns metadata for each entry: label, service, ' +
+    'URL, identity (username/email), and a hint (last 4 characters of the password). ' +
+    'Never returns actual passwords. Use this to discover what credentials are available ' +
+    'before using run_with_credentials with a vault:<id> reference.',
+  inputSchema: z.object({
+    service: z
+      .string()
+      .optional()
+      .describe('Filter entries by service name (case-insensitive partial match)'),
+  }),
+  category: 'system',
+};
+
+/**
  * send_voice_reply - Reply to the current conversation with a voice message.
  * Mind-only tool. Combines TTS + channel delivery + text storage.
  */
@@ -303,6 +324,7 @@ export const ANIMUS_TOOL_DEFS = {
   send_proactive_message: sendProactiveMessageDef,
   send_media: sendMediaDef,
   run_with_credentials: runWithCredentialsDef,
+  list_vault_entries: listVaultEntriesDef,
   resolve_tool_approval: resolveToolApprovalDef,
   transcribe_audio: transcribeAudioDef,
   generate_speech: generateSpeechDef,
@@ -326,6 +348,6 @@ export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
  * Excludes send_message (sub-agent only) and update_progress (sub-agent only).
  */
 export const MIND_TOOL_NAMES: readonly AnimusToolName[] = [
-  'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials', 'resolve_tool_approval',
-  'transcribe_audio', 'generate_speech', 'send_voice_reply',
+  'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials', 'list_vault_entries',
+  'resolve_tool_approval', 'transcribe_audio', 'generate_speech', 'send_voice_reply',
 ] as const;

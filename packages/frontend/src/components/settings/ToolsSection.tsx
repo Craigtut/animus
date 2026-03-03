@@ -10,8 +10,9 @@ import {
   ChatCircle,
   Lightning,
   Warning,
+  ShieldWarning,
 } from '@phosphor-icons/react';
-import { Typography, Badge, Button } from '../ui';
+import { Typography, Badge, Button, Modal } from '../ui';
 import { trpc } from '../../utils/trpc';
 import type { Theme } from '../../styles/theme';
 import type { ToolPermission, ToolPermissionMode, RiskTier } from '@animus-labs/shared';
@@ -32,6 +33,184 @@ const modeLabels: Record<ToolPermissionMode, string> = {
   ask: 'Ask First',
   always_allow: 'Always Allow',
 };
+
+// ============================================================================
+// Sensitive tool warning descriptions
+// ============================================================================
+
+const sensitiveToolWarnings: Record<string, { title: string; risks: string[] }> = {
+  run_with_credentials: {
+    title: 'Run With Credentials',
+    risks: [
+      'This tool is used legitimately by plugins and channels that need API keys or tokens to function. The agent will ask to use it during normal operation, and that is expected. With "Ask First" enabled, you can verify each request is using the right credential for the right purpose.',
+      'This tool injects your stored secrets (API keys, passwords, tokens) into the execution environment as plain-text environment variables.',
+      'If set to "Always Allow," the agent can access any of your stored credentials at any time without asking, and could inadvertently expose them in logs, send them to external services, or include them in generated output.',
+      'A single prompt injection or unexpected agent behavior could leak every secret you have stored.',
+    ],
+  },
+  Bash: {
+    title: 'Bash Shell',
+    risks: [
+      'This tool executes arbitrary shell commands on your machine with your user permissions. It can read, write, and delete any file you have access to.',
+      'If set to "Always Allow," the agent can run any command without your review: install software, modify system files, access private data, make network requests, or execute downloaded scripts.',
+      'A single malformed or malicious command could delete important files, exfiltrate data, install malware, or make irreversible changes to your system.',
+    ],
+  },
+};
+
+const defaultSensitiveWarning = {
+  title: 'Sensitive Tool',
+  risks: [
+    'This tool is classified as sensitive because it can perform actions with significant security implications.',
+    'Setting it to "Always Allow" means the agent will never ask for your confirmation before using it, even in unexpected or potentially harmful situations.',
+    'Only enable unrestricted access if you fully understand what this tool does and accept the risks.',
+  ],
+};
+
+// ============================================================================
+// SensitiveToolWarningDialog — confirmation before enabling always_allow
+// ============================================================================
+
+function SensitiveToolWarningDialog({
+  open,
+  onClose,
+  onConfirm,
+  toolNames,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  toolNames: string[];
+}) {
+  const theme = useTheme();
+
+  const isBulk = toolNames.length > 1;
+
+  return (
+    <Modal open={open} onClose={onClose} maxWidth="520px">
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
+        {/* Header */}
+        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+          <div css={css`
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            border-radius: ${theme.borderRadius.default};
+            background: ${theme.colors.error.main}1a;
+            flex-shrink: 0;
+          `}>
+            <ShieldWarning size={22} weight="fill" css={css`color: ${theme.colors.error.main};`} />
+          </div>
+          <div>
+            <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+              {isBulk
+                ? `Unrestrict ${toolNames.length} sensitive tools?`
+                : 'Remove safety gate?'}
+            </Typography.Subtitle>
+            <Typography.Caption color="hint">
+              This change has serious security implications
+            </Typography.Caption>
+          </div>
+        </div>
+
+        {/* Per-tool warnings */}
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+          {toolNames.map((toolName) => {
+            const warning = sensitiveToolWarnings[toolName] ?? defaultSensitiveWarning;
+            return (
+              <div key={toolName}>
+                {isBulk && (
+                  <Typography.SmallBodyAlt css={css`
+                    font-weight: ${theme.typography.fontWeight.medium};
+                    margin-bottom: ${theme.spacing[2]};
+                    display: flex;
+                    align-items: center;
+                    gap: ${theme.spacing[1.5]};
+                  `}>
+                    <Warning size={14} css={css`color: ${theme.colors.error.main};`} />
+                    {warning.title}
+                  </Typography.SmallBodyAlt>
+                )}
+                <div css={css`
+                  display: flex;
+                  flex-direction: column;
+                  gap: ${theme.spacing[2]};
+                `}>
+                  {warning.risks.map((risk, i) => (
+                    <div
+                      key={i}
+                      css={css`
+                        display: flex;
+                        gap: ${theme.spacing[2]};
+                        align-items: flex-start;
+                      `}
+                    >
+                      <div css={css`
+                        width: 4px;
+                        min-height: 4px;
+                        border-radius: 50%;
+                        background: ${theme.colors.error.main};
+                        flex-shrink: 0;
+                        margin-top: 8px;
+                      `} />
+                      <Typography.SmallBody color="secondary" css={css`
+                        line-height: ${theme.typography.lineHeight.relaxed};
+                      `}>
+                        {risk}
+                      </Typography.SmallBody>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Caution banner */}
+        <div css={css`
+          padding: ${theme.spacing[3]} ${theme.spacing[4]};
+          background: ${theme.colors.error.main}0d;
+          border: 1px solid ${theme.colors.error.main}26;
+          border-radius: ${theme.borderRadius.default};
+          display: flex;
+          align-items: flex-start;
+          gap: ${theme.spacing[2]};
+        `}>
+          <Warning size={16} weight="fill" css={css`
+            color: ${theme.colors.error.main};
+            flex-shrink: 0;
+            margin-top: 2px;
+          `} />
+          <Typography.SmallBody css={css`color: ${theme.colors.error.main};`}>
+            Only change this setting if you fully understand the risks. You can always change it back to "Ask First" later.
+          </Typography.SmallBody>
+        </div>
+
+        {/* Actions */}
+        <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Keep "Ask First"
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              onConfirm();
+              onClose();
+            }}
+            css={css`
+              background: ${theme.colors.error.main};
+              &:hover { background: ${theme.colors.error.dark}; }
+            `}
+          >
+            I understand, allow always
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 // ============================================================================
 // ToolModeSelector — segmented control for permission mode
@@ -118,6 +297,7 @@ function ToolModeSelector({
 function ToolRow({ tool }: { tool: ToolPermission }) {
   const theme = useTheme();
   const utils = trpc.useUtils();
+  const [showWarning, setShowWarning] = useState(false);
   const mutation = trpc.tools.updatePermission.useMutation({
     onSuccess: () => utils.tools.listTools.invalidate(),
   });
@@ -140,59 +320,78 @@ function ToolRow({ tool }: { tool: ToolPermission }) {
     .filter(Boolean)
     .join(' \u00b7 ');
 
-  return (
-    <div
-      css={css`
-        display: flex;
-        align-items: center;
-        gap: ${theme.spacing[3]};
-        padding: ${theme.spacing[2]} 0;
+  const handleModeChange = useCallback((mode: ToolPermissionMode) => {
+    // Gate sensitive tools behind a confirmation dialog when enabling always_allow
+    if (mode === 'always_allow' && tool.riskTier === 'sensitive') {
+      setShowWarning(true);
+      return;
+    }
+    mutation.mutate({ toolName: tool.toolName, mode });
+  }, [tool.riskTier, tool.toolName, mutation]);
 
-        @media (max-width: ${theme.breakpoints.md}) {
-          flex-direction: column;
-          align-items: flex-start;
-          gap: ${theme.spacing[2]};
-        }
-      `}
-    >
-      {/* Risk tier dot */}
+  return (
+    <>
       <div
         css={css`
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background: ${tierConfig.color(theme)};
-          flex-shrink: 0;
-        `}
-        title={tierConfig.label}
-      />
+          display: flex;
+          align-items: center;
+          gap: ${theme.spacing[3]};
+          padding: ${theme.spacing[2]} 0;
 
-      {/* Tool info */}
-      <div css={css`flex: 1; min-width: 0;`}>
-        <Typography.SmallBody as="div" css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
-          {tool.displayName}
-        </Typography.SmallBody>
-        <Typography.Caption as="div" color="hint" css={css`
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        `}>
-          {tool.description}
-        </Typography.Caption>
-        {usageText && (
-          <Typography.Caption as="div" color="hint" css={css`margin-top: 2px;`}>
-            {usageText}
+          @media (max-width: ${theme.breakpoints.md}) {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: ${theme.spacing[2]};
+          }
+        `}
+      >
+        {/* Risk tier dot */}
+        <div
+          css={css`
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: ${tierConfig.color(theme)};
+            flex-shrink: 0;
+          `}
+          title={tierConfig.label}
+        />
+
+        {/* Tool info */}
+        <div css={css`flex: 1; min-width: 0;`}>
+          <Typography.SmallBody as="div" css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
+            {tool.displayName}
+          </Typography.SmallBody>
+          <Typography.Caption as="div" color="hint" css={css`
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          `}>
+            {tool.description}
           </Typography.Caption>
-        )}
+          {usageText && (
+            <Typography.Caption as="div" color="hint" css={css`margin-top: 2px;`}>
+              {usageText}
+            </Typography.Caption>
+          )}
+        </div>
+
+        {/* Mode selector */}
+        <ToolModeSelector
+          value={tool.mode}
+          onChange={handleModeChange}
+          disabled={mutation.isPending}
+        />
       </div>
 
-      {/* Mode selector */}
-      <ToolModeSelector
-        value={tool.mode}
-        onChange={(mode) => mutation.mutate({ toolName: tool.toolName, mode })}
-        disabled={mutation.isPending}
+      {/* Sensitive tool warning dialog */}
+      <SensitiveToolWarningDialog
+        open={showWarning}
+        onClose={() => setShowWarning(false)}
+        onConfirm={() => mutation.mutate({ toolName: tool.toolName, mode: 'always_allow' })}
+        toolNames={[tool.toolName]}
       />
-    </div>
+    </>
   );
 }
 
@@ -204,6 +403,7 @@ function ToolGroup({ source, tools }: { source: string; tools: ToolPermission[] 
   const theme = useTheme();
   const [expanded, setExpanded] = useState(true);
   const [showSetAll, setShowSetAll] = useState(false);
+  const [showBulkWarning, setShowBulkWarning] = useState(false);
   const utils = trpc.useUtils();
   const groupMutation = trpc.tools.updateGroupPermission.useMutation({
     onSuccess: () => {
@@ -218,6 +418,23 @@ function ToolGroup({ source, tools }: { source: string; tools: ToolPermission[] 
     if (source.startsWith('plugin:')) return `Plugin: ${source.slice(7)}`;
     return source;
   }, [source]);
+
+  // Sensitive tools in this group that aren't already always_allow
+  const sensitiveToolNames = useMemo(
+    () => tools
+      .filter((t) => t.riskTier === 'sensitive' && t.mode !== 'always_allow')
+      .map((t) => t.toolName),
+    [tools],
+  );
+
+  const handleSetAll = useCallback((mode: ToolPermissionMode) => {
+    // If setting to always_allow and there are sensitive tools not yet unrestricted, warn first
+    if (mode === 'always_allow' && sensitiveToolNames.length > 0) {
+      setShowBulkWarning(true);
+      return;
+    }
+    groupMutation.mutate({ source, mode });
+  }, [source, sensitiveToolNames, groupMutation]);
 
   return (
     <div css={css`margin-bottom: ${theme.spacing[4]};`}>
@@ -251,7 +468,7 @@ function ToolGroup({ source, tools }: { source: string; tools: ToolPermission[] 
                   key={mode}
                   variant="ghost"
                   size="sm"
-                  onClick={() => groupMutation.mutate({ source, mode })}
+                  onClick={() => handleSetAll(mode)}
                   disabled={groupMutation.isPending}
                 >
                   {modeLabels[mode]}
@@ -293,6 +510,14 @@ function ToolGroup({ source, tools }: { source: string; tools: ToolPermission[] 
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Bulk sensitive warning dialog */}
+      <SensitiveToolWarningDialog
+        open={showBulkWarning}
+        onClose={() => setShowBulkWarning(false)}
+        onConfirm={() => groupMutation.mutate({ source, mode: 'always_allow' })}
+        toolNames={sensitiveToolNames}
+      />
     </div>
   );
 }

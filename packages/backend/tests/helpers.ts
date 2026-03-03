@@ -25,6 +25,9 @@ export function createTestSystemDb(): Database.Database {
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '005_energy_settings.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '006_plugins.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '010_tool_permissions.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '018_vault_entries.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '019_telemetry.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '020_plugin_status.sql'));
   return db;
 }
 
@@ -63,6 +66,7 @@ export function createTestAgentLogsDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   applySql(db, path.join(MIGRATIONS_DIR, 'agent-logs', '001_initial.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'agent-logs', '002_credential_audit.sql'));
   return db;
 }
 

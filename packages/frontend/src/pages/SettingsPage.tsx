@@ -37,7 +37,7 @@ import {
   Wrench,
   SignOut,
   MagnifyingGlass,
-  Info,
+  Key,
 } from '@phosphor-icons/react';
 import { Card, SelectionCard, Button, Input, Select, Modal, Badge, Toggle, Slider, Typography, Tooltip } from '../components/ui';
 import { trpc } from '../utils/trpc';
@@ -49,7 +49,9 @@ import { ToolsSection } from '../components/settings/ToolsSection';
 import { PackageConsentDialog } from '../components/settings/PackageConsentDialog';
 import { Upload, ArrowCounterClockwise } from '@phosphor-icons/react';
 import { AnpkDropZone } from '../components/settings/AnpkDropZone';
-import { AboutSection } from '../components/settings/AboutSection';
+import { AboutInline } from '../components/settings/AboutSection';
+import { TelemetryInline } from '../components/settings/TelemetrySection';
+import { PasswordsSection } from '../components/settings/PasswordsSection';
 import { toast } from '../store/toast-store';
 import DOMPurify from 'dompurify';
 
@@ -57,7 +59,7 @@ import DOMPurify from 'dompurify';
 // Types
 // ============================================================================
 
-type SettingsSection = 'heartbeat' | 'provider' | 'channels' | 'plugins' | 'tools' | 'goals' | 'saves' | 'system' | 'about';
+type SettingsSection = 'heartbeat' | 'provider' | 'channels' | 'plugins' | 'passwords' | 'tools' | 'goals' | 'saves' | 'system';
 
 interface ModelData {
   id: string;
@@ -85,11 +87,11 @@ const sections: SidebarItem[] = [
   { id: 'provider', label: 'Agent Provider', icon: Robot },
   { id: 'channels', label: 'Channels', icon: ChatCircle },
   { id: 'plugins', label: 'Plugins', icon: PuzzlePiece },
+  { id: 'passwords', label: 'Passwords', icon: Key },
   { id: 'tools', label: 'Tools', icon: Wrench },
   { id: 'goals', label: 'Goals', icon: Target },
   { id: 'saves', label: 'Saves', icon: FloppyDisk },
   { id: 'system', label: 'System', icon: GearSix },
-  { id: 'about', label: 'About', icon: Info },
 ];
 
 // ============================================================================
@@ -3459,10 +3461,11 @@ const sourceBadgeConfig: Record<string, { variant: 'default' | 'info' | 'success
 };
 
 // Status → Badge variant mapping for plugins (mirrors channelStatusBadge)
-const pluginStatusBadge: Record<string, { variant: 'default' | 'success' | 'warning'; label: string }> = {
+const pluginStatusBadge: Record<string, { variant: 'default' | 'success' | 'warning' | 'error'; label: string }> = {
   disabled: { variant: 'default', label: 'Disabled' },
   unconfigured: { variant: 'warning', label: 'Needs Configuration' },
   active: { variant: 'success', label: 'Active' },
+  error: { variant: 'error', label: 'Error' },
 };
 
 function PluginsSection() {
@@ -3789,6 +3792,8 @@ function PluginsSection() {
                         >
                           Configure
                         </Button>
+                      ) : plugin.status === 'error' ? (
+                        <Typography.Caption color="hint">Unavailable</Typography.Caption>
                       ) : (
                         <Toggle
                           checked={plugin.enabled}
@@ -3797,6 +3802,18 @@ function PluginsSection() {
                       )}
                     </div>
                   </div>
+                  {/* Error message */}
+                  {plugin.status === 'error' && plugin.lastError && (
+                    <Typography.SmallBody css={css`
+                      color: ${theme.colors.error.main};
+                      padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                      background: ${theme.colors.error.main}0d;
+                      border: 1px solid ${theme.colors.error.main}26;
+                      border-radius: ${theme.borderRadius.default};
+                    `}>
+                      {plugin.lastError}
+                    </Typography.SmallBody>
+                  )}
                   {/* Description */}
                   {plugin.description && (
                     <Typography.SmallBody color="secondary" css={css`
@@ -3839,14 +3856,38 @@ function PluginsSection() {
                       transition={{ duration: 0.2 }}
                       css={css`overflow: hidden;`}
                     >
-                      <PluginDetail
-                        pluginName={plugin.name}
-                        installedFrom={plugin.installedFrom}
-                        hasConfig={plugin.hasConfig}
-                        onConfigure={() => navigateToConfig(`/settings/plugins/${plugin.name}/configure`)}
-                        onUninstall={() => setUninstallConfirm(plugin.name)}
-                        onUpdate={() => setUpdateTarget(plugin.name)}
-                      />
+                      {plugin.status === 'error' ? (
+                        <div css={css`
+                          margin-top: ${theme.spacing[4]};
+                          padding-top: ${theme.spacing[4]};
+                          border-top: 1px solid ${theme.colors.border.light};
+                          display: flex;
+                          flex-direction: column;
+                          gap: ${theme.spacing[3]};
+                        `}>
+                          <Typography.SmallBody color="secondary">
+                            This plugin's directory could not be found. It will recover automatically when the directory becomes available again. You can also uninstall it to remove the record.
+                          </Typography.SmallBody>
+                          <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setUninstallConfirm(plugin.name)}
+                            >
+                              Uninstall
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <PluginDetail
+                          pluginName={plugin.name}
+                          installedFrom={plugin.installedFrom}
+                          hasConfig={plugin.hasConfig}
+                          onConfigure={() => navigateToConfig(`/settings/plugins/${plugin.name}/configure`)}
+                          onUninstall={() => setUninstallConfirm(plugin.name)}
+                          onUpdate={() => setUpdateTarget(plugin.name)}
+                        />
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -4497,6 +4538,9 @@ function SystemSection() {
         </div>
       )}
 
+      {/* Telemetry */}
+      <TelemetryInline />
+
       {/* Data Management */}
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
         <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
@@ -4592,6 +4636,9 @@ function SystemSection() {
         )}
       </div>
 
+      {/* About */}
+      <AboutInline />
+
       {/* Reset confirmation modal */}
       <Modal open={confirmAction !== null} onClose={() => setConfirmAction(null)}>
         {confirmAction && (
@@ -4649,15 +4696,29 @@ function SystemSection() {
 
 function PasswordChangeForm({ onClose }: { onClose: () => void }) {
   const theme = useTheme();
-  // Note: password change is a UI stub for now -- the backend auth router
-  // doesn't expose a change-password mutation yet. We'll show the form
-  // structure and call the appropriate route when it's available.
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+
+  const changePasswordMutation = trpc.seal.changePassword.useMutation({
+    onSuccess: () => {
+      setSuccess(true);
+      setError('');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => onClose(), 2000);
+    },
+    onError: (err) => {
+      setError(err.message || 'Failed to change password');
+    },
+  });
 
   const handleSubmit = () => {
+    setError('');
+    setSuccess(false);
     if (newPassword.length < 8) {
       setError('Password must be at least 8 characters');
       return;
@@ -4666,8 +4727,11 @@ function PasswordChangeForm({ onClose }: { onClose: () => void }) {
       setError('Passwords do not match');
       return;
     }
-    // TODO: Wire to auth.changePassword mutation when available
-    setError('Password management will be available in a future update');
+    changePasswordMutation.mutate({
+      currentPassword,
+      newPassword,
+      confirmNewPassword: confirmPassword,
+    });
   };
 
   return (
@@ -4696,8 +4760,24 @@ function PasswordChangeForm({ onClose }: { onClose: () => void }) {
         onChange={(e) => setConfirmPassword((e.target as HTMLInputElement).value)}
         error={error || undefined}
       />
+      {success && (
+        <Typography.SmallBody
+          as="div"
+          css={css`
+            color: ${theme.colors.success.main};
+            padding: ${theme.spacing[2]} ${theme.spacing[3]};
+            background: ${theme.colors.success.main}12;
+            border: 1px solid ${theme.colors.success.main}40;
+            border-radius: ${theme.borderRadius.default};
+          `}
+        >
+          Password changed successfully
+        </Typography.SmallBody>
+      )}
       <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
-        <Button size="sm" onClick={handleSubmit}>Save password</Button>
+        <Button size="sm" onClick={handleSubmit} loading={changePasswordMutation.isPending}>
+          {changePasswordMutation.isPending ? 'Saving...' : 'Save password'}
+        </Button>
         <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
       </div>
     </div>
@@ -4752,11 +4832,11 @@ export function SettingsPage() {
       case 'provider': return <ProviderSection />;
       case 'channels': return <ChannelsSection />;
       case 'plugins': return <PluginsSection />;
+      case 'passwords': return <PasswordsSection />;
       case 'tools': return <ToolsSection />;
       case 'goals': return <GoalsSection />;
       case 'saves': return <SavesSection />;
       case 'system': return <SystemSection />;
-      case 'about': return <AboutSection />;
       default: return <HeartbeatSection />;
     }
   };

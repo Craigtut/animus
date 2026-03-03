@@ -36,7 +36,11 @@ COPY packages/frontend/package.json packages/frontend/
 COPY packages/channel-sdk/package.json packages/channel-sdk/
 COPY packages/tts-native/package.json packages/tts-native/
 
-# Install all dependencies (including devDependencies for build)
+# Install all dependencies (including devDependencies for build).
+# onnxruntime-node's postinstall downloads optional CUDA GPU libraries (~500MB)
+# from GitHub. CPU binaries are already bundled in the package. Skip the GPU
+# download since we use CPU inference in Docker.
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 RUN npm ci
 
 # Copy the pre-built tts-native binary from rust-builder
@@ -77,9 +81,11 @@ RUN npm prune --omit=dev && \
       "sherpa-onnx-linux-${ARCH}@${SHERPA_VER}"
 
 # Stage 2: Production runtime
-FROM node:25-slim AS runtime
+FROM node:25 AS runtime
 
 # Install ffmpeg (needed for audio format conversion: WebM→PCM, WAV→OGG)
+# Note: node:25 (full) is used instead of node:25-slim so that the agent has
+# access to standard tools (curl, ping, etc.) when executing shell commands.
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 

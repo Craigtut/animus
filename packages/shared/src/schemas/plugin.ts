@@ -166,6 +166,8 @@ export const PluginMcpServerSchema = z.object({
 
 export const pluginSourceSchema = z.enum(['built-in', 'local', 'git', 'npm', 'store', 'package']);
 
+export const pluginStatusSchema = z.enum(['active', 'disabled', 'unconfigured', 'error']);
+
 export const PluginRecordSchema = z.object({
   name: z.string(),
   version: z.string(),
@@ -176,6 +178,8 @@ export const PluginRecordSchema = z.object({
   source: pluginSourceSchema,
   storeId: z.string().nullable(),
   configEncrypted: z.string().nullable(),
+  status: pluginStatusSchema.default('active'),
+  lastError: z.string().nullable().default(null),
 });
 
 // Types are derived and exported from types/index.ts via z.infer<>.

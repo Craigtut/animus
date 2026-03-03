@@ -136,7 +136,7 @@ export function createMessage(
     deliveryStatus: deliveryStatus as DeliveryStatus | null,
     externalId: data.externalId ?? null,
     deliveryError: null,
-    mindNotified: mindNotified === null ? null : mindNotified === 1,
+    mindNotified: mindNotified === null ? null : Boolean(mindNotified),
   };
 }
 

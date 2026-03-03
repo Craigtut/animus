@@ -44,6 +44,7 @@
     "ink-text-input": "^6.0.0",
     "llm-json-stream": "^1.1.0",
     "picocolors": "^1.1.1",
+    "posthog-node": "^5.26.2",
     "react": "^19.2.4",
     "sherpa-onnx-node": "^1.12.25",
     "tar": "^7.5.9",

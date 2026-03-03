@@ -10,6 +10,15 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 
+// Mock the db module and plugin store before importing the router
+vi.mock('../../src/db/index.js', () => ({
+  getSystemDb: () => ({} as any),
+}));
+
+vi.mock('../../src/db/stores/plugin-store.js', () => ({
+  getAllPlugins: vi.fn().mockReturnValue([]),
+}));
+
 // Mock the plugin-manager module before importing the router
 vi.mock('../../src/plugins/index.js', () => {
   const mockManager = {

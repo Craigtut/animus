@@ -1,14 +1,19 @@
 /**
- * Auth Plugin — Fastify plugin for JWT authentication.
+ * Auth Plugin -- Fastify plugin for JWT authentication.
  *
  * Registers @fastify/jwt with cookie-based transport.
  * Decorates fastify with an `authenticate` preHandler hook.
+ *
+ * JWT secret is loaded from data/jwt.key (separate from the vault DEK).
+ * On first run (before registration), the secret won't exist yet;
+ * a temporary secret is used until registration creates the real one.
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import fastifyJwt from '@fastify/jwt';
 import fp from 'fastify-plugin';
 import { env } from '../utils/env.js';
+import { loadJwtSecret } from '../lib/jwt-key.js';
 
 export interface JwtPayload {
   userId: string;
@@ -18,8 +23,12 @@ export interface JwtPayload {
 const COOKIE_NAME = 'animus_session';
 
 async function authPlugin(fastify: FastifyInstance): Promise<void> {
+  // Load JWT secret from file. Falls back to env var for legacy installs,
+  // then to a temporary secret for first-run (before registration creates jwt.key).
+  const jwtSecret = loadJwtSecret() ?? env.JWT_SECRET ?? 'animus-temp-jwt-secret-pre-registration';
+
   await fastify.register(fastifyJwt, {
-    secret: env.JWT_SECRET!,
+    secret: jwtSecret,
     cookie: {
       cookieName: COOKIE_NAME,
       signed: false,

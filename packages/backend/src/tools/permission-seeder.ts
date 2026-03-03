@@ -29,6 +29,8 @@ const CORE_TOOL_RISK_TIERS: Record<string, RiskTier> = {
   update_progress: 'communicates',
   generate_speech: 'acts',
   run_with_credentials: 'sensitive',
+  list_vault_entries: 'safe',
+  send_voice_reply: 'communicates',
 };
 
 // ---------------------------------------------------------------------------

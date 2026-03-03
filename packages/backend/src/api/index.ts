@@ -32,6 +32,8 @@ import { toolsRouter } from './routers/tools.js';
 import { speechRouter } from './routers/speech.js';
 import { downloadsRouter } from './routers/downloads.js';
 import { pluginOAuthRouter } from './routers/plugin-oauth.js';
+import { vaultRouter } from './routers/vault.js';
+import { sealRouter } from './routers/seal.js';
 
 // ============================================================================
 // App Router
@@ -65,6 +67,8 @@ export const appRouter = router({
   speech: speechRouter,
   downloads: downloadsRouter,
   pluginOAuth: pluginOAuthRouter,
+  vault: vaultRouter,
+  seal: sealRouter,
 });
 
 export type AppRouter = typeof appRouter;

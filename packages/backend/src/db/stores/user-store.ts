@@ -46,6 +46,18 @@ export function getPasswordHash(db: Database.Database, email: string): string | 
   return row?.password_hash ?? null;
 }
 
+export function updatePasswordHash(
+  db: Database.Database,
+  email: string,
+  newPasswordHash: string
+): void {
+  db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE email = ?').run(
+    newPasswordHash,
+    now(),
+    email
+  );
+}
+
 export function updateUserContactId(
   db: Database.Database,
   userId: string,

@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import * as systemStore from '../db/stores/system-store.js';
 import { createLogger } from '../lib/logger.js';
+import { isUnsealed } from '../lib/vault-manager.js';
 import { checkSdkAvailable, getClaudeNativeBinary, getClaudeNativeBinaryAsync, getCodexBundledBinary } from '../lib/cli-paths.js';
 
 const log = createLogger('Credentials', 'server');
@@ -88,6 +89,12 @@ const ENV_MAP: Record<string, string> = {
  * Called once after database initialization.
  */
 export function loadCredentialsIntoEnv(db: Database.Database): CredentialLoadSummary {
+  // Guard: don't attempt decryption when vault is sealed
+  if (!isUnsealed()) {
+    log.info('Vault is sealed: skipping credential loading');
+    return { storedCount: 0, envLoadedCount: 0, cliDetectedProviders: [] };
+  }
+
   let credentials: systemStore.Credential[];
   try {
     credentials = systemStore.getAllCredentials(db);

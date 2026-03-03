@@ -35,7 +35,7 @@ cp .env.example .env
 
 The `.env` file configures server settings. The defaults work out of the box for local development. API keys and agent providers are configured through the Settings UI after first launch.
 
-Secrets (`ANIMUS_ENCRYPTION_KEY`, `JWT_SECRET`) are **auto-generated** on first startup and stored in `data/.secrets`. You do not need to set them manually. See `docs/architecture/data-directory.md` for the full data layout.
+Encryption keys are derived from your user password at registration time. No manual key configuration is needed. For development, add `ANIMUS_UNLOCK_PASSWORD=devpassword` to your `.env` file so the server auto-unseals on restart (including hot-reloads). See `docs/architecture/encryption-architecture.md` for the full encryption design and `docs/architecture/data-directory.md` for the data layout.
 
 ### 4. Start Development Servers
 
@@ -157,7 +157,7 @@ This serves both the API and the built frontend at `http://localhost:3000`.
 
 For self-hosted servers, use Docker:
 
-No special configuration needed — secrets are auto-generated on first run.
+Set `ANIMUS_UNLOCK_PASSWORD` in your `.env` or `docker-compose.yml` so the server auto-unseals on container start. See `docs/architecture/encryption-architecture.md` for details.
 
 ```bash
 # Quick start (builds and runs in one step)
@@ -225,7 +225,7 @@ npm run build:prod
 npm run prepare:tauri    # Just the Node binary download + sidecar assembly
 ```
 
-Secrets (`ANIMUS_ENCRYPTION_KEY`, `JWT_SECRET`) are auto-generated on first launch and stored in the app data directory — no `.env` file needed for the desktop app.
+Encryption keys are derived from your user password. On the desktop app, you'll enter your password on the lock screen when the app opens. No `.env` file needed.
 
 ## Database Management
 

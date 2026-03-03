@@ -35,41 +35,55 @@ $ANIMUS_DATA_DIR/
     providers/            # Per-provider skill deployments
   workspace/              # Agent working directory (reserved for future use)
   package-uploads/        # Temp staging for .anpk installs
-  .secrets                # Auto-generated encryption key + JWT secret
+  vault.json              # Password-wrapped DEK + KDF parameters (see encryption-architecture.md)
   .restore-backup/        # Temporary rollback backup during restore
 ```
 
 ## Secrets Lifecycle
 
-Secrets (encryption key + JWT secret) are managed by `packages/backend/src/lib/secrets-manager.ts`.
+The encryption key (DEK) is derived from the user's password and exists only in process memory. No key material is stored on the filesystem. For the complete encryption architecture, see **`docs/architecture/encryption-architecture.md`**.
 
-### Resolution Order
+### Vault File
 
-For each secret (encryption key, JWT secret):
-1. Environment variable already set → use it
-2. `.secrets` file in DATA_DIR → load from it
-3. Legacy Tauri files (`.encryption_key`, `.jwt_secret`) → migrate
-4. Generate via `crypto.randomBytes(32).toString('hex')`
-
-### `.secrets` File Format
+`vault.json` stores the password-wrapped DEK and key derivation parameters:
 
 ```json
 {
-  "encryptionKey": "64-char-hex",
-  "jwtSecret": "64-char-hex",
-  "_generated": "2026-02-23T...",
-  "_version": 1
+  "version": 2,
+  "kdf": "argon2id",
+  "kdfParams": {
+    "memoryCost": 65536,
+    "timeCost": 3,
+    "parallelism": 1,
+    "salt": "<32-byte-base64>"
+  },
+  "wrappedDek": "<AES-256-GCM encrypted DEK>",
+  "wrappedJwtSecret": "<AES-256-GCM encrypted JWT secret>",
+  "sentinel": "<AES-256-GCM encrypted 'animus-key-ok'>"
 }
 ```
 
-Written with `0o600` permissions (owner read/write only).
+This file is safe to include in backups. Without the user's password, the wrapped DEK cannot be unwrapped.
 
-### Security Mitigations
+### Unlock Flow
 
-- **process.env scrubbed** — After loading, `process.env.ANIMUS_ENCRYPTION_KEY` and `process.env.JWT_SECRET` are deleted. Agent bash tools using `env`/`printenv` won't see them.
-- **File permissions** — `.secrets` is `0600`.
-- **Not served** — `@fastify/static` only serves from `dist/public/`.
-- **Future: tool-level deny list** — Agent file read/write tools should block access to `.secrets` and `.env`.
+On server start, the vault must be unsealed before credential operations work:
+
+1. `ANIMUS_UNLOCK_PASSWORD` env var or Docker secret file provides the password (automated environments)
+2. If no password available, server starts in sealed mode and waits for manual unlock via web UI or CLI
+3. Password is used to derive a key via Argon2id, which unwraps the DEK
+4. After unlock, the password source is scrubbed from `process.env`
+
+### Security Protections
+
+- **No key on disk** -- The DEK exists only in the Node.js process heap after unlock.
+- **process.env scrubbed** -- `ANIMUS_UNLOCK_PASSWORD` is deleted from `process.env` after key derivation.
+- **File deny list** -- Agent file read/write tools block access to `vault.json`, `.env`, and security-critical source files.
+- **Not served** -- `@fastify/static` only serves from `dist/public/`.
+
+### Legacy Migration
+
+Existing installations with a `data/.secrets` file are migrated to the vault system on upgrade. See `docs/architecture/encryption-architecture.md` for the migration flow.
 
 ## Deployment Modes
 

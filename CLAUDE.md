@@ -325,7 +325,8 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - **Architecture**: `docs/architecture/speech-engine.md` (shared STT/TTS engines, Pocket TTS, Parakeet STT, voice system, voice manager)
 - **Architecture**: `docs/architecture/sleep-energy.md` (sleep & energy system, circadian rhythm, energy bands, wake-up mechanics, accelerated emotional decay)
 - **Architecture**: `docs/architecture/plugin-system.md` (plugin system — skills-first philosophy, 7 component types, manifest format, config schemas, credential handling, MCP tools, hooks, decision types, triggers, hot-swap lifecycle, security model, plugin gallery)
-- **Architecture**: `docs/architecture/credential-passing.md` (secrets & credentials — AES-256-GCM encryption at rest, agent-blind model, three storage locations, credential manifest, plugin `${config.*}` resolution, `run_with_credentials` tool, channel IPC injection, frontend masking, threat model)
+- **Architecture**: `docs/architecture/encryption-architecture.md` (encryption system — password-derived keys, envelope encryption, sealed/unsealed server states, vault file, file deny list, unlock paths, deployment scenarios, threat model)
+- **Architecture**: `docs/architecture/credential-passing.md` (agent-blind credential pattern — three storage locations, credential manifest, plugin `${config.*}` resolution, `run_with_credentials` tool, channel IPC injection, frontend masking)
 - **Architecture**: `docs/architecture/observational-memory.md` (observational memory — three-stream compression, Observer/Reflector agents, token-based thresholds, async processing, memory.db schema)
 - **Architecture**: `docs/architecture/reflex-system.md` (reflex fast-response layer — Vercel AI SDK, dual-path voice architecture, lightweight context, heartbeat integration, provider configuration)
 - **Architecture**: `docs/architecture/tts-licensing-and-distribution.md` (TTS model licensing, CC-BY-4.0 redistribution, weight bundling approach, voice cloning consent flow, attribution requirements)
@@ -351,7 +352,8 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 - Working on observational memory/compression/observer/reflector → `/doc-explorer observational-memory`
 - Working on context assembly/prompt building → `/doc-explorer context-builder`
 - Working on shared abstractions (embedding, decay, encryption, auth, migrations) → `/doc-explorer tech-stack`
-- Working on secrets/credentials/encryption/API keys → `/doc-explorer credential-passing`
+- Working on encryption/vault/sealed-state/password-derived keys → `/doc-explorer encryption-architecture`
+- Working on secrets/credentials/agent-blind pattern/API keys → `/doc-explorer credential-passing`
 - Working on data directory layout/paths/env vars/secrets → `/doc-explorer data-directory`
 - Working on MCP tools/custom tools → `/doc-explorer mcp-tools`
 - Working on tool permissions/approval flow/trust ramp → `/doc-explorer tool-permissions`

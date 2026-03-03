@@ -51,12 +51,13 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
 
-  // Auth — secrets are resolved by secrets-manager at startup
-  JWT_SECRET: z.string().optional(),
+  // Auth — JWT secret loaded from data/jwt.key
+  JWT_SECRET: z.string().optional(), // Legacy: kept for migration
   SESSION_EXPIRY_DAYS: z.coerce.number().default(7),
 
-  // Encryption — resolved by secrets-manager at startup
-  ANIMUS_ENCRYPTION_KEY: z.string().optional(),
+  // Encryption — DEK derived from user password via vault-manager
+  ANIMUS_ENCRYPTION_KEY: z.string().optional(), // Legacy: kept for migration
+  ANIMUS_UNLOCK_PASSWORD: z.string().optional(), // Auto-unseal (Docker, dev .env)
 
   // Agent API keys (optional, users can configure these)
   ANTHROPIC_API_KEY: z.string().optional(),

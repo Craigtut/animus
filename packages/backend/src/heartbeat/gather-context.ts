@@ -16,6 +16,7 @@ import * as personaStore from '../db/stores/persona-store.js';
 import * as contactStore from '../db/stores/contact-store.js';
 import * as messageStore from '../db/stores/message-store.js';
 import * as memoryDbStore from '../db/stores/memory-store.js';
+import * as vaultStore from '../db/stores/vault-store.js';
 import { DecayEngine } from '@animus-labs/shared';
 import type {
   HeartbeatState,
@@ -447,6 +448,20 @@ export async function gatherContext(
     }
   } catch (err) {
     log.warn('Plugin context gathering failed:', err);
+  }
+
+  // Append vault entry summary to credential manifest
+  let vaultSummary = '';
+  try {
+    const vaultCount = vaultStore.getVaultEntryCount(sysDb);
+    if (vaultCount > 0) {
+      vaultSummary = `\nPassword vault: ${vaultCount} ${vaultCount === 1 ? 'account' : 'accounts'} stored. Use list_vault_entries to browse, then run_with_credentials with vault:<id> refs.`;
+    }
+  } catch (err) {
+    log.warn('Vault context gathering failed:', err);
+  }
+  if (vaultSummary) {
+    credentialManifest = credentialManifest ? credentialManifest + vaultSummary : vaultSummary.trim();
   }
 
   // Load pending tool approvals for the current contact

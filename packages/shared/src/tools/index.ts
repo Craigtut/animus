@@ -12,6 +12,7 @@ export {
   sendProactiveMessageDef,
   sendMediaDef,
   runWithCredentialsDef,
+  listVaultEntriesDef,
   resolveToolApprovalDef,
   transcribeAudioDef,
   generateSpeechDef,

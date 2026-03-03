@@ -1,12 +1,17 @@
 /**
- * run_with_credentials handler — executes a command with a plugin credential
- * injected as an environment variable.
+ * run_with_credentials handler — executes a command with credentials
+ * injected as environment variables.
  *
- * The credential is resolved from encrypted plugin config at execution time.
- * The LLM never sees the raw value — only the credential reference name.
+ * Supports two credential reference formats:
+ * - "pluginName.configKey" — resolved from encrypted plugin config
+ * - "vault:<id>" — resolved from the password vault (system.db)
  *
- * Works identically for mind and sub-agents since it resolves credentials
- * directly from the plugin manager singleton (not through tool context).
+ * Security features:
+ * - Output redaction: stdout/stderr are scanned for injected credential
+ *   values and any matches are replaced with [REDACTED] before returning
+ *   to the LLM.
+ * - Audit logging: every credential access is logged to agent_logs.db.
+ * - Agent provider keys are stripped from the subprocess environment.
  *
  * See docs/architecture/credential-passing.md
  */
@@ -16,6 +21,9 @@ import type { z } from 'zod';
 import type { ToolHandler, ToolResult } from '../types.js';
 import { runWithCredentialsDef } from '@animus-labs/shared';
 import { getPluginManager } from '../../plugins/index.js';
+import { getSystemDb, getAgentLogsDb } from '../../db/index.js';
+import * as vaultStore from '../../db/stores/vault-store.js';
+import { logCredentialAccess } from '../../db/stores/credential-audit-store.js';
 import { PROJECT_ROOT } from '../../utils/env.js';
 import { createLogger } from '../../lib/logger.js';
 
@@ -89,6 +97,22 @@ function execCommand(
 }
 
 /**
+ * Redact all occurrences of credential values from output text.
+ * Protects against echo $VAR or accidental credential exposure in stdout/stderr.
+ */
+function redactCredentials(text: string, secrets: string[]): string {
+  let result = text;
+  for (const secret of secrets) {
+    // Only redact non-trivial secrets (at least 4 chars)
+    if (secret.length >= 4) {
+      // Use split+join for literal replacement (no regex escaping needed)
+      result = result.split(secret).join('[REDACTED]');
+    }
+  }
+  return result;
+}
+
+/**
  * Format the subprocess output for the tool result.
  */
 function formatOutput(stdout: string, stderr: string, exitCode: number): string {
@@ -111,26 +135,74 @@ function formatOutput(stdout: string, stderr: string, exitCode: number): string 
   return parts.join('\n');
 }
 
-export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = async (
-  input,
-  _context,
-): Promise<ToolResult> => {
-  const pm = getPluginManager();
+/**
+ * Resolve a credential reference. Returns the value or an error result.
+ *
+ * Supports:
+ * - "vault:<id>" — password from vault_entries table
+ * - "pluginName.configKey" — value from plugin encrypted config
+ */
+interface ResolvedCredential {
+  value: string;
+  type: 'vault' | 'plugin';
+}
 
-  // 1. Parse credential ref: "pluginName.configKey"
-  const dotIndex = input.credentialRef.indexOf('.');
+function isResolved(result: ResolvedCredential | ToolResult): result is ResolvedCredential {
+  return 'value' in result;
+}
+
+async function resolveCredentialRef(
+  ref: string,
+  pm: ReturnType<typeof getPluginManager>,
+): Promise<ResolvedCredential | ToolResult> {
+  // Check for vault: prefix
+  if (ref.startsWith('vault:')) {
+    const vaultId = ref.substring(6);
+    if (!vaultId) {
+      return {
+        content: [{ type: 'text', text: 'Invalid vault reference: ID is empty. Expected "vault:<id>".' }],
+        isError: true,
+      };
+    }
+
+    try {
+      const db = getSystemDb();
+      const entry = vaultStore.getVaultEntry(db, vaultId);
+      if (!entry) {
+        return {
+          content: [{
+            type: 'text',
+            text: `Vault entry "${vaultId}" not found. Use list_vault_entries to see available credentials.`,
+          }],
+          isError: true,
+        };
+      }
+      return { value: entry.password, type: 'vault' };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text',
+          text: `Failed to resolve vault credential: ${String(err)}`,
+        }],
+        isError: true,
+      };
+    }
+  }
+
+  // Plugin credential: "pluginName.configKey"
+  const dotIndex = ref.indexOf('.');
   if (dotIndex === -1) {
     return {
       content: [{
         type: 'text',
-        text: `Invalid credentialRef format: "${input.credentialRef}". Expected "pluginName.configKey" (e.g., "nano-banana-pro.GEMINI_API_KEY").`,
+        text: `Invalid credentialRef format: "${ref}". Expected "pluginName.configKey" or "vault:<id>".`,
       }],
       isError: true,
     };
   }
 
-  const pluginName = input.credentialRef.substring(0, dotIndex);
-  const configKey = input.credentialRef.substring(dotIndex + 1);
+  const pluginName = ref.substring(0, dotIndex);
+  const configKey = ref.substring(dotIndex + 1);
 
   if (!pluginName || !configKey) {
     return {
@@ -142,7 +214,6 @@ export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = a
     };
   }
 
-  // 2. Resolve from decrypted plugin config
   const config = pm.getPluginConfig(pluginName);
   if (!config) {
     return {
@@ -156,30 +227,28 @@ export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = a
 
   const value = config[configKey];
 
-  // 2b. Resolve credential value (handle OAuth token objects and plain strings)
-  let credentialValue: string;
-
+  // Handle OAuth token objects
   if (
     typeof value === 'object' &&
     value !== null &&
     '__oauth' in (value as Record<string, unknown>) &&
     (value as Record<string, unknown>)['__oauth'] === true
   ) {
-    // OAuth token object: extract access_token, auto-refresh if near expiry
     const oauthData = value as Record<string, unknown>;
     const expiresAt = oauthData['expires_at'] as number | undefined;
     const fiveMinutes = 5 * 60 * 1000;
+
+    let credentialValue: string;
 
     if (expiresAt && expiresAt - Date.now() < fiveMinutes) {
       try {
         const { refreshTokens } = await import('../../services/plugin-oauth.js');
         await refreshTokens(pluginName, configKey);
-        // Re-read config after refresh
         const refreshedConfig = pm.getPluginConfig(pluginName);
         const refreshedOAuth = refreshedConfig?.[configKey] as Record<string, unknown> | undefined;
         credentialValue = (refreshedOAuth?.['access_token'] as string) ?? '';
       } catch (err) {
-        log.warn(`OAuth token refresh failed for ${input.credentialRef}, using existing token:`, err);
+        log.warn(`OAuth token refresh failed for ${ref}, using existing token:`, err);
         credentialValue = (oauthData['access_token'] as string) ?? '';
       }
     } else {
@@ -195,7 +264,11 @@ export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = a
         isError: true,
       };
     }
-  } else if (typeof value !== 'string' || !value) {
+
+    return { value: credentialValue, type: 'plugin' };
+  }
+
+  if (typeof value !== 'string' || !value) {
     return {
       content: [{
         type: 'text',
@@ -203,71 +276,75 @@ export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = a
       }],
       isError: true,
     };
-  } else {
-    credentialValue = value;
   }
 
-  // 3. Build child-only env (strip agent provider keys)
-  const childEnv: Record<string, string | undefined> = { ...process.env, [input.envVar]: credentialValue };
+  return { value, type: 'plugin' };
+}
 
-  // 3b. Resolve additional credentials (for plugins needing multiple keys)
+export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = async (
+  input,
+  _context,
+): Promise<ToolResult> => {
+  const pm = getPluginManager();
+
+  // Collect all credential values for redaction
+  const injectedSecrets: string[] = [];
+
+  // 1. Resolve primary credential
+  const primary = await resolveCredentialRef(input.credentialRef, pm);
+  if (!isResolved(primary)) return primary;
+
+  injectedSecrets.push(primary.value);
+
+  // 2. Build child-only env
+  const childEnv: Record<string, string | undefined> = {
+    ...process.env,
+    [input.envVar]: primary.value,
+  };
+
+  // 3. Resolve additional credentials
   if (input.additionalCredentials) {
     for (const extra of input.additionalCredentials) {
-      const extraDot = extra.credentialRef.indexOf('.');
-      if (extraDot === -1) {
-        return {
-          content: [{
-            type: 'text',
-            text: `Invalid additional credentialRef format: "${extra.credentialRef}". Expected "pluginName.configKey".`,
-          }],
-          isError: true,
-        };
+      const resolved = await resolveCredentialRef(extra.credentialRef, pm);
+      if (!isResolved(resolved)) return resolved;
+
+      injectedSecrets.push(resolved.value);
+      childEnv[extra.envVar] = resolved.value;
+
+      // Audit log additional credentials
+      try {
+        const logsDb = getAgentLogsDb();
+        logCredentialAccess(logsDb, {
+          credentialType: resolved.type,
+          credentialRef: extra.credentialRef,
+          toolName: 'run_with_credentials',
+          agentContext: _context.agentTaskId ? `sub-agent:${_context.agentTaskId}` : 'mind',
+        });
+      } catch {
+        // Non-critical
       }
-
-      const extraPlugin = extra.credentialRef.substring(0, extraDot);
-      const extraKey = extra.credentialRef.substring(extraDot + 1);
-
-      if (!extraPlugin || !extraKey) {
-        return {
-          content: [{
-            type: 'text',
-            text: `Invalid additional credentialRef: plugin name and config key must both be non-empty.`,
-          }],
-          isError: true,
-        };
-      }
-
-      const extraConfig = pm.getPluginConfig(extraPlugin);
-      if (!extraConfig) {
-        return {
-          content: [{
-            type: 'text',
-            text: `Plugin "${extraPlugin}" not found or has no configuration set (additional credential).`,
-          }],
-          isError: true,
-        };
-      }
-
-      const extraValue = extraConfig[extraKey];
-      if (typeof extraValue !== 'string' || !extraValue) {
-        return {
-          content: [{
-            type: 'text',
-            text: `Credential "${extraKey}" is not set for plugin "${extraPlugin}" (additional credential).`,
-          }],
-          isError: true,
-        };
-      }
-
-      childEnv[extra.envVar] = extraValue;
     }
   }
 
+  // Strip agent provider keys
   for (const key of STRIPPED_ENV_KEYS) {
     delete childEnv[key];
   }
 
-  // 4. Spawn subprocess
+  // 4. Audit log primary credential access
+  try {
+    const logsDb = getAgentLogsDb();
+    logCredentialAccess(logsDb, {
+      credentialType: primary.type,
+      credentialRef: input.credentialRef,
+      toolName: 'run_with_credentials',
+      agentContext: _context.agentTaskId ? `sub-agent:${_context.agentTaskId}` : 'mind',
+    });
+  } catch {
+    // Non-critical
+  }
+
+  // 5. Spawn subprocess
   const cwd = input.cwd || PROJECT_ROOT;
   log.info(`Executing command with credential ${input.credentialRef} → ${input.envVar}`);
 
@@ -277,8 +354,11 @@ export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = a
     timeout: TIMEOUT_MS,
   });
 
-  // 5. Return output (never the credential value)
-  const text = formatOutput(stdout, stderr, exitCode);
+  // 6. Redact credential values from output before returning to LLM
+  const redactedStdout = redactCredentials(stdout, injectedSecrets);
+  const redactedStderr = redactCredentials(stderr, injectedSecrets);
+
+  const text = formatOutput(redactedStdout, redactedStderr, exitCode);
 
   return {
     content: [{ type: 'text', text }],

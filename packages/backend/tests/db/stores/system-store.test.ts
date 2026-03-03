@@ -169,6 +169,19 @@ describe('system-store', () => {
       const settings = systemStore.getSystemSettings(db);
       expect(settings.heartbeatIntervalMs).toBe(60000);
     });
+
+    it('reads default telemetryEnabled (true) and can toggle it', () => {
+      const defaults = systemStore.getSystemSettings(db);
+      expect(defaults.telemetryEnabled).toBe(true);
+
+      systemStore.updateSystemSettings(db, { telemetryEnabled: false });
+      const updated = systemStore.getSystemSettings(db);
+      expect(updated.telemetryEnabled).toBe(false);
+
+      systemStore.updateSystemSettings(db, { telemetryEnabled: true });
+      const restored = systemStore.getSystemSettings(db);
+      expect(restored.telemetryEnabled).toBe(true);
+    });
   });
 
   describe('personality settings (persona.db)', () => {

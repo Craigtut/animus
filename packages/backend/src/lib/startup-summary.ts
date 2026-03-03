@@ -12,6 +12,7 @@ export interface StartupSummaryData {
   speechSttReady: boolean;
   speechTtsReady: boolean;
   speechFfmpegAvailable: boolean;
+  telemetryEnabled: boolean;
   resumedAfterRestart: boolean;
   nextTickInMs: number | null;
   startupMs: number;
@@ -42,6 +43,7 @@ export function formatStartupSummary(data: StartupSummaryData): string {
     row('Tools', `${data.toolsSeeded} tool permissions seeded`, innerWidth),
     row('Channels', `${data.channelsInstalled} installed | ${data.channelsRunning} running`, innerWidth),
     row('Speech', `STT: ${data.speechSttReady ? 'ready' : 'unavailable'} | TTS: ${data.speechTtsReady ? 'ready' : 'pending download'} | ffmpeg: ${data.speechFfmpegAvailable ? 'yes' : 'missing'}`, innerWidth),
+    row('Telemetry', data.telemetryEnabled ? 'enabled' : 'disabled', innerWidth),
     row('Heartbeat', heartbeatLine, innerWidth),
     row('Startup Time', `${data.startupMs}ms`, innerWidth),
     row('Server', `${data.address} (${data.environment})`, innerWidth),

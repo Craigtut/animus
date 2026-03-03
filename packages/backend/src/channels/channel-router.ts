@@ -217,12 +217,12 @@ export class ChannelRouter {
     try {
       const result = await channelManager.sendToChannel(channel, contactId, params.channelContent ?? content, metadata, deliveryMedia);
       if (result.ok) {
-        messageStore.updateDeliveryStatus(msgDb, msg.id, 'sent', { externalId: result.externalId });
+        messageStore.updateDeliveryStatus(msgDb, msg.id, 'sent', result.externalId ? { externalId: result.externalId } : undefined);
         msg.deliveryStatus = 'sent';
         msg.externalId = result.externalId ?? null;
       } else {
         log.warn(`Message stored but delivery failed for channel ${channel}: ${result.error}`);
-        messageStore.updateDeliveryStatus(msgDb, msg.id, 'failed', { error: result.error });
+        messageStore.updateDeliveryStatus(msgDb, msg.id, 'failed', result.error ? { error: result.error } : undefined);
         msg.deliveryStatus = 'failed';
         msg.deliveryError = result.error ?? null;
       }

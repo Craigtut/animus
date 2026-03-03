@@ -26,11 +26,23 @@ import { TaskSubsystem } from './tasks/index.js';
 import { AgentSubsystem } from './heartbeat/agent-subsystem.js';
 import { loadCredentialsIntoEnv, ensureClaudeOnboardingFile } from './services/credential-service.js';
 import { env, DATA_DIR } from './utils/env.js';
-import { resolveSecrets, persistSecretsIfNeeded } from './lib/secrets-manager.js';
+import {
+  loadVault,
+  resolveUnlockPassword,
+  unseal,
+  hasLegacySecrets,
+  setSealState,
+  getSealState,
+  isUnsealed,
+  scrubPasswordSources,
+  clearDek as vaultClearDek,
+} from './lib/vault-manager.js';
+import { setDek, clearDek } from './lib/encryption-service.js';
 import { createLogger, updateCategoryCache } from './lib/logger.js';
 import { logProcessIdentity } from './lib/process-diagnostics.js';
 import { isMaintenanceMode, getMaintenanceReason } from './lib/maintenance.js';
 import { formatStartupSummary } from './lib/startup-summary.js';
+import { getTelemetryService } from './services/telemetry-service.js';
 import * as systemStore from './db/stores/system-store.js';
 
 const log = createLogger('Server', 'server');
@@ -38,6 +50,16 @@ const log = createLogger('Server', 'server');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
+  // Prevent core dumps from exposing in-memory DEK
+  try {
+    const proc = process as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (typeof proc.setrlimit === 'function') {
+      proc.setrlimit('core', { soft: 0, hard: 0 });
+    }
+  } catch {
+    // setrlimit not available on all platforms
+  }
+
   const startupStartedAt = Date.now();
 
   // macOS dock icon suppression: propagate the addon path into DYLD_INSERT_LIBRARIES
@@ -62,26 +84,61 @@ async function main() {
   // Log process identity for production diagnostics
   logProcessIdentity('sidecar');
 
-  // Resolve encryption key + JWT secret (auto-generate if needed)
-  resolveSecrets();
+  // ---------------------------------------------------------------------------
+  // Vault-based encryption: resolve seal state before DB init
+  // ---------------------------------------------------------------------------
+  const vault = loadVault();
+  const unlockPassword = resolveUnlockPassword();
 
-  // Initialize databases (opens 6 DBs, runs migrations)
+  if (vault && unlockPassword) {
+    // Auto-unseal: password available (Docker env var, dev .env, Docker secret)
+    try {
+      await unseal(unlockPassword, vault);
+      const { getDek } = await import('./lib/vault-manager.js');
+      setDek(getDek());
+      scrubPasswordSources();
+      log.info('Vault auto-unsealed from password source');
+    } catch (err) {
+      log.error('Auto-unseal failed (wrong password?):', err);
+      setSealState('sealed');
+    }
+  } else if (vault && !unlockPassword) {
+    // Vault exists but no password: start sealed, wait for manual unlock
+    setSealState('sealed');
+    log.info('Vault is sealed: waiting for manual unlock via web UI');
+  } else if (!vault && hasLegacySecrets()) {
+    // Legacy .secrets file exists: needs migration
+    setSealState('needs-migration');
+    log.info('Legacy .secrets detected: migration to vault required');
+  } else {
+    // No vault, no legacy secrets: first run, registration will create vault
+    setSealState('no-vault');
+    log.info('No vault found: first-run mode (registration will create vault)');
+  }
+
+  // Initialize databases (opens 7 DBs, runs migrations)
   await initializeDatabases();
-
-  // Verify encryption key matches what was used to encrypt existing data
-  const { verifyEncryptionKey } = await import('./lib/encryption-service.js');
-  verifyEncryptionKey(getSystemDb());
-
-  // Persist .secrets file now that the key is verified
-  persistSecretsIfNeeded();
 
   // Load log category settings into logger cache
   const logCategories = systemStore.getLogCategories(getSystemDb());
   updateCategoryCache(logCategories);
 
-  // Load stored credentials into environment
-  const credentialSummary = loadCredentialsIntoEnv(getSystemDb());
-  ensureClaudeOnboardingFile();
+  // Initialize telemetry (after DB init so settings are available)
+  const telemetry = getTelemetryService();
+  telemetry.initialize();
+  telemetry.captureInstall();
+  telemetry.printFirstRunNotice();
+
+  // Verify encryption + load credentials only when unsealed
+  let credentialSummary = { storedCount: 0, envLoadedCount: 0, cliDetectedProviders: [] as string[] };
+  if (isUnsealed()) {
+    const { verifyEncryptionKey } = await import('./lib/encryption-service.js');
+    verifyEncryptionKey(getSystemDb());
+    credentialSummary = loadCredentialsIntoEnv(getSystemDb());
+    ensureClaudeOnboardingFile();
+  } else {
+    log.info('Vault is sealed or absent: skipping credential loading');
+  }
 
   // Route agents package logs through the backend logger so all output
   // uses the same format (timestamps, level labels, file logging, categories).
@@ -425,6 +482,14 @@ async function main() {
     }
   });
 
+  // Feature telemetry listeners (deduped per-day inside the service)
+  getEventBus().on('goal:created', () => { try { telemetry.captureFeatureUsed('goals'); } catch {} });
+  getEventBus().on('seed:created', () => { try { telemetry.captureFeatureUsed('goals'); } catch {} });
+  getEventBus().on('memory:stored', () => { try { telemetry.captureFeatureUsed('memory'); } catch {} });
+  getEventBus().on('channel:installed', () => { try { telemetry.captureFeatureUsed('channels'); } catch {} });
+  getEventBus().on('plugin:changed', () => { try { telemetry.captureFeatureUsed('plugins'); } catch {} });
+  getEventBus().on('energy:updated', () => { try { telemetry.captureFeatureUsed('sleep_energy'); } catch {} });
+
   // Initialize channel manager (after plugins, before heartbeat)
   const { getChannelManager } = await import('./channels/channel-manager.js');
 
@@ -486,6 +551,7 @@ async function main() {
     speechSttReady: speechStatus.sttAvailable,
     speechTtsReady: speechStatus.ttsAvailable,
     speechFfmpegAvailable: speechStatus.ffmpegAvailable,
+    telemetryEnabled: telemetry.isEnabled(),
     resumedAfterRestart: heartbeatInit.resumedAfterRestart,
     nextTickInMs: heartbeatInit.nextTickInMs,
     startupMs: Date.now() - startupStartedAt,
@@ -493,6 +559,13 @@ async function main() {
     environment: env.NODE_ENV,
   });
   log.info(`\n${startupSummary}`);
+
+  // Fire app_started telemetry event
+  telemetry.captureAppStarted({
+    provider: settings.defaultAgentProvider ?? 'claude',
+    channelCount: channelStats.installed,
+    pluginCount: pluginStats.loaded,
+  });
 
   // Start server
   try {
@@ -519,13 +592,26 @@ async function main() {
     await channelManager.stopAll();
     // Release speech engine resources
     await speechService.shutdown();
+    // Flush pending telemetry events
+    await telemetry.shutdown();
     await fastify.close();
     closeDatabases();
+    // Wipe DEK from memory
+    clearDek();
+    vaultClearDek();
     process.exit(0);
   };
 
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+  // Capture unhandled errors for telemetry (max 5/day, deduped by hash)
+  process.on('uncaughtException', (err) => {
+    try { telemetry.captureError(err); } catch {}
+  });
+  process.on('unhandledRejection', (reason) => {
+    try { telemetry.captureError(reason); } catch {}
+  });
 }
 
 main().catch((err) => {

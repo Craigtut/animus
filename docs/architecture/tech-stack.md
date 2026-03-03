@@ -400,14 +400,13 @@ interface IEncryptionService {
 
 **Implementation details:**
 - Algorithm: AES-256-GCM (authenticated encryption)
-- Key source: `ANIMUS_ENCRYPTION_KEY` environment variable
-- Key derivation: PBKDF2 from the env var value
+- Key source: DEK (Data Encryption Key) derived from the user's password via envelope encryption
 - IV: Random per-encryption, prepended to ciphertext
 - Format: `{iv}:{ciphertext}:{authTag}` (base64-encoded)
 
-The encryption key is auto-generated and persisted in the `.secrets` file at startup. The `isConfigured()` method lets the UI verify encryption is active.
+The DEK is a random 256-bit key wrapped with a password-derived key (Argon2id). It exists only in process memory after the user authenticates. The `isConfigured()` method returns whether the vault is unsealed.
 
-Used by the credentials table in `system.db` (API keys, OAuth tokens) and channel configuration (see `docs/architecture/channel-packages.md`).
+Used by the credentials table in `system.db` (API keys, OAuth tokens) and channel configuration (see `docs/architecture/channel-packages.md`). See `docs/architecture/encryption-architecture.md` for the full encryption design.
 
 ---
 

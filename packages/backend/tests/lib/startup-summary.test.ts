@@ -17,6 +17,7 @@ describe('startup summary', () => {
       speechSttReady: true,
       speechTtsReady: false,
       speechFfmpegAvailable: true,
+      telemetryEnabled: true,
       resumedAfterRestart: true,
       nextTickInMs: 600000,
       startupMs: 842,
@@ -32,6 +33,8 @@ describe('startup summary', () => {
     expect(output).toContain('STT: ready');
     expect(output).toContain('TTS: pending download');
     expect(output).toContain('ffmpeg: yes');
+    expect(output).toContain('Telemetry');
+    expect(output).toContain('enabled');
     expect(output).toContain('Heartbeat');
     expect(output).toContain('resumed after restart');
     expect(output).toContain('CLI detected: claude');

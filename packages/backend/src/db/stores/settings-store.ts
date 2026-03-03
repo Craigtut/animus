@@ -18,6 +18,7 @@ export function getSystemSettings(db: Database.Database): SystemSettings {
   return {
     ...rest,
     energySystemEnabled: intToBool(rest['energySystemEnabled'] as number),
+    telemetryEnabled: intToBool(rest['telemetryEnabled'] as number),
   } as SystemSettings;
 }
 
@@ -41,6 +42,7 @@ export function updateSystemSettings(
     defaultModel: 'default_model',
     goalApprovalMode: 'goal_approval_mode',
     energySystemEnabled: 'energy_system_enabled',
+    telemetryEnabled: 'telemetry_enabled',
     sleepStartHour: 'sleep_start_hour',
     sleepEndHour: 'sleep_end_hour',
     sleepTickIntervalMs: 'sleep_tick_interval_ms',
@@ -49,7 +51,7 @@ export function updateSystemSettings(
   };
 
   // Boolean fields need int conversion
-  const booleanFields = new Set(['energySystemEnabled']);
+  const booleanFields = new Set(['energySystemEnabled', 'telemetryEnabled']);
 
   for (const [camelKey, snakeKey] of Object.entries(mapping)) {
     const value = (data as Record<string, unknown>)[camelKey];

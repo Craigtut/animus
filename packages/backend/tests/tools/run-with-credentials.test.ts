@@ -1,8 +1,9 @@
 /**
  * run_with_credentials Handler Tests
  *
- * Tests the credential resolution, env injection, and subprocess execution
- * of the run_with_credentials tool handler.
+ * Tests the credential resolution, env injection, subprocess execution,
+ * vault ref support, output redaction, and audit logging of the
+ * run_with_credentials tool handler.
  *
  * Subprocess execution is mocked since tests run in a sandbox.
  */
@@ -35,6 +36,26 @@ vi.mock('../../src/utils/env.js', () => ({
   DATA_DIR: '/tmp/animus-test/data',
 }));
 
+// Mock vault store
+const mockGetVaultEntry = vi.fn();
+vi.mock('../../src/db/stores/vault-store.js', () => ({
+  getVaultEntry: (...args: unknown[]) => mockGetVaultEntry(...args),
+}));
+
+// Mock credential audit store
+const mockLogCredentialAccess = vi.fn();
+vi.mock('../../src/db/stores/credential-audit-store.js', () => ({
+  logCredentialAccess: (...args: unknown[]) => mockLogCredentialAccess(...args),
+}));
+
+// Mock db/index
+const mockSystemDb = {};
+const mockAgentLogsDb = {};
+vi.mock('../../src/db/index.js', () => ({
+  getSystemDb: () => mockSystemDb,
+  getAgentLogsDb: () => mockAgentLogsDb,
+}));
+
 // Track spawn calls so we can inspect env and command
 interface SpawnCall {
   command: string;
@@ -44,8 +65,8 @@ interface SpawnCall {
 
 const spawnCalls: SpawnCall[] = [];
 
-// Flag to simulate failure in the next spawn call
-let nextSpawnFailure: { exitCode: number; stderr: string } | null = null;
+// Configurable spawn output
+let nextSpawnOutput: { stdout: string; stderr: string; exitCode: number } | null = null;
 
 // Mock child_process.spawn
 vi.mock('node:child_process', () => ({
@@ -63,13 +84,14 @@ vi.mock('node:child_process', () => ({
     proc.stderr = stderr;
     proc.kill = vi.fn();
 
-    const failure = nextSpawnFailure;
-    nextSpawnFailure = null;
+    const output = nextSpawnOutput;
+    nextSpawnOutput = null;
 
     queueMicrotask(() => {
-      if (failure) {
-        stderr.emit('data', Buffer.from(failure.stderr));
-        proc.emit('exit', failure.exitCode);
+      if (output) {
+        if (output.stdout) stdout.emit('data', Buffer.from(output.stdout));
+        if (output.stderr) stderr.emit('data', Buffer.from(output.stderr));
+        proc.emit('exit', output.exitCode);
       } else {
         stdout.emit('data', Buffer.from('command output\n'));
         proc.emit('exit', 0);
@@ -109,7 +131,7 @@ describe('run_with_credentials handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     spawnCalls.length = 0;
-    nextSpawnFailure = null;
+    nextSpawnOutput = null;
   });
 
   // --------------------------------------------------------------------------
@@ -117,7 +139,7 @@ describe('run_with_credentials handler', () => {
   // --------------------------------------------------------------------------
 
   describe('credential ref parsing', () => {
-    it('should reject credentialRef without a dot separator', async () => {
+    it('should reject credentialRef without a dot separator or vault prefix', async () => {
       const result = await runWithCredentialsHandler(
         {
           command: 'echo hello',
@@ -129,8 +151,6 @@ describe('run_with_credentials handler', () => {
 
       expect(result.isError).toBe(true);
       expect(result.content[0]!.text).toContain('Invalid credentialRef format');
-      expect(result.content[0]!.text).toContain('pluginName.configKey');
-      // Should NOT have spawned any subprocess
       expect(spawnCalls).toHaveLength(0);
     });
 
@@ -165,7 +185,6 @@ describe('run_with_credentials handler', () => {
     });
 
     it('should handle credentialRef with multiple dots correctly', async () => {
-      // "plugin.name.with.dots" → pluginName = "plugin", configKey = "name.with.dots"
       mockGetPluginConfig.mockReturnValue({ 'name.with.dots': 'secret-value' });
 
       const result = await runWithCredentialsHandler(
@@ -259,6 +278,227 @@ describe('run_with_credentials handler', () => {
   });
 
   // --------------------------------------------------------------------------
+  // Vault Credential References
+  // --------------------------------------------------------------------------
+
+  describe('vault credential refs', () => {
+    it('should resolve vault:<id> references from the vault store', async () => {
+      mockGetVaultEntry.mockReturnValue({
+        id: 'vault-abc-123',
+        label: 'GitHub',
+        service: 'github.com',
+        password: 'gh-vault-secret',
+      });
+
+      const result = await runWithCredentialsHandler(
+        {
+          command: 'git push',
+          credentialRef: 'vault:vault-abc-123',
+          envVar: 'GH_TOKEN',
+        },
+        createMockContext(),
+      );
+
+      expect(mockGetVaultEntry).toHaveBeenCalledWith(mockSystemDb, 'vault-abc-123');
+      expect(result.isError).toBeFalsy();
+      expect(spawnCalls).toHaveLength(1);
+      expect(spawnCalls[0]!.options.env['GH_TOKEN']).toBe('gh-vault-secret');
+    });
+
+    it('should return error for nonexistent vault entry', async () => {
+      mockGetVaultEntry.mockReturnValue(null);
+
+      const result = await runWithCredentialsHandler(
+        {
+          command: 'echo test',
+          credentialRef: 'vault:nonexistent-id',
+          envVar: 'PASSWORD',
+        },
+        createMockContext(),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('not found');
+      expect(result.content[0]!.text).toContain('list_vault_entries');
+      expect(spawnCalls).toHaveLength(0);
+    });
+
+    it('should return error for vault: with empty ID', async () => {
+      const result = await runWithCredentialsHandler(
+        {
+          command: 'echo test',
+          credentialRef: 'vault:',
+          envVar: 'PASSWORD',
+        },
+        createMockContext(),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('ID is empty');
+      expect(spawnCalls).toHaveLength(0);
+    });
+
+    it('should support vault refs in additionalCredentials', async () => {
+      mockGetPluginConfig.mockReturnValue({ API_KEY: 'plugin-key' });
+      mockGetVaultEntry.mockReturnValue({
+        id: 'vault-xyz',
+        password: 'vault-password',
+      });
+
+      await runWithCredentialsHandler(
+        {
+          command: 'deploy.sh',
+          credentialRef: 'deploy-plugin.API_KEY',
+          envVar: 'DEPLOY_KEY',
+          additionalCredentials: [
+            { credentialRef: 'vault:vault-xyz', envVar: 'DB_PASSWORD' },
+          ],
+        },
+        createMockContext(),
+      );
+
+      expect(spawnCalls).toHaveLength(1);
+      const childEnv = spawnCalls[0]!.options.env;
+      expect(childEnv['DEPLOY_KEY']).toBe('plugin-key');
+      expect(childEnv['DB_PASSWORD']).toBe('vault-password');
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Output Redaction
+  // --------------------------------------------------------------------------
+
+  describe('output redaction', () => {
+    it('should redact credential values from stdout', async () => {
+      const secret = 'my-super-secret-key-12345';
+      mockGetPluginConfig.mockReturnValue({ API_KEY: secret });
+
+      // Simulate command echoing the credential value
+      nextSpawnOutput = {
+        stdout: `Using key: ${secret}\nDone!\n`,
+        stderr: '',
+        exitCode: 0,
+      };
+
+      const result = await runWithCredentialsHandler(
+        {
+          command: 'echo $API_KEY',
+          credentialRef: 'test-plugin.API_KEY',
+          envVar: 'API_KEY',
+        },
+        createMockContext(),
+      );
+
+      // The raw secret should NOT appear in the output
+      expect(result.content[0]!.text).not.toContain(secret);
+      // It should be replaced with [REDACTED]
+      expect(result.content[0]!.text).toContain('[REDACTED]');
+      expect(result.content[0]!.text).toContain('Done!');
+    });
+
+    it('should redact credential values from stderr', async () => {
+      const secret = 'secret-api-key-abcdef';
+      mockGetPluginConfig.mockReturnValue({ KEY: secret });
+
+      nextSpawnOutput = {
+        stdout: '',
+        stderr: `Error: invalid key ${secret}\n`,
+        exitCode: 1,
+      };
+
+      const result = await runWithCredentialsHandler(
+        {
+          command: 'failing-cmd',
+          credentialRef: 'test.KEY',
+          envVar: 'MY_KEY',
+        },
+        createMockContext(),
+      );
+
+      expect(result.content[0]!.text).not.toContain(secret);
+      expect(result.content[0]!.text).toContain('[REDACTED]');
+    });
+
+    it('should redact all injected credentials (primary + additional)', async () => {
+      const secret1 = 'primary-secret-value';
+      const secret2 = 'additional-secret-val';
+      mockGetPluginConfig.mockReturnValue({
+        KEY_A: secret1,
+        KEY_B: secret2,
+      });
+
+      nextSpawnOutput = {
+        stdout: `key1=${secret1}, key2=${secret2}\n`,
+        stderr: '',
+        exitCode: 0,
+      };
+
+      const result = await runWithCredentialsHandler(
+        {
+          command: 'show-keys',
+          credentialRef: 'test.KEY_A',
+          envVar: 'A',
+          additionalCredentials: [
+            { credentialRef: 'test.KEY_B', envVar: 'B' },
+          ],
+        },
+        createMockContext(),
+      );
+
+      expect(result.content[0]!.text).not.toContain(secret1);
+      expect(result.content[0]!.text).not.toContain(secret2);
+    });
+
+    it('should redact vault credential values from output', async () => {
+      const vaultPass = 'vault-password-here!';
+      mockGetVaultEntry.mockReturnValue({
+        id: 'v1',
+        password: vaultPass,
+      });
+
+      nextSpawnOutput = {
+        stdout: `Password: ${vaultPass}\n`,
+        stderr: '',
+        exitCode: 0,
+      };
+
+      const result = await runWithCredentialsHandler(
+        {
+          command: 'echo $PW',
+          credentialRef: 'vault:v1',
+          envVar: 'PW',
+        },
+        createMockContext(),
+      );
+
+      expect(result.content[0]!.text).not.toContain(vaultPass);
+      expect(result.content[0]!.text).toContain('[REDACTED]');
+    });
+
+    it('should not redact short secrets (less than 4 chars)', async () => {
+      mockGetPluginConfig.mockReturnValue({ PIN: 'ab' });
+
+      nextSpawnOutput = {
+        stdout: 'ab is a common prefix\n',
+        stderr: '',
+        exitCode: 0,
+      };
+
+      const result = await runWithCredentialsHandler(
+        {
+          command: 'echo test',
+          credentialRef: 'test.PIN',
+          envVar: 'PIN',
+        },
+        createMockContext(),
+      );
+
+      // 'ab' is too short to redact (would cause false positives)
+      expect(result.content[0]!.text).toContain('ab is a common prefix');
+    });
+  });
+
+  // --------------------------------------------------------------------------
   // Subprocess Execution
   // --------------------------------------------------------------------------
 
@@ -300,7 +540,6 @@ describe('run_with_credentials handler', () => {
     });
 
     it('should strip agent provider keys from child env', async () => {
-      // Temporarily set provider keys in process.env
       const originalAnthropicKey = process.env['ANTHROPIC_API_KEY'];
       const originalOpenAIKey = process.env['OPENAI_API_KEY'];
       const originalEncryptionKey = process.env['ANIMUS_ENCRYPTION_KEY'];
@@ -323,16 +562,12 @@ describe('run_with_credentials handler', () => {
         expect(spawnCalls).toHaveLength(1);
         const childEnv = spawnCalls[0]!.options.env;
 
-        // These should be stripped
         expect(childEnv['ANTHROPIC_API_KEY']).toBeUndefined();
         expect(childEnv['OPENAI_API_KEY']).toBeUndefined();
         expect(childEnv['ANIMUS_ENCRYPTION_KEY']).toBeUndefined();
         expect(childEnv['CLAUDE_CODE_OAUTH_TOKEN']).toBeUndefined();
-
-        // The injected key should be present
         expect(childEnv['MY_KEY']).toBe('secret');
       } finally {
-        // Restore
         if (originalAnthropicKey !== undefined) process.env['ANTHROPIC_API_KEY'] = originalAnthropicKey;
         else delete process.env['ANTHROPIC_API_KEY'];
         if (originalOpenAIKey !== undefined) process.env['OPENAI_API_KEY'] = originalOpenAIKey;
@@ -374,7 +609,7 @@ describe('run_with_credentials handler', () => {
     });
 
     it('should report exit code on command failure', async () => {
-      nextSpawnFailure = { exitCode: 42, stderr: 'error message\n' };
+      nextSpawnOutput = { stdout: '', stderr: 'error message\n', exitCode: 42 };
       mockGetPluginConfig.mockReturnValue({ API_KEY: 'secret' });
 
       const result = await runWithCredentialsHandler(
@@ -394,45 +629,94 @@ describe('run_with_credentials handler', () => {
   });
 
   // --------------------------------------------------------------------------
-  // Output Format
+  // Audit Logging
   // --------------------------------------------------------------------------
 
-  describe('output formatting', () => {
-    it('should format successful output with stdout', async () => {
+  describe('audit logging', () => {
+    it('should log plugin credential access', async () => {
       mockGetPluginConfig.mockReturnValue({ API_KEY: 'secret' });
 
-      const result = await runWithCredentialsHandler(
+      await runWithCredentialsHandler(
         {
-          command: 'echo "output line"',
-          credentialRef: 'test-plugin.API_KEY',
-          envVar: 'MY_KEY',
+          command: 'echo test',
+          credentialRef: 'my-plugin.API_KEY',
+          envVar: 'KEY',
         },
         createMockContext(),
       );
 
-      expect(result.isError).toBeFalsy();
-      expect(result.content[0]!.text).toContain('successfully');
-      expect(result.content[0]!.text).toContain('exit code 0');
-      expect(result.content[0]!.text).toContain('STDOUT');
-      expect(result.content[0]!.text).toContain('command output');
+      expect(mockLogCredentialAccess).toHaveBeenCalledWith(
+        mockAgentLogsDb,
+        expect.objectContaining({
+          credentialType: 'plugin',
+          credentialRef: 'my-plugin.API_KEY',
+          toolName: 'run_with_credentials',
+        }),
+      );
     });
 
-    it('should not include raw credential value in formatted output', async () => {
-      const secretValue = 'super-secret-api-key-that-must-not-appear';
-      mockGetPluginConfig.mockReturnValue({ API_KEY: secretValue });
+    it('should log vault credential access', async () => {
+      mockGetVaultEntry.mockReturnValue({ id: 'v1', password: 'pass' });
 
-      const result = await runWithCredentialsHandler(
+      await runWithCredentialsHandler(
         {
-          command: 'echo "safe output"',
-          credentialRef: 'test-plugin.API_KEY',
-          envVar: 'MY_KEY',
+          command: 'echo test',
+          credentialRef: 'vault:v1',
+          envVar: 'PW',
         },
         createMockContext(),
       );
 
-      // The credential should not appear in the tool result text
-      // (it's in the env but we don't serialize the env in the output)
-      expect(result.content[0]!.text).not.toContain(secretValue);
+      expect(mockLogCredentialAccess).toHaveBeenCalledWith(
+        mockAgentLogsDb,
+        expect.objectContaining({
+          credentialType: 'vault',
+          credentialRef: 'vault:v1',
+          toolName: 'run_with_credentials',
+        }),
+      );
+    });
+
+    it('should log additional credentials separately', async () => {
+      mockGetPluginConfig.mockReturnValue({
+        KEY_A: 'a-val',
+        KEY_B: 'b-val',
+      });
+
+      await runWithCredentialsHandler(
+        {
+          command: 'echo test',
+          credentialRef: 'test.KEY_A',
+          envVar: 'A',
+          additionalCredentials: [
+            { credentialRef: 'test.KEY_B', envVar: 'B' },
+          ],
+        },
+        createMockContext(),
+      );
+
+      // Should have logged both primary and additional
+      expect(mockLogCredentialAccess).toHaveBeenCalledTimes(2);
+    });
+
+    it('should include agent context in audit log', async () => {
+      mockGetPluginConfig.mockReturnValue({ KEY: 'val' });
+
+      await runWithCredentialsHandler(
+        {
+          command: 'echo test',
+          credentialRef: 'test.KEY',
+          envVar: 'K',
+        },
+        createMockContext(),
+      );
+
+      expect(mockLogCredentialAccess).toHaveBeenCalledWith(
+        mockAgentLogsDb,
+        expect.objectContaining({
+          agentContext: 'sub-agent:task-1',
+        }),
+      );
     });
   });
 
@@ -481,7 +765,7 @@ describe('run_with_credentials handler', () => {
       );
 
       expect(result.isError).toBe(true);
-      expect(result.content[0]!.text).toContain('Invalid additional credentialRef');
+      expect(result.content[0]!.text).toContain('Invalid credentialRef');
       expect(spawnCalls).toHaveLength(0);
     });
 
@@ -557,7 +841,6 @@ describe('run_with_credentials handler', () => {
     it('should not require ToolHandlerContext stores (uses plugin manager directly)', async () => {
       mockGetPluginConfig.mockReturnValue({ API_KEY: 'secret' });
 
-      // Even with minimal context (no stores), should work
       const minimalContext: ToolHandlerContext = {
         agentTaskId: 'task-1',
         contactId: '',

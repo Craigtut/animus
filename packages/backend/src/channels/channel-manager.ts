@@ -31,6 +31,7 @@ import type {
 } from '@animus-labs/shared';
 import { channelManifestSchema, configSchemaSchema } from '@animus-labs/shared';
 import { verifyPackage } from '../services/package-verifier.js';
+import { isUnsealed } from '../lib/vault-manager.js';
 
 const log = createLogger('ChannelManager', 'channels');
 
@@ -102,6 +103,13 @@ export class ChannelManager {
         }
 
         if (pkg.enabled) {
+          if (!isUnsealed()) {
+            // Vault is sealed: can't decrypt channel credentials, defer startup
+            log.info(`Deferring channel ${pkg.name} start (vault is sealed)`);
+            systemStore.updateChannelPackageStatus(db, pkg.name, 'disabled', 'Waiting for vault unlock');
+            continue;
+          }
+
           // Start channel process in the background. Channel startup involves
           // network I/O (WebSocket connections, API handshakes) and can take 10s+
           // if a service is unreachable. Starting in the background prevents a

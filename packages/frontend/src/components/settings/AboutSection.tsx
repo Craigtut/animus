@@ -1,6 +1,8 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
-import { ArrowSquareOut } from '@phosphor-icons/react';
+import { useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { ArrowSquareOut, CaretRight, CaretDown } from '@phosphor-icons/react';
 import { Typography } from '../ui';
 import { trpc } from '../../utils/trpc';
 
@@ -155,18 +157,13 @@ function AttributionCard({ entry }: { entry: AttributionEntry }) {
 }
 
 // ============================================================================
-// AboutSection
+// AboutInline — compact block for the System settings section
 // ============================================================================
 
-export function AboutSection() {
+export function AboutInline() {
   const theme = useTheme();
   const { data: versionData } = trpc.settings.getVersion.useQuery();
-
-  const sectionStyles = css`
-    display: flex;
-    flex-direction: column;
-    gap: ${theme.spacing[6]};
-  `;
+  const [expanded, setExpanded] = useState(false);
 
   const groupLabelStyles = css`
     font-size: ${theme.typography.fontSize.xs};
@@ -185,91 +182,128 @@ export function AboutSection() {
   `;
 
   return (
-    <div css={sectionStyles}>
-      {/* Engine Identity */}
-      <div css={css`
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: ${theme.spacing[2]};
-        padding: ${theme.spacing[6]} 0 ${theme.spacing[2]};
-      `}>
-        <Typography.Title3 serif style={{ fontWeight: theme.typography.fontWeight.light }}>
-          Animus Engine
-        </Typography.Title3>
-        <span css={css`
-          font-size: ${theme.typography.fontSize.sm};
-          color: ${theme.colors.text.secondary};
-          font-family: ${theme.typography.fontFamily.mono};
-        `}>
-          v{versionData?.version ?? '...'}
-        </span>
-        <Typography.Caption color="hint">
-          &copy; 2026 Craig Tuttle (Animus Labs)
-        </Typography.Caption>
-        <a
-          href="https://github.com/craigtut/animus/blob/main/LICENSE"
-          target="_blank"
-          rel="noopener noreferrer"
-          css={css`
-            font-size: ${theme.typography.fontSize.tiny};
-            color: ${theme.colors.text.hint};
-            text-decoration: underline;
-            text-underline-offset: 2px;
+    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+      <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+        About
+      </Typography.Subtitle>
 
-            &:hover {
-              color: ${theme.colors.text.secondary};
-            }
-          `}
-        >
-          Licensed under MIT
-        </a>
-      </div>
-
-      {/* AI Models */}
-      <div>
-        <div css={groupLabelStyles}>AI Models</div>
-        <div css={cardStyles}>
-          {aiModels.map((entry) => (
-            <AttributionCard key={entry.name} entry={entry} />
-          ))}
+      {/* Engine identity: name, version, copyright */}
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+        <div css={css`display: flex; align-items: baseline; gap: ${theme.spacing[2]};`}>
+          <Typography.SmallBody css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
+            Animus Engine
+          </Typography.SmallBody>
+          <span css={css`
+            font-size: ${theme.typography.fontSize.xs};
+            color: ${theme.colors.text.secondary};
+            font-family: ${theme.typography.fontFamily.mono};
+          `}>
+            v{versionData?.version ?? '...'}
+          </span>
         </div>
-      </div>
-
-      {/* Libraries */}
-      <div>
-        <div css={groupLabelStyles}>Libraries</div>
-        <div css={cardStyles}>
-          {libraries.map((entry) => (
-            <AttributionCard key={entry.name} entry={entry} />
-          ))}
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div css={css`
-        text-align: center;
-      `}>
-        <Typography.Caption color="hint">
-          Full attribution details available in{' '}
+        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+          <Typography.Caption color="hint">
+            &copy; 2026 Craig Tuttle (Animus Labs)
+          </Typography.Caption>
           <a
-            href="https://github.com/craigtut/animus/blob/main/THIRD-PARTY-LICENSES.md"
+            href="https://github.com/craigtut/animus/blob/main/LICENSE"
             target="_blank"
             rel="noopener noreferrer"
             css={css`
-              color: ${theme.colors.text.secondary};
+              font-size: ${theme.typography.fontSize.tiny};
+              color: ${theme.colors.text.hint};
               text-decoration: underline;
               text-underline-offset: 2px;
-
-              &:hover {
-                color: ${theme.colors.text.primary};
-              }
+              &:hover { color: ${theme.colors.text.secondary}; }
             `}
           >
-            THIRD-PARTY-LICENSES.md
+            MIT License
           </a>
-        </Typography.Caption>
+        </div>
       </div>
+
+      {/* Expand/collapse trigger */}
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        css={css`
+          display: flex;
+          align-items: center;
+          gap: ${theme.spacing[1.5]};
+          padding: 0;
+          cursor: pointer;
+          color: ${theme.colors.text.hint};
+          user-select: none;
+          &:hover { color: ${theme.colors.text.secondary}; }
+        `}
+      >
+        {expanded ? <CaretDown size={12} /> : <CaretRight size={12} />}
+        <Typography.Caption color="hint">
+          {expanded ? 'Hide attributions' : 'Attributions & licenses'}
+        </Typography.Caption>
+      </button>
+
+      {/* Expandable attributions */}
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            css={css`overflow: hidden;`}
+          >
+            <div css={css`
+              display: flex;
+              flex-direction: column;
+              gap: ${theme.spacing[5]};
+              padding-left: ${theme.spacing[3]};
+              border-left: 1px solid ${theme.colors.border.light};
+              margin-left: ${theme.spacing[1]};
+            `}>
+              {/* AI Models */}
+              <div>
+                <div css={groupLabelStyles}>AI Models</div>
+                <div css={cardStyles}>
+                  {aiModels.map((entry) => (
+                    <AttributionCard key={entry.name} entry={entry} />
+                  ))}
+                </div>
+              </div>
+
+              {/* Libraries */}
+              <div>
+                <div css={groupLabelStyles}>Libraries</div>
+                <div css={cardStyles}>
+                  {libraries.map((entry) => (
+                    <AttributionCard key={entry.name} entry={entry} />
+                  ))}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <Typography.Caption color="hint">
+                Full attribution details available in{' '}
+                <a
+                  href="https://github.com/craigtut/animus/blob/main/THIRD-PARTY-LICENSES.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  css={css`
+                    color: ${theme.colors.text.secondary};
+                    text-decoration: underline;
+                    text-underline-offset: 2px;
+                    &:hover { color: ${theme.colors.text.primary}; }
+                  `}
+                >
+                  THIRD-PARTY-LICENSES.md
+                </a>
+              </Typography.Caption>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+
+/** @deprecated Use AboutInline instead. Kept for backwards compat if referenced elsewhere. */
+export const AboutSection = AboutInline;

@@ -11,6 +11,8 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../trpc.js';
 import { getPluginManager } from '../../plugins/index.js';
+import { getSystemDb } from '../../db/index.js';
+import * as pluginStore from '../../db/stores/plugin-store.js';
 import { verifyPackage } from '../../services/package-verifier.js';
 import { PluginManifestSchema, pluginSourceSchema } from '@animus-labs/shared';
 
@@ -21,13 +23,14 @@ export const pluginsRouter = router({
   list: protectedProcedure.query(() => {
     const pm = getPluginManager();
     const plugins = pm.getAllPlugins();
+    const loadedNames = new Set(plugins.map((p) => p.name));
 
-    return plugins.map((p) => {
+    const results = plugins.map((p) => {
       const loaded = pm.getPlugin(p.name);
       const comps = p.manifest.components;
 
       // Compute status dynamically (mirrors channel pattern)
-      let status: 'active' | 'unconfigured' | 'disabled';
+      let status: 'active' | 'unconfigured' | 'disabled' | 'error';
       if (p.enabled) {
         status = 'active';
       } else if (!pm.hasRequiredConfig(p.name)) {
@@ -45,6 +48,7 @@ export const pluginsRouter = router({
         installedFrom: p.source,
         enabled: p.enabled,
         status,
+        lastError: null as string | null,
         components: {
           skills: loaded?.skills.length ?? 0,
           mcpServers: loaded ? Object.keys(loaded.mcpServers).length : 0,
@@ -62,6 +66,39 @@ export const pluginsRouter = router({
         hasConfig: comps.tools !== undefined || pm.getPluginConfigSchema(p.name) !== null,
       };
     });
+
+    // Include errored plugins from DB that aren't in the in-memory map
+    const db = getSystemDb();
+    const allDbRecords = pluginStore.getAllPlugins(db);
+    for (const record of allDbRecords) {
+      if (loadedNames.has(record.name)) continue;
+      if (record.status !== 'error') continue;
+
+      results.push({
+        name: record.name,
+        displayName: record.name, // No manifest available for errored plugins
+        version: record.version,
+        description: '',
+        iconSvg: null,
+        installedFrom: record.source,
+        enabled: record.enabled,
+        status: 'error',
+        lastError: record.lastError,
+        components: {
+          skills: 0,
+          mcpServers: 0,
+          mcpToolCount: 0,
+          contextSources: 0,
+          hooks: 0,
+          decisionTypes: 0,
+          triggers: 0,
+          agents: 0,
+        },
+        hasConfig: false,
+      });
+    }
+
+    return results;
   }),
 
   /**

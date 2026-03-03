@@ -7,7 +7,7 @@
 
 import type Database from 'better-sqlite3';
 import { now } from '@animus-labs/shared';
-import type { PluginRecord, PluginSource } from '@animus-labs/shared';
+import type { PluginRecord, PluginSource, PluginStatus } from '@animus-labs/shared';
 import { snakeToCamel, boolToInt, intToBool } from '../utils.js';
 
 // ============================================================================
@@ -37,8 +37,8 @@ export function insertPlugin(db: Database.Database, data: NewPlugin): PluginReco
   const timestamp = now();
   const enabled = data.enabled ?? true;
   db.prepare(
-    `INSERT INTO plugins (name, version, path, enabled, installed_at, updated_at, source, store_id, config_encrypted)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO plugins (name, version, path, enabled, installed_at, updated_at, source, store_id, config_encrypted, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     data.name,
     data.version,
@@ -49,6 +49,7 @@ export function insertPlugin(db: Database.Database, data: NewPlugin): PluginReco
     data.source,
     data.storeId ?? null,
     data.configEncrypted ?? null,
+    enabled ? 'active' : 'disabled',
   );
   return {
     name: data.name,
@@ -60,6 +61,8 @@ export function insertPlugin(db: Database.Database, data: NewPlugin): PluginReco
     source: data.source,
     storeId: data.storeId ?? null,
     configEncrypted: data.configEncrypted ?? null,
+    status: enabled ? 'active' : 'disabled',
+    lastError: null,
   };
 }
 
@@ -87,7 +90,7 @@ export function getEnabledPlugins(db: Database.Database): PluginRecord[] {
 export function updatePlugin(
   db: Database.Database,
   name: string,
-  data: Partial<Pick<PluginRecord, 'version' | 'path' | 'enabled' | 'source' | 'storeId'>>
+  data: Partial<Pick<PluginRecord, 'version' | 'path' | 'enabled' | 'source' | 'storeId' | 'status' | 'lastError'>>
 ): boolean {
   const fields: string[] = [];
   const values: unknown[] = [];
@@ -112,6 +115,14 @@ export function updatePlugin(
     fields.push('store_id = ?');
     values.push(data.storeId);
   }
+  if (data.status !== undefined) {
+    fields.push('status = ?');
+    values.push(data.status);
+  }
+  if (data.lastError !== undefined) {
+    fields.push('last_error = ?');
+    values.push(data.lastError);
+  }
 
   if (fields.length === 0) return false;
 
@@ -123,6 +134,17 @@ export function updatePlugin(
     .prepare(`UPDATE plugins SET ${fields.join(', ')} WHERE name = ?`)
     .run(...values);
   return result.changes > 0;
+}
+
+export function updatePluginStatus(
+  db: Database.Database,
+  name: string,
+  status: PluginStatus,
+  lastError?: string | null
+): void {
+  db.prepare(
+    'UPDATE plugins SET status = ?, last_error = ?, updated_at = ? WHERE name = ?'
+  ).run(status, lastError ?? null, now(), name);
 }
 
 export function deletePlugin(db: Database.Database, name: string): boolean {

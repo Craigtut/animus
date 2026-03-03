@@ -21,6 +21,7 @@ import { getSystemDb } from '../db/index.js';
 import * as pluginStore from '../db/stores/plugin-store.js';
 import * as systemStore from '../db/stores/system-store.js';
 import { encrypt, decrypt } from '../lib/encryption-service.js';
+import { isUnsealed, getSealState } from '../lib/vault-manager.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
 import {
@@ -169,16 +170,22 @@ export class PluginManager {
 
       const disc = discovered.find(([, m]) => m.name === record.name);
       if (!disc) {
-        if (record.source === 'package' || record.source === 'store') {
-          // Package-installed plugin directory missing — remove stale DB record
-          // so it doesn't block reinstallation. These paths are system-managed
-          // (extracted to ~/.animus/packages/), so if gone they're unrecoverable.
-          log.warn(`Plugin "${record.name}" installed from ${record.source} but not found on disk at "${record.path}" — removing stale record`);
-          pluginStore.deletePlugin(db, record.name);
-        } else {
-          log.warn(`Plugin "${record.name}" not found on disk at "${record.path}" — skipping`);
-        }
+        // Plugin directory not found on disk — mark as error instead of deleting.
+        // This preserves the DB record so Docker restarts or temporary path issues
+        // don't permanently lose installed plugins.
+        // NOTE: We intentionally do NOT set enabled=false here. The plugin can't load
+        // anyway (no disc entry), and preserving `enabled` means recovery will
+        // auto-restore the plugin to its previous active/disabled state.
+        const reason = `Plugin directory not found on disk at "${record.path}"`;
+        log.warn(`Plugin "${record.name}" (${record.source}): ${reason} — marking as error`);
+        pluginStore.updatePluginStatus(db, record.name, 'error', reason);
         continue;
+      }
+
+      // Plugin was previously errored but is now found on disk — recover it
+      if (record.status === 'error') {
+        log.info(`Plugin "${record.name}" recovered — directory found again at "${disc[0]}"`);
+        pluginStore.updatePluginStatus(db, record.name, record.enabled ? 'active' : 'disabled', null);
       }
 
       const [pluginPath, manifest, source] = disc;
@@ -204,8 +211,18 @@ export class PluginManager {
       if (record.enabled) {
         await this.loadComponents(loaded);
 
-        // Verify config — if required fields are missing, disable instead of enabling
-        if (!this.hasRequiredConfig(manifest.name)) {
+        // Verify config — if required fields are missing, disable instead of enabling.
+        // When the vault is sealed (or needs migration), we can't decrypt config to
+        // check it. Skip validation and load the plugin normally. Config will be
+        // validated on vault unlock via revalidateConfigs(). This mirrors how channels
+        // defer startup when sealed.
+        // NOTE: We only skip in 'sealed'/'needs-migration' states, NOT 'no-vault'.
+        // In 'no-vault' state, config isn't encrypted, so the check works fine.
+        const sealState = getSealState();
+        const vaultBlocking = sealState === 'sealed' || sealState === 'needs-migration';
+        const configValid = vaultBlocking || this.hasRequiredConfig(manifest.name);
+
+        if (!configValid) {
           log.warn(`Plugin "${manifest.name}" is missing required configuration — disabling`);
           loaded.enabled = false;
           pluginStore.updatePlugin(db, manifest.name, { enabled: false });
@@ -294,19 +311,28 @@ export class PluginManager {
 
   async uninstall(name: string): Promise<void> {
     const loaded = this.plugins.get(name);
-    if (!loaded) {
-      throw new Error(`Plugin "${name}" is not loaded`);
-    }
 
-    if (loaded.source === 'built-in') {
-      throw new Error(`Cannot uninstall built-in plugin "${name}"`);
-    }
+    if (loaded) {
+      if (loaded.source === 'built-in') {
+        throw new Error(`Cannot uninstall built-in plugin "${name}"`);
+      }
 
-    await this.stopTriggersForPlugin(name);
-    this.deregisterHooks(name);
-    this.deregisterDecisionTypes(name);
-    await this.removeSkillsForPlugin(loaded);
-    this.plugins.delete(name);
+      await this.stopTriggersForPlugin(name);
+      this.deregisterHooks(name);
+      this.deregisterDecisionTypes(name);
+      await this.removeSkillsForPlugin(loaded);
+      this.plugins.delete(name);
+    } else {
+      // Plugin might be errored (not in memory but still in DB)
+      const db = getSystemDb();
+      const record = pluginStore.getPlugin(db, name);
+      if (!record) {
+        throw new Error(`Plugin "${name}" is not installed`);
+      }
+      if (record.source === 'built-in') {
+        throw new Error(`Cannot uninstall built-in plugin "${name}"`);
+      }
+    }
 
     const db = getSystemDb();
     pluginStore.deletePlugin(db, name);
@@ -373,6 +399,41 @@ export class PluginManager {
 
     getEventBus().emit('plugin:changed', { pluginName: name, action: 'disabled' });
     log.info(`Disabled plugin: ${name}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Vault Unlock — re-validate configs after vault is unsealed
+  // -------------------------------------------------------------------------
+
+  /**
+   * Re-validate plugin configs after the vault is unsealed.
+   *
+   * During loadAll(), if the vault was sealed, config validation was skipped
+   * because encrypted configs can't be decrypted. Now that the vault is
+   * unsealed, check each enabled plugin's config and disable any that are
+   * truly missing required fields.
+   */
+  revalidateConfigs(): void {
+    const db = getSystemDb();
+    let disabledCount = 0;
+
+    for (const [name, loaded] of this.plugins) {
+      if (!loaded.enabled) continue;
+      if (!loaded.configSchema) continue; // No schema = nothing to check
+
+      if (!this.hasRequiredConfig(name)) {
+        log.warn(`Plugin "${name}" is missing required configuration (discovered on vault unlock) — disabling`);
+        loaded.enabled = false;
+        pluginStore.updatePlugin(db, name, { enabled: false });
+        this.deregisterHooks(name);
+        this.deregisterDecisionTypes(name);
+        disabledCount++;
+      }
+    }
+
+    if (disabledCount > 0) {
+      log.info(`Disabled ${disabledCount} plugin(s) with missing configuration after vault unlock`);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -1676,8 +1737,9 @@ export class PluginManager {
         }
         const manifest = await this.readManifest(pluginPath);
         results.push([pluginPath, manifest, record.source]);
-      } catch {
-        log.warn(`Could not load registered plugin at ${record.path}`);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : 'Unknown error loading plugin';
+        log.warn(`Could not load registered plugin "${record.name}" at ${record.path}: ${reason}`);
       }
     }
 
@@ -1685,10 +1747,42 @@ export class PluginManager {
   }
 
   private async readManifest(pluginDir: string): Promise<PluginManifest> {
-    const manifestPath = path.join(pluginDir, 'plugin.json');
-    const raw = await fs.readFile(manifestPath, 'utf-8');
-    const json = JSON.parse(raw);
-    return PluginManifestSchema.parse(json);
+    // Try plugin.json first (native manifest), then fall back to manifest.json
+    // (.anpk unified format). Packages built with anipack only contain manifest.json.
+    const pluginJsonPath = path.join(pluginDir, 'plugin.json');
+    if (fsSync.existsSync(pluginJsonPath)) {
+      const raw = await fs.readFile(pluginJsonPath, 'utf-8');
+      return PluginManifestSchema.parse(JSON.parse(raw));
+    }
+
+    const unifiedPath = path.join(pluginDir, 'manifest.json');
+    const raw = await fs.readFile(unifiedPath, 'utf-8');
+    const manifest: PackageManifest = PackageManifestSchema.parse(JSON.parse(raw));
+
+    // Synthesize a PluginManifest from the unified PackageManifest
+    return {
+      name: manifest.name,
+      displayName: manifest.displayName ?? manifest.name,
+      version: manifest.version,
+      description: manifest.description,
+      author: manifest.author,
+      license: manifest.license,
+      engine: manifest.engineVersion,
+      icon: manifest.icon,
+      components: manifest.packageType === 'plugin' ? manifest.components : {},
+      dependencies: manifest.packageType === 'plugin' ? manifest.dependencies : undefined,
+      permissions: manifest.permissions ? {
+        tools: manifest.permissions.tools,
+        network: Array.isArray(manifest.permissions.network)
+          ? manifest.permissions.network.length > 0
+          : manifest.permissions.network,
+        filesystem: manifest.permissions.filesystem,
+        contacts: manifest.permissions.contacts,
+        memory: manifest.permissions.memory,
+      } : undefined,
+      configSchema: manifest.configSchema,
+      setup: manifest.packageType === 'plugin' ? manifest.setup : undefined,
+    } as PluginManifest;
   }
 
   // -------------------------------------------------------------------------

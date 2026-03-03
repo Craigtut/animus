@@ -6,7 +6,7 @@ Animus is an experiment in artificial life: an autonomous assistant built on a h
 
 Open source. Self-hosted. Yours.
 
-[Discord](https://discord.gg/QCqKUJgGD6) · [Documentation](docs/) · [Getting Started](docs/guides/getting-started.md)
+[Website](https://animusengine.com) · [Discord](https://discord.gg/QCqKUJgGD6) · [Documentation](docs/) · [Getting Started](docs/guides/getting-started.md)
 
 > **Status:** Animus is under active development and moving quickly. Expect rough edges, incomplete features, and documentation that may be ahead of or behind the code. If you're here early, that's the point.
 

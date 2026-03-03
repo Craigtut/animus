@@ -95,6 +95,7 @@ export const systemSettingsSchema = z.object({
   sleepTickIntervalMs: z.number().int().positive().default(1800000),
   reasoningEffort: z.enum(['low', 'medium', 'high', 'max']).nullable().default(null),
   memoryPoolMaxSize: z.number().int().min(100).default(40000),
+  telemetryEnabled: z.boolean().default(true),
 });
 
 export const updateSystemSettingsInputSchema = systemSettingsSchema.partial();

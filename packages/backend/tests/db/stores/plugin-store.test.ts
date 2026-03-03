@@ -238,6 +238,67 @@ describe('plugin-store', () => {
   });
 
   // ========================================================================
+  // updatePluginStatus
+  // ========================================================================
+
+  describe('updatePluginStatus', () => {
+    it('sets status and lastError', () => {
+      pluginStore.insertPlugin(db, { name: 'err', version: '1.0.0', path: '/p/err', source: 'package' });
+      pluginStore.updatePluginStatus(db, 'err', 'error', 'Directory not found');
+
+      const found = pluginStore.getPlugin(db, 'err');
+      expect(found!.status).toBe('error');
+      expect(found!.lastError).toBe('Directory not found');
+    });
+
+    it('clears lastError when recovering', () => {
+      pluginStore.insertPlugin(db, { name: 'recover', version: '1.0.0', path: '/p/r', source: 'store' });
+      pluginStore.updatePluginStatus(db, 'recover', 'error', 'Missing directory');
+      pluginStore.updatePluginStatus(db, 'recover', 'active', null);
+
+      const found = pluginStore.getPlugin(db, 'recover');
+      expect(found!.status).toBe('active');
+      expect(found!.lastError).toBeNull();
+    });
+  });
+
+  // ========================================================================
+  // status and lastError fields
+  // ========================================================================
+
+  describe('status and lastError fields', () => {
+    it('defaults status to active on insert when enabled', () => {
+      const plugin = pluginStore.insertPlugin(db, { name: 'def', version: '1.0.0', path: '/p', source: 'local' });
+      expect(plugin.status).toBe('active');
+      expect(plugin.lastError).toBeNull();
+    });
+
+    it('defaults status to disabled on insert when not enabled', () => {
+      const plugin = pluginStore.insertPlugin(db, { name: 'dis', version: '1.0.0', path: '/p', source: 'local', enabled: false });
+      expect(plugin.status).toBe('disabled');
+      expect(plugin.lastError).toBeNull();
+    });
+
+    it('reads status and lastError from DB', () => {
+      pluginStore.insertPlugin(db, { name: 'read-status', version: '1.0.0', path: '/p', source: 'local' });
+      pluginStore.updatePluginStatus(db, 'read-status', 'error', 'test error');
+
+      const found = pluginStore.getPlugin(db, 'read-status');
+      expect(found!.status).toBe('error');
+      expect(found!.lastError).toBe('test error');
+    });
+
+    it('can update status via updatePlugin', () => {
+      pluginStore.insertPlugin(db, { name: 'up-status', version: '1.0.0', path: '/p', source: 'local' });
+      pluginStore.updatePlugin(db, 'up-status', { status: 'error', lastError: 'broken' });
+
+      const found = pluginStore.getPlugin(db, 'up-status');
+      expect(found!.status).toBe('error');
+      expect(found!.lastError).toBe('broken');
+    });
+  });
+
+  // ========================================================================
   // Boolean handling (enabled field)
   // ========================================================================
 

@@ -21,6 +21,8 @@ import * as systemStore from '../db/stores/system-store.js';
 import * as personaStore from '../db/stores/persona-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
+import { isUnsealed } from '../lib/vault-manager.js';
+import { getTelemetryService } from '../services/telemetry-service.js';
 import { now } from '@animus-labs/shared';
 import type { HeartbeatState, MindOutput } from '@animus-labs/shared';
 
@@ -547,7 +549,24 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
   const state = heartbeatStore.getHeartbeatState(hbDb);
   const tickNumber = state.tickNumber + 1;
 
+  // Skip the full pipeline when the vault is sealed (no credentials available)
+  if (!isUnsealed()) {
+    log.info(`Tick #${tickNumber} skipped: vault is sealed`);
+    heartbeatStore.updateHeartbeatState(hbDb, {
+      tickNumber,
+      lastTickAt: now(),
+    });
+    eventBus.emit('heartbeat:state_change', heartbeatStore.getHeartbeatState(hbDb));
+    return;
+  }
+
   log.info(`Starting tick #${tickNumber} (${queuedTick.trigger.type})`);
+
+  // Daily active telemetry (deduped per-day, never blocks the pipeline)
+  try {
+    const uptimeHours = process.uptime() / 3600;
+    getTelemetryService().captureDailyActive(uptimeHours);
+  } catch { /* telemetry must never block the heartbeat */ }
 
   // Emit tick start event
   eventBus.emit('heartbeat:tick_start', {

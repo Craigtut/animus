@@ -21,6 +21,10 @@ import { AppLayout } from './components/layout/AppLayout';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 
+// Vault pages
+import { UnlockPage } from './pages/UnlockPage';
+import { MigrationPage } from './pages/MigrationPage';
+
 // Onboarding
 import { OnboardingLayout } from './pages/onboarding/OnboardingLayout';
 import { WelcomeStep } from './pages/onboarding/WelcomeStep';
@@ -159,6 +163,10 @@ export function App() {
         <ThemeSelector>
           <BrowserRouter>
             <Routes>
+              {/* Vault routes (no auth required) */}
+              <Route path="/unlock" element={<UnlockPage />} />
+              <Route path="/migrate" element={<MigrationPage />} />
+
               {/* Guest routes */}
               <Route path="/login" element={<GuestGuard><LoginPage /></GuestGuard>} />
               <Route path="/register" element={<GuestGuard><RegisterPage /></GuestGuard>} />

@@ -13,6 +13,9 @@ import * as contactStore from '../../db/stores/contact-store.js';
 import { getSystemDb, getContactsDb } from '../../db/index.js';
 import { COOKIE_OPTIONS } from '../../plugins/auth.js';
 import type { JwtPayload } from '../../plugins/auth.js';
+import { createVault, setSealState } from '../../lib/vault-manager.js';
+import { setDek, verifyEncryptionKey } from '../../lib/encryption-service.js';
+import { createJwtSecret } from '../../lib/jwt-key.js';
 
 export const authRouter = router({
   /**
@@ -71,6 +74,17 @@ export const authRouter = router({
       channel: 'web',
       identifier: user.email,
     });
+
+    // Create encryption vault with the user's password
+    const newDek = await createVault(input.password);
+    setDek(newDek);
+    setSealState('unsealed');
+
+    // Store encryption sentinel for key verification on future startups
+    verifyEncryptionKey(db);
+
+    // Generate and persist JWT secret (separate from vault DEK)
+    createJwtSecret();
 
     // Sign JWT and set cookie
     const payload: JwtPayload = { userId: user.id, email: user.email };

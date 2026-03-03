@@ -1,43 +1,54 @@
 /**
- * Encryption Service — AES-256-GCM encryption for secrets.
+ * Encryption Service -- AES-256-GCM encryption for secrets.
  *
- * Key derived from ANIMUS_ENCRYPTION_KEY via PBKDF2.
- * The key is resolved by secrets-manager at startup (auto-generated if needed).
+ * The DEK (Data Encryption Key) is provided by vault-manager after unsealing.
+ * No key material is derived from environment variables or stored on disk.
+ * See docs/architecture/encryption-architecture.md.
  */
 
-import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync } from 'crypto';
+import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 import type Database from 'better-sqlite3';
-import { env } from '../utils/env.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('Encryption', 'server');
 
 const ALGORITHM = 'aes-256-gcm';
-const KEY_LENGTH = 32;
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
-const SALT = 'animus-encryption-salt'; // Static salt — key uniqueness from env var
-const ITERATIONS = 100_000;
 const SENTINEL = 'animus-key-ok';
 
-let derivedKey: Buffer | null = null;
+// DEK pushed in by vault-manager after unseal
+let activeDek: Buffer | null = null;
 
-function getKey(): Buffer | null {
-  if (derivedKey) return derivedKey;
-  if (!env.ANIMUS_ENCRYPTION_KEY) {
-    throw new Error(
-      'Encryption key not available. Ensure resolveSecrets() was called before using encryption.'
-    );
-  }
-  derivedKey = pbkdf2Sync(env.ANIMUS_ENCRYPTION_KEY, SALT, ITERATIONS, KEY_LENGTH, 'sha256');
-  return derivedKey;
+/**
+ * Set the active Data Encryption Key. Called by vault-manager after unseal.
+ */
+export function setDek(newDek: Buffer): void {
+  activeDek = newDek;
 }
 
 /**
- * Whether encryption is configured (key is set).
+ * Wipe the DEK from memory. Called on shutdown or re-seal.
+ */
+export function clearDek(): void {
+  if (activeDek) {
+    activeDek.fill(0);
+    activeDek = null;
+  }
+}
+
+function getKey(): Buffer {
+  if (!activeDek) {
+    throw new Error('Vault is sealed. Cannot encrypt/decrypt.');
+  }
+  return activeDek;
+}
+
+/**
+ * Whether encryption is configured (vault is unsealed and DEK is available).
  */
 export function isConfigured(): boolean {
-  return !!env.ANIMUS_ENCRYPTION_KEY;
+  return activeDek !== null;
 }
 
 /**
@@ -46,9 +57,6 @@ export function isConfigured(): boolean {
  */
 export function encrypt(plaintext: string): string {
   const key = getKey();
-  if (!key) {
-    throw new Error('Cannot encrypt: ANIMUS_ENCRYPTION_KEY is not configured');
-  }
 
   const iv = randomBytes(IV_LENGTH);
   const cipher = createCipheriv(ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
@@ -63,9 +71,6 @@ export function encrypt(plaintext: string): string {
  */
 export function decrypt(ciphertext: string): string {
   const key = getKey();
-  if (!key) {
-    throw new Error('Cannot decrypt: no encryption key configured');
-  }
 
   const parts = ciphertext.split(':');
   if (parts.length !== 3) {
@@ -90,7 +95,7 @@ export function decrypt(ciphertext: string): string {
  * On first run (no sentinel stored), encrypts and stores a sentinel value.
  * On subsequent runs, decrypts the sentinel to verify the key hasn't changed.
  *
- * Throws if the key has changed — all encrypted data would be unreadable.
+ * Throws if the key has changed (all encrypted data would be unreadable).
  */
 export function verifyEncryptionKey(db: Database.Database): void {
   const row = db.prepare(
@@ -99,9 +104,7 @@ export function verifyEncryptionKey(db: Database.Database): void {
 
   const stored = row?.encryption_key_check ?? null;
 
-  // Key is always set (enforced by env validation), so only two cases remain.
-
-  // First time using this key — store sentinel
+  // First time using this key: store sentinel
   if (!stored) {
     const sentinel = encrypt(SENTINEL);
     db.prepare(
@@ -111,7 +114,7 @@ export function verifyEncryptionKey(db: Database.Database): void {
     return;
   }
 
-  // Sentinel exists — verify the key matches
+  // Sentinel exists: verify the key matches
   try {
     const decrypted = decrypt(stored!);
     if (decrypted !== SENTINEL) {
@@ -119,8 +122,8 @@ export function verifyEncryptionKey(db: Database.Database): void {
     }
   } catch {
     throw new Error(
-      'ANIMUS_ENCRYPTION_KEY does not match the key used to encrypt existing data. ' +
-      'Restore the original encryption key to start the server. ' +
+      'Encryption key does not match the key used to encrypt existing data. ' +
+      'The vault password may have changed without re-encrypting credentials. ' +
       'All stored secrets (API keys, channel configs) are encrypted with the original key.'
     );
   }

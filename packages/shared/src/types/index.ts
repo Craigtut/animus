@@ -93,6 +93,7 @@ import type {
   // Plugins
   PluginManifestSchema,
   pluginSourceSchema,
+  pluginStatusSchema,
   PluginRecordSchema,
   AgentFrontmatterSchema,
   ContextSourceSchema,
@@ -251,6 +252,7 @@ export type TaskTickOutput = z.infer<typeof taskTickOutputSchema>;
 
 export type PluginManifest = z.infer<typeof PluginManifestSchema>;
 export type PluginSource = z.infer<typeof pluginSourceSchema>;
+export type PluginStatus = z.infer<typeof pluginStatusSchema>;
 export type PluginRecord = z.infer<typeof PluginRecordSchema>;
 export type AgentFrontmatter = z.infer<typeof AgentFrontmatterSchema>;
 export type ContextSource = z.infer<typeof ContextSourceSchema>;

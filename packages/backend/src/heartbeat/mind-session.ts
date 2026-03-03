@@ -15,6 +15,7 @@ import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
 import path from 'path';
 import { env, PROJECT_ROOT } from '../utils/env.js';
+import { isBlockedPath, isBlockedCommand } from '../lib/file-deny-list.js';
 
 import {
   attachSessionLogging,
@@ -615,6 +616,23 @@ function buildCanUseToolCallback(
 > {
   return async (toolName: string, input: Record<string, unknown>) => {
     log.info(`canUseTool callback invoked for: "${toolName}"`);
+
+    // Security: file deny list -- block access to vault, .env, encryption source files
+    if (['Read', 'Write', 'Edit'].includes(toolName)) {
+      const filePath = input['file_path'] as string | undefined;
+      if (filePath && isBlockedPath(filePath)) {
+        log.warn(`Blocked agent access to restricted file: ${filePath}`);
+        return { behavior: 'deny', message: 'Access to this file is restricted for security.' };
+      }
+    }
+    if (toolName === 'Bash') {
+      const command = input['command'] as string | undefined;
+      if (command && isBlockedCommand(command)) {
+        log.warn(`Blocked agent execution of restricted command: ${command.substring(0, 100)}`);
+        return { behavior: 'deny', message: 'This command is restricted for security.' };
+      }
+    }
+
     const resolved = resolveToolPermission(toolName);
 
     // No resolved info means tool is exempt (core MCP, cognitive, unknown)

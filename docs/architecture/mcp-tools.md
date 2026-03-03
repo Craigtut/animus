@@ -171,7 +171,8 @@ These are provided to sub-agent sessions via MCP, filtered by the triggering con
 | `send_message` | messaging | Send a message (with optional media) to the triggering contact via the originating channel. Used for progress updates, intermediate findings, clarifying questions. |
 | `update_progress` | progress | Report current activity and percentage complete back to the orchestrator. Updates `current_activity` in SQLite so the mind knows what the sub-agent is doing. |
 | `read_memory` | memory | Search Animus's long-term memory (LanceDB) for relevant information. Read-only — only the mind writes memories. |
-| `run_with_credentials` | system | Execute a command with a plugin credential injected as an environment variable. The credential is resolved from encrypted storage and never exposed to the LLM. |
+| `run_with_credentials` | system | Execute a command with a credential (plugin or vault) injected as an environment variable. The credential is resolved from encrypted storage and never exposed to the LLM. Output is scanned for injected values and redacted. |
+| `list_vault_entries` | system | List password vault entries (metadata only: label, service, identity, hint). Returns `vault:<id>` refs for use with `run_with_credentials`. Supports optional `service` filter. |
 
 #### Mind-Only Tools
 
@@ -183,7 +184,8 @@ These are available only to the mind session. They are served via a separate MCP
 | `lookup_contacts` | system | Discover contacts and their available communication channels. Used before `send_proactive_message` to find valid contactId/channel pairs. |
 | `send_proactive_message` | messaging | Send a message (with optional media) to **any** contact on **any** of their channels. Goes through `ChannelRouter.sendOutbound()` for full delivery. Used for unprompted outreach (interval ticks, reminders, etc.). |
 | `send_media` | messaging | Send media files (images, audio, video, documents) to the **triggering contact** on the trigger channel. Files must already exist on disk (from plugin tools, sub-agents, etc.). Delivered immediately during the mind query, before the text reply. |
-| `run_with_credentials` | system | Same as above — execute a command with injected credentials. |
+| `run_with_credentials` | system | Same as above — execute a command with injected credentials (plugin or vault refs). |
+| `list_vault_entries` | system | Same as above — list password vault entries with metadata and vault refs. |
 
 **Note:** The mind also has two **cognitive tools** (`record_thought`, `record_cognitive_state`) served by a separate `cognitive` MCP server. These are not part of the Animus tool registry; they're defined in `heartbeat/cognitive-tools.ts` and manage the phase-based streaming pipeline. The cognitive state (`CognitiveSnapshot`) accumulates in-process via module-level singleton in `cognitive-tools.ts`, while the tools themselves are exposed via the same stdio bridge pattern as all other tools. See `docs/architecture/heartbeat.md`.
 
@@ -200,13 +202,15 @@ export const ANIMUS_TOOL_DEFS = {
   send_proactive_message: sendProactiveMessageDef,
   send_media: sendMediaDef,
   run_with_credentials: runWithCredentialsDef,
+  list_vault_entries: listVaultEntriesDef,
 } as const;
 
 export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
 
 // Mind-only tools (not given to sub-agents)
 export const MIND_TOOL_NAMES: readonly AnimusToolName[] = [
-  'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials'
+  'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media',
+  'run_with_credentials', 'list_vault_entries'
 ] as const;
 ```
 
@@ -218,8 +222,8 @@ Permission filtering applies to **sub-agent tools only**. Mind tools are not fil
 // packages/shared/src/tools/permissions.ts
 
 export const TOOL_PERMISSIONS: Record<PermissionTier, readonly AnimusToolName[]> = {
-  primary: ['send_message', 'update_progress', 'read_memory', 'run_with_credentials'],
-  standard: ['send_message', 'read_memory', 'run_with_credentials'],
+  primary: ['send_message', 'update_progress', 'read_memory', 'run_with_credentials', 'list_vault_entries'],
+  standard: ['send_message', 'read_memory', 'run_with_credentials', 'list_vault_entries'],
 } as const;
 ```
 

@@ -15,10 +15,21 @@ export function AuthGuard({ children }: AuthGuardProps) {
   const location = useLocation();
   const { isAuthenticated, setUser, logout } = useAuthStore();
 
+  // Check vault seal state — determines whether to show unlock/migration pages.
+  // Polls every 30s so the UI detects server restarts (sealed state) proactively.
+  const { data: sealStatus, isLoading: sealLoading } = trpc.seal.status.useQuery(undefined, {
+    retry: 3,
+    retryDelay: 1000,
+    refetchInterval: 30_000,
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: true,
+  });
+
   // Check auth on mount — the cookie-based session is the source of truth
   const { data: meData, isLoading: authLoading, error } = trpc.auth.me.useQuery(undefined, {
     retry: false,
     refetchOnWindowFocus: false,
+    enabled: sealStatus?.sealState !== 'sealed' && sealStatus?.sealState !== 'needs-migration',
   });
 
   // Always check if any user exists — used to redirect to /register vs /login.
@@ -28,6 +39,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
     retry: 3,
     retryDelay: 1000,
     refetchOnWindowFocus: false,
+    enabled: sealStatus?.sealState !== 'sealed' && sealStatus?.sealState !== 'needs-migration',
   });
 
   // Check onboarding status for non-onboarding routes
@@ -46,7 +58,15 @@ export function AuthGuard({ children }: AuthGuardProps) {
     }
   }, [meData, error, setUser, logout]);
 
-  if (authLoading || statusLoading || (meData && !isOnboardingRoute && onboardingLoading)) {
+  // Vault seal state: redirect to unlock or migration page
+  if (sealStatus?.sealState === 'sealed') {
+    return <Navigate to="/unlock" replace />;
+  }
+  if (sealStatus?.sealState === 'needs-migration') {
+    return <Navigate to="/migrate" replace />;
+  }
+
+  if (sealLoading || authLoading || statusLoading || (meData && !isOnboardingRoute && onboardingLoading)) {
     return (
       <div css={css`
         min-height: 100vh;
