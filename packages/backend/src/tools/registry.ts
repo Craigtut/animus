@@ -23,6 +23,7 @@ import { sendProactiveMessageHandler } from './handlers/send-proactive-message.j
 import { sendMediaHandler } from './handlers/send-media.js';
 import { runWithCredentialsHandler } from './handlers/run-with-credentials.js';
 import { listVaultEntriesHandler } from './handlers/list-vault-entries.js';
+import { manageVaultEntryHandler } from './handlers/manage-vault-entry.js';
 import { resolveToolApprovalHandler } from './handlers/resolve-tool-approval.js';
 import { transcribeAudioHandler } from './handlers/transcribe-audio.js';
 import { generateSpeechHandler } from './handlers/generate-speech.js';
@@ -114,6 +115,13 @@ const TOOL_REGISTRY: Record<AnimusToolName, AnimusTool> = {
     inputSchema: ANIMUS_TOOL_DEFS.list_vault_entries.inputSchema,
     category: ANIMUS_TOOL_DEFS.list_vault_entries.category,
     handler: listVaultEntriesHandler,
+  },
+  manage_vault_entry: {
+    name: 'manage_vault_entry',
+    description: ANIMUS_TOOL_DEFS.manage_vault_entry.description,
+    inputSchema: ANIMUS_TOOL_DEFS.manage_vault_entry.inputSchema,
+    category: ANIMUS_TOOL_DEFS.manage_vault_entry.category,
+    handler: manageVaultEntryHandler,
   },
   resolve_tool_approval: {
     name: 'resolve_tool_approval',

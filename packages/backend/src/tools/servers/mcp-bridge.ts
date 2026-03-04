@@ -18,6 +18,7 @@
  */
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { getMindTools, getAllowedTools, ANIMUS_TOOL_DEFS, type AnimusToolName, type PermissionTier } from '@animus-labs/shared';
@@ -226,6 +227,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         return;
       }
       const defs = getToolDefs(toolSet);
+      log.info(`Bridge GET /tools: set=${toolSet}, returning ${defs.length} tools: ${defs.map(d => d.name).join(', ')}`);
       jsonResponse(res, 200, { tools: defs });
       return;
     }
@@ -365,6 +367,40 @@ export function getBridgePort(): number | null {
 // Stdio MCP Server Config Builder
 // ============================================================================
 
+// Cache the resolved tsx binary path to avoid repeated lookups.
+let resolvedTsxPath: string | null = null;
+
+/**
+ * Resolve the tsx binary path. In dev mode, we need tsx to run .ts files.
+ * Resolving once and using the absolute path avoids npx overhead (~500ms)
+ * and eliminates potential conflicts from concurrent npx invocations.
+ */
+function resolveTsxBinary(): string {
+  if (resolvedTsxPath) return resolvedTsxPath;
+
+  const thisDir = dirname(fileURLToPath(import.meta.url));
+
+  // Walk up to find node_modules/.bin/tsx relative to the project root
+  // From packages/backend/src/tools/servers/ -> ../../../../node_modules/.bin/tsx
+  const candidates = [
+    resolve(thisDir, '../../../../..', 'node_modules/.bin/tsx'),  // monorepo root
+    resolve(thisDir, '../../../..', 'node_modules/.bin/tsx'),     // package root
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      resolvedTsxPath = candidate;
+      log.info(`Resolved tsx binary: ${resolvedTsxPath}`);
+      return resolvedTsxPath;
+    }
+  }
+
+  // Fallback: use npx (slower but works)
+  log.warn('Could not resolve tsx binary path, falling back to npx');
+  resolvedTsxPath = 'npx';
+  return resolvedTsxPath;
+}
+
 /**
  * Build a stdio MCP server config for use with any agent SDK.
  *
@@ -388,10 +424,16 @@ export function buildMcpServerConfig(
   let args: string[];
 
   if (isDev) {
-    // Dev mode: run .ts file with tsx
+    // Dev mode: run .ts file with tsx (resolved binary, not npx)
     const scriptPath = join(thisDir, 'animus-mcp-server.ts');
-    command = 'npx';
-    args = ['tsx', scriptPath];
+    const tsxBin = resolveTsxBinary();
+    if (tsxBin === 'npx') {
+      command = 'npx';
+      args = ['tsx', scriptPath];
+    } else {
+      command = tsxBin;
+      args = [scriptPath];
+    }
   } else {
     // Production: run compiled .js
     const scriptPath = join(thisDir, 'animus-mcp-server.js');

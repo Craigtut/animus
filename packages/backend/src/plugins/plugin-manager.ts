@@ -23,6 +23,7 @@ import * as systemStore from '../db/stores/system-store.js';
 import { encrypt, decrypt } from '../lib/encryption-service.js';
 import { isUnsealed, getSealState } from '../lib/vault-manager.js';
 import { getEventBus } from '../lib/event-bus.js';
+import { isFileSecretValue, maskFileSecret } from '../utils/secure-temp-file.js';
 import { createLogger } from '../lib/logger.js';
 import {
   PluginManifestSchema,
@@ -1037,7 +1038,26 @@ export class PluginManager {
         } catch {
           // Doesn't exist — fine
         }
-        await fs.symlink(skill.absolutePath, targetPath, 'dir');
+
+        // Create target as a real directory so we can process SKILL.md
+        await fs.mkdir(targetPath, { recursive: true });
+
+        // Read skill directory entries and deploy each one
+        const entries = await fs.readdir(skill.absolutePath);
+        for (const entry of entries) {
+          const srcEntry = path.join(skill.absolutePath, entry);
+          const destEntry = path.join(targetPath, entry);
+          if (entry === 'SKILL.md') {
+            // Process SKILL.md: substitute ${PLUGIN_ROOT} with the plugin's absolute path
+            const content = await fs.readFile(srcEntry, 'utf-8');
+            const processed = this.substitutePluginRoot(content, loaded.absolutePath);
+            await fs.writeFile(destEntry, processed, 'utf-8');
+          } else {
+            // Symlink all other entries (scripts/, references/, etc.)
+            await fs.symlink(srcEntry, destEntry, 'dir');
+          }
+        }
+
         this.deployedSkillPaths.push(targetPath);
         log.debug(`Deployed skill "${skill.name}" → ${targetPath}`);
       } catch (err) {
@@ -1493,7 +1513,7 @@ export class PluginManager {
       const config = this.getDecryptedConfig(loaded.manifest.name);
 
       for (const field of loaded.configSchema.fields) {
-        if (field.type !== 'secret' && field.type !== 'oauth') continue;
+        if (field.type !== 'secret' && field.type !== 'oauth' && field.type !== 'file_secret') continue;
 
         const value = config?.[field.key];
         let hint: string;
@@ -1501,6 +1521,8 @@ export class PluginManager {
           hint = (typeof value === 'object' && value !== null && (value as Record<string, unknown>)['__oauth'] === true)
             ? '(connected)'
             : '(not connected)';
+        } else if (field.type === 'file_secret') {
+          hint = isFileSecretValue(value) ? `(file: ${value.filename})` : '(not set)';
         } else {
           hint = typeof value === 'string' && value.length >= 4
             ? `...${value.slice(-4)}`
@@ -1640,9 +1662,17 @@ export class PluginManager {
         .map(f => f.key),
     );
 
+    const fileSecretKeys = new Set(
+      loaded.configSchema.fields
+        .filter(f => f.type === 'file_secret')
+        .map(f => f.key),
+    );
+
     const masked: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(config)) {
-      if (oauthKeys.has(key) && typeof value === 'object' && value !== null && (value as Record<string, unknown>)['__oauth'] === true) {
+      if (fileSecretKeys.has(key) && isFileSecretValue(value)) {
+        masked[key] = maskFileSecret(value);
+      } else if (oauthKeys.has(key) && typeof value === 'object' && value !== null && (value as Record<string, unknown>)['__oauth'] === true) {
         // Mask OAuth token objects: expose connection status but not raw tokens
         const oauthData = value as Record<string, unknown>;
         masked[key] = {
@@ -1671,6 +1701,25 @@ export class PluginManager {
   }
 
   setPluginConfig(name: string, config: Record<string, unknown>): void {
+    // Preserve masked secret/file_secret values from existing config
+    const loaded = this.plugins.get(name);
+    if (loaded?.configSchema) {
+      const existing = this.getDecryptedConfig(name);
+      if (existing) {
+        for (const field of loaded.configSchema.fields) {
+          if (field.type === 'file_secret') {
+            const val = config[field.key] as Record<string, unknown> | undefined;
+            if (val?.['__file_secret'] && val?.['configured'] && !val?.['data']) {
+              config[field.key] = existing[field.key];
+            }
+          }
+          if (field.type === 'secret' && config[field.key] === '••••••••') {
+            config[field.key] = existing[field.key];
+          }
+        }
+      }
+    }
+
     const db = getSystemDb();
     const encrypted = encrypt(JSON.stringify(config));
     pluginStore.updatePluginConfig(db, name, encrypted);

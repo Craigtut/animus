@@ -316,7 +316,7 @@ We use `canUseTool` with `approvalLevel: 'normal'` (which maps to `default` perm
 ```typescript
 function resolveToolPermission(toolName: string) {
   // Core Animus MCP tools → skip (have own in-process gate)
-  if (toolName.startsWith('mcp__tools__')) return null;
+  if (toolName.startsWith('mcp__animus__')) return null;
   // Cognitive tools → skip (always allowed)
   if (toolName.startsWith('mcp__cognitive__')) return null;
   // Plugin MCP tools → use server-level key

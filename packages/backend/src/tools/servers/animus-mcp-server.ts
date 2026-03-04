@@ -109,11 +109,20 @@ function bridgePost(path: string, body: unknown): Promise<unknown> {
 // ============================================================================
 
 async function main(): Promise<void> {
+  process.stderr.write(`[animus-mcp] Starting: toolSet=${TOOL_SET}, bridgePort=${BRIDGE_PORT}, taskId=${TASK_ID}\n`);
+
   // Fetch tool definitions from bridge at startup
-  const toolsResponse = (await bridgeGet(`/tools?set=${TOOL_SET}`)) as {
-    tools: BridgeToolDef[];
-  };
+  let toolsResponse: { tools: BridgeToolDef[] };
+  try {
+    toolsResponse = (await bridgeGet(`/tools?set=${TOOL_SET}`)) as {
+      tools: BridgeToolDef[];
+    };
+  } catch (err) {
+    process.stderr.write(`[animus-mcp] FATAL: Failed to fetch tools from bridge at 127.0.0.1:${BRIDGE_PORT}/tools?set=${TOOL_SET}: ${err}\n`);
+    process.exit(1);
+  }
   const toolDefs = toolsResponse.tools;
+  process.stderr.write(`[animus-mcp] Discovered ${toolDefs.length} tools: ${toolDefs.map(d => d.name).join(', ')}\n`);
 
   // Build a lookup for tool routing
   const toolMap = new Map<string, BridgeToolDef>();
@@ -122,7 +131,7 @@ async function main(): Promise<void> {
   }
 
   // Determine server name based on tool set
-  const serverName = TOOL_SET === 'cognitive' ? 'cognitive' : 'tools';
+  const serverName = TOOL_SET === 'cognitive' ? 'cognitive' : 'animus';
 
   // Create the MCP server
   const mcpServer = new Server(
@@ -178,6 +187,7 @@ async function main(): Promise<void> {
   // Connect via stdio
   const transport = new StdioServerTransport();
   await mcpServer.connect(transport);
+  process.stderr.write(`[animus-mcp] Connected via stdio (server="${serverName}", tools=${toolDefs.length})\n`);
 }
 
 main().catch((err) => {

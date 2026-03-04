@@ -157,7 +157,8 @@ export function updateChannelPackageStatus(
 export function getChannelPackageConfig(
   db: Database.Database,
   name: string,
-  secretKeys: string[]
+  secretKeys: string[],
+  fileSecretKeys: string[] = [],
 ): Record<string, unknown> | null {
   const row = db
     .prepare('SELECT config FROM channel_packages WHERE name = ?')
@@ -170,6 +171,15 @@ export function getChannelPackageConfig(
       config[key] = decrypt(config[key] as string);
     }
   }
+  // Decrypt file_secret fields (stored as encrypted JSON strings)
+  for (const key of fileSecretKeys) {
+    if (typeof config[key] === 'string' && config[key]) {
+      try {
+        const decrypted = decrypt(config[key] as string);
+        config[key] = JSON.parse(decrypted);
+      } catch { /* leave as-is if corrupt */ }
+    }
+  }
   return config;
 }
 
@@ -177,13 +187,21 @@ export function setChannelPackageConfig(
   db: Database.Database,
   name: string,
   config: Record<string, unknown>,
-  secretKeys: string[]
+  secretKeys: string[],
+  fileSecretKeys: string[] = [],
 ): void {
   const encrypted = { ...config };
   // Encrypt secret fields
   for (const key of secretKeys) {
     if (typeof encrypted[key] === 'string' && encrypted[key]) {
       encrypted[key] = encrypt(encrypted[key] as string);
+    }
+  }
+  // Encrypt file_secret fields (JSON objects stringified then encrypted)
+  for (const key of fileSecretKeys) {
+    const val = encrypted[key];
+    if (typeof val === 'object' && val !== null && (val as Record<string, unknown>)['__file_secret']) {
+      encrypted[key] = encrypt(JSON.stringify(val));
     }
   }
   db.prepare(

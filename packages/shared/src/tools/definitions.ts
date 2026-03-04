@@ -21,7 +21,14 @@ export interface AnimusToolDef<TInput extends z.ZodTypeAny = z.ZodTypeAny> {
   /** Human-readable description for the LLM */
   description: string;
 
-  /** Zod schema for input validation */
+  /**
+   * Zod schema for input validation.
+   *
+   * IMPORTANT: Must be a z.object() at the top level. The MCP protocol requires
+   * tool input schemas to produce `{ type: "object" }` in JSON Schema. Using
+   * z.discriminatedUnion(), z.union(), or other non-object types will silently
+   * break MCP tool discovery (the entire MCP server's tools become invisible).
+   */
   inputSchema: TInput;
 
   /**
@@ -81,7 +88,7 @@ export const updateProgressDef: AnimusToolDef = {
 export const readMemoryDef: AnimusToolDef = {
   name: 'read_memory',
   description:
-    "Search Animus's long-term memory for relevant information. Returns memories ranked by relevance to your query. Use this to recall facts, past experiences, procedures, or outcomes that might help with the current task.",
+    "Search long-term memory for relevant information. GATHER CONTEXT pre-loads recent and relevant memories each tick, but use this tool when you need something specific that wasn't pre-loaded: a past conversation, a fact learned weeks ago, a procedure, or a specific outcome. Returns memories ranked by relevance. Each call adds a round-trip, so only use it when the pre-loaded context is insufficient.",
   inputSchema: z.object({
     query: z
       .string()
@@ -109,7 +116,7 @@ export const readMemoryDef: AnimusToolDef = {
 export const lookupContactsDef: AnimusToolDef = {
   name: 'lookup_contacts',
   description:
-    'Look up contacts and their available communication channels. Use this to discover who you can reach and how before sending proactive messages. Returns contact names, permission tiers, and available channels.',
+    'Look up contacts and their available communication channels. GATHER CONTEXT includes a contacts summary each tick, but use this tool when you need to verify a specific contact exists or check their exact channels before sending a proactive message. Returns contact names, permission tiers, and available channels.',
   inputSchema: z.object({
     nameFilter: z
       .string()
@@ -130,7 +137,7 @@ export const lookupContactsDef: AnimusToolDef = {
 export const sendProactiveMessageDef: AnimusToolDef = {
   name: 'send_proactive_message',
   description:
-    'Send a message to any contact on any of their available channels. Use lookup_contacts first to discover available contacts and channels. This goes through the full delivery pipeline (channel adapter, message storage, event emission). For responding to the contact who triggered this tick on the same channel, prefer the "reply" field in your JSON output instead — it is faster.',
+    'Send a message to any contact on any of their available channels. This is the ONLY way to message a user on non-message ticks (interval, scheduled task, agent completion), and the way to reach out on a different channel than the one that triggered this tick. Use lookup_contacts first to verify the contact ID and available channels. Goes through the full delivery pipeline (channel adapter, message storage, event emission).',
   inputSchema: z.object({
     contactId: z.string().uuid().describe('The contact ID to message'),
     channel: z
@@ -177,11 +184,15 @@ export const sendMediaDef: AnimusToolDef = {
 export const runWithCredentialsDef: AnimusToolDef = {
   name: 'run_with_credentials',
   description:
-    'Execute a command with a credential injected as an environment variable. ' +
-    'The credential is resolved from encrypted storage and injected only into the ' +
-    'subprocess — you never see the raw value. Supports two reference formats: ' +
+    'Execute a command with one or more credentials injected as environment variables. ' +
+    'Credentials are resolved from encrypted storage and injected only into the ' +
+    'subprocess; you never see the raw values. Supports two reference formats: ' +
     '"pluginName.configKey" for plugin credentials, or "vault:<id>" for password ' +
-    'vault entries (use list_vault_entries to find vault IDs).',
+    'vault entries (use list_vault_entries to find vault IDs). ' +
+    'For commands needing multiple secrets (e.g., an API key plus a token), use ' +
+    'additionalCredentials to inject extra credential refs alongside the primary one. ' +
+    'For non-secret configuration flags (e.g., backend selection, color mode), use ' +
+    'extraEnv to set plain environment variables that are NOT redacted from output.',
   inputSchema: z.object({
     command: z.string().describe('The full command to execute'),
     credentialRef: z.string().describe(
@@ -195,6 +206,9 @@ export const runWithCredentialsDef: AnimusToolDef = {
       envVar: z.string().describe('Environment variable name to inject as'),
     })).optional().describe(
       'Additional credentials to inject. Use when a command needs multiple credentials (e.g., API key + token).'
+    ),
+    extraEnv: z.record(z.string()).optional().describe(
+      'Additional non-secret environment variables to set for the subprocess (e.g., {"GOG_KEYRING_BACKEND": "file"}). These are NOT treated as secrets and will not be redacted from output.'
     ),
     cwd: z.string().optional().describe('Working directory. Defaults to project root.'),
   }),
@@ -297,8 +311,12 @@ export const sendVoiceReplyDef: AnimusToolDef = {
     'speech audio and delivers it through the channel. The text is stored as message content ' +
     'in conversation history for future context. Use this when the user sent you a voice ' +
     'message and you want to reply in kind, or when a spoken response feels more natural ' +
-    "than text. Write your text as natural speech — avoid emojis, markdown, URLs, or " +
-    "anything that doesn't translate well to spoken word.",
+    "than text. Write your text as natural speech: no emojis, markdown, URLs, or " +
+    "anything that doesn't translate well to spoken word. " +
+    'IMPORTANT: When you call send_voice_reply, do NOT also write a text reply in your ' +
+    'natural language output. Your spoken text would be sent as a SEPARATE text message, ' +
+    'duplicating your voice reply. After calling this tool, skip the reply phase entirely ' +
+    'and go straight to record_cognitive_state.',
   inputSchema: z.object({
     text: z.string().min(1).describe(
       'The text to speak. Write as natural speech — no emojis, no markdown, no URLs.'
@@ -309,6 +327,39 @@ export const sendVoiceReplyDef: AnimusToolDef = {
       .describe('Override the persona default voice. Use a built-in name or custom voice UUID.'),
   }),
   category: 'speech',
+};
+
+/**
+ * manage_vault_entry - Create, update, or delete password vault entries.
+ * Mind-only tool. Passwords are system-generated (agents never choose them).
+ */
+export const manageVaultEntryDef: AnimusToolDef = {
+  name: 'manage_vault_entry',
+  description:
+    'Create, update, or delete password vault entries. Passwords are always generated by the system ' +
+    '(you never choose them). You can only update or delete entries you previously created.\n\n' +
+    'Actions:\n' +
+    '- create: Provide account metadata. A strong password is generated automatically. Returns the vault ref for use with run_with_credentials.\n' +
+    '- update: Update metadata or regenerate the password for an agent-created entry.\n' +
+    '- delete: Remove an agent-created entry (e.g., after a failed signup).',
+  inputSchema: z.object({
+    action: z.enum(['create', 'update', 'delete']).describe('Action to perform'),
+    // Required for create:
+    label: z.string().optional().describe('Short name for this credential (e.g., "GitHub account"). Required for create.'),
+    service: z.string().optional().describe('Service name (e.g., "github.com"). Required for create.'),
+    // Required for update/delete:
+    id: z.string().optional().describe('Vault entry ID. Required for update and delete.'),
+    // Optional metadata (create or update):
+    url: z.string().optional().describe('Login URL for the service'),
+    identity: z.string().optional().describe('Username or email used for this account'),
+    notes: z.string().optional().describe('Usage notes for future reference'),
+    // Password options (create or update with regeneratePassword):
+    passwordLength: z.number().min(8).max(128).optional().describe('Password length (default: 32)'),
+    excludeSymbols: z.boolean().optional().describe('Exclude special characters from password'),
+    // Update-only:
+    regeneratePassword: z.boolean().optional().describe('Generate a new password (update only)'),
+  }),
+  category: 'system',
 };
 
 /**
@@ -325,6 +376,7 @@ export const ANIMUS_TOOL_DEFS = {
   send_media: sendMediaDef,
   run_with_credentials: runWithCredentialsDef,
   list_vault_entries: listVaultEntriesDef,
+  manage_vault_entry: manageVaultEntryDef,
   resolve_tool_approval: resolveToolApprovalDef,
   transcribe_audio: transcribeAudioDef,
   generate_speech: generateSpeechDef,
@@ -349,5 +401,5 @@ export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
  */
 export const MIND_TOOL_NAMES: readonly AnimusToolName[] = [
   'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials', 'list_vault_entries',
-  'resolve_tool_approval', 'transcribe_audio', 'generate_speech', 'send_voice_reply',
+  'manage_vault_entry', 'resolve_tool_approval', 'transcribe_audio', 'generate_speech', 'send_voice_reply',
 ] as const;

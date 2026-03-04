@@ -10,7 +10,9 @@ import {
   EyeSlash,
   Warning,
   CircleNotch,
+  ArrowsClockwise,
 } from '@phosphor-icons/react';
+import { generatePassword } from '@animus-labs/shared';
 import { Button, Input, Modal, Typography, Card } from '../ui';
 import { trpc } from '../../utils/trpc';
 
@@ -372,32 +374,64 @@ export function PasswordsSection() {
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
                   placeholder={editingId ? 'Enter new password to change' : 'Password or API key'}
-                  css={css`padding-right: 40px;`}
+                  css={css`padding-right: 72px;`}
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  css={css`
-                    position: absolute;
-                    right: 8px;
-                    top: 50%;
-                    transform: translateY(-50%);
-                    background: none;
-                    border: none;
-                    cursor: pointer;
-                    color: ${theme.colors.text.hint};
-                    padding: 4px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
+                <div css={css`
+                  position: absolute;
+                  right: 4px;
+                  top: 50%;
+                  transform: translateY(-50%);
+                  display: flex;
+                  align-items: center;
+                  gap: 2px;
+                `}>
+                  <button
+                    type="button"
+                    title="Generate password"
+                    onClick={() => {
+                      const pw = generatePassword({ length: 32 });
+                      setForm({ ...form, password: pw });
+                      setShowPassword(true);
+                    }}
+                    css={css`
+                      background: none;
+                      border: none;
+                      cursor: pointer;
+                      color: ${theme.colors.text.hint};
+                      padding: 4px;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
 
-                    &:hover {
-                      color: ${theme.colors.text.secondary};
-                    }
-                  `}
-                >
-                  {showPassword ? <EyeSlash size={18} /> : <Eye size={18} />}
-                </button>
+                      &:hover {
+                        color: ${theme.colors.text.secondary};
+                      }
+                    `}
+                  >
+                    <ArrowsClockwise size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                    onClick={() => setShowPassword(!showPassword)}
+                    css={css`
+                      background: none;
+                      border: none;
+                      cursor: pointer;
+                      color: ${theme.colors.text.hint};
+                      padding: 4px;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+
+                      &:hover {
+                        color: ${theme.colors.text.secondary};
+                      }
+                    `}
+                  >
+                    {showPassword ? <EyeSlash size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </div>
             </div>
 

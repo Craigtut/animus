@@ -13,6 +13,7 @@ export {
   sendMediaDef,
   runWithCredentialsDef,
   listVaultEntriesDef,
+  manageVaultEntryDef,
   resolveToolApprovalDef,
   transcribeAudioDef,
   generateSpeechDef,

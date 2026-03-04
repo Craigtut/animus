@@ -526,7 +526,7 @@ The mind session receives two MCP servers: `tools` (mind tools) and `cognitive` 
 // Mind session MCP config (identical for Claude, Codex, OpenCode)
 {
   mcpServers: {
-    'tools': {
+    'animus': {
       command: 'node',  // or tsx in dev mode
       args: ['/path/to/animus-mcp-server.js'],
       env: { BRIDGE_PORT: '54321', TOOL_SET: 'mind', TASK_ID: 'mind' },
@@ -539,11 +539,11 @@ The mind session receives two MCP servers: `tools` (mind tools) and `cognitive` 
     // ...plus any plugin MCP servers
   },
   allowedTools: [
-    'mcp__tools__read_memory',
-    'mcp__tools__lookup_contacts',
-    'mcp__tools__send_proactive_message',
-    'mcp__tools__send_media',
-    'mcp__tools__run_with_credentials',
+    'mcp__animus__read_memory',
+    'mcp__animus__lookup_contacts',
+    'mcp__animus__send_proactive_message',
+    'mcp__animus__send_media',
+    'mcp__animus__run_with_credentials',
     'mcp__cognitive__record_thought',
     'mcp__cognitive__record_cognitive_state',
   ],
@@ -552,23 +552,23 @@ The mind session receives two MCP servers: `tools` (mind tools) and `cognitive` 
 
 ### Sub-Agent Session (all providers)
 
-Sub-agents receive a single `tools` MCP server with tier-filtered tools:
+Sub-agents receive a single `animus` MCP server with tier-filtered tools:
 
 ```typescript
 // Sub-agent MCP config (primary tier example)
 {
   mcpServers: {
-    'tools': {
+    'animus': {
       command: 'node',
       args: ['/path/to/animus-mcp-server.js'],
       env: { BRIDGE_PORT: '54321', TOOL_SET: 'subagent', TASK_ID: 'task-uuid-123' },
     },
   },
   allowedTools: [
-    'mcp__tools__send_message',
-    'mcp__tools__update_progress',
-    'mcp__tools__read_memory',
-    'mcp__tools__run_with_credentials',
+    'mcp__animus__send_message',
+    'mcp__animus__update_progress',
+    'mcp__animus__read_memory',
+    'mcp__animus__run_with_credentials',
   ],
 }
 ```

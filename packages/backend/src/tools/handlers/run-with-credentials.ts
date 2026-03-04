@@ -26,6 +26,7 @@ import * as vaultStore from '../../db/stores/vault-store.js';
 import { logCredentialAccess } from '../../db/stores/credential-audit-store.js';
 import { PROJECT_ROOT } from '../../utils/env.js';
 import { createLogger } from '../../lib/logger.js';
+import { writeSecureTempFile, isFileSecretValue, type SecureTempFileHandle } from '../../utils/secure-temp-file.js';
 
 const log = createLogger('RunWithCredentials', 'heartbeat');
 
@@ -145,6 +146,7 @@ function formatOutput(stdout: string, stderr: string, exitCode: number): string 
 interface ResolvedCredential {
   value: string;
   type: 'vault' | 'plugin';
+  fileSecret?: { data: string; filename: string };
 }
 
 function isResolved(result: ResolvedCredential | ToolResult): result is ResolvedCredential {
@@ -268,6 +270,15 @@ async function resolveCredentialRef(
     return { value: credentialValue, type: 'plugin' };
   }
 
+  // Handle file_secret objects: return placeholder value + file data for temp materialization
+  if (isFileSecretValue(value)) {
+    return {
+      value: '', // placeholder, replaced with temp file path in handler
+      type: 'plugin',
+      fileSecret: { data: value.data, filename: value.filename },
+    };
+  }
+
   if (typeof value !== 'string' || !value) {
     return {
       content: [{
@@ -289,12 +300,14 @@ export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = a
 
   // Collect all credential values for redaction
   const injectedSecrets: string[] = [];
+  // Track temp file handles for cleanup
+  const tempFileHandles: SecureTempFileHandle[] = [];
 
   // 1. Resolve primary credential
   const primary = await resolveCredentialRef(input.credentialRef, pm);
   if (!isResolved(primary)) return primary;
 
-  injectedSecrets.push(primary.value);
+  if (primary.value) injectedSecrets.push(primary.value);
 
   // 2. Build child-only env
   const childEnv: Record<string, string | undefined> = {
@@ -302,14 +315,31 @@ export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = a
     [input.envVar]: primary.value,
   };
 
+  // 2a. Materialize file_secret for primary credential
+  if (primary.fileSecret) {
+    const handle = await writeSecureTempFile(primary.fileSecret);
+    tempFileHandles.push(handle);
+    childEnv[input.envVar] = handle.path;
+    // Add base64 data to redaction list in case it leaks
+    injectedSecrets.push(primary.fileSecret.data);
+  }
+
   // 3. Resolve additional credentials
   if (input.additionalCredentials) {
     for (const extra of input.additionalCredentials) {
       const resolved = await resolveCredentialRef(extra.credentialRef, pm);
       if (!isResolved(resolved)) return resolved;
 
-      injectedSecrets.push(resolved.value);
-      childEnv[extra.envVar] = resolved.value;
+      if (resolved.value) injectedSecrets.push(resolved.value);
+
+      if (resolved.fileSecret) {
+        const handle = await writeSecureTempFile(resolved.fileSecret);
+        tempFileHandles.push(handle);
+        childEnv[extra.envVar] = handle.path;
+        injectedSecrets.push(resolved.fileSecret.data);
+      } else {
+        childEnv[extra.envVar] = resolved.value;
+      }
 
       // Audit log additional credentials
       try {
@@ -331,6 +361,13 @@ export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = a
     delete childEnv[key];
   }
 
+  // 3b. Apply extra (non-secret) environment variables
+  if (input.extraEnv) {
+    for (const key of Object.keys(input.extraEnv)) {
+      childEnv[key] = input.extraEnv[key] as string;
+    }
+  }
+
   // 4. Audit log primary credential access
   try {
     const logsDb = getAgentLogsDb();
@@ -344,24 +381,31 @@ export const runWithCredentialsHandler: ToolHandler<RunWithCredentialsInput> = a
     // Non-critical
   }
 
-  // 5. Spawn subprocess
+  // 5. Spawn subprocess (with guaranteed temp file cleanup)
   const cwd = input.cwd || PROJECT_ROOT;
   log.info(`Executing command with credential ${input.credentialRef} → ${input.envVar}`);
 
-  const { stdout, stderr, exitCode } = await execCommand(input.command, {
-    env: childEnv,
-    cwd,
-    timeout: TIMEOUT_MS,
-  });
+  try {
+    const { stdout, stderr, exitCode } = await execCommand(input.command, {
+      env: childEnv,
+      cwd,
+      timeout: TIMEOUT_MS,
+    });
 
-  // 6. Redact credential values from output before returning to LLM
-  const redactedStdout = redactCredentials(stdout, injectedSecrets);
-  const redactedStderr = redactCredentials(stderr, injectedSecrets);
+    // 6. Redact credential values from output before returning to LLM
+    const redactedStdout = redactCredentials(stdout, injectedSecrets);
+    const redactedStderr = redactCredentials(stderr, injectedSecrets);
 
-  const text = formatOutput(redactedStdout, redactedStderr, exitCode);
+    const text = formatOutput(redactedStdout, redactedStderr, exitCode);
 
-  return {
-    content: [{ type: 'text', text }],
-    ...(exitCode !== 0 ? { isError: true } : {}),
-  };
+    return {
+      content: [{ type: 'text', text }],
+      ...(exitCode !== 0 ? { isError: true } : {}),
+    };
+  } finally {
+    // Clean up all temp credential files, even on error/timeout
+    for (const handle of tempFileHandles) {
+      await handle.cleanup();
+    }
+  }
 };

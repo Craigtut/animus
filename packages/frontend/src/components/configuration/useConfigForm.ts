@@ -101,6 +101,18 @@ export function useConfigForm({ fields, currentConfig, isLoading }: UseConfigFor
           }
         }
       }
+
+      // File secret size validation
+      if (field.type === 'file_secret' && value && typeof value === 'object') {
+        const fileVal = value as { data?: string };
+        if (fileVal.data) {
+          const sizeBytes = Math.ceil(fileVal.data.length * 3 / 4);
+          const maxSize = field.maxFileSize ?? 102_400;
+          if (sizeBytes > maxSize) {
+            errors[field.key] = `File too large (max ${Math.round(maxSize / 1024)}KB)`;
+          }
+        }
+      }
     }
 
     setValidationErrors(errors);

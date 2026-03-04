@@ -231,7 +231,7 @@ export async function getOrCreateMindSession(
       for (const def of mindTools) {
         const mode = permissions.get(def.name);
         if (mode === 'off') continue;
-        allowedTools.push(`mcp__tools__${def.name}`);
+        allowedTools.push(`mcp__animus__${def.name}`);
       }
       state.mcpServer = { serverConfig: serverConfig as unknown as Record<string, unknown>, allowedTools };
       log.info(`Mind MCP server built (stdio bridge) with tools: ${allowedTools.join(', ')}`);
@@ -283,7 +283,7 @@ export async function getOrCreateMindSession(
   }
 
   const mergedMcpServers: Record<string, Record<string, unknown>> = {
-    ...(state.mcpServer ? { tools: state.mcpServer.serverConfig } : {}),
+    ...(state.mcpServer ? { animus: state.mcpServer.serverConfig } : {}),
     ...(state.cognitiveServer ? { cognitive: state.cognitiveServer.serverConfig } : {}),
     ...filteredPluginMcpServers,
   };
@@ -575,9 +575,8 @@ function resolveToolPermission(toolName: string): {
   // Plugin MCP tools: use server-level key
   if (toolName.startsWith('mcp__')) {
     // Core Animus MCP tools have their own in-process gate in registry.ts
-    // Mind session registers under key 'tools' (mcp__tools__*),
-    // sub-agent orchestrator uses key 'animus' (mcp__animus__*)
-    if (toolName.startsWith('mcp__tools__') || toolName.startsWith('mcp__animus__')) return null;
+    // Mind session and sub-agents register under key 'animus' (mcp__animus__*)
+    if (toolName.startsWith('mcp__animus__')) return null;
     // Cognitive tools are internal, always allowed
     if (toolName.startsWith('mcp__cognitive__')) return null;
 

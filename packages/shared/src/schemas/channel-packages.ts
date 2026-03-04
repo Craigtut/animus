@@ -72,6 +72,7 @@ export const channelManifestSchema = z.object({
 export const configFieldTypeSchema = z.enum([
   'text',
   'secret',
+  'file_secret',
   'url',
   'number',
   'select',
@@ -114,6 +115,8 @@ export const configFieldSchema = z.object({
   oauth: configFieldOAuthSchema.optional(), // for 'oauth' type: provider OAuth config
   dependsOn: z.array(z.string()).optional(), // field keys that must be filled before this field is active
   category: z.string().optional(), // field category (e.g., "advanced") for UI grouping/visibility
+  accept: z.string().optional(), // MIME types / extensions for file_secret: "application/json,.pem"
+  maxFileSize: z.number().optional(), // max bytes for file_secret (default 100KB)
 });
 
 export const setupGuideLinkSchema = z.object({

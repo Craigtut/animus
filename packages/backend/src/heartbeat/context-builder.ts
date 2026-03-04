@@ -107,8 +107,6 @@ export interface MindContextParams {
   circadianBaseline?: number | null;
   wakeUpContext?: WakeUpContext | null;
   energySystemEnabled?: boolean;
-  /** Whether mind MCP tools are available this session */
-  mindToolsEnabled?: boolean;
   /** Plugin decision type descriptions for system prompt */
   pluginDecisionDescriptions?: string;
   /** Plugin context sources formatted for user message */
@@ -399,65 +397,6 @@ a plan, schedule a task, delegate to a sub-agent, or simply think about
 it more deeply. But don't force progress. Not every tick needs to move
 a goal forward. Goals serve your life — your life doesn't serve goals.`;
 
-const TOOL_REFERENCE = `── AVAILABLE TOOLS ──
-
-You have access to MCP tools that you can call during this tick:
-
-read_memory — Search your long-term memory dynamically.
-  GATHER CONTEXT pre-loads recent and relevant memories, but if you need
-  to search for something specific that wasn't pre-loaded — a past
-  conversation, a fact you learned weeks ago, a procedure — use this tool.
-
-  Input: { query: string, limit?: number, types?: string[] }
-
-lookup_contacts — Discover contacts and their available channels.
-  GATHER CONTEXT includes a contacts list, but if you need to verify a
-  contact exists or check their exact channels before sending a message,
-  use this tool. Supports filtering by name and channel type.
-
-  Input: { nameFilter?: string, channel?: "web" | "sms" | "discord" | "api" }
-
-send_proactive_message — Send a message to any contact on any channel.
-  This is your way to proactively interact with contacts. Its the ONLY way 
-  to message a user on non-message ticks (interval, task completion, agent 
-  completion). Also use this for reaching out on a different channel than the one that
-  triggered it. Goes through the full delivery pipeline.
-
-  Use lookup_contacts first if you need to verify the contact ID or
-  available channels.
-
-  Input: { contactId: string (UUID), channel: "web" | "sms" | "discord" | "api", content: string }
-
-run_with_credentials — Execute a command with a plugin credential.
-  Use this for plugin scripts that need API keys. The credential is
-  resolved from encrypted storage and injected as an env var into the
-  subprocess. You never see the raw value.
-
-  Input: { command: string, credentialRef: string, envVar: string, cwd?: string }
-
-resolve_tool_approval — Approve or deny a pending tool approval request.
-  When the user indicates they approve or deny a tool that was previously
-  blocked by the permission system, use this tool to record their decision.
-  If approved, the tool will be retried automatically.
-
-  Input: { requestId: string, approved: boolean }
-
-send_voice_reply — Reply with a voice message.
-  When the user sent you a voice message, reply in kind with this tool.
-  It synthesizes your text into speech and delivers it as audio. The text
-  is preserved in conversation history for future context.
-  Write as natural speech — no emojis, markdown, or URLs.
-
-  IMPORTANT: When you call send_voice_reply, do NOT also write a text
-  reply in your natural language output. Your spoken text would otherwise
-  be sent as a SEPARATE text message, duplicating your voice reply.
-  After calling this tool, skip the reply phase entirely — go straight
-  to record_cognitive_state.
-
-  Input: { text: string, speed?: number, voiceId?: string }
-
-IMPORTANT: These tools add round-trips. Only use them when the pre-loaded
-context is insufficient. Most ticks won't need any tool calls.`;
 
 const SESSION_AWARENESS = `── SESSION AWARENESS ──
 
@@ -968,7 +907,6 @@ export function buildSystemPrompt(
   options?: {
     energySystemEnabled?: boolean;
     tickIntervalMs?: number;
-    mindToolsEnabled?: boolean;
     pluginDecisionDescriptions?: string;
   }
 ): string {
@@ -988,10 +926,6 @@ export function buildSystemPrompt(
     MEMORY_INSTRUCTIONS,
     GOAL_GUIDANCE,
   );
-
-  if (options?.mindToolsEnabled) {
-    sections.push(TOOL_REFERENCE);
-  }
 
   sections.push(SESSION_AWARENESS);
 
@@ -1228,7 +1162,6 @@ export function buildMindContext(params: MindContextParams): CompiledContext {
   const systemPromptOptions: Parameters<typeof buildSystemPrompt>[1] = {
     energySystemEnabled: params.energySystemEnabled ?? false,
     tickIntervalMs: params.tickIntervalMs,
-    mindToolsEnabled: params.mindToolsEnabled ?? false,
   };
   if (params.pluginDecisionDescriptions) {
     systemPromptOptions.pluginDecisionDescriptions = params.pluginDecisionDescriptions;

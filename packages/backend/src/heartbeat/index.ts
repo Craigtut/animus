@@ -187,7 +187,6 @@ async function mindQuery(
     circadianBaseline: gathered.circadianBaseline,
     wakeUpContext: gathered.wakeUpContext,
     energySystemEnabled: gathered.energySystemEnabled,
-    mindToolsEnabled: !!ctx.mindSession.mcpServer,
     ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
     ...(gathered.pluginContextSources ? { pluginContextSources: gathered.pluginContextSources } : {}),
     ...(gathered.credentialManifest ? { credentialManifest: gathered.credentialManifest } : {}),
@@ -223,7 +222,6 @@ async function mindQuery(
       effectiveSystemPrompt = buildSystemPrompt(ctx.compiledPersona!, {
         energySystemEnabled: gathered.energySystemEnabled ?? false,
         tickIntervalMs: gathered.tickIntervalMs,
-        mindToolsEnabled: !!ctx.mindSession.mcpServer,
         ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
       });
     }

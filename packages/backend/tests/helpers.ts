@@ -28,6 +28,7 @@ export function createTestSystemDb(): Database.Database {
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '018_vault_entries.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '019_telemetry.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '020_plugin_status.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '021_vault_created_by.sql'));
   return db;
 }
 

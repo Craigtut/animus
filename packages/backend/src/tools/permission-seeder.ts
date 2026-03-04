@@ -30,6 +30,7 @@ const CORE_TOOL_RISK_TIERS: Record<string, RiskTier> = {
   generate_speech: 'acts',
   run_with_credentials: 'sensitive',
   list_vault_entries: 'safe',
+  manage_vault_entry: 'acts',
   send_voice_reply: 'communicates',
 };
 

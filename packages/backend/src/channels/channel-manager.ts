@@ -1103,14 +1103,17 @@ export class ChannelManager {
     systemStore.updateChannelPackageStatus(db, pkg.name, 'starting');
     this.emitStatusChange(pkg.name, pkg.channelType, 'starting');
 
-    // Get secret keys from config schema
+    // Get secret keys and file_secret keys from config schema
     const configSchema = this.configSchemas.get(pkg.channelType);
     const secretKeys = configSchema?.fields
       .filter((f) => f.type === 'secret')
       .map((f) => f.key) ?? [];
+    const fileSecretKeys = configSchema?.fields
+      .filter((f) => f.type === 'file_secret')
+      .map((f) => f.key) ?? [];
 
     // Decrypt config
-    const decryptedConfig = systemStore.getChannelPackageConfig(db, pkg.name, secretKeys) ?? {};
+    const decryptedConfig = systemStore.getChannelPackageConfig(db, pkg.name, secretKeys, fileSecretKeys) ?? {};
 
     const host = new ChannelProcessHost({
       pkg,

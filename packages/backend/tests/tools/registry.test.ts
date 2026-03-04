@@ -17,8 +17,8 @@ import type { ToolHandlerContext } from '../../src/tools/types.js';
 // ============================================================================
 
 describe('Tool Definitions', () => {
-  it('should have 11 tool definitions', () => {
-    expect(Object.keys(ANIMUS_TOOL_DEFS)).toHaveLength(11);
+  it('should have 13 tool definitions', () => {
+    expect(Object.keys(ANIMUS_TOOL_DEFS)).toHaveLength(13);
   });
 
   it('should define send_message', () => {
@@ -63,7 +63,9 @@ describe('Tool Permissions', () => {
     expect(allowed).toContain('update_progress');
     expect(allowed).toContain('read_memory');
     expect(allowed).toContain('run_with_credentials');
-    expect(allowed).toHaveLength(4);
+    expect(allowed).toContain('list_vault_entries');
+    expect(allowed).toContain('manage_vault_entry');
+    expect(allowed).toHaveLength(6);
   });
 
   it('should restrict tools for standard tier', () => {
@@ -71,8 +73,10 @@ describe('Tool Permissions', () => {
     expect(allowed).toContain('send_message');
     expect(allowed).toContain('read_memory');
     expect(allowed).toContain('run_with_credentials');
+    expect(allowed).toContain('list_vault_entries');
     expect(allowed).not.toContain('update_progress');
-    expect(allowed).toHaveLength(3);
+    expect(allowed).not.toContain('manage_vault_entry');
+    expect(allowed).toHaveLength(4);
   });
 
   it('isToolAllowed should work correctly', () => {
@@ -90,7 +94,7 @@ describe('Tool Permissions', () => {
 describe('Tool Registry', () => {
   it('should return all tool names', () => {
     const names = getToolNames();
-    expect(names).toEqual(['send_message', 'update_progress', 'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials', 'resolve_tool_approval', 'transcribe_audio', 'generate_speech', 'send_voice_reply']);
+    expect(names).toEqual(['send_message', 'update_progress', 'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials', 'list_vault_entries', 'manage_vault_entry', 'resolve_tool_approval', 'transcribe_audio', 'generate_speech', 'send_voice_reply']);
   });
 
   it('should get a tool by name', () => {
@@ -107,10 +111,10 @@ describe('Tool Registry', () => {
 
   it('should filter tools by tier', () => {
     const primaryTools = getToolsForTier('primary');
-    expect(primaryTools).toHaveLength(4);
+    expect(primaryTools).toHaveLength(6);
 
     const standardTools = getToolsForTier('standard');
-    expect(standardTools).toHaveLength(3);
+    expect(standardTools).toHaveLength(4);
     expect(standardTools.map((t) => t.name)).not.toContain('update_progress');
   });
 });

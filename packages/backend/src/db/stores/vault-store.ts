@@ -19,6 +19,7 @@ interface VaultEntryRow {
   identity: string | null;
   encrypted_password: string;
   notes: string | null;
+  created_by: string;
   created_at: string;
   updated_at: string;
 }
@@ -31,6 +32,7 @@ export interface VaultEntry {
   identity: string | null;
   password: string; // decrypted
   notes: string | null;
+  createdBy: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -43,6 +45,7 @@ export interface VaultEntryMetadata {
   identity: string | null;
   hint: string; // last 4 chars of password
   notes: string | null;
+  createdBy: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -56,6 +59,7 @@ function rowToEntry(row: VaultEntryRow): VaultEntry {
     identity: row.identity,
     password: decrypt(row.encrypted_password),
     notes: row.notes,
+    createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -75,6 +79,7 @@ function rowToMetadata(row: VaultEntryRow): VaultEntryMetadata {
     identity: row.identity,
     hint,
     notes: row.notes,
+    createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -89,6 +94,7 @@ export function createVaultEntry(
     identity?: string | null | undefined;
     password: string;
     notes?: string | null | undefined;
+    createdBy?: string;
   }
 ): VaultEntryMetadata {
   const id = generateUUID();
@@ -96,8 +102,8 @@ export function createVaultEntry(
   const encryptedPassword = encrypt(data.password);
 
   db.prepare(
-    `INSERT INTO vault_entries (id, label, service, url, identity, encrypted_password, notes, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO vault_entries (id, label, service, url, identity, encrypted_password, notes, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     data.label,
@@ -106,6 +112,7 @@ export function createVaultEntry(
     data.identity ?? null,
     encryptedPassword,
     data.notes ?? null,
+    data.createdBy ?? 'user',
     timestamp,
     timestamp
   );
@@ -221,5 +228,15 @@ export function getVaultEntryCount(db: Database.Database): number {
   const row = db
     .prepare('SELECT COUNT(*) as count FROM vault_entries')
     .get() as { count: number };
+  return row.count;
+}
+
+/**
+ * Count vault entries for a given service. Used for duplicate warnings.
+ */
+export function countVaultEntriesByService(db: Database.Database, service: string): number {
+  const row = db
+    .prepare('SELECT COUNT(*) as count FROM vault_entries WHERE LOWER(service) = LOWER(?)')
+    .get(service) as { count: number };
   return row.count;
 }

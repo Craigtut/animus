@@ -16,6 +16,7 @@ import * as systemStore from '../../db/stores/system-store.js';
 import { getChannelManager } from '../../channels/channel-manager.js';
 import { getEventBus } from '../../lib/event-bus.js';
 import { verifyPackage } from '../../services/package-verifier.js';
+import { isFileSecretValue, maskFileSecret } from '../../utils/secure-temp-file.js';
 import type { AnimusEventMap } from '@animus-labs/shared';
 
 export const channelsRouter = router({
@@ -156,14 +157,22 @@ export const channelsRouter = router({
       const secretKeys = configSchema?.fields
         .filter(f => f.type === 'secret')
         .map(f => f.key) ?? [];
+      const fileSecretKeys = configSchema?.fields
+        .filter(f => f.type === 'file_secret')
+        .map(f => f.key) ?? [];
 
-      const config = systemStore.getChannelPackageConfig(db, input.name, secretKeys);
+      const config = systemStore.getChannelPackageConfig(db, input.name, secretKeys, fileSecretKeys);
 
       // Mask secret values for display
       if (config) {
         for (const key of secretKeys) {
           if (config[key]) {
             config[key] = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+          }
+        }
+        for (const key of fileSecretKeys) {
+          if (isFileSecretValue(config[key])) {
+            config[key] = maskFileSecret(config[key] as Parameters<typeof maskFileSecret>[0]);
           }
         }
       }
@@ -191,12 +200,22 @@ export const channelsRouter = router({
       const secretKeys = configSchema?.fields
         .filter(f => f.type === 'secret')
         .map(f => f.key) ?? [];
+      const fileSecretKeys = configSchema?.fields
+        .filter(f => f.type === 'file_secret')
+        .map(f => f.key) ?? [];
 
       // If a secret field has the masked value, preserve the existing value
-      const existingConfig = systemStore.getChannelPackageConfig(db, input.name, secretKeys) ?? {};
+      const existingConfig = systemStore.getChannelPackageConfig(db, input.name, secretKeys, fileSecretKeys) ?? {};
       const configToSave = { ...input.config };
       for (const key of secretKeys) {
         if (configToSave[key] === '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022') {
+          configToSave[key] = existingConfig[key];
+        }
+      }
+      // Preserve masked file_secret values (frontend sends back {configured: true} without data)
+      for (const key of fileSecretKeys) {
+        const val = configToSave[key] as Record<string, unknown> | undefined;
+        if (val?.['__file_secret'] && val?.['configured'] && !val?.['data']) {
           configToSave[key] = existingConfig[key];
         }
       }
@@ -213,7 +232,7 @@ export const channelsRouter = router({
         }
       }
 
-      systemStore.setChannelPackageConfig(db, input.name, configToSave, secretKeys);
+      systemStore.setChannelPackageConfig(db, input.name, configToSave, secretKeys, fileSecretKeys);
 
       // Auto-restart if the channel is currently running so it picks up new config
       if (pkg.enabled && channelManager.getProcess(pkg.channelType)) {
