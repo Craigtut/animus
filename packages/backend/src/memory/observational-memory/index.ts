@@ -211,6 +211,12 @@ export async function processStream(params: {
     let batchTokens = 0;
     let lastBatchItem: RawItem | null = null;
 
+    // DEBUG: log timezone and sample timestamp to diagnose observer time issues
+    if (oldestFirst.length > 0) {
+      const sample = oldestFirst[0]!;
+      log.debug(`Observer batch timezone=${timezone ?? 'UNDEFINED'}, sample raw=${sample.createdAt}, formatted=${formatItemTimestamp(sample.createdAt, timezone)}`);
+    }
+
     for (const item of oldestFirst) {
       const itemTokens = estimateTokens(item.content);
       if (batchTokens + itemTokens > batchTokenTarget && batchItems.length > 0) {

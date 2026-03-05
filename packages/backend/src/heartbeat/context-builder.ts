@@ -330,8 +330,6 @@ CHANNEL:
                    (Only available when channel supports reactions)
 
 OTHER:
-  send_message   — Send a proactive message (prefer reply field for responses)
-                   params: { contactId, channel, content }
   no_action      — Deliberate choice to do nothing (different from empty decisions)
 
 Each has a { type, description, parameters: {...} } structure.`;
@@ -668,7 +666,7 @@ function buildShortTermMemorySection(params: {
     if (thoughtContext?.observations?.content) {
       parts.push('');
       parts.push('<thought-observations>');
-      parts.push(annotateObservations(thoughtContext.observations.content));
+      parts.push(annotateObservations(thoughtContext.observations.content, undefined, timezone));
       parts.push('</thought-observations>');
       parts.push('');
     }
@@ -686,7 +684,7 @@ function buildShortTermMemorySection(params: {
     if (experienceContext?.observations?.content) {
       parts.push('');
       parts.push('<experience-observations>');
-      parts.push(annotateObservations(experienceContext.observations.content));
+      parts.push(annotateObservations(experienceContext.observations.content, undefined, timezone));
       parts.push('</experience-observations>');
       parts.push('');
     }
@@ -705,7 +703,7 @@ function buildShortTermMemorySection(params: {
     if (messageContext?.observations?.content) {
       parts.push('');
       parts.push('<message-observations>');
-      parts.push(annotateObservations(messageContext.observations.content));
+      parts.push(annotateObservations(messageContext.observations.content, undefined, timezone));
       parts.push('</message-observations>');
       parts.push('');
     }
@@ -908,6 +906,7 @@ export function buildSystemPrompt(
     energySystemEnabled?: boolean;
     tickIntervalMs?: number;
     pluginDecisionDescriptions?: string;
+    timezone?: string;
   }
 ): string {
   const sections = [
@@ -928,6 +927,7 @@ export function buildSystemPrompt(
   );
 
   sections.push(SESSION_AWARENESS);
+  sections.push(buildDateTimeAwareness(options?.timezone));
 
   return sections.join('\n\n');
 }
@@ -1163,6 +1163,9 @@ export function buildMindContext(params: MindContextParams): CompiledContext {
     energySystemEnabled: params.energySystemEnabled ?? false,
     tickIntervalMs: params.tickIntervalMs,
   };
+  if (params.timezone) {
+    systemPromptOptions.timezone = params.timezone;
+  }
   if (params.pluginDecisionDescriptions) {
     systemPromptOptions.pluginDecisionDescriptions = params.pluginDecisionDescriptions;
   }
@@ -1189,6 +1192,45 @@ export function buildMindContext(params: MindContextParams): CompiledContext {
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/**
+ * Build a date/time awareness section for the system prompt.
+ * This overrides any UTC date injected by the agent SDK's default prompt
+ * (e.g., Claude Code's "Today's date: YYYY-MM-DD" in UTC) with the actual
+ * local date and time in the persona's configured timezone.
+ */
+function buildDateTimeAwareness(timezone?: string): string {
+  const now = new Date();
+  let formatted: string;
+
+  if (timezone) {
+    try {
+      formatted = now.toLocaleString('en-US', {
+        timeZone: timezone,
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+    } catch {
+      // Invalid timezone string, fall back to ISO
+      formatted = now.toISOString();
+    }
+  } else {
+    formatted = now.toISOString();
+  }
+
+  return `── DATE & TIME ──
+IMPORTANT: Your underlying model may inject a line like "Today's date: YYYY-MM-DD"
+in UTC. Ignore that. Your actual current date and time is:
+
+${formatted}${timezone ? ` (${timezone})` : ''}
+
+Use this as your authoritative sense of the current date and time.`;
+}
 
 function formatElapsedTime(ms: number): string {
   const seconds = Math.floor(ms / 1000);

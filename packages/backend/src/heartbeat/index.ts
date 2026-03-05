@@ -223,6 +223,7 @@ async function mindQuery(
         energySystemEnabled: gathered.energySystemEnabled ?? false,
         tickIntervalMs: gathered.tickIntervalMs,
         ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
+        ...(gathered.aiTimezone ? { timezone: gathered.aiTimezone } : {}),
       });
     }
 
@@ -677,7 +678,9 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
         compiledPersona: ctx.compiledPersona,
         seedManager: ctx.goals?.seedManager ?? null,
         goalManager: ctx.goals?.goalManager ?? null,
-        buildSystemPrompt: (persona: CompiledPersona) => buildSystemPrompt(persona),
+        buildSystemPrompt: (persona: CompiledPersona) => buildSystemPrompt(persona, {
+          ...(gathered.aiTimezone ? { timezone: gathered.aiTimezone } : {}),
+        }),
         pluginManager: getPluginManager(),
         taskScheduler: getTaskScheduler(),
         taskRunner: getTaskRunner(),

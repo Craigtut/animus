@@ -10,6 +10,24 @@
  */
 
 /**
+ * Get the current date components in a specific IANA timezone.
+ * Returns { year, month (0-based), day } in that timezone.
+ */
+function getDatePartsInTimezone(date: Date, timezone: string): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  const year = parseInt(parts.find(p => p.type === 'year')!.value, 10);
+  const month = parseInt(parts.find(p => p.type === 'month')!.value, 10) - 1;
+  const day = parseInt(parts.find(p => p.type === 'day')!.value, 10);
+  return { year, month, day };
+}
+
+/**
  * Parse a date from an observation header line.
  * Expected format: "Date: Feb 10, 2026" or "Date: Jan 1, 2026"
  * Returns null if the line doesn't match.
@@ -29,15 +47,32 @@ export function parseDateHeader(line: string): Date | null {
 
 /**
  * Format a relative time string between a date and "now".
+ * When timezone is provided, "now" is resolved in that timezone so that
+ * "today"/"yesterday" labels match the persona's local calendar date.
  * Returns: "today", "yesterday", "X days ago", "X weeks ago", "X months ago"
  */
-export function formatRelativeTime(date: Date, now: Date): string {
-  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const startOfNow = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+export function formatRelativeTime(date: Date, now: Date, timezone?: string): string {
+  let startOfDate: Date;
+  let startOfNow: Date;
+
+  if (timezone) {
+    // The observation date header ("Date: Mar 03, 2026") was written in the
+    // persona timezone. Parse it as a calendar date (midnight, no TZ shift).
+    startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+    // "Now" needs to be resolved in the persona timezone so the day boundary
+    // aligns with the persona's local clock, not the server's.
+    const nowParts = getDatePartsInTimezone(now, timezone);
+    startOfNow = new Date(nowParts.year, nowParts.month, nowParts.day);
+  } else {
+    startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    startOfNow = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }
+
   const diffMs = startOfNow.getTime() - startOfDate.getTime();
   const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
 
-  if (diffDays === 0) return 'today';
+  if (diffDays <= 0) return 'today';
   if (diffDays === 1) return 'yesterday';
   if (diffDays < 14) return `${diffDays} days ago`;
   if (diffDays < 60) {
@@ -73,8 +108,9 @@ export function formatGap(newer: Date, older: Date): string | null {
 /**
  * Add relative time annotations to date headers in observation text.
  * "Date: Feb 10, 2026" becomes "Date: Feb 10, 2026 (4 days ago)"
+ * When timezone is provided, "today"/"yesterday" are resolved in that timezone.
  */
-export function annotateRelativeTime(observations: string, currentDate?: Date): string {
+export function annotateRelativeTime(observations: string, currentDate?: Date, timezone?: string): string {
   const now = currentDate ?? new Date();
   const lines = observations.split('\n');
 
@@ -82,7 +118,7 @@ export function annotateRelativeTime(observations: string, currentDate?: Date): 
     const date = parseDateHeader(line);
     if (!date) return line;
 
-    const relative = formatRelativeTime(date, now);
+    const relative = formatRelativeTime(date, now, timezone);
     // Strip existing annotation if present, then add new one
     const cleanLine = line.replace(/\s*\(.*\)\s*$/, '');
     return `${cleanLine} (${relative})`;
@@ -224,10 +260,12 @@ export function insertGapMarkers(observations: string): string {
  * 4. Annotate date headers with relative time
  *
  * This is the main entry point used by the context builder.
+ * When timezone is provided, "today"/"yesterday" labels are resolved
+ * in that IANA timezone instead of the server's local time.
  */
-export function annotateObservations(observations: string, currentDate?: Date): string {
+export function annotateObservations(observations: string, currentDate?: Date, timezone?: string): string {
   const merged = mergeSameDateGroups(observations);
   const reversed = reverseObservationGroups(merged);
   const withGaps = insertGapMarkers(reversed);
-  return annotateRelativeTime(withGaps, currentDate);
+  return annotateRelativeTime(withGaps, currentDate, timezone);
 }
