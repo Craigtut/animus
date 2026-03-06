@@ -64,6 +64,17 @@ jobs:
         env:
           TAURI_TARGET_ARCH: ${{ matrix.target-arch }}
 
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          # Extract the section for the current version from CHANGELOG.md
+          # Grabs everything between the first ## header and the next ## header (or EOF)
+          NOTES=$(awk '/^## /{if(found) exit; found=1; next} found{print}' CHANGELOG.md)
+          # Use GitHub Actions delimiter for multiline output
+          echo "notes<<CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+
       - name: Build Tauri app and create release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -72,7 +83,7 @@ jobs:
           projectPath: packages/tauri
           tagName: ${{ github.ref_name }}
           releaseName: 'Animus ${{ github.ref_name }}'
-          releaseBody: 'See [CHANGELOG.md](https://github.com/Craigtut/animus/blob/main/CHANGELOG.md) for details.'
+          releaseBody: ${{ steps.changelog.outputs.notes }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.tauri-args }}
