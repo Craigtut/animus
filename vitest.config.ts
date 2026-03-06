@@ -17,6 +17,7 @@ export default defineConfig({
     },
   },
   resolve: {
+    conditions: ['source'],
     alias: {
       '@animus/shared': path.resolve(__dirname, 'packages/shared/src'),
       '@animus/agents': path.resolve(__dirname, 'packages/agents/src'),
