@@ -8,6 +8,7 @@ export default defineConfig({
     env: {
       ANIMUS_ENCRYPTION_KEY: 'test-encryption-key-not-for-production',
     },
+    setupFiles: ['./vitest.setup.ts'],
     include: ['packages/*/tests/**/*.test.ts', 'packages/*/src/**/*.test.ts'],
     exclude: ['node_modules', 'dist', '**/tests/integration/**', '**/tests/speech/**'],
     coverage: {
