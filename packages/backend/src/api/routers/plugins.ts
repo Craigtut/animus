@@ -30,7 +30,7 @@ export const pluginsRouter = router({
       const comps = p.manifest.components;
 
       // Compute status dynamically (mirrors channel pattern)
-      let status: 'active' | 'unconfigured' | 'disabled' | 'error';
+      let status: 'active' | 'unconfigured' | 'disabled';
       if (p.enabled) {
         status = 'active';
       } else if (!pm.hasRequiredConfig(p.name)) {
@@ -47,7 +47,7 @@ export const pluginsRouter = router({
         iconSvg: loaded?.iconSvg ?? null,
         installedFrom: p.source,
         enabled: p.enabled,
-        status,
+        status: status as 'active' | 'unconfigured' | 'disabled' | 'error',
         lastError: null as string | null,
         components: {
           skills: loaded?.skills.length ?? 0,

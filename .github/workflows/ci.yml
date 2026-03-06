@@ -28,8 +28,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Lint
-        run: npm run lint
+      # TODO: Enable once eslint.config.js is created (ESLint 9 flat config migration)
+      # - name: Lint
+      #   run: npm run lint
 
       - name: Test
         run: npm run test:run
