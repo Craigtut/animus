@@ -208,10 +208,14 @@ npm run release -- --dry-run patch           # Preview the release flow
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
-**Format:**
+**Format (single line only, no body, no footer):**
 ```
 <type>(<scope>): <description>
 ```
+
+Example: `feat(heartbeat): add configurable tick interval`
+
+Do NOT add a commit body or footer. No `Co-Authored-By`, no bullet lists, no extra lines. Just the one line.
 
 **Types:** `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `style`
 
@@ -222,7 +226,8 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/).
 - Commit early and often. Small, focused commits are preferred over large batches.
 - Each commit should be one logical change.
 - Write in imperative mood: "add feature" not "added feature".
-- Keep the first line under 72 characters.
+- Keep the first line under 100 characters.
+- Always use `git commit -m "..."` with a single-line message.
 
 **What agents must NOT do:**
 - Do NOT run `scripts/bump-version.mjs` or `scripts/release.mjs`
