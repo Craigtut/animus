@@ -1,6 +1,6 @@
 ---
 name: doc-explorer
-description: Explore Animus project documentation. Use when you need context about how the system works, its architecture, design principles, agent SDKs, the heartbeat system, persona system, frontend design, or any project documentation. Also use when the user asks about docs, wants to understand a feature, or when you need deeper context to implement something correctly.
+description: Explore Animus project documentation. Use when you need context about how the system works, its architecture, design principles, agent SDKs, the heartbeat system, persona system, or any project documentation. Also use when the user asks about docs, wants to understand a feature, or when you need deeper context to implement something correctly.
 allowed-tools: Read Grep Glob
 ---
 
@@ -12,7 +12,7 @@ You are exploring the Animus project documentation to gather context. The docs l
 
 **Before exploring any other documentation, you MUST read these two foundational documents into context:**
 
-1. **Project Vision** - `docs/project-vision.md`
+1. **Product Vision** - `docs/product-vision.md`
    The soul of Animus: what it is, why it exists, and the core principles that guide all development.
 
 2. **Brand Vision** - `docs/brand-vision.md`
@@ -28,160 +28,153 @@ These documents define the non-negotiable identity and design language for the e
 
 **If invoked without arguments**: Provide a summary of all available documentation topics and ask what the user wants to explore.
 
-**If invoked automatically by Claude**: Read the specific files relevant to your current task. Don't read everything - be targeted.
+**If invoked automatically by Claude**: Read the specific files relevant to your current task. Don't read everything, be targeted.
 
 ## Topic: $ARGUMENTS
 
 ## Documentation Index
 
-Use this index to find the right files to read. Each entry includes the file path, size, and what it covers.
+Use this index to find the right files to read. Each entry includes the file path and what it covers.
 
-### Vision & Identity
+### Vision, Identity & Design
 
-| File | Size | Covers |
-|------|------|--------|
-| `docs/project-vision.md` | 7 KB | Core concept, what makes Animus different, the heartbeat concept, persistent mind, autonomous action, self-building capability, multi-channel presence, guardrails, security |
-| `docs/brand-vision.md` | 8 KB | Brand essence, personality (warm, calm, sophisticated), visual identity, color palette (monochromatic + warm), typography (Outfit and Crimson Pro), animation philosophy, visualization approaches for inner life |
+| File | Covers |
+|------|--------|
+| `docs/product-vision.md` | Core concept, what makes Animus different, the heartbeat concept, persistent mind, autonomous action, self-building capability, multi-channel presence, guardrails, security |
+| `docs/brand-vision.md` | Brand essence, personality (warm, calm, sophisticated), visual identity, color palette (monochromatic + warm), typography (Outfit and Crimson Pro), animation philosophy, visualization approaches for inner life |
+| `docs/design-principles.md` | Core design philosophy, intent-driven design, clarity over cleverness, dark mode foundation, color semantics, emotional state colors, typography, spacing, motion principles, component guidelines, interaction patterns |
 
-### Architecture
+### Architecture (Backend)
 
-| File | Size | Covers |
-|------|------|--------|
-| `docs/architecture/heartbeat.md` | 24 KB | The heartbeat tick system, mind session lifecycle (cold/active/warm states), 3-stage pipeline (GATHER CONTEXT → MIND QUERY → EXECUTE), emotion engine (12 emotions, decay, baselines), MindOutput schema, streaming structured output (llm-json-stream), tick queuing & concurrency, crash recovery, TTL cleanup, API, real-time monitoring |
-| `docs/architecture/persona.md` | 12 KB | Persona system design - 8-step creation flow, archetypes, personality dimensions (10 sliders), trait chips, ranked values, existence paradigm (Simulated Life vs Digital Consciousness), prompt compilation system, onboarding gate |
-| `docs/architecture/data-directory.md` | 3 KB | Data directory layout (`ANIMUS_DATA_DIR`), directory structure, secrets lifecycle (auto-generated encryption key + JWT), deployment modes (dev, Docker, Tauri, custom) |
-| `docs/architecture/tech-stack.md` | 14 KB | Full technology overview - Frontend (Vite, React 19, Zustand, Emotion, Motion), Backend (Fastify, tRPC, SQLite), seven databases, LanceDB, agent SDKs, deployment. Shared Abstractions section: Embedding Provider, Context Builder, Decay Engine, Event Bus, Encryption Service, Database Stores |
-| `docs/architecture/agent-orchestration.md` | 14 KB | Sub-agent delegation, custom orchestration layer, prompt template, channel-aware formatting, agent lifecycle, MCP tools, result delivery through heartbeat, failure handling, configuration |
-| `docs/architecture/mcp-tools.md` | 28 KB | Cross-provider MCP tool architecture - tool definitions (shared), handlers (backend), registry, permission filtering by contact tier, hybrid in-process/stdio strategy, Claude createSdkMcpServer optimization, extensibility, user-defined tools |
-| `docs/architecture/tool-permissions.md` | 18 KB | Tool permission & approval system - three permission states (off/ask/always_allow), four risk tiers, two-tick approval pattern, canUseTool callback, permission seeder, approval notifier, context builder integration, trust ramp, sub-agent filtering, channel-specific approval rendering, tRPC API |
-| `docs/architecture/contacts.md` | 14 KB | Contact system, user-contact linking, primary/standard/unknown tiers, identity resolution, contact channels, permission enforcement, message isolation, message storage (messages.db), contact notes |
-| `docs/architecture/channel-packages.md` | 30 KB | Channel system architecture (single source of truth) - channel protocol (IncomingMessage, identity resolution, conversation scoping, outbound routing), web channel (built-in), channel package format (manifest, config schema), AdapterContext API, child process isolation, IPC protocol (including streaming), streaming pipeline, media handling, Channel Manager, installation UX, hot-swap lifecycle, dynamic channel types, frontend integration, plugin hooks integration, security model, Channel SDK, channel reference specs (SMS/Twilio, Discord, OpenAI API, Ollama API) |
-| `docs/architecture/context-builder.md` | 16 KB | Context Builder system - centralized context assembly for all LLM prompts (mind ticks, sub-agents, task ticks), prompt compilation, token budget management, persona compilation, four compilation targets |
-| `docs/architecture/memory.md` | 22 KB | Memory system - four layers (short-term, working memory, core self, long-term), memory.db schema, write pipeline (embed → dedup → store), retrieval scoring, consolidation, forgetting, Transformers.js embeddings, structured output additions, pre-session-end flush, MCP tools for sub-agents |
-| `docs/architecture/goals.md` | 20 KB | Goal system - seeds (emergent desires), goals, plans, tasks hierarchy, salience scoring, emotional links, approval modes, cleanup, heartbeat integration |
-| `docs/architecture/tasks-system.md` | 16 KB | Task system - scheduled vs deferred tasks, task ticks, cron support, planning agent, retry logic, heartbeat integration |
-| `docs/architecture/open-questions.md` | 5 KB | Resolved design questions (all 7) - concurrent tick handling, crash recovery, MCP tool design, structured output, Claude OAuth, Codex OAuth, contact notes |
-| `docs/architecture/voice-channel.md` | 20 KB | Voice channel architecture - Parakeet TDT v3 STT (sherpa-onnx) + Pocket TTS (@animus-labs/tts-native napi-rs, Rust/Candle), frontend voice mode UX, audio pipeline (capture → transcribe → mind → synthesize → playback), sentence-buffered TTS streaming, voice channel adapter, configuration, ffmpeg conversion |
-| `docs/architecture/speech-engine.md` | 10 KB | Shared speech engine - STTEngine (sherpa-onnx Parakeet TDT v3, ~630MB) + TTSEngine (@animus-labs/tts-native napi-rs, Pocket TTS safetensors ~225MB, Rust/Candle) + VoiceManager as backend infrastructure, zero-shot voice cloning, lazy loading, auto-build on dev, voice manifest, built-in/custom voices, MCP tools (transcribe_audio, generate_speech), singleton SpeechService facade |
-| `docs/architecture/sleep-energy.md` | 16 KB | Sleep & energy system - circadian rhythm, energy level (0-1), 6 energy bands (peak/alert/tired/drowsy/very drowsy/sleeping), experience-driven energy deltas, exponential decay toward circadian baseline, wake-up mechanics (natural + triggered), accelerated emotional decay during sleep, tick interval switching, settings configuration |
-| `docs/architecture/observational-memory.md` | 22 KB | Observational memory — three-stream compression (messages/thoughts/experiences), Observer and Reflector agents, token-based thresholds replacing hard item limits, batch threshold mechanism, async processing in EXECUTE phase, memory.db schema, configuration file, context presentation (temporal annotations, gap markers, continuation hint, read-time optimization), observability/event emission, prompt caching benefits |
-| `docs/architecture/reflex-system.md` | 16 KB | Reflex fast-response system — dual-path voice architecture (reflex + heartbeat), Vercel AI SDK abstraction, lightweight context assembly using observational memory, heartbeat integration & correction path, provider configuration (Anthropic/OpenAI/Google/Ollama), subscription vs API cost model, fallback behavior, streaming pipeline |
-| `docs/architecture/plugin-system.md` | 52 KB | Plugin system architecture — skills-first philosophy (token efficiency, composability, self-modification), 7 component types (skills, MCP tools, context sources, hooks, decision types, triggers, agents), plugin manifest format, config schemas, credential handling (${config.*}, run_with_credentials), hot-swap lifecycle, security model, plugin gallery (weather, agent-browser, nano-banana-pro, home-assistant), implementation status, store architecture |
-| `docs/architecture/encryption-architecture.md` | 12 KB | Encryption architecture — password-derived keys (Argon2id), envelope encryption (DEK wrapped with password key), sealed/unsealed server states, vault.json format, unlock paths (env var, Docker secret, web UI, CLI), file deny list, startup flow, password change, first-time setup, deployment scenarios (desktop, Docker, headless, dev), future device-key auto-unseal, threat model |
-| `docs/architecture/credential-passing.md` | 28 KB | Agent-blind credential pattern — four credential storage locations (credentials table, plugins.config_encrypted, channel_packages.config, vault_entries), agent provider keys (env mapping, startup flow, validation, detection), plugin credentials (three injection paths: MCP `${config.*}` resolution, stdin for decision/hook handlers, `run_with_credentials` subprocess env injection with stripped provider keys), channel credentials (IPC init message injection, child process isolation), password vault (vault_entries table, vault:id refs, list_vault_entries tool, output redaction, credential audit logging), agent-blind pattern (credential manifest, context injection, tool definition), frontend credential UI (password masking, masked-value preservation, validation), security boundaries & threat model, trust assumptions |
-| `docs/architecture/backend-architecture.md` | ~8 KB | Backend modular monolith architecture: store patterns, service layer, subsystem lifecycles, pipeline deps, decision handler registry, anti-patterns |
+| File | Covers |
+|------|--------|
+| `docs/architecture/heartbeat.md` | The heartbeat tick system, mind session lifecycle (cold/active/warm states), 3-stage pipeline (GATHER CONTEXT, MIND QUERY, EXECUTE), 5 tick triggers (interval, message, scheduled_task, agent_complete, plugin_trigger), emotion engine (12 emotions, decay, baselines), MindOutput schema, streaming structured output, tick queuing and concurrency, crash recovery, TTL cleanup |
+| `docs/architecture/context-builder.md` | Context Builder system, centralized context assembly for all LLM prompts (mind ticks, sub-agents, task ticks), prompt compilation, token budget management, persona compilation, four compilation targets |
+| `docs/architecture/persona.md` | Persona system design, 8-step creation flow, archetypes, personality dimensions (10 sliders), trait chips, ranked values, existence paradigm (Simulated Life vs Digital Consciousness), prompt compilation system, onboarding gate |
+| `docs/architecture/memory.md` | Memory system, four layers (short-term, working memory, core self, long-term), memory.db schema, write pipeline (embed, dedup, store), retrieval scoring, consolidation, forgetting, Transformers.js embeddings |
+| `docs/architecture/observational-memory.md` | Three-stream compression (messages/thoughts/experiences), Observer and Reflector agents, token-based thresholds, batch threshold mechanism, async processing in EXECUTE phase, temporal annotations |
+| `docs/architecture/goals.md` | Goal system, seeds (emergent desires), goals, plans, tasks hierarchy, salience scoring, emotional links, approval modes, cleanup, heartbeat integration |
+| `docs/architecture/tasks-system.md` | Task system, scheduled vs deferred tasks, task ticks, cron support, planning agent, retry logic, heartbeat integration |
+| `docs/architecture/contacts.md` | Contact system, user-contact linking, primary/standard/unknown tiers, identity resolution, contact channels, permission enforcement, message isolation |
+| `docs/architecture/agent-orchestration.md` | Sub-agent delegation, custom orchestration layer, prompt template, channel-aware formatting, agent lifecycle, MCP tools, result delivery through heartbeat, failure handling |
+| `docs/architecture/sleep-energy.md` | Sleep and energy system, circadian rhythm, energy level (0-1), 6 energy bands, experience-driven energy deltas, exponential decay toward circadian baseline, wake-up mechanics, accelerated emotional decay during sleep |
+| `docs/architecture/mcp-tools.md` | Cross-provider MCP tool architecture, tool definitions (shared), handlers (backend), registry, permission filtering by contact tier, hybrid in-process/stdio strategy |
+| `docs/architecture/tool-permissions.md` | Tool permission and approval system, three permission states (off/ask/always_allow), four risk tiers, two-tick approval pattern, canUseTool callback, trust ramp, sub-agent filtering |
+| `docs/architecture/plugin-system.md` | Plugin system architecture, skills-first philosophy, 7 component types (skills, MCP tools, context sources, hooks, decision types, triggers, agents), manifest format, config schemas, credential handling, hot-swap lifecycle, security model |
+| `docs/architecture/channel-packages.md` | Channel system architecture (single source of truth), channel protocol (IncomingMessage, identity resolution, conversation scoping, outbound routing), web channel (built-in), channel package format, AdapterContext API, child process isolation, IPC protocol, streaming pipeline, media handling, Channel Manager, hot-swap lifecycle, security model, Channel SDK |
+| `docs/architecture/channels.md` | Channel reference specs for specific adapters: SMS/Twilio, Discord, OpenAI API, Ollama API. Protocol-level implementation details. See channel-packages.md for system architecture. |
+| `docs/architecture/voice-channel.md` | Voice channel architecture, frontend voice mode UX, audio pipeline (capture, transcribe, mind, synthesize, playback), sentence-buffered TTS streaming, voice channel adapter. See speech-engine.md for engine internals. |
+| `docs/architecture/speech-engine.md` | Shared speech engine, STTEngine (sherpa-onnx Parakeet TDT v3), TTSEngine (@animus-labs/tts-native, Pocket TTS), VoiceManager, zero-shot voice cloning, lazy loading, voice manifest, MCP tools. See voice-channel.md for interaction layer. |
+| `docs/architecture/tts-licensing-and-distribution.md` | TTS model licensing (CC-BY-4.0), redistribution compliance, weight bundling approach, voice cloning consent flow, attribution requirements. See speech-engine.md for technical details. |
+| `docs/architecture/encryption-architecture.md` | Encryption architecture (implemented), password-derived keys (Argon2id), envelope encryption (DEK wrapped with password key), sealed/unsealed server states, vault.json format, unlock paths, file deny list, deployment scenarios, threat model |
+| `docs/architecture/credential-passing.md` | Agent-blind credential pattern, four credential storage locations, plugin credentials (three injection paths), channel credentials (IPC injection), password vault, credential audit logging, frontend credential UI, security boundaries |
+| `docs/architecture/data-directory.md` | Data directory layout (`ANIMUS_DATA_DIR`), directory structure, secrets lifecycle, deployment modes (dev, Docker, Tauri, custom) |
+| `docs/architecture/package-installation.md` | Package distribution (.anpk install flow), verification chain, rollback, update checking, config migration, store browser UI. **STATUS: PARTIALLY IMPLEMENTED** |
+| `docs/architecture/backend-architecture.md` | Backend modular monolith architecture: store patterns, service layer, subsystem lifecycles, pipeline deps, decision handler registry, anti-patterns |
+| `docs/architecture/tech-stack.md` | Full technology overview, frontend stack (Vite, React 19, Zustand, Emotion, Motion), backend stack (Fastify, tRPC, SQLite), seven databases, LanceDB, agent SDKs, deployment paths, shared abstractions (Embedding Provider, Context Builder, Decay Engine, Event Bus, Encryption Service, Database Stores, Migrations) |
 
-### Frontend
+### Agent SDKs
 
-| File | Size | Covers |
-|------|------|--------|
-| `docs/frontend/design-principles.md` | 11 KB | Core design philosophy, intent-driven design, clarity over cleverness, dark mode foundation, color semantics, emotional state colors, typography, spacing, motion principles, component guidelines, interaction patterns |
-| `docs/frontend/onboarding.md` | 25 KB | Onboarding & authentication flow - sign up/login, 7 onboarding steps, persona creation (8 sub-steps), birth animation, route structure, persistence, responsive design |
-| `docs/frontend/app-shell.md` | 14 KB | App shell & navigation - four spaces (Presence, Mind, People, Settings), floating navigation pill, command palette, connection status indicator, click-deeper transition pattern, space transitions, route structure, responsive behavior |
-| `docs/frontend/presence.md` | 18 KB | Presence space - emotional field visualization, thought stream, goals & agency indicators, embedded conversation, ambient animation, heartbeat pulse, scroll behavior, real-time data sources, responsive design, 9am and complex request scenarios |
-| `docs/frontend/mind.md` | 14 KB | Mind space - emotion detail view (12 emotions, sparklines, history), thought/experience log, memory browser (core self, working memory, long-term search), goal detail views (plans, milestones, salience), agent orchestration view |
-| `docs/frontend/people.md` | 10 KB | People space - contact list, contact detail (conversation, notes, working memory), unknown caller log, channel management, contact editing |
-| `docs/frontend/settings.md` | 12 KB | Settings space - persona editing (all 8 sections), heartbeat configuration, agent provider & credentials, channel configuration, goal settings, system settings (timezone, embedding, data management) |
-| `docs/frontend/voice-mode.md` | 16 KB | Voice mode UX on Presence - entering voice mode, voice surface visualization, listening experience (VAD, transcription flash), thinking state, speaking experience (sentence-level TTS, barge-in interruption), continuous conversation flow, mobile behavior, error states, mixed mode fallback |
+| File | Covers |
+|------|--------|
+| `docs/agents/README.md` | Overview of agent SDK docs, per-provider structure, quick reference comparison, design decisions, implementation priority |
+| `docs/agents/sdk-comparison.md` | Consolidated comparison of Claude vs Codex vs OpenCode: authentication, streaming, tools, sessions, cost tracking, trade-offs, when to use each |
+| `docs/agents/architecture-overview.md` | Unified abstraction layer design, SDK comparison matrix, critical concerns (auth, streaming, sessions), design decisions, event normalization, built-in tools mapping |
+| `docs/agents/sdk-cli-architecture.md` | How agent SDK CLIs are bundled and resolved (Claude bundled cli.js, Codex native binaries, path resolution) |
+| `docs/agents/claude/sdk-research.md` | Claude Agent SDK deep dive: query() async generator, subprocess architecture, auth, session management, streaming, hooks, MCP support. **STATUS: REFERENCE** |
+| `docs/agents/codex/sdk-research.md` | Codex SDK: thread-based model, auth (ChatGPT OAuth or API key), approval policies. **STATUS: REFERENCE** |
+| `docs/agents/codex/oauth.md` | Codex OAuth device code flow: OpenAI endpoints, device auth protocol, token lifecycle, auth.json format, Animus proxy architecture, tRPC procedures. **STATUS: REFERENCE** |
+| `docs/agents/codex/app-server-protocol.md` | Codex app-server JSON-RPC protocol: initialization handshake, method inventory, turn management. **STATUS: REFERENCE** |
+| `docs/agents/opencode/sdk-research.md` | OpenCode SDK: client/server architecture, session management, plugin system, 75+ providers. **STATUS: REFERENCE** |
+
+### Research (Planned/Exploratory)
+
+| File | Covers |
+|------|--------|
+| `docs/research/reflex-system.md` | Reflex fast-response system design: dual-path voice architecture, Vercel AI SDK, lightweight context assembly. **STATUS: PLANNED, not implemented.** |
+| `docs/research/voice-mode.md` | Frontend voice mode UX design: mic button, voice visualization, VAD, listening/speaking states. **STATUS: PLANNED, not implemented.** |
+| `docs/research/tauri-v2-os-features.md` | Tauri v2 desktop features research: system tray, autostart, global shortcuts, background audio. **STATUS: RESEARCH, not implemented.** |
+| `docs/research/twilio-mms-media-hosting.md` | Twilio MMS media hosting options: ImgBB, Cloudflare R2, pluggable hosting. **STATUS: RESEARCH, not implemented.** |
+| `docs/research/Claude-Agent-SDK-Research.md` | Deep Claude Agent SDK API reference. **STATUS: REFERENCE** |
+| `docs/research/opencode-sdk-research.md` | Deep OpenCode SDK API reference. **STATUS: REFERENCE** |
+| `docs/agents/pi/research/sdk-research.md` | Pi AI + Pi Agent Core research: in-process library, transformContext hook, multi-provider gateway. **STATUS: RESEARCH, Pi adapter not implemented.** |
+| `docs/agents/pi/research/adapter-implementation.md` | Pi adapter implementation plan: PiAdapter/PiSession design, transformContext exposure, MCP tool bridging. **STATUS: RESEARCH, not implemented.** |
 
 ### Guides
 
-| File | Size | Covers |
-|------|------|--------|
-| `docs/guides/getting-started.md` | 5 KB | Prerequisites (Node 20+), installation, environment config, project structure, dev workflow, database management, agent provider config, troubleshooting |
-
-### Agent SDKs (Research & Architecture)
-
-Organized by provider with cross-cutting docs at the top level.
-
-| File | Size | Covers |
-|------|------|--------|
-| `docs/agents/README.md` | 5 KB | Overview of agent SDK docs, per-provider structure, quick reference comparison, design decisions, implementation priority |
-| `docs/agents/architecture-overview.md` | 37 KB | Unified abstraction layer design - SDK comparison matrix, critical concerns (auth, streaming, sessions), design decisions, event normalization, built-in tools mapping |
-| `docs/agents/plugin-extension-systems.md` | 28 KB | Plugin/extension system comparison across SDKs, Animus plugin strategy |
-| `docs/agents/claude/sdk-research.md` | 14 KB | Claude Agent SDK deep dive - query() async generator, subprocess architecture, auth (API key or OAuth), session management, streaming, hooks, MCP support, tools |
-| `docs/agents/codex/sdk-research.md` | 13 KB | Codex SDK - thread-based model, Codex class, startThread(), auth (ChatGPT OAuth or API key), no cancel/abort, approval policies |
-| `docs/agents/codex/oauth.md` | 18 KB | Codex OAuth device code flow - OpenAI endpoints, device auth protocol, token lifecycle, auth.json format, RFC 8628 differences, Animus proxy architecture, tRPC procedures, frontend UX |
-| `docs/agents/opencode/sdk-research.md` | 12 KB | OpenCode SDK - client/server architecture, createOpencode(), session management, plugin system, 75+ providers |
-| `docs/agents/pi/sdk-research.md` | 20 KB | Pi AI + Pi Agent Core - in-process library, 20+ providers via 9 API backends, transformContext hook, steer(), TypeBox tools, cross-provider handoffs, cost tracking, sequential tool execution |
-| `docs/agents/pi/adapter-implementation.md` | 25 KB | Pi adapter implementation plan - PiAdapter/PiSession design, transformContext exposure, MCP tool bridging (Zod→TypeBox), event mapping, warm session semantics, capabilities, error handling, build sequence |
+| File | Covers |
+|------|--------|
+| `docs/guides/getting-started.md` | Prerequisites (Node 24+), installation, environment config, project structure, dev workflow, database management, agent provider config, troubleshooting |
 
 ## Exploration Strategy
 
 When you need context for a task, follow this approach:
 
 1. **Identify the topic area** from the index above
-2. **Read the most relevant file(s)** - don't read everything, be targeted
+2. **Read the most relevant file(s)**, don't read everything, be targeted
 3. **For architecture questions**: Start with `docs/architecture/tech-stack.md` for overview, then drill into specific docs
-4. **For agent/SDK work**: Start with `docs/agents/README.md` for the overview, then read the specific provider doc
-5. **For frontend work**: Read `docs/frontend/design-principles.md` and `docs/brand-vision.md`. For specific spaces: `docs/frontend/app-shell.md` (navigation, transitions), `docs/frontend/presence.md`, `docs/frontend/mind.md`, `docs/frontend/people.md`, `docs/frontend/settings.md`
-5b. **For frontend onboarding/auth**: Read `docs/frontend/onboarding.md`
+4. **For agent/SDK work**: Start with `docs/agents/sdk-comparison.md` for the comparison, then read the specific provider doc
+5. **For frontend work**: Read `docs/design-principles.md` and `docs/brand-vision.md`. Frontend page specs have been removed; the code in `packages/frontend/src/` is the authoritative source.
 6. **For persona/personality**: Read `docs/architecture/persona.md` and `docs/brand-vision.md`
-7. **For heartbeat/inner life**: Read `docs/architecture/heartbeat.md` and `docs/project-vision.md`
-7a. **For sleep/energy/circadian rhythm**: Read `docs/architecture/sleep-energy.md` and `docs/architecture/heartbeat.md`
-7b. **For memory/knowledge/embeddings**: Read `docs/architecture/memory.md` and `docs/architecture/heartbeat.md`
-7b2. **For observational memory/compression/observer/reflector**: Read `docs/architecture/observational-memory.md` and `docs/architecture/memory.md`
-7c. **For context assembly/prompt building**: Read `docs/architecture/context-builder.md`
-7d. **For shared abstractions (embedding, decay, encryption, event bus)**: Read `docs/architecture/tech-stack.md` (Shared Abstractions section)
-7e. **For MCP tools/custom tools**: Read `docs/architecture/mcp-tools.md` and `docs/architecture/agent-orchestration.md`
-7f. **For tool permissions/approval flow/trust ramp**: Read `docs/architecture/tool-permissions.md`
-7g. **For plugin system/plugin architecture**: Read `docs/architecture/plugin-system.md` (full architecture). For practical plugin building, the `build-plugin` skill is loaded automatically.
-8. **For new contributors**: Read `docs/guides/getting-started.md`
-9. **For channels/messaging/SMS/Discord/API**: Read `docs/architecture/channel-packages.md` and `docs/architecture/contacts.md`
-10. **For Codex OAuth/authentication**: Read `docs/agents/codex/oauth.md`
-11. **For voice/speech/STT/TTS/audio**: Read `docs/architecture/voice-channel.md`, `docs/architecture/speech-engine.md`, `docs/frontend/voice-mode.md`, and `docs/architecture/channel-packages.md`
-11b. **For speech engine/shared STT/TTS/voice management**: Read `docs/architecture/speech-engine.md`
-12. **For reflex/fast-response/voice-latency**: Read `docs/architecture/reflex-system.md`, `docs/architecture/voice-channel.md`, and `docs/architecture/heartbeat.md`
-13. **For encryption/vault/password-derived keys/sealed state**: Read `docs/architecture/encryption-architecture.md`
-13b. **For secrets/credentials/agent-blind pattern/API keys**: Read `docs/architecture/credential-passing.md`
-14. **For data directory layout/paths/env vars/secrets lifecycle**: Read `docs/architecture/data-directory.md`
+7. **For heartbeat/inner life**: Read `docs/architecture/heartbeat.md` and `docs/product-vision.md`
+8. **For sleep/energy/circadian rhythm**: Read `docs/architecture/sleep-energy.md`
+9. **For memory/knowledge/embeddings**: Read `docs/architecture/memory.md`
+10. **For observational memory/compression**: Read `docs/architecture/observational-memory.md`
+11. **For context assembly/prompt building**: Read `docs/architecture/context-builder.md`
+12. **For shared abstractions (embedding, decay, encryption, event bus)**: Read `docs/architecture/tech-stack.md` (Shared Abstractions section)
+13. **For MCP tools/custom tools**: Read `docs/architecture/mcp-tools.md`
+14. **For tool permissions/approval flow**: Read `docs/architecture/tool-permissions.md`
+15. **For plugin system**: Read `docs/architecture/plugin-system.md`
+16. **For channels/messaging**: Read `docs/architecture/channel-packages.md` (system architecture) and `docs/architecture/channels.md` (adapter specs)
+17. **For contacts/identity/permissions**: Read `docs/architecture/contacts.md`
+18. **For voice/speech/STT/TTS**: Read `docs/architecture/voice-channel.md` and `docs/architecture/speech-engine.md`
+19. **For encryption/vault**: Read `docs/architecture/encryption-architecture.md`
+20. **For credentials/secrets/agent-blind pattern**: Read `docs/architecture/credential-passing.md`
+21. **For data directory layout**: Read `docs/architecture/data-directory.md`
+22. **For sub-agent orchestration**: Read `docs/architecture/agent-orchestration.md`
+23. **For backend architecture patterns**: Read `docs/architecture/backend-architecture.md`
+24. **For new contributors**: Read `docs/guides/getting-started.md`
+25. **For reflex/fast-response (PLANNED)**: Read `docs/research/reflex-system.md`
+26. **For Codex OAuth**: Read `docs/agents/codex/oauth.md`
 
 ## Topic Keyword Guide
 
 Use this to quickly map user questions to the right docs:
 
-- **heartbeat, tick, pipeline, mind session, inner life, emotion, decay, gather context, streaming output, MindOutput** -> `docs/architecture/heartbeat.md`
-- **tech stack, database, sqlite, lancedb, fastify, trpc, vite, react** -> `docs/architecture/tech-stack.md`
-- **design, UI, colors, typography, animation, dark mode, components** -> `docs/frontend/design-principles.md`
-- **persona, personality, archetype, traits, values, existence, identity creation, onboarding** -> `docs/architecture/persona.md`
+- **heartbeat, tick, pipeline, mind session, inner life, emotion, decay, gather context, streaming output, MindOutput, plugin trigger** -> `docs/architecture/heartbeat.md`
+- **tech stack, database, sqlite, lancedb, fastify, trpc, vite, react, shared abstractions, embedding provider, decay engine, encryption service, event bus, database stores** -> `docs/architecture/tech-stack.md`
+- **design, UI, colors, typography, animation, dark mode, components, interaction patterns** -> `docs/design-principles.md`
+- **persona, personality, archetype, traits, values, existence, identity creation** -> `docs/architecture/persona.md`
 - **brand, visual identity, logo, voice** -> `docs/brand-vision.md`
-- **vision, concept, what is animus, autonomous, self-building** -> `docs/project-vision.md`
+- **vision, concept, what is animus, autonomous, self-building** -> `docs/product-vision.md`
 - **setup, install, environment, dev workflow, troubleshooting** -> `docs/guides/getting-started.md`
-- **build plugin, create plugin, plugin development, plugin guide, plugin tutorial, writing plugins, SKILL.md, plugin best practices** -> use the `build-plugin` skill (loaded automatically); for architecture: `docs/architecture/plugin-system.md`
-- **claude sdk, agent sdk, anthropic, query, async generator** -> `docs/agents/claude/sdk-research.md`
+- **plugin, extension, hook system, plugin architecture, skills-first, SKILL.md** -> `docs/architecture/plugin-system.md`
+- **sub-agent, delegation, orchestration, spawn agent, agent lifecycle** -> `docs/architecture/agent-orchestration.md`
+- **MCP, tools, custom tools, tool definitions, tool registry, send_message, read_memory** -> `docs/architecture/mcp-tools.md`
+- **tool permissions, tool approval, ask first, always allow, risk tier, trust ramp** -> `docs/architecture/tool-permissions.md`
+- **contacts, identity, permission, primary, standard, unknown caller** -> `docs/architecture/contacts.md`
+- **channels, adapter, SMS, twilio, discord, API, ollama, openai, channel packages, channel manifest, channel SDK, channel isolation, hot-swap** -> `docs/architecture/channel-packages.md`
+- **channel reference, channel specs, twilio config, discord config, ollama config** -> `docs/architecture/channels.md`
+- **context builder, context assembly, prompt compilation, token budget, system prompt** -> `docs/architecture/context-builder.md`
+- **memory, embedding, retrieval, long-term, lancedb, working memory, core self, consolidation, forgetting** -> `docs/architecture/memory.md`
+- **observational memory, observer, reflector, compression, token threshold** -> `docs/architecture/observational-memory.md`
+- **goals, objectives, seeds, salience, plans** -> `docs/architecture/goals.md`
+- **tasks, scheduling, cron, scheduled jobs, deferred tasks** -> `docs/architecture/tasks-system.md`
+- **voice, speech, STT, TTS, audio, microphone, parakeet, pocket tts, sherpa-onnx** -> `docs/architecture/voice-channel.md`, `docs/architecture/speech-engine.md`
+- **speech engine, voice manager, voice cloning, voice manifest** -> `docs/architecture/speech-engine.md`
+- **tts licensing, model distribution, voice cloning consent, attribution** -> `docs/architecture/tts-licensing-and-distribution.md`
+- **sleep, energy, circadian, tired, drowsy, wake up, energy level** -> `docs/architecture/sleep-energy.md`
+- **encryption, vault, sealed, unsealed, password-derived key, DEK, Argon2id** -> `docs/architecture/encryption-architecture.md`
+- **credential, API key, secret, agent-blind, credential manifest, run_with_credentials, vault entries** -> `docs/architecture/credential-passing.md`
+- **data directory, ANIMUS_DATA_DIR, database paths, deployment modes** -> `docs/architecture/data-directory.md`
+- **package installation, .anpk, store browser, update checking** -> `docs/architecture/package-installation.md`
+- **backend architecture, modular monolith, store pattern, service layer, decision handler** -> `docs/architecture/backend-architecture.md`
+- **agent SDK, sdk comparison, claude vs codex vs opencode** -> `docs/agents/sdk-comparison.md`
+- **agent abstraction, unified interface, event normalization** -> `docs/agents/architecture-overview.md`
+- **claude sdk, anthropic, query, async generator** -> `docs/agents/claude/sdk-research.md`
 - **codex, openai, thread, codex sdk** -> `docs/agents/codex/sdk-research.md`
 - **codex oauth, chatgpt auth, device code** -> `docs/agents/codex/oauth.md`
 - **opencode, provider-agnostic, client-server** -> `docs/agents/opencode/sdk-research.md`
-- **pi, pi-ai, pi-agent-core, transformContext, steer, in-process, multi-provider gateway, TypeBox, cross-provider** -> `docs/agents/pi/sdk-research.md`
-- **pi adapter, pi implementation, context transform adapter, MCP bridging, Zod to TypeBox** -> `docs/agents/pi/adapter-implementation.md`
-- **abstraction layer, unified, event normalization, sdk comparison** -> `docs/agents/architecture-overview.md`
-- **plugin, extension, hook system, plugin architecture, plugin manager, skills-first, SKILL.md standard** -> `docs/architecture/plugin-system.md`
-- **plugin SDK comparison, plugin research, cross-SDK plugins** -> `docs/agents/plugin-extension-systems.md`
-- **agent overview, implementation priority, sdk comparison quick ref** -> `docs/agents/README.md`
-- **sub-agent, delegation, orchestration, spawn agent, agent lifecycle** -> `docs/architecture/agent-orchestration.md`
-- **MCP, tools, custom tools, tool definitions, tool registry, send_message, read_memory, update_progress** -> `docs/architecture/mcp-tools.md`
-- **tool permissions, tool approval, ask first, always allow, risk tier, canUseTool, trust ramp, approval card, permission gate** -> `docs/architecture/tool-permissions.md`
-- **contacts, identity, permission, primary, standard, unknown caller, contact notes** -> `docs/architecture/contacts.md`
-- **channels, adapter, SMS, twilio, discord, API, ollama, openai, streaming, webhook, inbound, outbound, media, channel packages, channel plugin, channel install, channel manifest, channel SDK, channel isolation, hot-swap, AdapterContext, channel manager, IPC, child process** -> `docs/architecture/channel-packages.md`
-- **context builder, context assembly, prompt compilation, token budget, mind prompt, system prompt, mind instructions** -> `docs/architecture/context-builder.md`
-- **shared abstractions, embedding provider, decay engine, encryption service, event bus, database stores** -> `docs/architecture/tech-stack.md`
-- **memory, embedding, retrieval, long-term, lancedb memories, working memory, core self, consolidation, forgetting, transformers.js** -> `docs/architecture/memory.md`
-- **observational memory, observer, reflector, observation, compression, token threshold, raw window, observation window, short-term compression** -> `docs/architecture/observational-memory.md`
-- **goals, objectives, long-term direction** -> `docs/architecture/goals.md`
-- **tasks, scheduling, cron, scheduled jobs** -> `docs/architecture/tasks-system.md`
-- **open questions, resolved questions** -> `docs/architecture/open-questions.md`
-- **voice, speech, STT, TTS, speech-to-text, text-to-speech, audio, microphone, parakeet, pocket tts, sherpa-onnx, voice channel** -> `docs/architecture/voice-channel.md`, `docs/architecture/speech-engine.md`
-- **speech engine, speech service, voice manager, voice cloning, voice manifest, built-in voices, custom voices, transcribe_audio, generate_speech** -> `docs/architecture/speech-engine.md`
-- **sleep, energy, circadian, tired, drowsy, wake up, nap, rest, energy level, sleep hours, quiet hours** -> `docs/architecture/sleep-energy.md`
-- **app shell, navigation, nav pill, command palette, connection status, route structure, space transition, click deeper** -> `docs/frontend/app-shell.md`
-- **presence, emotional field, thought stream, conversation, ambient animation, heartbeat pulse** -> `docs/frontend/presence.md`
-- **mind space, emotion detail, thought log, memory browser, goal detail, agent view, inner life observation** -> `docs/frontend/mind.md`
-- **people, contacts UI, contact list, contact detail, unknown caller, working memory UI** -> `docs/frontend/people.md`
-- **settings, persona editing, heartbeat config, provider config, channel config, data management** -> `docs/frontend/settings.md`
-- **onboarding, auth, signup, login, first time, birth animation, persona creation UI** -> `docs/frontend/onboarding.md`
-- **voice mode UI, voice UX, voice surface, listening, speaking, barge-in, continuous conversation, voice visualization, transcription** -> `docs/frontend/voice-mode.md`
-- **reflex, fast response, voice latency, TTFT, dual path, Vercel AI SDK, direct LLM, reflex context, reflex provider, fast path, slow path** -> `docs/architecture/reflex-system.md`
-- **data directory, ANIMUS_DATA_DIR, DATA_DIR, data layout, database paths, deployment modes, Docker data, Tauri data** -> `docs/architecture/data-directory.md`
-- **encryption, vault, sealed, unsealed, password-derived key, DEK, envelope encryption, vault.json, unlock, ANIMUS_UNLOCK_PASSWORD, file deny list, Argon2id key derivation, key management** -> `docs/architecture/encryption-architecture.md`
-- **credential, API key, secret, credential passing, agent-blind, credential manifest, credential injection, plugin credentials, MCP env vars, sensitive config, AES-256-GCM, run_with_credentials, channel credentials, IPC credentials, encrypted storage, password vault, vault entries, list_vault_entries, vault ref, credential audit, output redaction** -> `docs/architecture/credential-passing.md`
-- **backend architecture, modular monolith, store pattern, service layer, lifecycle, pipeline deps, decision handler** -> `docs/architecture/backend-architecture.md`
+- **pi, pi-ai, transformContext, multi-provider** -> `docs/agents/pi/research/sdk-research.md`
+- **reflex, fast response, voice latency, dual path, Vercel AI SDK** -> `docs/research/reflex-system.md`
+- **voice mode UI, voice UX, voice visualization, barge-in** -> `docs/research/voice-mode.md`

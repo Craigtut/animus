@@ -265,27 +265,7 @@ const { data } = trpc.onHeartbeat.useSubscription();
 
 ### Agent Integration
 
-The `@animus-labs/agents` package provides a unified interface for all agent SDKs.
-
-**Status**: Types defined, implementation pending.
-
-```typescript
-import { IAgentSession, AgentSessionConfig } from '@animus-labs/agents';
-
-// Future API (not yet implemented):
-const session = await adapter.createSession({
-  provider: 'claude',  // or 'codex', 'opencode'
-  systemPrompt: '...',
-});
-
-session.onEvent((event) => {
-  // Handle normalized streaming events
-});
-
-const response = await session.prompt('...');
-```
-
-The agents package is separate from backend to maintain clear boundaries and allow independent iteration.
+The `@animus-labs/agents` package provides a unified interface for all agent SDKs. Claude and Codex adapters are fully implemented and integrated. The OpenCode adapter is built but not yet wired into the backend/frontend. See `docs/agents/sdk-comparison.md` for provider comparison and `docs/agents/architecture-overview.md` for the abstraction layer design.
 
 ### Event Logging
 
@@ -308,67 +288,47 @@ All agent interactions must be logged. The agent abstraction layer handles this 
 
 ## Documentation (MANDATORY)
 
-**IMPORTANT: Before implementing any feature, fixing any bug, or making any non-trivial change, you MUST use `/doc-explorer <topic>` to load the relevant documentation context first.** This is not optional. The `/docs` folder contains critical design decisions, architectural patterns, and constraints that must be followed. Implementing without reading the docs risks building something inconsistent with the project's design. After creating new documents you need to make sure that they are referenced in the Doc Explorer. 
+**IMPORTANT: Before implementing any feature, fixing any bug, or making any non-trivial change, you MUST use `/doc-explorer <topic>` to load the relevant documentation context first.** This is not optional. The `/docs` folder contains critical design decisions, architectural patterns, and constraints that must be followed. Implementing without reading the docs risks building something inconsistent with the project's design. After creating new documents you need to make sure that they are referenced in the Doc Explorer skill (`.skills/doc-explorer/SKILL.md`).
 
 Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to explore documentation for a specific area, or invoke it without arguments to see all available topics.
 
-**Available documentation areas:**
-- **Vision & Identity**: `docs/project-vision.md`, `docs/brand-vision.md`
-- **Architecture**: `docs/architecture/heartbeat.md`, `docs/architecture/agent-orchestration.md`, `docs/architecture/contacts.md`, `docs/architecture/persona.md`, `docs/architecture/tech-stack.md`
-- **Architecture**: `docs/architecture/goals.md` (goal system, seeds, plans, salience), `docs/architecture/tasks-system.md` (scheduled & deferred tasks, task ticks)
-- **Architecture**: `docs/architecture/memory.md` (four memory layers, memory.db, embeddings, write pipeline, consolidation)
-- **Architecture**: `docs/architecture/context-builder.md` (context assembly, prompt compilation, token budgets, persona compilation)
-- **Architecture**: `docs/architecture/channel-packages.md` (channel system — protocol, packaging, child process isolation, IPC streaming, AdapterContext, manifests, Channel Manager, hot-swap, dynamic types, security, channel reference specs)
-- **Architecture**: `docs/architecture/mcp-tools.md` (cross-provider MCP tool architecture, tool definitions, handlers, registry, permission filtering)
-- **Architecture**: `docs/architecture/tool-permissions.md` (tool permission & approval system, three permission states, risk tiers, two-tick approval pattern, canUseTool, trust ramp, sub-agent filtering)
-- **Architecture**: `docs/architecture/voice-channel.md` (voice channel — Parakeet TDT v3 STT + Pocket TTS, both via sherpa-onnx, frontend voice mode, audio pipeline)
-- **Architecture**: `docs/architecture/speech-engine.md` (shared STT/TTS engines, Pocket TTS, Parakeet STT, voice system, voice manager)
-- **Architecture**: `docs/architecture/sleep-energy.md` (sleep & energy system, circadian rhythm, energy bands, wake-up mechanics, accelerated emotional decay)
-- **Architecture**: `docs/architecture/plugin-system.md` (plugin system — skills-first philosophy, 7 component types, manifest format, config schemas, credential handling, MCP tools, hooks, decision types, triggers, hot-swap lifecycle, security model, plugin gallery)
-- **Architecture**: `docs/architecture/encryption-architecture.md` (encryption system — password-derived keys, envelope encryption, sealed/unsealed server states, vault file, file deny list, unlock paths, deployment scenarios, threat model)
-- **Architecture**: `docs/architecture/credential-passing.md` (agent-blind credential pattern — three storage locations, credential manifest, plugin `${config.*}` resolution, `run_with_credentials` tool, channel IPC injection, frontend masking)
-- **Architecture**: `docs/architecture/observational-memory.md` (observational memory — three-stream compression, Observer/Reflector agents, token-based thresholds, async processing, memory.db schema)
-- **Architecture**: `docs/architecture/reflex-system.md` (reflex fast-response layer — Vercel AI SDK, dual-path voice architecture, lightweight context, heartbeat integration, provider configuration)
-- **Architecture**: `docs/architecture/tts-licensing-and-distribution.md` (TTS model licensing, CC-BY-4.0 redistribution, weight bundling approach, voice cloning consent flow, attribution requirements)
-- **Architecture**: `docs/architecture/data-directory.md` (data directory layout, `ANIMUS_DATA_DIR` resolution, secrets lifecycle, deployment modes)
-- **Architecture**: `docs/architecture/package-installation.md` (package distribution — .anpk install flow, verification chain, rollback, update checking, config migration, store browser UI, AI self-management MCP tools)
-- **Architecture**: `docs/architecture/backend-architecture.md` (modular monolith patterns, store/service/lifecycle/pipeline conventions, anti-patterns)
-- **Open Questions**: `docs/architecture/open-questions.md` (all 7 resolved)
-- **Open Concerns**: `docs/architecture/open-concerns.md` (known acceptable concerns)
-- **Frontend Design**: `docs/frontend/design-principles.md`, `docs/frontend/onboarding.md`
-- **Frontend Specs**: `docs/frontend/app-shell.md` (navigation, transitions, routes), `docs/frontend/presence.md` (main space), `docs/frontend/mind.md` (inner life detail), `docs/frontend/people.md` (contacts), `docs/frontend/settings.md` (configuration), `docs/frontend/voice-mode.md` (voice interaction)
-- **Guides**: `docs/guides/getting-started.md`
-- **Agent SDKs**: `docs/agents/` (per-provider folders: claude/, codex/, opencode/, pi/ + architecture overview + plugin/extension systems)
+### Documentation Structure
 
-**When to use `/doc-explorer`:**
-- Starting work on any feature → `/doc-explorer` with the relevant topic
-- Working on frontend/UI → `/doc-explorer design` and `/doc-explorer brand`
-- Working on contacts/identity/permissions → `/doc-explorer contacts`
-- Working on channels/SMS/Discord/API → `/doc-explorer channels`
-- Working on channel packages/installation/isolation → `/doc-explorer channel-packages`
-- Working on persona/personality system → `/doc-explorer persona`
-- Working on the heartbeat system → `/doc-explorer heartbeat`
-- Working on memory/knowledge/embeddings → `/doc-explorer memory`
-- Working on observational memory/compression/observer/reflector → `/doc-explorer observational-memory`
-- Working on context assembly/prompt building → `/doc-explorer context-builder`
-- Working on shared abstractions (embedding, decay, encryption, auth, migrations) → `/doc-explorer tech-stack`
-- Working on encryption/vault/sealed-state/password-derived keys → `/doc-explorer encryption-architecture`
-- Working on secrets/credentials/agent-blind pattern/API keys → `/doc-explorer credential-passing`
-- Working on data directory layout/paths/env vars/secrets → `/doc-explorer data-directory`
-- Working on MCP tools/custom tools → `/doc-explorer mcp-tools`
-- Working on tool permissions/approval flow/trust ramp → `/doc-explorer tool-permissions`
-- Working on voice/speech/STT/TTS/audio → `/doc-explorer voice` and `/doc-explorer speech-engine`
-- Working on speech/STT/TTS/voice synthesis/voice management → `/doc-explorer speech-engine`
-- Working on reflex/fast-response/voice-latency → `/doc-explorer reflex`
-- Working on TTS licensing/model distribution/voice cloning consent → `/doc-explorer tts-licensing`
-- Working on sleep/energy/circadian rhythm → `/doc-explorer sleep-energy`
-- Working on agent SDKs → `/doc-explorer agents`
-- Working on Pi adapter/transformContext → `/doc-explorer pi`
-- Building a new plugin → `/doc-explorer plugin-system`
-- Working on package distribution/packaging/.anpk format → `/doc-explorer package-installation` and see `docs/architecture/distribution-system.md` (workspace root) for the master overview
-- Working on backend architecture/stores/services/new modules → `/doc-explorer backend-architecture`
-- Working on backend/API → `/doc-explorer architecture`
-- Unsure about project conventions → `/doc-explorer` (no args, see everything)
+```
+docs/
+  product-vision.md          # What Animus is and why it exists
+  brand-vision.md            # Visual identity, personality, design language
+  design-principles.md       # UI/UX design philosophy and component guidelines
+  architecture/              # Backend architecture specs (source of truth)
+  agents/                    # Agent SDK docs, comparison, per-provider references
+  research/                  # Planned features and exploratory research (not yet built)
+  guides/                    # Getting started, setup instructions
+```
+
+- **Architecture docs** describe implemented systems. They are authoritative.
+- **Research docs** describe planned or exploratory work. They are marked with STATUS headers.
+- **Frontend page specs have been removed.** The code in `packages/frontend/src/` is the authoritative source for frontend implementation. Only `design-principles.md` remains as a design guideline doc.
+- **Agent SDK research docs** are reference material. See `docs/agents/sdk-comparison.md` for the consolidated overview.
+
+### Key docs by area
+
+- **Vision & Identity**: `docs/product-vision.md`, `docs/brand-vision.md`, `docs/design-principles.md`
+- **Heartbeat & Pipeline**: `docs/architecture/heartbeat.md`, `docs/architecture/context-builder.md`
+- **Features**: `docs/architecture/memory.md`, `docs/architecture/goals.md`, `docs/architecture/tasks-system.md`, `docs/architecture/contacts.md`, `docs/architecture/observational-memory.md`
+- **Persona**: `docs/architecture/persona.md`
+- **Channels & Plugins**: `docs/architecture/channel-packages.md`, `docs/architecture/channels.md`, `docs/architecture/plugin-system.md`
+- **Tools & Permissions**: `docs/architecture/mcp-tools.md`, `docs/architecture/tool-permissions.md`
+- **Voice/Speech**: `docs/architecture/voice-channel.md`, `docs/architecture/speech-engine.md`, `docs/architecture/tts-licensing-and-distribution.md`
+- **Security**: `docs/architecture/encryption-architecture.md`, `docs/architecture/credential-passing.md`
+- **Infrastructure**: `docs/architecture/data-directory.md`, `docs/architecture/backend-architecture.md`, `docs/architecture/tech-stack.md`, `docs/architecture/sleep-energy.md`
+- **Agent SDKs**: `docs/agents/sdk-comparison.md`, `docs/agents/architecture-overview.md`, plus per-provider docs in `docs/agents/claude/`, `docs/agents/codex/`, `docs/agents/opencode/`
+- **Planned (not built)**: `docs/research/reflex-system.md`, `docs/research/voice-mode.md`, `docs/agents/pi/research/`
+
+Use `/doc-explorer <topic>` for the full index and keyword guide. Examples:
+- `/doc-explorer heartbeat` for the tick system
+- `/doc-explorer memory` for the memory architecture
+- `/doc-explorer agents` for SDK comparison
+- `/doc-explorer` (no args) to see everything
 
 ## File Locations
 

@@ -12,7 +12,7 @@ Think of it like a biological heart pumping blood in a steady rhythm. The heartb
 
 ## The Mind
 
-The mind is a **persistent agent session** — a single, long-lived session using the `@animus-labs/agents` abstraction layer. It is not a series of disconnected LLM calls. It is one continuous conversation with the underlying agent SDK (Claude Agent SDK, Codex, or OpenCode), maintaining full conversational context across ticks.
+The mind is an **agent session that persists across ticks** using the `@animus-labs/agents` abstraction layer. It is not a series of disconnected LLM calls. When the session is warm, it maintains full conversational context across ticks via the underlying agent SDK (Claude Agent SDK or Codex). Sessions cycle through cold, active, and warm states to balance continuity with context window management (see Session States below).
 
 The mind serves as the **top-level orchestrator**. It thinks, feels, decides, and replies — but it does not perform long-running work itself. When a complex task needs execution (research, multi-step workflows, code generation), the mind kicks off **sub-agents** to handle that work autonomously. The mind stays fast and responsive, never blocked by heavy operations.
 
@@ -41,25 +41,28 @@ The mind should be thought of as consciousness — the quick, aware, responsive 
 
 ## Tick Triggers
 
-A heartbeat tick is not only driven by a timer. There are **four events** that trigger a tick:
+A heartbeat tick is not only driven by a timer. There are **five events** that trigger a tick:
 
 ### 1. Interval Tick (Heartbeat Timer)
-The default rhythm. When no messages arrive and no tasks fire, the heartbeat ticks on a regular interval (default: 5 minutes, configurable via UI). This gives Animus its idle inner life — thoughts that emerge on their own, emotions that drift, goals that get reconsidered.
+The default rhythm. When no messages arrive and no tasks fire, the heartbeat ticks on a regular interval (default: 5 minutes, configurable via UI). This gives Animus its idle inner life: thoughts that emerge on their own, emotions that drift, goals that get reconsidered.
 
-**Timer reset behavior:** The interval timer resets after *any* tick, regardless of trigger type. If the interval is 5 minutes and a message arrives at minute 3, the timer resets — the next interval tick won't fire until 5 minutes after that message-triggered tick completes. This prevents unnecessary interval ticks from piling up during periods of activity.
+**Timer reset behavior:** The interval timer resets after *any* tick, regardless of trigger type. If the interval is 5 minutes and a message arrives at minute 3, the timer resets. The next interval tick won't fire until 5 minutes after that message-triggered tick completes. This prevents unnecessary interval ticks from piling up during periods of activity.
 
 ### 2. Message Received
-When a contact sends a message through any channel (web, SMS, Discord, API), it triggers a tick — but only if the sender is a **known contact**. Unknown callers receive a canned response and do not trigger a tick (see `docs/architecture/contacts.md`).
+When a contact sends a message through any channel (web, SMS, Discord, API), it triggers a tick, but only if the sender is a **known contact**. Unknown callers receive a canned response and do not trigger a tick (see `docs/architecture/contacts.md`).
 
 The message is tagged with the contact's identity and permission tier during ingestion, before the tick fires. This context flows through the entire pipeline: GATHER CONTEXT loads only the triggering contact's message history, the mind receives the contact's permission constraints, and EXECUTE enforces decision boundaries based on the contact's tier.
 
-Because the mind is a persistent agent session, a new message is simply another user input into the ongoing session — no new session is created.
+When the session is warm, a new message is simply another user input into the ongoing session, preserving conversational continuity.
 
 ### 3. Scheduled Task Fires
-Tasks are scheduled jobs that activate at a later time (cron-like). When a task fires, it triggers a tick with the task details as context. The mind evaluates the task and decides how to handle it — it may respond directly, delegate to a sub-agent, or determine the task is no longer relevant.
+Tasks are scheduled jobs that activate at a later time (cron-like). When a task fires, it triggers a tick with the task details as context. The mind evaluates the task and decides how to handle it: it may respond directly, delegate to a sub-agent, or determine the task is no longer relevant.
 
 ### 4. Sub-Agent Completion
-When a sub-agent finishes its work, the completion event triggers a new tick. The mind receives the results, processes them as part of its cognitive cycle, and may take follow-up actions — such as messaging the user with results, updating goals, or kicking off additional agents.
+When a sub-agent finishes its work, the completion event triggers a new tick. The mind receives the results, processes them as part of its cognitive cycle, and may take follow-up actions: messaging the user with results, updating goals, or kicking off additional agents.
+
+### 5. Plugin Trigger
+Plugins can register custom triggers that fire ticks with a named trigger and optional JSON payload. This allows plugins to inject external events into the heartbeat pipeline (e.g., a home automation plugin triggering a tick when a sensor activates). The trigger context includes the `pluginTriggerName` and an optional `pluginPayload` object.
 
 ### Mind Session Lifecycle
 
@@ -124,6 +127,7 @@ When multiple triggers are queued, higher-priority triggers run first:
 |---|---|---|
 | 1 (highest) | `message` | User-facing, latency matters |
 | 2 | `agent_complete` | User is waiting for results |
+| 2 | `plugin_trigger` | External event, same priority as agent completion |
 | 3 | `scheduled_task` | Timed work, but not user-blocking |
 | 4 (lowest) | `interval` | Background processing, can wait |
 
@@ -849,7 +853,7 @@ CREATE TABLE heartbeat_state (
   tick_number INTEGER NOT NULL DEFAULT 0,
   current_stage TEXT NOT NULL DEFAULT 'idle',  -- 'idle' | 'gather' | 'mind' | 'execute'
   session_state TEXT NOT NULL DEFAULT 'cold',  -- 'cold' | 'active' | 'warm'
-  trigger_type TEXT,                            -- 'interval' | 'message' | 'task' | 'agent_complete'
+  trigger_type TEXT,                            -- 'interval' | 'message' | 'scheduled_task' | 'agent_complete' | 'plugin_trigger'
   trigger_context TEXT,                         -- JSON
   mind_session_id TEXT,                         -- Agent session ID for resume
   session_token_count INTEGER DEFAULT 0,        -- Cumulative tokens in current session (for context budget)
@@ -917,7 +921,7 @@ getHeartbeatState(): HeartbeatState
 interface HeartbeatState {
   tickNumber: number;
   currentStage: 'idle' | 'gather' | 'mind' | 'execute';
-  triggerType: 'interval' | 'message' | 'task' | 'agent_complete' | null;
+  triggerType: 'interval' | 'message' | 'scheduled_task' | 'agent_complete' | 'plugin_trigger' | null;
   mindSessionId: string | null;
   startedAt: Timestamp;
   lastTickAt: Timestamp | null;

@@ -1,5 +1,7 @@
 # Codex OAuth Device Code Flow: Research & Proxy Design
 
+> **STATUS: REFERENCE** - Technical authentication reference for the Codex SDK integration. See [sdk-comparison.md](../sdk-comparison.md) for overview.
+
 > **Purpose**: Design document for proxying the Codex CLI OAuth device code flow through Animus's web UI
 > **Status**: Research complete
 > **Last Updated**: 2026-02-08

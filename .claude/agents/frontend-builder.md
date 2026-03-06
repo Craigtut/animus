@@ -29,7 +29,7 @@ You are the frontend specialist for the Animus project. You implement the React 
 
 ## Design Sources
 
-Before implementing any feature, check for a design spec at `docs/frontend/specs/[feature-name].md`. If one exists, implement it faithfully. Also reference:
+Before implementing any feature, reference:
 
 - **`docs/frontend/design-principles.md`** — Component guidelines, animation timing, visual system
 - **`docs/brand-vision.md`** — Color philosophy, typography, the "alive" quality

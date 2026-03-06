@@ -1,3 +1,5 @@
+> **STATUS: RESEARCH** - The Pi adapter is not yet implemented. This is exploratory research.
+
 # Pi SDK Research
 
 > **Packages**: `@mariozechner/pi-ai` (LLM abstraction) + `@mariozechner/pi-agent-core` (agent framework)
@@ -112,25 +114,25 @@ The `AssistantMessageEventStream` is a push-pull async iterable with a built-in 
 
 ### Key Features of pi-ai
 
-1. **Cross-provider context handoffs** — Switch models mid-conversation. Handles thinking block signatures, tool call ID normalization (Anthropic max 64 chars alphanumeric, Mistral exactly 9, OpenAI 450+), orphaned tool call cleanup
+1. **Cross-provider context handoffs** -- Switch models mid-conversation. Handles thinking block signatures, tool call ID normalization (Anthropic max 64 chars alphanumeric, Mistral exactly 9, OpenAI 450+), orphaned tool call cleanup
 2. **TypeBox + AJV tool definitions** with partial JSON streaming via `partial-json` library
 3. **5-level reasoning normalization** (minimal/low/medium/high/xhigh) mapped per-provider (Anthropic adaptive vs budget, OpenAI effort, Google thinkingLevel vs thinkingBudget)
-4. **Auto-generated model catalog** — 300+ models with pricing from models.dev/OpenRouter/Vercel
-5. **Cost & token tracking** on every response — per-category breakdown (input/output/cacheRead/cacheWrite + costs)
-6. **Context overflow detection** — 13+ regex patterns for provider-specific errors + silent overflow detection
-7. **Prompt caching** — 3 retention levels (none/short/long)
+4. **Auto-generated model catalog** -- 300+ models with pricing from models.dev/OpenRouter/Vercel
+5. **Cost & token tracking** on every response -- per-category breakdown (input/output/cacheRead/cacheWrite + costs)
+6. **Context overflow detection** -- 13+ regex patterns for provider-specific errors + silent overflow detection
+7. **Prompt caching** -- 3 retention levels (none/short/long)
 8. **OAuth** for 5 providers (Anthropic, Copilot, Google, Antigravity, Codex)
 9. **Abort support** throughout via AbortSignal
-10. **Image/vision support** — base64 encoding with capability-aware filtering
+10. **Image/vision support** -- base64 encoding with capability-aware filtering
 
 ### What pi-ai Does NOT Have
 
-- No MCP — zero references in entire repo
-- No context compaction — detects overflow but does not manage the window
-- No agent loop — streams tool calls to the caller, the caller executes them
-- No pre-request token counting — counts come post-hoc from API responses
+- No MCP -- zero references in entire repo
+- No context compaction -- detects overflow but does not manage the window
+- No agent loop -- streams tool calls to the caller, the caller executes them
+- No pre-request token counting -- counts come post-hoc from API responses
 - No structured output / JSON mode
-- No Zod — TypeBox only for tool schemas
+- No Zod -- TypeBox only for tool schemas
 - No middleware/interceptor pattern
 
 ### Dependencies
@@ -167,8 +169,8 @@ const agent = new Agent({
 
 1. **Stateful Agent class** with system prompt, model, tools, messages, streaming state
 2. **Sequential tool execution** with streaming progress callbacks via `update` callback
-3. **Steering messages** — `agent.steer(message)` interrupts mid-execution, skips remaining tools, injects new context
-4. **Follow-up messages** — `agent.followUp(message)` queued for post-completion processing
+3. **Steering messages** -- `agent.steer(message)` interrupts mid-execution, skips remaining tools, injects new context
+4. **Follow-up messages** -- `agent.followUp(message)` queued for post-completion processing
 5. **10 event types** across 4 scopes (agent, turn, message, tool):
 
 | Event | Scope | Description |
@@ -184,8 +186,8 @@ const agent = new Agent({
 | `tool_execution_update` | Tool | Tool progress update |
 | `tool_execution_end` | Tool | Tool execution complete |
 
-6. **Custom message types** via TypeScript declaration merging — extend `CustomAgentMessages` interface
-7. **`transformContext` hook** — async function called before every LLM call, receives full context (system prompt + messages + tools + thinking level), can reshape everything
+6. **Custom message types** via TypeScript declaration merging -- extend `CustomAgentMessages` interface
+7. **`transformContext` hook** -- async function called before every LLM call, receives full context (system prompt + messages + tools + thinking level), can reshape everything
 8. **Proxy mode** for browser-to-backend routing via SSE
 9. **Dynamic API key resolution** for expiring tokens
 10. **Runtime model switching** across any provider via `setModel()`
@@ -194,15 +196,15 @@ const agent = new Agent({
 
 ### What pi-agent-core Does NOT Have
 
-- No MCP support — deliberately rejected ("no MCP support" in coding-agent README)
-- No sub-agents / orchestration — each Agent is independent, no hierarchy
+- No MCP support -- deliberately rejected ("no MCP support" in coding-agent README)
+- No sub-agents / orchestration -- each Agent is independent, no hierarchy
 - No built-in context compaction (just the transformContext hook)
-- No persistence / memory — in-memory only (Context is JSON-serializable)
-- No structured output — no JSON mode or response schema enforcement
+- No persistence / memory -- in-memory only (Context is JSON-serializable)
+- No structured output -- no JSON mode or response schema enforcement
 - No retry logic at agent level
 - No hooks / middleware / plugins (beyond transformContext)
 - No permission system
-- No parallel tool execution — always sequential
+- No parallel tool execution -- always sequential
 
 ### The transformContext Hook (Critical for Animus)
 
@@ -389,7 +391,7 @@ The coding agent ships with 4 tools:
 | `edit` | Edit existing files |
 | `bash` | Run shell commands |
 
-**Note**: These tools belong to `pi-coding-agent`, not `pi-agent-core`. The agent framework itself is tool-agnostic — you bring your own tools.
+**Note**: These tools belong to `pi-coding-agent`, not `pi-agent-core`. The agent framework itself is tool-agnostic -- you bring your own tools.
 
 ### Sequential Execution
 
@@ -497,7 +499,7 @@ await agent.run("Now write tests for what you found");
 
 Pi handles the hard problems behind the scenes:
 - **Thinking block signatures**: Strips/normalizes provider-specific thinking markers
-- **Tool call ID formats**: Anthropic (max 64 chars, alphanumeric), Mistral (exactly 9 chars), OpenAI (450+ chars) — all normalized
+- **Tool call ID formats**: Anthropic (max 64 chars, alphanumeric), Mistral (exactly 9 chars), OpenAI (450+ chars) -- all normalized
 - **Orphaned tool calls**: Cleans up tool calls with missing results when switching providers
 - **Errored messages**: Strips provider-specific error formatting
 
@@ -520,7 +522,7 @@ Pi has no built-in permission system. All permission control must be implemented
 
 ## Unified Hook Model Mapping
 
-Pi has **minimal hook support** — only the `update` callback during `agent.run()`:
+Pi has **minimal hook support** -- only the `update` callback during `agent.run()`:
 
 | Unified Hook | Pi Support | How It Works |
 |---|---|---|
@@ -586,38 +588,38 @@ function wrapToolWithHooks(tool, hooks) {
 
 ### Strengths
 
-1. **Cross-provider message portability** — The transform-messages.ts module handles thinking block signatures, tool call ID normalization, orphaned call cleanup, errored message stripping across providers. Production-hardened with edge cases covered.
-2. **Cost tracking as first-class** — Every `AssistantMessage` includes detailed per-category cost breakdown computed from model pricing. More granular than any other SDK.
-3. **Reasoning normalization** — 5-level abstraction hides Anthropic adaptive/budget, OpenAI effort, Google thinkingLevel differences behind a single enum.
-4. **EventStream design** — Push-pull async iterable with built-in result promise. Clean completion semantics without callback hell.
-5. **Minimal agent footprint** — 5 files, 1 dependency. Embeddable in any TypeScript project without process management overhead.
-6. **transformContext** — Genuinely powerful hook for context lifecycle management. No other SDK offers this level of dynamic context control.
-7. **In-process execution** — No subprocess spawning, no server management, no IPC. Direct library calls with full stack trace visibility.
-8. **Model switching** — Cross-provider model switching mid-conversation is unique and enables cost/quality optimization per-task.
+1. **Cross-provider message portability** -- The transform-messages.ts module handles thinking block signatures, tool call ID normalization, orphaned call cleanup, errored message stripping across providers. Production-hardened with edge cases covered.
+2. **Cost tracking as first-class** -- Every `AssistantMessage` includes detailed per-category cost breakdown computed from model pricing. More granular than any other SDK.
+3. **Reasoning normalization** -- 5-level abstraction hides Anthropic adaptive/budget, OpenAI effort, Google thinkingLevel differences behind a single enum.
+4. **EventStream design** -- Push-pull async iterable with built-in result promise. Clean completion semantics without callback hell.
+5. **Minimal agent footprint** -- 5 files, 1 dependency. Embeddable in any TypeScript project without process management overhead.
+6. **transformContext** -- Genuinely powerful hook for context lifecycle management. No other SDK offers this level of dynamic context control.
+7. **In-process execution** -- No subprocess spawning, no server management, no IPC. Direct library calls with full stack trace visibility.
+8. **Model switching** -- Cross-provider model switching mid-conversation is unique and enables cost/quality optimization per-task.
 
 ### Weaknesses
 
-1. **Global mutable provider registry** — Singleton pattern for provider configuration. Cannot have two different configurations for the same provider in one process. Acceptable for single-user Animus.
-2. **Sequential tool execution** — No parallel tool execution. Slower for multi-tool turns but guarantees correctness.
-3. **TypeBox not Zod** — Animus uses Zod throughout. Requires schema conversion at the adapter boundary.
-4. **No pre-request token counting** — Context budget enforcement requires heuristics or external counting.
-5. **Limited error typing** — Plain Error objects, no error taxonomy or structured error data. The adapter must implement its own error classification.
-6. **No persistence** — Context must be externally persisted. Not a problem for Animus (we have SQLite), but adds adapter complexity.
-7. **No MCP** — Deliberate design choice. Animus MCP tools must be converted to Pi tool format at the adapter boundary.
-8. **No permission system** — All permission logic falls on the adapter. More implementation work than other SDKs.
+1. **Global mutable provider registry** -- Singleton pattern for provider configuration. Cannot have two different configurations for the same provider in one process. Acceptable for single-user Animus.
+2. **Sequential tool execution** -- No parallel tool execution. Slower for multi-tool turns but guarantees correctness.
+3. **TypeBox not Zod** -- Animus uses Zod throughout. Requires schema conversion at the adapter boundary.
+4. **No pre-request token counting** -- Context budget enforcement requires heuristics or external counting.
+5. **Limited error typing** -- Plain Error objects, no error taxonomy or structured error data. The adapter must implement its own error classification.
+6. **No persistence** -- Context must be externally persisted. Not a problem for Animus (we have SQLite), but adds adapter complexity.
+7. **No MCP** -- Deliberate design choice. Animus MCP tools must be converted to Pi tool format at the adapter boundary.
+8. **No permission system** -- All permission logic falls on the adapter. More implementation work than other SDKs.
 
 ## Key Concerns for Abstraction Layer
 
-1. **In-process library** — Different from all other adapters (no subprocess or server). Simpler lifecycle management but must handle pi-ai's global state carefully.
-2. **TypeBox/Zod conversion** — MCP tools use Zod schemas. Must convert at adapter boundary via JSON Schema intermediate format.
-3. **No MCP** — Our MCP tools must be wrapped as Pi-native tools. The adapter registers each MCP tool as a Pi tool with a wrapper `execute` function that calls the MCP handler.
-4. **No built-in permissions** — Adapter must implement permission checks via tool wrapping (filter tools for plan mode, wrap execute for approval mode).
-5. **transformContext is the primary extension point** — Context builder integration, memory injection, emotional state, and token budgets all flow through this hook.
-6. **No sub-agents** — Animus uses custom orchestration anyway, so this is not a limitation. Each sub-agent is an independent Agent instance managed by our orchestration layer.
-7. **Sequential tool execution** — Cannot be changed. Acceptable since Animus does not require parallel tool execution.
-8. **Steering maps to update_agent** — The mind's `update_agent` decision can call `agent.steer()` to redirect running sub-agents mid-execution.
-9. **Session persistence is manual** — The adapter must serialize/deserialize Agent state to SQLite for crash recovery.
-10. **Cost tracking advantage** — Pi's granular cost data can feed directly into `agent_logs.db` with more detail than other adapters provide.
+1. **In-process library** -- Different from all other adapters (no subprocess or server). Simpler lifecycle management but must handle pi-ai's global state carefully.
+2. **TypeBox/Zod conversion** -- MCP tools use Zod schemas. Must convert at adapter boundary via JSON Schema intermediate format.
+3. **No MCP** -- Our MCP tools must be wrapped as Pi-native tools. The adapter registers each MCP tool as a Pi tool with a wrapper `execute` function that calls the MCP handler.
+4. **No built-in permissions** -- Adapter must implement permission checks via tool wrapping (filter tools for plan mode, wrap execute for approval mode).
+5. **transformContext is the primary extension point** -- Context builder integration, memory injection, emotional state, and token budgets all flow through this hook.
+6. **No sub-agents** -- Animus uses custom orchestration anyway, so this is not a limitation. Each sub-agent is an independent Agent instance managed by our orchestration layer.
+7. **Sequential tool execution** -- Cannot be changed. Acceptable since Animus does not require parallel tool execution.
+8. **Steering maps to update_agent** -- The mind's `update_agent` decision can call `agent.steer()` to redirect running sub-agents mid-execution.
+9. **Session persistence is manual** -- The adapter must serialize/deserialize Agent state to SQLite for crash recovery.
+10. **Cost tracking advantage** -- Pi's granular cost data can feed directly into `agent_logs.db` with more detail than other adapters provide.
 
 ## References
 

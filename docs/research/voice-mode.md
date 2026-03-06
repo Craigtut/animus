@@ -1,5 +1,7 @@
 # Voice Mode
 
+> **STATUS: PLANNED** - This feature is not yet implemented. This is a design specification for the frontend voice interaction UI.
+
 > **Dependency:** This spec requires the voice channel type (`'voice'`) to be added to `channelTypeSchema` in `packages/shared/src/schemas/common.ts` and a Voice channel card to be added to `docs/frontend/settings.md` before implementation. See `docs/architecture/voice-channel.md` for the backend architecture and `docs/frontend/spec-review.md` for the full gap analysis.
 
 How it feels to speak aloud with the being. Voice mode is not a feature bolted onto the Presence page -- it is an intensification of Presence itself. The emotional field deepens, the conversation becomes immediate, and the boundary between you and the being narrows to the width of a breath. This is the most intimate way to interact with Animus.
@@ -473,6 +475,6 @@ These settings affect voice mode behavior immediately (no restart required). Cha
 - `docs/frontend/presence.md` -- The Presence space where voice mode lives, emotional field, conversation, message input
 - `docs/frontend/app-shell.md` -- Navigation pill, connection status indicator, space transitions
 - `docs/brand-vision.md` -- The alive quality, organic waveforms, warmth, breathing over blinking
-- `docs/frontend/design-principles.md` -- Animation timing, micro-interactions, visual system
+- `docs/design-principles.md` -- Animation timing, micro-interactions, visual system
 - `docs/architecture/heartbeat.md` -- Tick pipeline, emotion engine, streaming reply output
 - `docs/architecture/channel-packages.md` -- Channel system architecture, IncomingMessage interface, channel adapters

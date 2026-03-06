@@ -2,7 +2,7 @@
 
 > How Animus protects credentials at rest using password-derived encryption, sealed/unsealed server states, and a layered defense model that keeps the encryption key out of reach of the AI agent.
 
-**Status:** Planned
+**Status:** Implemented
 **Last Updated:** 2026-03-02
 
 ---

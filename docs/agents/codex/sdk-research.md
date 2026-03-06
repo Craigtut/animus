@@ -1,5 +1,7 @@
 # OpenAI Codex SDK Research
 
+> **STATUS: REFERENCE** - See [sdk-comparison.md](../sdk-comparison.md) for overview. This document contains detailed provider-specific research.
+
 > **Package**: `@openai/codex-sdk`
 > **Status**: Production-ready
 > **Languages**: TypeScript (primary), Python, Rust core
@@ -422,32 +424,13 @@ With the App Server Protocol, Codex now supports pre-execution blocking via the 
 
 ## Key Concerns for Abstraction Layer
 
-1. **Thread-based model** vs Claude's query-based: fundamental difference
-2. **Subscription auth supported**: Users can use ChatGPT accounts
-3. ~~**No abort/cancel**~~: **Resolved** via App Server Protocol `turn/interrupt`
-4. **App Server Protocol architecture**: Long-lived JSON-RPC process over stdio
-5. **Approval policies**: Maps to unified permission model with interactive approval flow
-6. **Built-in sandbox modes**: Combined with approval policies for permission mapping
-7. **Session persistence**: Automatic to ~/.codex/sessions
-8. **No native subagents**: Requires MCP + Agents SDK for multi-agent orchestration
-9. **Pre-execution hooks can block** (via approval): Cannot modify input, only accept/decline
-10. **Mid-turn injection**: Supported via `turn/steer` (cancel-and-recreate at Responses API level)
+For the full cross-SDK comparison and unified permission model mapping, see [sdk-comparison.md](../sdk-comparison.md) and [architecture-overview.md](../architecture-overview.md).
 
-## Comparison to Claude Agent SDK
-
-| Aspect | Claude Agent SDK | Codex (App Server) |
-|--------|------------------|--------------------|
-| Entry point | `query()` async generator | `thread/start` + `turn/start` |
-| Streaming | `for await (msg of query())` | JSON-RPC notifications |
-| Session | `resume: sessionId` option | `thread/resume` method |
-| Cancel | `abortController.abort()` | `turn/interrupt` |
-| Mid-turn injection | `injectMessage()` via AsyncIterable | `turn/steer` |
-| Auth | API key OR OAuth token | API key OR ChatGPT OAuth |
-| Architecture | Async generator (subprocess) | Long-lived JSON-RPC process |
-| Pre-execution hooks | ✅ Can block/modify | ✅ Can block (accept/decline), cannot modify |
-| Session forking | ✅ `forkSession` | ✅ `thread/fork` |
-| Subagents | ✅ Task tool | ❌ Not native |
-| Hooks | PreToolUse, PostToolUse, etc | Via approval request/response |
+Codex-specific concerns:
+1. **App Server Protocol** is the primary transport (not the per-turn SDK API). See [app-server-protocol.md](./app-server-protocol.md).
+2. **Pre-execution hooks can block** (via approval) but cannot modify input, only accept/decline.
+3. **No native subagents**: Requires MCP + Agents SDK for multi-agent orchestration.
+4. **Mid-turn injection**: Supported via `turn/steer` (cancel-and-recreate at Responses API level).
 
 ## References
 

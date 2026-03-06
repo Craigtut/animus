@@ -124,11 +124,11 @@ All databases live under `data/databases/` (see `docs/architecture/data-director
 | **Codex SDK** | OpenAI's Codex agent |
 | **OpenCode SDK** | OpenCode.ai agent |
 
-All three will be wrapped in a unified abstraction layer in the `@animus-labs/agents` package (`/packages/agents/`). This is a separate package from the backend to maintain clear boundaries.
+All three are wrapped in a unified abstraction layer in the `@animus-labs/agents` package (`/packages/agents/`). This is a separate package from the backend to maintain clear boundaries.
 
-**Status**: Interface types defined, implementation pending.
+**Status**: Claude and Codex adapters are fully implemented and integrated into the backend and frontend. The OpenCode adapter is implemented in the agents package but not yet wired into the backend or frontend.
 
-The abstraction layer will provide:
+The abstraction layer provides:
 - Consistent interface across providers
 - Normalized event streaming
 - Token/cost tracking

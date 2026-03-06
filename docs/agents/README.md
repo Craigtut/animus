@@ -18,8 +18,9 @@ docs/agents/
 ├── opencode/
 │   └── sdk-research.md          # OpenCode SDK deep dive
 └── pi/
-    ├── sdk-research.md            # Pi AI + Pi Agent Core deep dive
-    └── adapter-implementation.md  # Pi adapter implementation plan
+    └── research/
+        ├── sdk-research.md            # Pi AI + Pi Agent Core deep dive
+        └── adapter-implementation.md  # Pi adapter implementation plan
 ```
 
 ## Per-Provider Documentation
@@ -59,10 +60,12 @@ docs/agents/
 
 ### Pi (`@mariozechner/pi-ai` + `@mariozechner/pi-agent-core`)
 
+> **Note:** Pi is planned/research only and is not yet implemented. The documents below are research and planning artifacts.
+
 | Document | Description |
 |----------|-------------|
-| [pi/sdk-research.md](./pi/sdk-research.md) | Pi AI multi-provider LLM abstraction + Pi Agent Core framework deep dive |
-| [pi/adapter-implementation.md](./pi/adapter-implementation.md) | Full implementation plan for adding Pi as fourth adapter |
+| [pi/research/sdk-research.md](./pi/research/sdk-research.md) | Pi AI multi-provider LLM abstraction + Pi Agent Core framework deep dive |
+| [pi/research/adapter-implementation.md](./pi/research/adapter-implementation.md) | Full implementation plan for adding Pi as fourth adapter |
 
 - **Architecture**: In-process library (no subprocess or server)
 - **Auth**: Per-provider API keys, dynamic key resolution, OAuth for 5 providers

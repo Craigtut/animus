@@ -85,7 +85,7 @@ During EXECUTE, after new thoughts are persisted and embedded (embedding happens
 For each new thought produced this tick:
   1. Get the thought's embedding (already computed for memory)
   2. Compare against all active seed embeddings (cosine similarity)
-  3. If similarity > SEED_RESONANCE_THRESHOLD (default: 0.7):
+  3. If similarity > SEED_RESONANCE_THRESHOLD (default: 0.55):
      - Boost seed strength proportional to similarity and thought importance
      - Update last_reinforced_at timestamp
 ```
@@ -137,7 +137,7 @@ elapsedHours = (now - lastReinforcedAt) / 3_600_000
 decayedStrength = strength * e^(-SEED_DECAY_RATE * elapsedHours)
 ```
 
-Default full decay (99%): ~7 days (`SEED_DECAY_RATE ≈ 0.027/hr`). A seed that isn't reinforced for a week effectively disappears. This ensures passing fancies don't linger.
+Default full decay (99%): ~13 days (`SEED_DECAY_RATE ≈ 0.015/hr`). A seed that isn't reinforced fades away over roughly two weeks. This ensures passing fancies don't linger.
 
 Decay is applied during the EXECUTE stage's seed processing pass, before the resonance check.
 
@@ -185,9 +185,9 @@ Seeds with status `decayed` (strength dropped below 0.01) are cleaned up by TTL 
 
 | Constant | Default | Description |
 |----------|---------|-------------|
-| `SEED_RESONANCE_THRESHOLD` | 0.7 | Cosine similarity required to count as resonance |
+| `SEED_RESONANCE_THRESHOLD` | 0.55 | Cosine similarity required to count as resonance |
 | `SEED_BOOST_MULTIPLIER` | 0.15 | Scales the strength boost per resonance match |
-| `SEED_DECAY_RATE` | 0.027 | Decay rate per hour (~7 day full reset) |
+| `SEED_DECAY_RATE` | 0.015 | Decay rate per hour (~7 day full reset) |
 | `SEED_GRADUATION_THRESHOLD` | 0.7 | Strength required to trigger graduation |
 | `SEED_CLEANUP_THRESHOLD` | 0.01 | Below this strength, seed is marked as decayed |
 
@@ -778,9 +778,9 @@ The mind's system prompt (see `docs/architecture/context-builder.md`) must inclu
 | `SALIENCE_LOG_RETENTION_DAYS` | 90 | TTL for salience history entries |
 | `GOAL_PLANNING_PROMPT_STRONGER_TICKS` | 3 | Ticks after activation before escalating to "stronger" planning prompt |
 | `GOAL_PLANNING_PROMPT_FORCEFUL_TICKS` | 10 | Ticks after activation before escalating to "forceful" planning prompt |
-| `SEED_RESONANCE_THRESHOLD` | 0.7 | Cosine similarity for seed reinforcement |
+| `SEED_RESONANCE_THRESHOLD` | 0.55 | Cosine similarity for seed reinforcement |
 | `SEED_BOOST_MULTIPLIER` | 0.15 | Strength boost per resonance match |
-| `SEED_DECAY_RATE` | 0.027 | Decay rate per hour (~7 day full reset) |
+| `SEED_DECAY_RATE` | 0.015 | Decay rate per hour (~13 day full reset) |
 | `SEED_GRADUATION_THRESHOLD` | 0.7 | Strength to trigger graduation |
 | `SEED_CLEANUP_THRESHOLD` | 0.01 | Below this, seed is marked decayed |
 

@@ -1,5 +1,7 @@
 # Claude Agent SDK Comprehensive Research
 
+> **STATUS: REFERENCE** - See [sdk-comparison.md](../agents/sdk-comparison.md) for overview. This document contains detailed provider-specific research.
+
 > **Note**: The Claude Code SDK has been renamed to the **Claude Agent SDK**. The npm package is `@anthropic-ai/claude-agent-sdk`.
 
 ## Table of Contents

@@ -1,6 +1,10 @@
 # Voice Channel Architecture
 
-How Animus hears and speaks — a direct voice channel on the Presence page that captures user speech, transcribes it locally, processes it through the heartbeat pipeline, and speaks the reply back using local text-to-speech.
+> **See also**:
+> - `docs/architecture/speech-engine.md` -- Shared speech engine (STT/TTS engine classes, voice system, model files, MCP tools, lazy loading)
+> - `docs/architecture/tts-licensing-and-distribution.md` -- TTS model licensing (CC-BY-4.0), redistribution, attribution, voice cloning consent
+
+How Animus hears and speaks: a direct voice channel on the Presence page that captures user speech, transcribes it locally, processes it through the heartbeat pipeline, and speaks the reply back using local text-to-speech.
 
 ## Concept
 
@@ -48,119 +52,21 @@ The voice channel adds a conversational voice mode to the web Presence page. Unl
 
 ## Technology Choices
 
-### Speech-to-Text: Parakeet TDT v3 via sherpa-onnx
+The voice channel uses the shared speech engine for both STT and TTS. See `docs/architecture/speech-engine.md` for the complete technology details, model files, engine classes, voice system, and lazy loading behavior.
 
-**Model**: NVIDIA Parakeet TDT 0.6B v3 (int8 quantized)
-**Runtime**: sherpa-onnx (native Node.js addon via npm)
+**Summary:**
+- **STT**: NVIDIA Parakeet TDT 0.6B v3 (int8 quantized, ~630 MB) via sherpa-onnx native Node.js addon. 25-language support, faster-than-realtime on CPU, completely offline.
+- **TTS**: Pocket TTS (~225 MB safetensors) via `@animus-labs/tts-native` napi-rs addon (Rust/Candle). Zero-shot voice cloning from 5-15 seconds of reference audio, ~3.2x realtime on Apple Silicon, CPU-only.
 
-Parakeet TDT v3 is a 600M-parameter transducer-based ASR model from NVIDIA that achieves state-of-the-art accuracy while running efficiently on CPU. It supports **25 European languages** with automatic language detection. The int8 quantized ONNX version runs locally through sherpa-onnx without internet access.
-
-#### Why Parakeet v3 + sherpa-onnx
-
-| Criterion | Decision |
-|-----------|----------|
-| **Accuracy** | 9.7% average WER across 25 languages, beating Whisper Large v3 (9.9%) |
-| **Multilingual** | 25 European languages with automatic language detection out of the box |
-| **Speed** | Transcribes faster than real-time on CPU via ONNX Runtime |
-| **Local** | Completely offline — no API calls, no internet needed |
-| **Node.js native** | sherpa-onnx publishes an npm package (`sherpa-onnx`) with native addon bindings. No Python sidecar needed. |
-| **Model size** | ~630 MB (int8 quantized encoder + decoder + joiner) |
-| **Input** | 16kHz mono PCM audio |
-| **License** | CC-BY-4.0 |
-
-#### sherpa-onnx npm Package
-
-```
-npm install sherpa-onnx
-```
-
-Requires Node.js >= 18. On macOS, set `DYLD_LIBRARY_PATH` to point at the native modules in `node_modules/sherpa-onnx`. On Linux, set `LD_LIBRARY_PATH`.
-
-The package provides:
-- **Offline recognizer** — transcribe complete audio files or buffers
-- **Online recognizer** — streaming recognition with partial results (for real-time feedback)
-- **VAD (Voice Activity Detection)** — Silero VAD model to detect speech segments
-- **Offline TTS** — text-to-speech synthesis (used for Pocket TTS, see below)
-- All run completely offline via ONNX Runtime
-
-#### Model Files
-
-Download from sherpa-onnx releases:
-```bash
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2
-tar xf sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2
-```
-
-Contents:
-- `encoder.int8.onnx` — ~622 MB
-- `decoder.int8.onnx` — ~6.9 MB
-- `joiner.int8.onnx` — ~1.7 MB
-- `tokens.txt` — vocabulary file
-
-Total: ~630 MB on disk. Model files are stored in `./data/models/stt/` and downloaded on first use or via a setup command.
-
----
-
-### Text-to-Speech: Pocket TTS via @animus-labs/tts-native (napi-rs)
-
-**Model**: Pocket TTS (~225MB safetensors)
-**Runtime**: `@animus-labs/tts-native` — a napi-rs native Node.js addon wrapping the [pocket-tts](https://github.com/babybirdprd/pocket-tts) Rust crate (Candle-based inference)
-
-Pocket TTS is a zero-shot voice cloning model that uses reference audio to reproduce any voice. Given a short WAV sample (5-15 seconds), it generates speech that mimics the speaker's voice characteristics. The Rust port runs the original safetensors weights natively via Candle, producing near-identical quality to the original Python implementation at 3-7x faster speeds. No Python sidecar, no separate process.
-
-#### Why native Rust Pocket TTS
-
-| Criterion | Decision |
-|-----------|----------|
-| **Runtime** | `@animus-labs/tts-native` napi-rs addon (Rust, compiled per-platform) |
-| **Voice cloning** | Zero-shot cloning from 5-15 seconds of reference audio |
-| **Speed** | ~3.2x realtime on Apple Silicon (e.g., 5.2s audio in 1.6s) |
-| **Quality** | Near-identical to original Python implementation. sherpa-onnx ONNX version produced garbled audio. |
-| **CPU-only** | No GPU needed. Uses Accelerate framework on macOS. |
-| **License** | CC-BY-4.0 (model weights), MIT (Rust crate) |
-| **Model size** | ~225 MB (safetensors + tokenizer) |
-
-#### Integration: In-Process via Shared Speech Service
-
-TTS is accessed through the shared speech engine, not owned by the voice channel adapter. See `docs/architecture/speech-engine.md` for the full engine design.
+Both engines are accessed through the `SpeechService` singleton. The voice channel adapter does **not** own STT or TTS instances.
 
 ```typescript
 import { getSpeechService, pcmToWav } from '../speech/index.js';
 
 const speech = getSpeechService();
-const audio = await speech.tts.synthesize('Hello, how are you?');
-// audio.samples: Float32Array (PCM samples)
-// audio.sampleRate: number (typically 24000)
-
+const text = await speech.stt.transcribe(pcmAudio);
+const audio = await speech.tts.synthesize(replyText);
 const wav = pcmToWav(audio.samples, audio.sampleRate);
-```
-
-No HTTP calls, no child processes, no sidecar lifecycle management. The TTS runs in the same Node.js process as the backend.
-
-#### Model Files
-
-Pocket TTS safetensors models are stored in `./data/models/tts/`:
-
-- `tts_b6369a24.safetensors` — Combined model weights (FlowLM + Mimi), ~225 MB
-- `tokenizer.model` — SentencePiece tokenizer, ~58 KB
-- `b6369a24.yaml` — Model config, ~1.3 KB
-
-Total: ~225 MB on disk. Hosted on GitHub Releases (`speech-models-v1.0.0`) for unauthenticated download.
-
-#### Voice Configuration
-
-Pocket TTS uses **reference audio** rather than numeric speaker IDs. Voice configuration is part of the persona (`personality_settings.voice_id` and `personality_settings.voice_speed`). The system includes 8 built-in voices and supports custom voice uploads. See `docs/architecture/speech-engine.md` for the full voice system design.
-
-#### Output Format
-
-Pocket TTS produces raw PCM samples (Float32Array at 24kHz). The backend encodes these to WAV before sending to the frontend:
-
-```typescript
-import { pcmToWav } from '../speech/audio-utils.js';
-
-const wav = pcmToWav(samples, sampleRate);
-// Standard WAV header + PCM data
-// 24kHz, mono, 16-bit
 ```
 
 ---

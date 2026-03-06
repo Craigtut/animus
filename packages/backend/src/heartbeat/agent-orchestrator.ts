@@ -377,11 +377,18 @@ export class AgentOrchestrator {
         sessionEnv,
       );
 
+      // When using Claude Code, use the claude_code preset so sub-agents get
+      // the full Claude Code system prompt (tool instructions, coding guidelines).
+      // Other providers (Codex, OpenCode) get the plain system prompt string.
+      const systemPromptConfig = provider === 'claude'
+        ? { type: 'preset' as const, preset: 'claude_code' as const, append: params.systemPrompt }
+        : params.systemPrompt;
+
       const session = await this.manager.createSession({
         provider,
         ...(model != null ? { model } : {}),
         cwd: PROJECT_ROOT,
-        systemPrompt: params.systemPrompt,
+        systemPrompt: systemPromptConfig,
         permissions: {
           executionMode: 'build',
           approvalLevel: 'none',

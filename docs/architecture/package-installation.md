@@ -1,5 +1,7 @@
 # Engine Package Installation
 
+> **STATUS: PARTIALLY IMPLEMENTED** - The core .anpk unzip flow exists. Store browser, update checking, rollback, and AI self-management tools are not yet built.
+
 > Architecture document for how the Animus Engine installs, verifies, manages, updates, and rolls back `.anpk` packages. Covers the install flow, rollback capability, update checking, config migration, and the future AI self-install system.
 
 ## Overview

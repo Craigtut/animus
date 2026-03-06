@@ -1,5 +1,7 @@
 # Codex App Server Protocol Reference
 
+> **STATUS: REFERENCE** - Technical protocol reference for the Codex SDK integration. See [sdk-comparison.md](../sdk-comparison.md) for overview.
+
 > **Protocol**: JSON-RPC 2.0 over stdio (JSONL)
 > **Process**: `codex app-server` (long-lived)
 > **Status**: Stable (non-experimental), used by VS Code extension and CLI TUI

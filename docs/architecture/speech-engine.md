@@ -1,5 +1,9 @@
 # Shared Speech Engine Architecture
 
+> **See also**:
+> - `docs/architecture/voice-channel.md` -- Voice channel adapter, frontend UX, audio pipeline, streaming pipeline for voice
+> - `docs/architecture/tts-licensing-and-distribution.md` -- TTS model licensing (CC-BY-4.0), redistribution, attribution, voice cloning consent
+
 How Animus hears and speaks -- shared STT and TTS as backend infrastructure modules, not channel-specific. Multiple consumers (voice channel, reflex system, agent MCP tools, plugins) access speech capabilities through a unified service facade.
 
 ## Overview

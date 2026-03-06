@@ -1,5 +1,9 @@
 # TTS Model Licensing, Distribution & Voice Cloning Consent
 
+> **See also**:
+> - `docs/architecture/speech-engine.md` -- Shared speech engine architecture, STT/TTS engine classes, voice system, model files, lazy loading
+> - `docs/architecture/voice-channel.md` -- Voice channel adapter, frontend UX, audio pipeline
+
 Research document covering the legal landscape for bundling Pocket TTS weights into Animus, attribution requirements, and the voice cloning consent flow.
 
 **Decision**: Bundle all model weights directly into the application so TTS works out of the box. No HuggingFace account, no API tokens, no runtime downloads for core functionality.

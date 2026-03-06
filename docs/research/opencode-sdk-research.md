@@ -1,10 +1,10 @@
 # OpenCode SDK Research Report
 
+> **STATUS: REFERENCE** - See [sdk-comparison.md](../agents/sdk-comparison.md) for overview. This document contains detailed provider-specific research.
+
 ## Executive Summary
 
-OpenCode is an **open-source AI coding agent** built for the terminal, providing intelligent coding assistance through a client-server architecture. Unlike Claude Code and OpenAI Codex which are closed-source SDKs tied to specific providers, OpenCode is provider-agnostic and supports **75+ LLM providers** through the AI SDK and Models.dev integration.
-
-The OpenCode SDK (`@opencode-ai/sdk`) is a type-safe JavaScript/TypeScript client for interacting with the OpenCode server. It enables programmatic control of the OpenCode agent for building custom workflows and integrations.
+OpenCode is an **open-source AI coding agent** built for the terminal, providing intelligent coding assistance through a client-server architecture. The OpenCode SDK (`@opencode-ai/sdk`) is a type-safe JavaScript/TypeScript client for interacting with the OpenCode server. It enables programmatic control of the OpenCode agent for building custom workflows and integrations.
 
 **Key Characteristics:**
 - **Open source** - Full source code available on GitHub
@@ -831,53 +831,7 @@ AGENTS.md locations:
 
 ---
 
-## 9. Comparison with Claude Code and Codex SDKs
-
-### Architecture Comparison
-
-| Aspect | OpenCode SDK | Claude Code SDK | Codex SDK |
-|--------|--------------|-----------------|-----------|
-| **Source** | Open source | Proprietary | Proprietary |
-| **Provider** | Multi-provider (75+) | Anthropic only | OpenAI only |
-| **Architecture** | Client-server | CLI-integrated | Cloud-based |
-| **Self-hosted** | Yes | No | No |
-| **MCP Support** | Yes | Native | stdio-based |
-
-### Feature Comparison
-
-| Feature | OpenCode | Claude Code | Codex |
-|---------|----------|-------------|-------|
-| Streaming | SSE-based | Native streaming | Native streaming |
-| Tool System | Plugin-based | Built-in | Built-in |
-| Custom Tools | Yes (TypeScript) | Yes | Yes |
-| Token Tracking | Third-party | Built-in | Built-in |
-| Local Models | Yes | No | No |
-| IDE Integration | Extensions | Native | Web-based |
-
-### Use Case Recommendations
-
-**Choose OpenCode when:**
-- You need provider flexibility
-- Self-hosting is required
-- You want full source code access
-- Building custom integrations
-- Using local/private models
-
-**Choose Claude Code when:**
-- Deep integration with Anthropic ecosystem
-- Maximum context window needed
-- Complex refactoring tasks
-- MCP-native tooling
-
-**Choose Codex when:**
-- Autonomous task delegation
-- Cost efficiency (GPT-5 pricing)
-- Cloud-based development
-- Quick generation tasks
-
----
-
-## 10. Server API Reference
+## 9. Server API Reference
 
 ### Starting the Server
 
@@ -936,7 +890,7 @@ POST /mcp        # Add MCP server dynamically
 
 ---
 
-## 11. Complete Code Example
+## 10. Complete Code Example
 
 ### Building an Integration
 
@@ -1044,7 +998,7 @@ main().catch(console.error)
 
 ---
 
-## 12. Sources
+## 11. Sources
 
 - [OpenCode SDK Documentation](https://opencode.ai/docs/sdk/)
 - [OpenCode Server Documentation](https://opencode.ai/docs/server/)
@@ -1066,56 +1020,14 @@ main().catch(console.error)
 
 ---
 
-## 13. Key Takeaways for Animus Integration
-
-### Mapping to IAgentAdapter Interface
-
-Based on the OpenCode SDK capabilities, here's how it maps to the Animus agent abstraction:
-
-```typescript
-// packages/agents/src/adapters/opencode.ts
-
-import { createOpencode, createOpencodeClient } from "@opencode-ai/sdk"
-import type { IAgentAdapter, IAgentSession, AgentEvent } from "../types"
-
-export class OpenCodeAdapter implements IAgentAdapter {
-  private client: ReturnType<typeof createOpencodeClient>
-
-  async initialize(config: AgentConfig): Promise<void> {
-    const { client } = await createOpencode({
-      port: config.port || 4096,
-      config: {
-        model: config.model || "anthropic/claude-sonnet-4-5"
-      }
-    })
-    this.client = client
-  }
-
-  async createSession(config: SessionConfig): Promise<IAgentSession> {
-    const session = await this.client.session.create()
-    return new OpenCodeSession(this.client, session, config)
-  }
-}
-```
-
-### Event Normalization
-
-OpenCode events need to be normalized to match the `AgentEvent` type:
-
-| OpenCode Event | AgentEvent Type |
-|----------------|-----------------|
-| `message.part.updated` | `response.streaming` |
-| `tool.execute.before` | `tool.start` |
-| `tool.execute.after` | `tool.end` |
-| `session.idle` | `response.complete` |
-| `session.error` | `error` |
-
-### Considerations
+## 12. Key Considerations for Animus Integration
 
 1. **Server Dependency** - OpenCode requires running a server, unlike Claude Code which is CLI-integrated
 2. **Token Tracking** - Must implement custom tracking via events or third-party tools
 3. **Provider Flexibility** - Can configure any of 75+ providers through OpenCode's config
 4. **Plugin System** - Can extend functionality through plugins and custom tools
+
+For IAgentAdapter interface mapping and event normalization details, see [architecture-overview.md](../agents/architecture-overview.md).
 
 ---
 

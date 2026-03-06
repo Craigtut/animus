@@ -1,3 +1,5 @@
+> **STATUS: RESEARCH** - The Pi adapter is not yet implemented. This is a planning document.
+
 # Pi Adapter Implementation Plan
 
 > **Status**: Planning
@@ -8,7 +10,7 @@
 
 ## 1. Overview
 
-Pi is the fourth agent provider in Animus, joining Claude, Codex, and OpenCode. Unlike the other three providers which each target a single LLM vendor, Pi is a **meta-provider** — one adapter that unlocks 20+ LLM providers through a unified abstraction layer.
+Pi is the fourth agent provider in Animus, joining Claude, Codex, and OpenCode. Unlike the other three providers which each target a single LLM vendor, Pi is a **meta-provider** -- one adapter that unlocks 20+ LLM providers through a unified abstraction layer.
 
 ### Strategic Value
 
@@ -65,8 +67,8 @@ This means a user running Animus with Pi configured can switch between providers
 
 ### Two-Package Architecture
 
-- **`@mariozechner/pi-ai`** — Low-level LLM abstraction. Provides `convertToLlm()` to create a provider-specific LLM instance from a model string. Handles streaming, tool calling, thinking/reasoning, caching, and provider normalization. Comparable to Vercel AI SDK's provider layer.
-- **`@mariozechner/pi-agent-core`** — Agent loop built on top of pi-ai. Provides `Agent` class with `prompt()`, `steer()`, `abort()`, event subscriptions, state management, and the critical `transformContext` hook. This is what PiSession wraps.
+- **`@mariozechner/pi-ai`** -- Low-level LLM abstraction. Provides `convertToLlm()` to create a provider-specific LLM instance from a model string. Handles streaming, tool calling, thinking/reasoning, caching, and provider normalization. Comparable to Vercel AI SDK's provider layer.
+- **`@mariozechner/pi-agent-core`** -- Agent loop built on top of pi-ai. Provides `Agent` class with `prompt()`, `steer()`, `abort()`, event subscriptions, state management, and the critical `transformContext` hook. This is what PiSession wraps.
 
 ---
 
@@ -76,9 +78,9 @@ This is the most architecturally significant addition Pi brings to the agent abs
 
 ### The Problem
 
-In Claude, Codex, and OpenCode, the system prompt is set once when the session is created (cold start). On warm ticks, the orchestrator sends only the user message — the system prompt is already baked into the running session. This is the `CompiledContext { systemPrompt: string | null, userMessage: string }` pattern, where `systemPrompt` is `null` for warm sessions.
+In Claude, Codex, and OpenCode, the system prompt is set once when the session is created (cold start). On warm ticks, the orchestrator sends only the user message -- the system prompt is already baked into the running session. This is the `CompiledContext { systemPrompt: string | null, userMessage: string }` pattern, where `systemPrompt` is `null` for warm sessions.
 
-Pi's `transformContext` hook fires **before every LLM call** within the agent loop and allows reshaping the entire context: system prompt, message history, tools, and thinking level. This is fundamentally different — the system prompt is not immutable after session creation.
+Pi's `transformContext` hook fires **before every LLM call** within the agent loop and allows reshaping the entire context: system prompt, message history, tools, and thinking level. This is fundamentally different -- the system prompt is not immutable after session creation.
 
 ### The Opportunity
 
@@ -90,7 +92,7 @@ Pi's `transformContext` hook fires **before every LLM call** within the agent lo
 
 ### Design: ContextTransformer Abstraction
 
-Add an optional `ContextTransformer` concept to the agent abstraction layer. This is a new cross-cutting capability, not Pi-specific in its interface — other adapters could implement it in the future.
+Add an optional `ContextTransformer` concept to the agent abstraction layer. This is a new cross-cutting capability, not Pi-specific in its interface -- other adapters could implement it in the future.
 
 #### New Types in `types.ts`
 
@@ -180,7 +182,7 @@ export interface AdapterCapabilities {
 **Today (Claude/Codex/OpenCode):**
 1. Cold start: Context Builder produces `CompiledContext { systemPrompt: "...", userMessage: "..." }`
 2. Warm tick: Context Builder produces `CompiledContext { systemPrompt: null, userMessage: "..." }`
-3. The system prompt is frozen in the warm session's context — stale persona, stale emotions, stale operational instructions
+3. The system prompt is frozen in the warm session's context -- stale persona, stale emotions, stale operational instructions
 
 **With Pi (transformContext):**
 1. Cold start: Context Builder produces `CompiledContext { systemPrompt: "...", userMessage: "..." }` (same as today)
@@ -217,7 +219,7 @@ interface IContextBuilder {
 }
 ```
 
-The transformer function closes over the database access layer and fetches fresh state on each invocation. This means the system prompt is always current — no stale emotional state, no stale working memory.
+The transformer function closes over the database access layer and fetches fresh state on each invocation. This means the system prompt is always current -- no stale emotional state, no stale working memory.
 
 ---
 
@@ -866,7 +868,7 @@ Map Pi's event types to our normalized `AgentEvent` types:
 | `tool_execution_end` (success) | `tool_call_end` | Map output, durationMs |
 | `tool_execution_end` (error) | `tool_error` | Map error message, set `isRetryable` based on error type |
 | `turn_end` | `turn_end` | Aggregate turnIndex, text, toolNames used in this turn |
-| `agent_end` | (internal) | Resolve the `prompt()` / `promptStreaming()` promise. Do not emit as a public event — the session may continue. |
+| `agent_end` | (internal) | Resolve the `prompt()` / `promptStreaming()` promise. Do not emit as a public event -- the session may continue. |
 | `error` | `error` | Map to `AgentError` via `wrapError()`. Classify by error type (see section 12). |
 
 ### Thinking State Machine
@@ -874,9 +876,9 @@ Map Pi's event types to our normalized `AgentEvent` types:
 Pi's thinking events require state tracking because the SDK emits deltas rather than discrete start/end events:
 
 ```
-idle ──(thinking_delta)──→ thinking ──(text_delta)──→ idle
+idle --(thinking_delta)--→ thinking --(text_delta)--→ idle
                               │                          │
-                              └──(thinking_delta)────────┘
+                              └--(thinking_delta)────────┘
                                     (still thinking)
 ```
 
@@ -941,7 +943,7 @@ function bridgeMcpToolToPiTool(
 ### Key Considerations
 
 - **The MCP server lifecycle is managed by the backend**, not the adapter. The adapter receives tool definitions and wraps them as Pi AgentTools. Tool execution goes through the backend's MCP server handler.
-- **Error handling in tool execution** is handled by Pi's agent loop — if `execute` throws, the error is returned to the LLM as a tool error result, and the agent loop continues. This matches our existing behavior for other adapters.
+- **Error handling in tool execution** is handled by Pi's agent loop -- if `execute` throws, the error is returned to the LLM as a tool error result, and the agent loop continues. This matches our existing behavior for other adapters.
 - **Tool filtering by contact permission tier** happens before tools are passed to the adapter. The adapter receives only the tools the current contact is allowed to use.
 
 ---
@@ -956,10 +958,10 @@ The mind session uses two MCP tools (`record_thought` and `record_cognitive_stat
 
 ### Strategy for Pi
 
-1. **MCP tool delivery** — Pi receives the same stdio MCP server configs as all other providers. The cognitive tools are exposed via `buildMcpServerConfig(bridgePort, 'cognitive', 'mind')`. If Pi supports in-process MCP natively, that can be used as an alternative, but the stdio bridge works universally.
-2. **Phase-based streaming** — Reply text streams naturally between tool calls. The `onChunk` callback checks the cognitive phase (`'replying'`) before emitting to the frontend.
-3. **Validation** — Tool inputs are Zod-validated at call time. No post-hoc JSON parsing or fallback chains needed. On agent failure, `safeMindOutput()` provides a minimal valid output.
-4. **No adapter-level changes** — The Pi adapter does not need to know about cognitive state or MindOutput. It handles MCP tool calls via the standard SDK mechanism, and the backend's cognitive tool handlers accumulate state.
+1. **MCP tool delivery** -- Pi receives the same stdio MCP server configs as all other providers. The cognitive tools are exposed via `buildMcpServerConfig(bridgePort, 'cognitive', 'mind')`. If Pi supports in-process MCP natively, that can be used as an alternative, but the stdio bridge works universally.
+2. **Phase-based streaming** -- Reply text streams naturally between tool calls. The `onChunk` callback checks the cognitive phase (`'replying'`) before emitting to the frontend.
+3. **Validation** -- Tool inputs are Zod-validated at call time. No post-hoc JSON parsing or fallback chains needed. On agent failure, `safeMindOutput()` provides a minimal valid output.
+4. **No adapter-level changes** -- The Pi adapter does not need to know about cognitive state or MindOutput. It handles MCP tool calls via the standard SDK mechanism, and the backend's cognitive tool handlers accumulate state.
 
 ---
 
@@ -971,7 +973,7 @@ Pi warm sessions work differently from Claude, and the difference is an advantag
 
 - CLI subprocess persists with full conversation in its context window
 - System prompt set once on cold start, immutable thereafter
-- Warm ticks append user messages — stale context accumulates
+- Warm ticks append user messages -- stale context accumulates
 - No way to reshape the conversation history or update the system prompt
 
 ### Pi Warm Sessions
@@ -979,7 +981,7 @@ Pi warm sessions work differently from Claude, and the difference is an advantag
 - Agent instance persists in memory with messages in `agent.state.messages`
 - `transformContext` fires before every LLM call, allowing full context reshaping
 - The system prompt can be updated, messages can be pruned, tools can be adjusted
-- No stale accumulation — every LLM call sees fresh context
+- No stale accumulation -- every LLM call sees fresh context
 
 ### Implementation
 
@@ -999,7 +1001,7 @@ The orchestrator sends `systemPrompt: null` for warm ticks (same as Claude). The
 - Passes it to the Agent on cold start, or
 - Injects it via `transformContext` on every LLM call (keeping it fresh)
 
-This is hidden from the orchestrator — from its perspective, Pi warm sessions work identically to Claude warm sessions.
+This is hidden from the orchestrator -- from its perspective, Pi warm sessions work identically to Claude warm sessions.
 
 ---
 
@@ -1012,14 +1014,14 @@ Our custom orchestration layer manages sub-agent lifecycle independently of the 
 | Step | Implementation |
 |---|---|
 | **Spawn** | `orchestrator.spawnAgent()` calls `manager.createSession({ provider: 'pi', ... })`. PiAdapter creates a PiSession wrapping a new Agent instance. |
-| **Prompt** | `session.prompt(instructions)` — Pi Agent runs its loop, executes tools, returns result. |
+| **Prompt** | `session.prompt(instructions)` -- Pi Agent runs its loop, executes tools, returns result. |
 | **Update** | `session.injectMessage(context)` maps to `agent.steer(message)`. Pi's `steer()` explicitly interrupts tool execution and forces the model to acknowledge the update. This is better than Claude's approach for `update_agent`. |
 | **Cancel** | `session.cancel()` calls `agent.abort()` via AbortController. Clean cancellation. |
 | **Complete** | Agent finishes naturally. Orchestrator stores result, triggers heartbeat tick. |
 
 ### No Native Sub-Agent Spawning
 
-Pi does not have a native sub-agent mechanism. This is fine — our orchestrator handles all sub-agent coordination (same as Codex and OpenCode). The one code path for all providers principle holds.
+Pi does not have a native sub-agent mechanism. This is fine -- our orchestrator handles all sub-agent coordination (same as Codex and OpenCode). The one code path for all providers principle holds.
 
 ### `steer()` Advantage
 
@@ -1042,7 +1044,7 @@ export const PI_CAPABILITIES: AdapterCapabilities = {
   /** No tool input modification hooks in Pi */
   canModifyToolInput: false,
 
-  /** No native sub-agents — our orchestrator handles it */
+  /** No native sub-agents -- our orchestrator handles it */
   supportsSubagents: false,
 
   /** Pi normalizes thinking across providers (5 levels) */
@@ -1060,13 +1062,13 @@ export const PI_CAPABILITIES: AdapterCapabilities = {
   /** No fork mechanism in Pi */
   supportsFork: false,
 
-  /** NEW — Pi's transformContext hook */
+  /** NEW -- Pi's transformContext hook */
   supportsContextTransform: true,
 
-  /** Unlimited by Pi itself — limited by provider rate limits */
+  /** Unlimited by Pi itself -- limited by provider rate limits */
   maxConcurrentSessions: null,
 
-  /** Dynamic — populated from pi-ai's model registry at runtime */
+  /** Dynamic -- populated from pi-ai's model registry at runtime */
   supportedModels: [],
 };
 ```
@@ -1123,7 +1125,7 @@ Map Pi errors to our `AgentError` system following the four-tier strategy from `
 | Network/connection error | `NETWORK_ERROR` | `network` | `retry` | Tier 1: Auto-retry |
 | Provider API error (5xx) | `API_ERROR` | `server_error` | `retry` | Tier 1: Auto-retry |
 | Authentication failure (401/403) | `AUTH_FAILED` | `authentication` | `fatal` | Tier 4: Disable provider, log error |
-| Tool execution error | (handled by Pi agent loop) | — | — | Pi returns error to LLM, agent continues |
+| Tool execution error | (handled by Pi agent loop) | -- | -- | Pi returns error to LLM, agent continues |
 | AbortController abort | `CANCELLED` | `cancelled` | `recoverable` | Normal cancellation flow |
 | SDK load failure | `SDK_LOAD_FAILED` | `invalid_input` | `fatal` | Tier 4: Pi unavailable |
 | Invalid model/provider | `INVALID_MODEL` | `invalid_input` | `fatal` | Immediate failure |
@@ -1161,7 +1163,7 @@ Pi Agent state can be serialized via `agent.state.messages`. For crash recovery:
 2. On crash recovery, if `mind_session_id` starts with `pi:`, deserialize the messages and reconstruct the Agent
 3. The reconstructed Agent has full conversation history but loses any in-flight tool execution state
 
-This is acceptable for the heartbeat system — the mind session is designed to handle cold restarts gracefully.
+This is acceptable for the heartbeat system -- the mind session is designed to handle cold restarts gracefully.
 
 ---
 
@@ -1183,7 +1185,7 @@ This is acceptable for the heartbeat system — the mind session is designed to 
 | `/packages/agents/src/capabilities.ts` | Add `PI_CAPABILITIES`, add `supportsContextTransform: false` to existing constants, update `getCapabilities()` and `hasCapability()` signatures and implementation |
 | `/packages/agents/src/manager.ts` | Import `PiAdapter`, add to `registerDefaultAdapters()` |
 | `/packages/agents/src/index.ts` | Export `PiAdapter`, `PI_CAPABILITIES`, `piSessionConfigSchema`, `PiConfig` |
-| `/packages/agents/src/errors.ts` | No changes — existing error types cover Pi's error cases |
+| `/packages/agents/src/errors.ts` | No changes -- existing error types cover Pi's error cases |
 | `/packages/backend/src/heartbeat/mind-session.ts` | Add Pi-specific session creation path: check `hasCapability(provider, 'supportsContextTransform')`, if true call `session.setContextTransformer(contextBuilder.buildContextTransformer(params))` |
 | `/packages/backend/src/heartbeat/agent-orchestrator.ts` | Add Pi-specific sub-agent creation: bridge MCP tools directly as AgentTools instead of passing MCP server configs |
 
@@ -1233,11 +1235,11 @@ export { piSessionConfigSchema, type PiConfig } from './schemas.js';
 
 | Test | Description |
 |---|---|
-| Full session lifecycle | Create session, prompt, stream, cancel, end — with mock Pi Agent |
+| Full session lifecycle | Create session, prompt, stream, cancel, end -- with mock Pi Agent |
 | Context transformer flow | Register transformer, verify it fires before each LLM call, verify context is reshaped |
 | Warm session behavior | Multiple prompts on same session, verify agent state accumulates |
 | Event emission ordering | Verify events emit in correct order (session_start before input_received, turn_end before tool_call_start, etc.) |
-| Error recovery | Simulate context overflow, network errors, abort — verify correct AgentError classification |
+| Error recovery | Simulate context overflow, network errors, abort -- verify correct AgentError classification |
 
 ### E2E Tests (Requires Real Provider)
 
@@ -1302,7 +1304,7 @@ In `/packages/agents/package.json`:
 ### Transitive Dependencies
 
 Pi's packages bring their own dependencies (TypeBox, provider-specific SDKs, etc.). These are managed by pi-ai/pi-agent-core and do not need to be declared in our package.json. The key transitive dependency is:
-- `zod-to-json-schema` — already a pi-ai dependency, used for our MCP tool bridging
+- `zod-to-json-schema` -- already a pi-ai dependency, used for our MCP tool bridging
 
 ---
 
@@ -1315,7 +1317,7 @@ Implementation should proceed in this order, with each step building on the prev
 | **1** | Schema updates | Add `'pi'` to `agentProviderSchema` (shared), add `piSessionConfigSchema` (agents) |
 | **2** | Types and interfaces | Add Pi config fields to `AgentSessionConfig`, add `ContextTransformer` types, add `supportsContextTransform` to `AdapterCapabilities`, add optional `setContextTransformer` to `IAgentSession` |
 | **3** | Capabilities | Add `PI_CAPABILITIES`, add `supportsContextTransform: false` to existing constants, update `getCapabilities()` and `hasCapability()` |
-| **4** | PiAdapter + PiSession | Core implementation — the adapter, session, SDK type declarations |
+| **4** | PiAdapter + PiSession | Core implementation -- the adapter, session, SDK type declarations |
 | **5** | Event mapping | Map Pi events to Animus events, implement thinking state machine |
 | **6** | MCP tool bridging | Zod-to-TypeBox conversion, tool execution routing |
 | **7** | Manager + exports | Add to `registerDefaultAdapters()`, export from index.ts |
@@ -1326,9 +1328,9 @@ Implementation should proceed in this order, with each step building on the prev
 ### Estimated Effort
 
 - Steps 1-3 (schema/types/capabilities): Small, mechanical changes across multiple files
-- Steps 4-6 (core adapter): Bulk of the work — PiSession is the most complex piece
-- Steps 7-8 (registration/backend): Moderate — requires understanding of heartbeat pipeline
-- Steps 9-10 (tests): Substantial — following the project's testing requirements
+- Steps 4-6 (core adapter): Bulk of the work -- PiSession is the most complex piece
+- Steps 7-8 (registration/backend): Moderate -- requires understanding of heartbeat pipeline
+- Steps 9-10 (tests): Substantial -- following the project's testing requirements
 
 ---
 
@@ -1352,9 +1354,9 @@ Implementation should proceed in this order, with each step building on the prev
 
 ## Related Documents
 
-- `docs/agents/architecture-overview.md` — SDK comparison and adapter design principles
-- `docs/architecture/heartbeat.md` — The tick pipeline that uses the adapter
-- `docs/architecture/context-builder.md` — Context assembly, token budgets, persona compilation
-- `docs/architecture/agent-orchestration.md` — Sub-agent lifecycle and prompt templates
-- `docs/architecture/mcp-tools.md` — MCP tool definitions and permission filtering
-- `docs/agents/plugin-extension-systems.md` — Plugin and extension systems across SDKs
+- `docs/agents/architecture-overview.md` -- SDK comparison and adapter design principles
+- `docs/architecture/heartbeat.md` -- The tick pipeline that uses the adapter
+- `docs/architecture/context-builder.md` -- Context assembly, token budgets, persona compilation
+- `docs/architecture/agent-orchestration.md` -- Sub-agent lifecycle and prompt templates
+- `docs/architecture/mcp-tools.md` -- MCP tool definitions and permission filtering
+- `docs/agents/plugin-extension-systems.md` -- Plugin and extension systems across SDKs

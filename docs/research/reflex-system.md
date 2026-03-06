@@ -1,4 +1,6 @@
-# Animus: Reflex System
+# Reflex System
+
+> **STATUS: PLANNED** - This feature is not yet implemented. This is a design specification for a future fast-response layer.
 
 The Reflex is a fast-response layer that enables low-latency voice conversations while preserving the heartbeat as the cognitive core. It uses direct LLM API calls via the Vercel AI SDK to generate quick conversational replies (~300-500ms TTFT), bypassing the agentic SDK subprocess overhead (~4-9 seconds) that makes the heartbeat too slow for natural voice interaction.
 
@@ -576,7 +578,7 @@ Reflex LLM -> Text chunks -> EventBus 'reflex:chunk'
 
 TTS synthesis is accessed via `getSpeechService().tts.synthesize()` from the shared speech module. See `docs/architecture/speech-engine.md` for engine details.
 
-The voice mode frontend spec (`docs/frontend/voice-mode.md`) already defines the Speaking experience, audio queueing, and barge-in behavior. The reflex integrates at the "reply text streams" stage -- the frontend doesn't need to know whether the text came from a reflex or a heartbeat.
+The voice mode frontend spec (`docs/research/voice-mode.md`) already defines the Speaking experience, audio queueing, and barge-in behavior. The reflex integrates at the "reply text streams" stage -- the frontend doesn't need to know whether the text came from a reflex or a heartbeat.
 
 ### Latency Breakdown
 
@@ -640,5 +642,5 @@ Compare to heartbeat-only path:
 - `docs/architecture/voice-channel.md` -- STT/TTS pipeline and voice architecture
 - `docs/architecture/agent-orchestration.md` -- Sub-agent management (heartbeat's domain)
 - `docs/architecture/tech-stack.md` -- Shared abstractions and dependencies
-- `docs/frontend/voice-mode.md` -- Voice mode UX and frontend behavior
+- `docs/research/voice-mode.md` -- Voice mode UX and frontend behavior
 - `docs/agents/architecture-overview.md` -- Agent SDK abstraction layer
