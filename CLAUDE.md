@@ -176,6 +176,21 @@ npm run lint:fix      # ESLint auto-fix
 npm run clean         # Remove dist folders and caches
 ```
 
+### Release Commands (Human-Initiated Only)
+
+These commands exist but must **never be run by agents** unless the user explicitly asks.
+
+```bash
+npm run bump -- <patch|minor|major|X.Y.Z>   # Bump version across all lockstep packages
+npm run bump -- --dry-run patch              # Preview what would change
+npm run release -- <patch|minor|major>       # Full release: bump + changelog + commit + tag
+npm run release -- --dry-run patch           # Preview the release flow
+```
+
+- `bump` updates 8 lockstep files: root package.json, tauri.conf.json, 2 Cargo.toml, 4 workspace package.json files. Does NOT touch shared, channel-sdk, or anipack.
+- `release` runs bump, generates changelog from conventional commits, commits as `chore(release): vX.Y.Z`, creates an annotated git tag, then prints push instructions. It does NOT push automatically.
+- See `docs/architecture/release-engineering.md` for the full versioning policy and release process.
+
 ### Writing Style
 
 - **Never use em dashes** (`—`) when writing copy. Use alternative punctuation (commas, colons, semicolons, parentheses, or separate sentences) instead.
@@ -188,6 +203,33 @@ npm run clean         # Remove dist folders and caches
 - Prefer composition over inheritance
 - Use meaningful variable names
 - Add comments only for non-obvious logic
+
+### Commit Conventions
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/).
+
+**Format:**
+```
+<type>(<scope>): <description>
+```
+
+**Types:** `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `style`
+
+**Scopes** (use the most specific applicable):
+`heartbeat`, `memory`, `agents`, `channels`, `plugins`, `contacts`, `goals`, `tasks`, `persona`, `frontend`, `backend`, `shared`, `tauri`, `api`, `db`, `auth`, `ci`, `release`
+
+**Rules:**
+- Commit early and often. Small, focused commits are preferred over large batches.
+- Each commit should be one logical change.
+- Write in imperative mood: "add feature" not "added feature".
+- Keep the first line under 72 characters.
+
+**What agents must NOT do:**
+- Do NOT run `scripts/bump-version.mjs` or `scripts/release.mjs`
+- Do NOT create git tags
+- Do NOT push to remote unless explicitly asked
+- Do NOT modify version numbers in package.json, Cargo.toml, or tauri.conf.json
+- Version bumps and releases are human-initiated only
 
 ### Backend Architecture
 
@@ -320,7 +362,7 @@ docs/
 - **Tools & Permissions**: `docs/architecture/mcp-tools.md`, `docs/architecture/tool-permissions.md`
 - **Voice/Speech**: `docs/architecture/voice-channel.md`, `docs/architecture/speech-engine.md`, `docs/architecture/tts-licensing-and-distribution.md`
 - **Security**: `docs/architecture/encryption-architecture.md`, `docs/architecture/credential-passing.md`
-- **Infrastructure**: `docs/architecture/data-directory.md`, `docs/architecture/backend-architecture.md`, `docs/architecture/tech-stack.md`, `docs/architecture/sleep-energy.md`
+- **Infrastructure**: `docs/architecture/data-directory.md`, `docs/architecture/backend-architecture.md`, `docs/architecture/tech-stack.md`, `docs/architecture/sleep-energy.md`, `docs/architecture/release-engineering.md`
 - **Agent SDKs**: `docs/agents/sdk-comparison.md`, `docs/agents/architecture-overview.md`, plus per-provider docs in `docs/agents/claude/`, `docs/agents/codex/`, `docs/agents/opencode/`
 - **Planned (not built)**: `docs/research/reflex-system.md`, `docs/research/voice-mode.md`, `docs/agents/pi/research/`
 

@@ -34,7 +34,9 @@ const NATIVE_DIR = path.join(TAURI_DIR, 'native');
  *   - ext: archive extension
  */
 function getPlatformInfo() {
-  const { platform, arch } = process;
+  // Allow CI to override for cross-compilation (e.g. building x64 on ARM runner)
+  const platform = process.env.TAURI_TARGET_PLATFORM || process.platform;
+  const arch = process.env.TAURI_TARGET_ARCH || process.arch;
 
   const map = {
     'darwin-arm64': {
@@ -343,7 +345,9 @@ function formatMB(bytes) {
 function prunePlatformBinaries() {
   console.log('[7/10] Pruning foreign-platform binaries...');
 
-  const { platform, arch } = process;
+  // Use target platform/arch (may differ from host when cross-compiling in CI)
+  const platform = process.env.TAURI_TARGET_PLATFORM || process.platform;
+  const arch = process.env.TAURI_TARGET_ARCH || process.arch;
   const nodeModules = path.join(RESOURCES_DIR, 'node_modules');
   let totalSaved = 0;
 

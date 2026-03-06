@@ -71,6 +71,7 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/architecture/data-directory.md` | Data directory layout (`ANIMUS_DATA_DIR`), directory structure, secrets lifecycle, deployment modes (dev, Docker, Tauri, custom) |
 | `docs/architecture/package-installation.md` | Package distribution (.anpk install flow), verification chain, rollback, update checking, config migration, store browser UI. **STATUS: PARTIALLY IMPLEMENTED** |
 | `docs/architecture/backend-architecture.md` | Backend modular monolith architecture: store patterns, service layer, subsystem lifecycles, pipeline deps, decision handler registry, anti-patterns |
+| `docs/architecture/release-engineering.md` | Release engineering: versioning policy (lockstep vs independent packages), conventional commits, CI pipeline (typecheck/lint/test), release workflow (tag-triggered Tauri builds for macOS + Windows), bump-version and release scripts, cross-compilation, code signing (future), changelog generation |
 | `docs/architecture/tech-stack.md` | Full technology overview, frontend stack (Vite, React 19, Zustand, Emotion, Motion), backend stack (Fastify, tRPC, SQLite), seven databases, LanceDB, agent SDKs, deployment paths, shared abstractions (Embedding Provider, Context Builder, Decay Engine, Event Bus, Encryption Service, Database Stores, Migrations) |
 
 ### Agent SDKs
@@ -129,6 +130,7 @@ When you need context for a task, follow this approach:
 17. **For contacts/identity/permissions**: Read `docs/architecture/contacts.md`
 18. **For voice/speech/STT/TTS**: Read `docs/architecture/voice-channel.md` and `docs/architecture/speech-engine.md`
 19. **For encryption/vault**: Read `docs/architecture/encryption-architecture.md`
+20. **For release engineering/CI/CD/versioning**: Read `docs/architecture/release-engineering.md`
 20. **For credentials/secrets/agent-blind pattern**: Read `docs/architecture/credential-passing.md`
 21. **For data directory layout**: Read `docs/architecture/data-directory.md`
 22. **For sub-agent orchestration**: Read `docs/architecture/agent-orchestration.md`
