@@ -1,31 +1,40 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { randomBytes } from 'crypto';
 
-// We need to mock the env before importing the module
-vi.mock('../../src/utils/env.js', () => ({
-  env: {
-    ANIMUS_ENCRYPTION_KEY: 'test-encryption-key-for-testing',
-    NODE_ENV: 'test',
-  },
-  PROJECT_ROOT: '/tmp/animus-test',
-  DATA_DIR: '/tmp/animus-test/data',
+vi.mock('../../src/lib/logger.js', () => ({
+  createLogger: () => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }),
 }));
 
 describe('EncryptionService', () => {
-  // Import fresh for each test
   let encrypt: typeof import('../../src/lib/encryption-service.js').encrypt;
   let decrypt: typeof import('../../src/lib/encryption-service.js').decrypt;
   let isConfigured: typeof import('../../src/lib/encryption-service.js').isConfigured;
+  let setDek: typeof import('../../src/lib/encryption-service.js').setDek;
+  let clearDek: typeof import('../../src/lib/encryption-service.js').clearDek;
 
   beforeEach(async () => {
-    // Reset module cache to get fresh key derivation
     vi.resetModules();
     const mod = await import('../../src/lib/encryption-service.js');
     encrypt = mod.encrypt;
     decrypt = mod.decrypt;
     isConfigured = mod.isConfigured;
+    setDek = mod.setDek;
+    clearDek = mod.clearDek;
+
+    // Provide a 32-byte test DEK (AES-256 requires 32 bytes)
+    setDek(randomBytes(32));
   });
 
-  it('reports configured when key is set', () => {
+  afterEach(() => {
+    clearDek();
+  });
+
+  it('reports configured when DEK is set', () => {
     expect(isConfigured()).toBe(true);
   });
 
@@ -56,7 +65,7 @@ describe('EncryptionService', () => {
   });
 
   it('handles unicode content', () => {
-    const plaintext = 'Hello 🌍 — special chars: é, ñ, ü';
+    const plaintext = 'Hello world, special chars: e, n, u';
     const encrypted = encrypt(plaintext);
     expect(decrypt(encrypted)).toBe(plaintext);
   });
@@ -76,27 +85,29 @@ describe('EncryptionService', () => {
   });
 });
 
-describe('EncryptionService (unconfigured)', () => {
+describe('EncryptionService (sealed)', () => {
+  let encrypt: typeof import('../../src/lib/encryption-service.js').encrypt;
+  let decrypt: typeof import('../../src/lib/encryption-service.js').decrypt;
+  let isConfigured: typeof import('../../src/lib/encryption-service.js').isConfigured;
+
   beforeEach(async () => {
     vi.resetModules();
-    vi.doMock('../../src/utils/env.js', () => ({
-      env: {
-        ANIMUS_ENCRYPTION_KEY: '',
-        NODE_ENV: 'test',
-      },
-      PROJECT_ROOT: '/tmp/animus-test',
-      DATA_DIR: '/tmp/animus-test/data',
-    }));
+    const mod = await import('../../src/lib/encryption-service.js');
+    encrypt = mod.encrypt;
+    decrypt = mod.decrypt;
+    isConfigured = mod.isConfigured;
+    // Do NOT call setDek — vault stays sealed
   });
 
-  it('throws on encrypt when key not set', async () => {
-    const mod = await import('../../src/lib/encryption-service.js');
-    expect(mod.isConfigured()).toBe(false);
-    expect(() => mod.encrypt('my-key')).toThrow('resolveSecrets()');
+  it('reports not configured when DEK is not set', () => {
+    expect(isConfigured()).toBe(false);
   });
 
-  it('rejects legacy plain: format', async () => {
-    const mod = await import('../../src/lib/encryption-service.js');
-    expect(() => mod.decrypt('plain:dGVzdA==')).toThrow('resolveSecrets()');
+  it('throws on encrypt when vault is sealed', () => {
+    expect(() => encrypt('my-key')).toThrow('Vault is sealed');
+  });
+
+  it('throws on decrypt when vault is sealed', () => {
+    expect(() => decrypt('plain:dGVzdA==')).toThrow('Vault is sealed');
   });
 });

@@ -130,7 +130,7 @@ describe('context-builder', () => {
     it('formats interval trigger', () => {
       const msg = buildUserMessage(makeParams());
       expect(msg).toContain('THIS MOMENT');
-      expect(msg).toContain('quiet moment');
+      expect(msg).toContain('has passed since your last tick');
     });
 
     it('formats message trigger', () => {

@@ -52,6 +52,7 @@ export function createTestMessagesDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   applySql(db, path.join(MIGRATIONS_DIR, 'messages', '001_initial.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'messages', '002_delivery_tracking.sql'));
   return db;
 }
 

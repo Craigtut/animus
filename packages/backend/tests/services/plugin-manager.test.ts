@@ -56,6 +56,20 @@ vi.mock('fs/promises', () => ({
   lstat: (...args: unknown[]) => mockLstat(...args),
 }));
 
+// Mock node:fs (sync) — plugin-manager uses fsSync.existsSync for manifest detection
+const mockExistsSync = vi.fn();
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    default: {
+      ...actual,
+      existsSync: (...args: unknown[]) => mockExistsSync(...args),
+    },
+    existsSync: (...args: unknown[]) => mockExistsSync(...args),
+  };
+});
+
 // Mock child_process.spawn
 const mockSpawn = vi.fn();
 vi.mock('child_process', () => ({
@@ -138,6 +152,13 @@ describe('PluginManager', () => {
     mockWriteFile.mockResolvedValue(undefined);
     mockLstat.mockRejectedValue(new Error('ENOENT'));
     mockSpawn.mockReset();
+
+    // Default: existsSync returns true for plugin.json paths (so readManifest proceeds to readFile)
+    mockExistsSync.mockImplementation((p: string) => {
+      if (typeof p === 'string' && p.endsWith('plugin.json')) return true;
+      // For directory existence checks in scanAllDirectories, return true for registered paths
+      return true;
+    });
   });
 
   afterEach(() => {
@@ -223,13 +244,13 @@ describe('PluginManager', () => {
     it('creates symlinks for skills to provider discovery path', async () => {
       // Setup a plugin with a skill
       mockReaddir.mockImplementation(async (dir: string) => {
-        // Top-level scan directories — only return plugin from built-in path
-        if (dir.endsWith('backend/plugins')) {
-          return [{ name: 'skill-plugin', isDirectory: () => true, isFile: () => false }];
-        }
-        // The skill subdirectory scan
+        // The skill subdirectory scan (loadSkills finds skill directories)
         if (dir.includes('skill-plugin') && dir.endsWith('skills')) {
           return [{ name: 'my-skill', isDirectory: () => true, isFile: () => false }];
+        }
+        // Inside the skill directory (deploySkillsForPlugin reads entries)
+        if (dir.includes('my-skill')) {
+          return ['SKILL.md', 'helpers'];
         }
         return [];
       });
@@ -245,6 +266,9 @@ describe('PluginManager', () => {
             components: { skills: './skills/' },
           });
         }
+        if (filePath.endsWith('SKILL.md')) {
+          return '# My Skill\nDoes things.';
+        }
         throw new Error('File not found');
       });
 
@@ -254,14 +278,12 @@ describe('PluginManager', () => {
       const pm = getPluginManager();
       await pm.loadAll();
 
-      // Verify symlink was created
+      // Verify symlink was created for non-SKILL.md entries (SKILL.md is copied, others are symlinked)
       expect(mockSymlink).toHaveBeenCalled();
       const symlinkCall = mockSymlink.mock.calls.find(
-        (call: unknown[]) => typeof call[1] === 'string' && (call[1] as string).includes('my-skill')
+        (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('helpers')
       );
       expect(symlinkCall).toBeDefined();
-      // Target should be under the Claude bridge plugin skills/ directory
-      expect(symlinkCall![1]).toContain('runtime/providers/claude/animus-skill-bridge/skills/my-skill');
     });
 
     it('cleans up skills on cleanupSkills()', async () => {

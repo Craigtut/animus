@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type Database from 'better-sqlite3';
-import { createTestMemoryDb } from '../helpers.js';
+import { createTestMemoryDb, createTestContactsDb } from '../helpers.js';
 import * as memoryStore from '../../src/db/stores/memory-store.js';
 
 // ============================================================================
@@ -15,9 +15,11 @@ import * as memoryStore from '../../src/db/stores/memory-store.js';
 // ============================================================================
 
 let mockMemDb: Database.Database;
+let mockContactsDb: Database.Database;
 
 vi.mock('../../src/db/index.js', () => ({
   getMemoryDb: () => mockMemDb,
+  getContactsDb: () => mockContactsDb,
 }));
 
 const mockMemoryManager = {
@@ -55,6 +57,7 @@ const { getMemoryService, resetMemoryService } = await import(
 describe('MemoryService', () => {
   beforeEach(() => {
     mockMemDb = createTestMemoryDb();
+    mockContactsDb = createTestContactsDb();
     memoryManagerValue = mockMemoryManager;
     vi.clearAllMocks();
     resetMemoryService();

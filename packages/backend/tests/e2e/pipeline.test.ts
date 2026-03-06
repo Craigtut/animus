@@ -318,7 +318,7 @@ describe('Full Tick Cycle', () => {
     // Warm session => no system prompt
     expect(context.systemPrompt).toBeNull();
     // User message should have interval trigger
-    expect(context.userMessage).toContain('quiet moment');
+    expect(context.userMessage).toContain('has passed since your last tick');
     // Should NOT contain contact section
     expect(context.userMessage).not.toContain('WHO YOU\'RE TALKING TO');
   });
