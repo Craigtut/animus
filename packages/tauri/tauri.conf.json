@@ -1,6 +1,6 @@
 {
   "productName": "Animus",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.animus.desktop",
   "build": {
     "frontendDist": "../frontend/dist",
@@ -37,7 +37,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/node"],
-    "resources": ["resources/"]
+    "externalBin": [
+      "binaries/node"
+    ],
+    "resources": [
+      "resources/"
+    ]
   }
 }
