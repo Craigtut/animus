@@ -52,7 +52,15 @@ async function generateChangelog() {
   });
 
   if (newEntry.trim()) {
-    fs.writeFileSync(changelogPath, newEntry + '\n' + existing);
+    // Insert new entry after the header block, not before it
+    const headerMatch = existing.match(/^(# Changelog\n(?:.*\n)*?\n)/);
+    if (headerMatch) {
+      const header = headerMatch[1];
+      const rest = existing.slice(header.length);
+      fs.writeFileSync(changelogPath, header + newEntry + '\n' + rest);
+    } else {
+      fs.writeFileSync(changelogPath, newEntry + '\n' + existing);
+    }
   }
 }
 

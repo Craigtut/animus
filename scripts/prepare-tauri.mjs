@@ -208,15 +208,6 @@ function prepareMacOSBgPolicy() {
   );
   console.log(`      Compiled ${addonDest}`);
 
-  // Ad-hoc code sign the addon so it can be loaded by a signed Node.js binary
-  // with hardened runtime. Without this, DYLD_INSERT_LIBRARIES may be rejected.
-  try {
-    execSync(`codesign --sign - --force "${addonDest}"`, { stdio: 'inherit' });
-    console.log('      Ad-hoc signed macos_bg_policy.node');
-  } catch (e) {
-    console.log('      WARN: Failed to ad-hoc sign addon (may cause DYLD load failures)');
-  }
-
   // Copy preload script
   if (fs.existsSync(preloadSrc)) {
     fs.cpSync(preloadSrc, preloadDest);
@@ -572,8 +563,77 @@ function pruneNonEssentialFiles() {
   console.log(`      Non-essential file pruning saved ${formatMB(totalSaved)}`);
 }
 
+/**
+ * Sign all native binaries in resources/ for macOS notarization.
+ * Apple requires every binary in the app bundle to be signed with a
+ * Developer ID certificate. Uses APPLE_SIGNING_IDENTITY env var in CI,
+ * falls back to ad-hoc signing locally.
+ */
+function signNativeBinaries() {
+  if (process.platform !== 'darwin') {
+    console.log('[10/11] Signing native binaries: skipped (not macOS)');
+    return;
+  }
+
+  console.log('[10/11] Signing native binaries for macOS notarization...');
+
+  const identity = process.env.APPLE_SIGNING_IDENTITY || '-';
+  const isAdHoc = identity === '-';
+  console.log(`      Signing identity: ${isAdHoc ? 'ad-hoc (local dev)' : identity}`);
+
+  // Find all native binaries (.node, .bare, and known executables)
+  const nativeBinaries = [];
+
+  function findBinaries(dir) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        findBinaries(fullPath);
+      } else if (entry.isFile() || entry.isSymbolicLink()) {
+        const ext = path.extname(entry.name).toLowerCase();
+        // Sign .node files, .bare files, and known native executables
+        if (ext === '.node' || ext === '.bare' || entry.name === 'rg') {
+          nativeBinaries.push(fullPath);
+        }
+      }
+    }
+  }
+
+  findBinaries(RESOURCES_DIR);
+
+  if (nativeBinaries.length === 0) {
+    console.log('      No native binaries found to sign');
+    return;
+  }
+
+  let signed = 0;
+  for (const binPath of nativeBinaries) {
+    const relPath = path.relative(RESOURCES_DIR, binPath);
+    try {
+      execSync(
+        `codesign --sign "${identity}" --force --options runtime --timestamp "${binPath}"`,
+        { stdio: 'pipe' }
+      );
+      signed++;
+      console.log(`      Signed: ${relPath}`);
+    } catch (e) {
+      console.log(`      WARN: Failed to sign ${relPath}: ${e.message}`);
+    }
+  }
+
+  console.log(`      Signed ${signed}/${nativeBinaries.length} native binaries`);
+}
+
 function verify() {
-  console.log('[10/10] Verifying sidecar payload...');
+  console.log('[11/11] Verifying sidecar payload...');
 
   const checks = [
     { path: path.join(RESOURCES_DIR, 'backend', 'index.js'), label: 'resources/backend/index.js' },
@@ -628,6 +688,7 @@ async function main() {
     pruneNonEssentialFiles();
     // Copy workspace packages AFTER npm install, otherwise npm removes them
     copyWorkspacePackages();
+    signNativeBinaries();
     verify();
   } catch (err) {
     console.error('\nFatal error during Tauri build preparation:');

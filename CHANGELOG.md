@@ -1,3 +1,9 @@
+# Changelog
+
+All notable changes to the Animus Engine will be documented in this file.
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
+
 ## [0.2.1](https://github.com/Craigtut/animus/compare/v0.2.0...v0.2.1) (2026-03-07)
 
 ### Features
@@ -7,12 +13,6 @@
 ### Bug Fixes
 
 * **ci:** pull release notes from CHANGELOG.md into GitHub release ([88ba70c](https://github.com/Craigtut/animus/commit/88ba70c24d13dd68267c6a679fbfbe755ce92016))
-
-# Changelog
-
-All notable changes to the Animus Engine will be documented in this file.
-
-This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
 
 ## 0.2.0 (2026-03-06)
 

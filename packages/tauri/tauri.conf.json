@@ -44,8 +44,7 @@
       "resources/"
     ],
     "macOS": {
-      "entitlements": "Entitlements.plist",
-      "signingIdentity": "-"
+      "entitlements": "Entitlements.plist"
     }
   }
 }
