@@ -13,6 +13,7 @@ import { useSettingsStore } from './store';
 // Guards
 import { AuthGuard } from './components/guards/AuthGuard';
 import { GuestGuard } from './components/guards/GuestGuard';
+import { SetupGuard } from './components/guards/SetupGuard';
 
 // Layout
 import { AppLayout } from './components/layout/AppLayout';
@@ -50,6 +51,7 @@ import { PersonaPage } from './pages/PersonaPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ConfigurationPage } from './pages/ConfigurationPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { SetupPage } from './pages/SetupPage';
 import { MaintenanceOverlay } from './components/MaintenanceOverlay';
 import { DownloadToast } from './components/DownloadToast';
 import { ToastContainer } from './components/ToastContainer';
@@ -171,8 +173,11 @@ export function App() {
               <Route path="/login" element={<GuestGuard><LoginPage /></GuestGuard>} />
               <Route path="/register" element={<GuestGuard><RegisterPage /></GuestGuard>} />
 
-              {/* Onboarding routes (auth required) */}
-              <Route path="/onboarding" element={<AuthGuard><OnboardingLayout /></AuthGuard>}>
+              {/* Setup route (auth required, before onboarding) */}
+              <Route path="/setup" element={<AuthGuard><SetupPage /></AuthGuard>} />
+
+              {/* Onboarding routes (auth required, SDK must be installed) */}
+              <Route path="/onboarding" element={<AuthGuard><SetupGuard><OnboardingLayout /></SetupGuard></AuthGuard>}>
                 <Route index element={<Navigate to="welcome" replace />} />
                 <Route path="welcome" element={<WelcomeStep />} />
                 <Route path="restore" element={<RestoreStep />} />
@@ -189,10 +194,10 @@ export function App() {
                 <Route path="persona/background" element={<BackgroundStep />} />
                 <Route path="persona/review" element={<ReviewStep />} />
               </Route>
-              <Route path="/onboarding/birth" element={<AuthGuard><BirthPage /></AuthGuard>} />
+              <Route path="/onboarding/birth" element={<AuthGuard><SetupGuard><BirthPage /></SetupGuard></AuthGuard>} />
 
-              {/* Main app routes (auth required) */}
-              <Route element={<AuthGuard><AppLayout /></AuthGuard>}>
+              {/* Main app routes (auth required, SDK must be installed) */}
+              <Route element={<AuthGuard><SetupGuard><AppLayout /></SetupGuard></AuthGuard>}>
                 <Route path="/" element={<PresencePage />} />
                 <Route path="/presence" element={<Navigate to="/" replace />} />
                 <Route path="/mind" element={<MindPage />} />

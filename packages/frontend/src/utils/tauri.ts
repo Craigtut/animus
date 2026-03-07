@@ -3,19 +3,33 @@ export function isTauri(): boolean {
 }
 
 /**
- * Unregister any Service Workers left over from previous browser-mode builds.
- * In Tauri, the PWA plugin is disabled, but a previously-registered SW may
- * still be cached in WebView2 and intercept requests. Call once at startup.
+ * Fully neutralize Service Workers in Tauri builds.
+ *
+ * The PWA plugin is disabled at build time for Tauri, but stale artifacts
+ * (sw.js, registerSW.js) from earlier builds may still be present in the
+ * webview cache or bundled files. This function:
+ *   1. Removes the registerSW.js <script> tag so it can't re-register on load
+ *   2. Unregisters any already-active Service Workers
+ *   3. Overrides navigator.serviceWorker.register to block future registrations
  */
 export function cleanupServiceWorkers(): void {
   if (!isTauri()) return;
+
+  // Remove the registerSW.js script tag before it fires on window.load
+  const swScript = document.getElementById('vite-plugin-pwa:register-sw');
+  if (swScript) swScript.remove();
+
   if (!('serviceWorker' in navigator)) return;
 
+  // Unregister any existing Service Workers
   navigator.serviceWorker.getRegistrations().then((registrations) => {
     for (const reg of registrations) {
       reg.unregister();
     }
   });
+
+  // Block future registration attempts (belt-and-suspenders)
+  navigator.serviceWorker.register = () => Promise.reject(new Error('Service Workers are disabled in Tauri'));
 }
 
 /**

@@ -41,6 +41,9 @@ COPY packages/tts-native/package.json packages/tts-native/
 # from GitHub. CPU binaries are already bundled in the package. Skip the GPU
 # download since we use CPU inference in Docker.
 ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
+# NOTE: npm ci fetches the Claude Agent SDK from the npm registry during build.
+# This is a user-initiated install (you are building the image), not redistribution.
+# If publishing pre-built images, exclude the SDK and install at container startup.
 RUN npm ci
 
 # Copy the pre-built tts-native binary from rust-builder

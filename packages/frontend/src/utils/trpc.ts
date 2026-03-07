@@ -31,7 +31,7 @@ const getBaseUrl = () => {
   return 'http://localhost:3000';
 };
 
-const getWsUrl = () => {
+const getWsUrl = (): string => {
   if (typeof window !== 'undefined') {
     // Tauri or custom API URL override
     const override = window.__ANIMUS_API_URL__;
@@ -46,9 +46,35 @@ const getWsUrl = () => {
   return 'ws://localhost:3000/api/trpc';
 };
 
-// Create WebSocket client for subscriptions
+// ── WebSocket auth token ──
+// WKWebView on macOS doesn't reliably send HTTP cookies with WebSocket
+// upgrade requests. tRPC's connectionParams sends the auth token as the
+// first WebSocket message (not in the URL), so it never leaks to logs
+// or proxies. The server waits for this message before creating the
+// context, making it available via info.connectionParams.
+let _wsAuthToken: string | null = null;
+
+/** Set the JWT token for WebSocket authentication via connectionParams. */
+export function setWsAuthToken(token: string | null) {
+  _wsAuthToken = token;
+}
+
+// Create WebSocket client for subscriptions.
+// connectionParams sends the auth token as the first message after
+// connecting, which the server uses to authenticate the WS session.
+// This works across all platforms (browser, Docker, Tauri/WKWebView).
 const wsClient = createWSClient({
-  url: getWsUrl(),
+  url: getWsUrl,
+  lazy: {
+    enabled: true,
+    closeMs: 0,
+  },
+  connectionParams: async () => {
+    if (_wsAuthToken) {
+      return { token: _wsAuthToken };
+    }
+    return null;
+  },
 });
 
 // Create the tRPC client

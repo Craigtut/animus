@@ -133,6 +133,14 @@ export interface AnimusEventMap {
   'download:completed': { assetId: string; label: string; category: string };
   'download:failed': { assetId: string; label: string; category: string; error: string; retriesRemaining: number };
 
+  // SDK Installation
+  'sdk:install_progress': {
+    sdk: string;
+    phase: 'starting' | 'downloading' | 'installing' | 'complete' | 'error';
+    message: string;
+    error?: string;
+  };
+
   // System
   'system:settings_updated': Record<string, unknown>;
   'system:shutdown': void;

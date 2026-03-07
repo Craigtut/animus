@@ -5,8 +5,10 @@
  * AgentLogStore adapter, AgentOrchestrator) into a SubsystemLifecycle.
  */
 
+import { join } from 'node:path';
 import type { SubsystemLifecycle } from '../lib/lifecycle.js';
 import { createLogger } from '../lib/logger.js';
+import { DATA_DIR } from '../utils/env.js';
 import { getHeartbeatDb, getSystemDb, getAgentLogsDb } from '../db/index.js';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import * as agentLogStore from '../db/stores/agent-log-store.js';
@@ -41,7 +43,10 @@ export class AgentSubsystem implements SubsystemLifecycle {
     }
 
     // Initialize AgentManager (1 mind + 3 sub-agents + 2 observer/reflector + 2 buffer = 8 max)
-    this.agentManager = createAgentManager({ maxConcurrentSessions: 8 });
+    this.agentManager = createAgentManager({
+      maxConcurrentSessions: 8,
+      runtimeSdkPath: join(DATA_DIR, 'sdks', 'claude'),
+    });
     const configuredProviders = this.agentManager.getConfiguredProviders();
     if (configuredProviders.length > 0) {
       log.debug(`Agent providers configured: ${configuredProviders.join(', ')}`);

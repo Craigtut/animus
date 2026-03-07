@@ -277,6 +277,102 @@ async function downloadFfmpegBinary() {
 }
 
 // ---------------------------------------------------------------------------
+// Step A2b: Extract bundled npm from Node.js archive
+// ---------------------------------------------------------------------------
+
+async function extractBundledNpm() {
+  const npmDest = path.join(RESOURCES_DIR, 'npm');
+
+  if (fs.existsSync(path.join(npmDest, 'bin', 'npm')) || fs.existsSync(path.join(npmDest, 'npm.cmd'))) {
+    console.log('[1b/11] Bundled npm already exists, skipping extraction');
+    return;
+  }
+
+  const { nodePlatform, ext } = getPlatformInfo();
+  const nodeVersion = `v${process.versions.node}`;
+  const archiveName = `node-${nodeVersion}-${nodePlatform}`;
+  const url = `https://nodejs.org/dist/${nodeVersion}/${archiveName}${ext}`;
+
+  console.log('[1b/11] Extracting bundled npm from Node.js archive...');
+
+  fs.mkdirSync(BINARIES_DIR, { recursive: true });
+  const tmpArchive = path.join(BINARIES_DIR, `node-npm-download${ext}`);
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+    const fileStream = fs.createWriteStream(tmpArchive);
+    await pipeline(Readable.fromWeb(response.body), fileStream);
+
+    if (ext === '.tar.gz' || ext === '.tar.xz') {
+      const tmpExtract = path.join(BINARIES_DIR, '_npm_extract_tmp');
+      fs.mkdirSync(tmpExtract, { recursive: true });
+      execSync(
+        `tar -xf "${tmpArchive}" -C "${tmpExtract}" "${archiveName}/bin/npm" "${archiveName}/bin/npx" "${archiveName}/lib/node_modules/npm/"`,
+        { stdio: 'inherit' }
+      );
+      fs.mkdirSync(path.join(npmDest, 'bin'), { recursive: true });
+      fs.mkdirSync(path.join(npmDest, 'lib', 'node_modules'), { recursive: true });
+      fs.renameSync(path.join(tmpExtract, archiveName, 'bin', 'npm'), path.join(npmDest, 'bin', 'npm'));
+      fs.renameSync(path.join(tmpExtract, archiveName, 'bin', 'npx'), path.join(npmDest, 'bin', 'npx'));
+      fs.renameSync(
+        path.join(tmpExtract, archiveName, 'lib', 'node_modules', 'npm'),
+        path.join(npmDest, 'lib', 'node_modules', 'npm')
+      );
+      fs.chmodSync(path.join(npmDest, 'bin', 'npm'), 0o755);
+      fs.chmodSync(path.join(npmDest, 'bin', 'npx'), 0o755);
+      fs.rmSync(tmpExtract, { recursive: true, force: true });
+    } else if (ext === '.zip') {
+      // Windows: extract npm.cmd, npx.cmd, and node_modules/npm/
+      const tmpExtract = path.join(BINARIES_DIR, '_npm_extract_tmp');
+      fs.mkdirSync(tmpExtract, { recursive: true });
+      const ps1Path = path.join(BINARIES_DIR, '_extract_npm.ps1');
+      const ps1Content = [
+        'Add-Type -AssemblyName System.IO.Compression.FileSystem',
+        `$zip = [System.IO.Compression.ZipFile]::OpenRead("${tmpArchive.replace(/\\/g, '\\\\')}")`,
+        `$dest = "${tmpExtract.replace(/\\/g, '\\\\')}"`,
+        `foreach ($entry in $zip.Entries) {`,
+        `  $rel = $entry.FullName`,
+        `  if ($rel -like "${archiveName}/npm.cmd" -or $rel -like "${archiveName}/npx.cmd" -or $rel -like "${archiveName}/node_modules/npm/*") {`,
+        `    $targetPath = Join-Path $dest ($rel -replace "^${archiveName}/", "")`,
+        `    $targetDir = Split-Path $targetPath -Parent`,
+        `    if (!(Test-Path $targetDir)) { New-Item -ItemType Directory -Path $targetDir -Force | Out-Null }`,
+        `    if (!$entry.FullName.EndsWith("/")) { [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $targetPath, $true) }`,
+        `  }`,
+        `}`,
+        '$zip.Dispose()',
+      ].join('\n');
+      fs.writeFileSync(ps1Path, ps1Content);
+      try {
+        execSync(`powershell -ExecutionPolicy Bypass -File "${ps1Path}"`, { stdio: 'inherit' });
+      } finally {
+        fs.unlinkSync(ps1Path);
+      }
+      // Move extracted files to npm dest
+      fs.mkdirSync(npmDest, { recursive: true });
+      if (fs.existsSync(path.join(tmpExtract, 'npm.cmd'))) {
+        fs.renameSync(path.join(tmpExtract, 'npm.cmd'), path.join(npmDest, 'npm.cmd'));
+      }
+      if (fs.existsSync(path.join(tmpExtract, 'npx.cmd'))) {
+        fs.renameSync(path.join(tmpExtract, 'npx.cmd'), path.join(npmDest, 'npx.cmd'));
+      }
+      if (fs.existsSync(path.join(tmpExtract, 'node_modules', 'npm'))) {
+        fs.mkdirSync(path.join(npmDest, 'node_modules'), { recursive: true });
+        fs.renameSync(
+          path.join(tmpExtract, 'node_modules', 'npm'),
+          path.join(npmDest, 'node_modules', 'npm')
+        );
+      }
+      fs.rmSync(tmpExtract, { recursive: true, force: true });
+    }
+
+    console.log(`      Extracted npm to ${npmDest}`);
+  } finally {
+    if (fs.existsSync(tmpArchive)) fs.unlinkSync(tmpArchive);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Step B: Populate resources/ with sidecar payload
 // ---------------------------------------------------------------------------
 
@@ -337,6 +433,64 @@ function prepareMacOSBgPolicy() {
     console.log(`      Copied preload-bg-policy.js`);
   } else {
     console.log('      WARN: native/preload-bg-policy.js not found');
+  }
+}
+
+/**
+ * Strip PWA/Service Worker artifacts from the frontend dist.
+ *
+ * The frontend build runs without TAURI_ENV_TARGET_TRIPLE (which is only set
+ * by `cargo tauri build`), so VitePWA generates sw.js, registerSW.js, and a
+ * manifest. These must be removed before bundling into the Tauri app because
+ * the Service Worker intercepts requests and breaks WebSocket connections.
+ *
+ * Cleans both the frontend dist (used by Tauri's frontendDist) and the backend
+ * dist/public copy (served by Fastify in production).
+ */
+function stripPwaArtifacts() {
+  console.log('[4b/12] Stripping PWA artifacts from frontend dist...');
+
+  const dirs = [
+    path.join(ROOT, 'packages', 'frontend', 'dist'),
+    path.join(ROOT, 'packages', 'backend', 'dist', 'public'),
+  ];
+
+  const exactFiles = ['sw.js', 'sw.js.map', 'registerSW.js', 'manifest.webmanifest'];
+
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir)) continue;
+
+    // Remove known PWA files
+    for (const file of exactFiles) {
+      const filePath = path.join(dir, file);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log(`      Removed ${path.relative(ROOT, filePath)}`);
+      }
+    }
+
+    // Remove workbox runtime (filename contains a hash, e.g. workbox-977eaa84.js)
+    for (const entry of fs.readdirSync(dir)) {
+      if (entry.startsWith('workbox-') && entry.endsWith('.js')) {
+        fs.unlinkSync(path.join(dir, entry));
+        console.log(`      Removed ${path.relative(ROOT, path.join(dir, entry))}`);
+      }
+    }
+
+    // Strip registerSW script tag and manifest link from index.html
+    const indexPath = path.join(dir, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      let html = fs.readFileSync(indexPath, 'utf-8');
+      const original = html;
+      // Remove: <script id="vite-plugin-pwa:register-sw" src="/registerSW.js"></script>
+      html = html.replace(/<script\s+id="vite-plugin-pwa:register-sw"[^>]*><\/script>/g, '');
+      // Remove: <link rel="manifest" href="/manifest.webmanifest">
+      html = html.replace(/<link\s+rel="manifest"[^>]*>/g, '');
+      if (html !== original) {
+        fs.writeFileSync(indexPath, html);
+        console.log(`      Cleaned ${path.relative(ROOT, indexPath)}`);
+      }
+    }
   }
 }
 
@@ -401,6 +555,7 @@ function generatePackageJson() {
   delete deps['@animus-labs/shared'];
   delete deps['@animus-labs/agents'];
   delete deps['@animus-labs/tts-native'];
+  delete deps['@anthropic-ai/claude-agent-sdk'];
 
   const resourcePkg = {
     private: true,
@@ -762,15 +917,29 @@ function verify() {
   const platform = process.env.TAURI_TARGET_PLATFORM || process.platform;
   const binExt = platform === 'win32' ? '.exe' : '';
 
+  const isWindows = process.platform === 'win32';
+
   const checks = [
     { path: path.join(RESOURCES_DIR, 'backend', 'index.js'), label: 'resources/backend/index.js' },
     { path: path.join(RESOURCES_DIR, 'node_modules', 'fastify'), label: 'resources/node_modules/fastify' },
     { path: path.join(RESOURCES_DIR, 'node_modules', '@animus-labs', 'shared', 'dist'), label: 'resources/node_modules/@animus-labs/shared/dist' },
     { path: path.join(RESOURCES_DIR, 'node_modules', '@animus-labs', 'agents', 'dist'), label: 'resources/node_modules/@animus-labs/agents/dist' },
-    { path: path.join(RESOURCES_DIR, 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'cli.js'), label: 'Claude SDK cli.js' },
     { path: path.join(RESOURCES_DIR, 'node_modules', '@openai', 'codex-sdk', 'vendor'), label: 'Codex SDK vendor/' },
     { path: path.join(BINARIES_DIR, `ffmpeg-${targetTriple}${binExt}`), label: `binaries/ffmpeg-${targetTriple}${binExt}` },
   ];
+
+  // Verify bundled npm
+  if (isWindows) {
+    checks.push(
+      { path: path.join(RESOURCES_DIR, 'npm', 'npm.cmd'), label: 'Bundled npm (resources/npm/npm.cmd)' },
+      { path: path.join(RESOURCES_DIR, 'npm', 'node_modules', 'npm', 'index.js'), label: 'Bundled npm package' },
+    );
+  } else {
+    checks.push(
+      { path: path.join(RESOURCES_DIR, 'npm', 'bin', 'npm'), label: 'Bundled npm (resources/npm/bin/npm)' },
+      { path: path.join(RESOURCES_DIR, 'npm', 'lib', 'node_modules', 'npm', 'index.js'), label: 'Bundled npm package' },
+    );
+  }
 
   // On macOS, verify the dock icon suppression files
   if (process.platform === 'darwin') {
@@ -809,7 +978,9 @@ async function main() {
     await downloadNodeBinary();
     await downloadFfmpegBinary();
     cleanResources();
+    await extractBundledNpm();
     prepareMacOSBgPolicy();
+    stripPwaArtifacts();
     copyBackendDist();
     generatePackageJson();
     installDependencies();

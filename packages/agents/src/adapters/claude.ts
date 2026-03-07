@@ -27,9 +27,10 @@ import { createTaggedLogger, type Logger } from '../logger.js';
 import { CLAUDE_CAPABILITIES } from '../capabilities.js';
 import { BaseAdapter, BaseSession, type AdapterOptions } from './base.js';
 import { generateUUID, now, createPendingSessionId } from '../utils/index.js';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 // Type declarations for the Claude Agent SDK
 // The actual SDK will be dynamically imported
@@ -301,9 +302,11 @@ export class ClaudeAdapter extends BaseAdapter {
   readonly capabilities: AdapterCapabilities = CLAUDE_CAPABILITIES;
 
   private sdk: ClaudeSDK | null = null;
+  private runtimeSdkPath: string | undefined;
 
   constructor(options?: AdapterOptions) {
     super(options);
+    this.runtimeSdkPath = options?.runtimeSdkPath;
     this.initLogger(options);
   }
 
@@ -353,26 +356,55 @@ export class ClaudeAdapter extends BaseAdapter {
 
   /**
    * Load the Claude SDK dynamically.
+   *
+   * Resolution order:
+   * 1. Standard node_modules (dev monorepo, Docker)
+   * 2. Runtime-installed SDK path (Tauri production: data/sdks/claude/)
    */
   private async loadSDK(): Promise<ClaudeSDK> {
     if (this.sdk) {
       return this.sdk;
     }
 
+    // Try standard node_modules first (works in dev, Docker)
     try {
       const module = await import('@anthropic-ai/claude-agent-sdk');
       this.sdk = module as unknown as ClaudeSDK;
       return this.sdk;
-    } catch (error) {
-      throw new AgentError({
-        code: 'SDK_LOAD_FAILED',
-        message: 'Failed to load Claude Agent SDK. Is @anthropic-ai/claude-agent-sdk installed?',
-        category: 'invalid_input',
-        severity: 'fatal',
-        provider: 'claude',
-        cause: error instanceof Error ? error : undefined,
-      });
+    } catch {
+      // Not in standard node_modules, try runtime path
     }
+
+    // Try runtime-installed SDK (Tauri production)
+    if (this.runtimeSdkPath) {
+      const sdkDir = join(
+        this.runtimeSdkPath, 'node_modules', '@anthropic-ai', 'claude-agent-sdk',
+      );
+      const sdkPkgPath = join(sdkDir, 'package.json');
+      if (existsSync(sdkPkgPath)) {
+        try {
+          const sdkPkg = JSON.parse(readFileSync(sdkPkgPath, 'utf-8'));
+          const entryPoint = join(sdkDir, sdkPkg.main || 'index.js');
+          const module = await import(pathToFileURL(entryPoint).href);
+          this.sdk = module as unknown as ClaudeSDK;
+          this.logger.debug('Loaded Claude SDK from runtime path', { path: entryPoint });
+          return this.sdk;
+        } catch (error) {
+          this.logger.warn('Failed to load Claude SDK from runtime path', {
+            path: sdkDir,
+            error: String(error),
+          });
+        }
+      }
+    }
+
+    throw new AgentError({
+      code: 'SDK_NOT_INSTALLED',
+      message: 'Claude Agent SDK is not installed. Complete setup to install it.',
+      category: 'invalid_input',
+      severity: 'fatal',
+      provider: 'claude',
+    });
   }
 
   /**

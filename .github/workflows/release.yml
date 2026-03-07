@@ -96,6 +96,7 @@ jobs:
 
       - name: Build Tauri app and create release
         uses: tauri-apps/tauri-action@v0
+        id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -112,3 +113,21 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.tauri-args }}
+
+      - name: Upload stable-named download assets
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          # For each artifact the tauri-action uploaded, upload a copy without the version number
+          for ARTIFACT in ${{ join(fromJson(steps.tauri.outputs.artifactPaths), ' ') }}; do
+            BASENAME=$(basename "$ARTIFACT")
+            # Strip version from filename: Animus_0.2.1_aarch64.dmg -> Animus_aarch64.dmg
+            STABLE_NAME=$(echo "$BASENAME" | sed "s/_${VERSION}//; s/_${VERSION}//")
+            if [ "$STABLE_NAME" != "$BASENAME" ]; then
+              cp "$ARTIFACT" "$(dirname "$ARTIFACT")/$STABLE_NAME"
+              gh release upload "$TAG" "$(dirname "$ARTIFACT")/$STABLE_NAME" --clobber
+            fi
+          done

@@ -1,1 +1,7 @@
+# Reject commits with Co-Authored-By lines
+if grep -q '^Co-Authored-By:' "$1"; then
+  echo "error: Co-Authored-By lines are not allowed in commit messages"
+  exit 1
+fi
+
 npx --no -- commitlint --edit "$1"

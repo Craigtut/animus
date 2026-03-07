@@ -21,6 +21,7 @@ import { execFile } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { homedir, platform, arch } from 'node:os';
 import { createLogger } from './logger.js';
+import { DATA_DIR } from '../utils/env.js';
 
 const log = createLogger('CliPaths', 'server');
 
@@ -61,6 +62,15 @@ export function resolveClaudeCliPaths(): { bundledCliJs: string | null; nativeBi
     }
   } catch {
     log.debug('Claude Agent SDK package not found in node_modules');
+  }
+
+  // Fallback: check runtime-installed SDK (Tauri production)
+  if (!bundledCliJs) {
+    const runtimeCliJs = join(DATA_DIR, 'sdks', 'claude', 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'cli.js');
+    if (existsSync(runtimeCliJs)) {
+      bundledCliJs = runtimeCliJs;
+      log.debug(`Found Claude SDK cli.js at runtime path ${runtimeCliJs}`);
+    }
   }
 
   // Find native binary in well-known locations

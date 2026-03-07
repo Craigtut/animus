@@ -42,11 +42,12 @@ export function AuthGuard({ children }: AuthGuardProps) {
     enabled: sealStatus?.sealState !== 'sealed' && sealStatus?.sealState !== 'needs-migration',
   });
 
-  // Check onboarding status for non-onboarding routes
+  // Check onboarding status for routing decisions
   const isOnboardingRoute = location.pathname.startsWith('/onboarding');
+  const isSetupRoute = location.pathname.startsWith('/setup');
   const { data: onboardingState, isLoading: onboardingLoading } = trpc.onboarding.getState.useQuery(
     undefined,
-    { enabled: !!meData && !isOnboardingRoute, retry: false, refetchOnWindowFocus: false }
+    { enabled: !!meData, retry: false, refetchOnWindowFocus: false }
   );
 
   useEffect(() => {
@@ -66,7 +67,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
     return <Navigate to="/migrate" replace />;
   }
 
-  if (sealLoading || authLoading || statusLoading || (meData && !isOnboardingRoute && onboardingLoading)) {
+  if (sealLoading || authLoading || statusLoading || (meData && onboardingLoading)) {
     return (
       <div css={css`
         min-height: 100vh;
@@ -88,8 +89,14 @@ export function AuthGuard({ children }: AuthGuardProps) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // If onboarding isn't complete, redirect non-onboarding routes to onboarding
-  if (!isOnboardingRoute && onboardingState && !onboardingState.isComplete) {
+  // If onboarding is complete, prevent access to onboarding routes (but not /setup,
+  // which handles SDK installation independently of onboarding state)
+  if (isOnboardingRoute && onboardingState?.isComplete) {
+    return <Navigate to="/" replace />;
+  }
+
+  // If onboarding isn't complete, redirect non-onboarding/non-setup routes to onboarding
+  if (!isOnboardingRoute && !isSetupRoute && onboardingState && !onboardingState.isComplete) {
     return <Navigate to="/onboarding" replace />;
   }
 

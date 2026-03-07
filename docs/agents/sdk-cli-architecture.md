@@ -99,7 +99,7 @@ _resetCache(): void
 | Mode | Claude SDK `cli.js` | Claude Native Binary | Codex Bundled Binary |
 |------|--------------------|--------------------|---------------------|
 | **Dev** (monorepo) | `node_modules/@anthropic-ai/...` | User-installed (`~/.local/bin/` etc.) | `node_modules/@openai/...` |
-| **Tauri** (production) | `resources/node_modules/@anthropic-ai/...` | User-installed (if present) | `resources/node_modules/@openai/...` |
+| **Tauri** (production) | Runtime-installed to `data/sdks/claude/` | User-installed (if present) | `resources/node_modules/@openai/...` |
 | **Docker** | `node_modules/@anthropic-ai/...` | Not typically available | `node_modules/@openai/...` |
 
 In Docker, API keys are the expected auth method. The native Claude binary and CLI auth flows are for desktop users.
@@ -125,9 +125,11 @@ The agent execution itself uses the SDK-bundled `cli.js`, which does NOT need th
 
 ## Tauri Build Verification
 
-The `scripts/prepare-tauri.mjs` verification step confirms SDK CLIs are present in the production bundle:
-- `resources/node_modules/@anthropic-ai/claude-agent-sdk/cli.js`
+The `scripts/prepare-tauri.mjs` verification step confirms SDK CLIs and npm are present in the production bundle:
+- `resources/npm/bin/npm` and `resources/npm/lib/node_modules/npm/` (bundled npm for runtime SDK installation)
 - `resources/node_modules/@openai/codex-sdk/vendor/`
+
+The Claude Agent SDK is NOT bundled in the Tauri production build. It is installed at runtime to `data/sdks/claude/` on first launch using the bundled npm. This avoids redistributing the proprietary SDK. See `docs/agents/claude/runtime-sdk-installation.md` for details.
 
 ---
 

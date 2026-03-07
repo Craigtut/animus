@@ -33,6 +33,8 @@ import { generateUUID, now, createSessionId, parseSessionId } from '../utils/ind
 export interface AdapterOptions {
   /** Custom logger instance */
   logger?: Logger | undefined;
+  /** Path to runtime-installed SDK (e.g. data/sdks/claude for Tauri production) */
+  runtimeSdkPath?: string | undefined;
 }
 
 /**

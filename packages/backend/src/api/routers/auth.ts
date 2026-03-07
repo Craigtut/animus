@@ -149,6 +149,24 @@ export const authRouter = router({
   }),
 
   /**
+   * Return the JWT for WebSocket authentication via connectionParams.
+   * WKWebView on macOS doesn't send cookies with WebSocket upgrade requests.
+   * The frontend fetches the token over HTTP (which does send cookies), then
+   * passes it via tRPC's connectionParams (first WS message, not in the URL).
+   */
+  wsToken: protectedProcedure.query(({ ctx }) => {
+    const cookieHeader = ctx.req.headers.cookie;
+    const token = cookieHeader
+      ?.split(';')
+      .map((c) => c.trim())
+      .find((c) => c.startsWith(`${COOKIE_OPTIONS.cookieName}=`))
+      ?.split('=')
+      .slice(1)
+      .join('=') ?? null;
+    return { token };
+  }),
+
+  /**
    * Get current authenticated user.
    */
   me: protectedProcedure.query(({ ctx }) => {

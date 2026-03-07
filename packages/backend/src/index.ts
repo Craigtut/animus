@@ -80,6 +80,7 @@ async function main() {
   const fsMod = await import('node:fs');
   fsMod.mkdirSync(path.join(DATA_DIR, 'logs'), { recursive: true });
   fsMod.mkdirSync(path.join(DATA_DIR, 'workspace'), { recursive: true });
+  fsMod.mkdirSync(path.join(DATA_DIR, 'sdks'), { recursive: true });
 
   // Log process identity for production diagnostics
   logProcessIdentity('sidecar');

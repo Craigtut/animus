@@ -45,10 +45,10 @@ export interface TRPCContext {
   userId: string | null;
 }
 
-export async function createTRPCContext({
-  req,
-  res,
-}: CreateFastifyContextOptions): Promise<TRPCContext> {
+export async function createTRPCContext(
+  opts: CreateFastifyContextOptions,
+): Promise<TRPCContext> {
+  const { req, res } = opts;
   let userId: string | null = null;
   try {
     if (typeof (req as any).jwtVerify === 'function') {
@@ -56,8 +56,18 @@ export async function createTRPCContext({
       const decoded = await (req as any).jwtVerify() as JwtPayload;
       userId = decoded.userId;
     } else {
-      // WebSocket raw IncomingMessage — manually verify JWT from cookie
-      const token = extractCookieValue(req.headers.cookie, COOKIE_NAME);
+      // WebSocket raw IncomingMessage — try cookie first
+      let token = extractCookieValue(req.headers.cookie, COOKIE_NAME);
+
+      // Fallback: use connectionParams. WKWebView on macOS doesn't reliably
+      // send cookies with WebSocket upgrade requests. The client sends the
+      // JWT via tRPC's connectionParams (first message after WS connect),
+      // which the server receives in info.connectionParams.
+      if (!token) {
+        const info = (opts as any).info as { connectionParams?: Record<string, string> | null } | undefined;
+        token = info?.connectionParams?.['token'] ?? null;
+      }
+
       if (token) {
         const decoded = await verifyJwt(token) as JwtPayload;
         userId = decoded.userId;

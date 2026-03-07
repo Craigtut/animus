@@ -2,6 +2,7 @@
 import { css, useTheme } from '@emotion/react';
 import { useNavigate } from 'react-router-dom';
 import { useRef, useState, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { FluidBackground } from '../components/effects/FluidBackground';
 import { trpc } from '../utils/trpc';
 import { useHeartbeatStore } from '../store/heartbeat-store';
@@ -26,6 +27,7 @@ function mapDirectionToRole(direction: string): 'user' | 'assistant' {
 export function PresencePage() {
   const theme = useTheme();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const messageInputRef = useRef<MessageInputHandle>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -42,7 +44,12 @@ export function PresencePage() {
   });
   const { data: persona } = trpc.persona.get.useQuery(undefined, { retry: false });
 
-  const sendMutation = trpc.messages.send.useMutation();
+  const sendMutation = trpc.messages.send.useMutation({
+    onSuccess: () => {
+      // Immediately refetch messages so the sent message appears in the UI
+      queryClient.invalidateQueries({ queryKey: [['messages', 'getRecent']] });
+    },
+  });
 
   // ── Store state ──
   const replyStream = useHeartbeatStore((s) => s.replyStream);

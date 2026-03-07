@@ -86,6 +86,9 @@ export interface AgentManagerConfig {
 
   /** Warmth thresholds for session state tracking */
   warmthThresholds?: Partial<WarmthThresholds>;
+
+  /** Path to runtime-installed SDK directory (Tauri production: data/sdks/claude) */
+  runtimeSdkPath?: string;
 }
 
 /**
@@ -142,7 +145,7 @@ export class AgentManager {
 
     // Auto-register default adapters unless disabled
     if (config?.autoRegisterAdapters !== false) {
-      this.registerDefaultAdapters(config?.logger);
+      this.registerDefaultAdapters(config);
     }
 
     // Register cleanup handlers
@@ -152,8 +155,9 @@ export class AgentManager {
   /**
    * Register the default adapters for all providers.
    */
-  private registerDefaultAdapters(logger?: Logger): void {
-    this.registerAdapter(new ClaudeAdapter({ logger }));
+  private registerDefaultAdapters(config?: AgentManagerConfig): void {
+    const { logger, runtimeSdkPath } = config ?? {};
+    this.registerAdapter(new ClaudeAdapter({ logger, runtimeSdkPath }));
     this.registerAdapter(new CodexAdapter({ logger }));
     this.registerAdapter(new OpenCodeAdapter({ logger }));
   }
