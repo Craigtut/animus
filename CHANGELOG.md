@@ -1,3 +1,10 @@
+## [0.2.2](https://github.com/Craigtut/animus/compare/v0.2.1...v0.2.2) (2026-03-07)
+
+### Bug Fixes
+
+* **release:** fix bump-version entry guard on windows ([1c6acd5](https://github.com/Craigtut/animus/commit/1c6acd50aa400006945b4ca16a9baeea41ef5f19))
+* **tauri:** windows production build and runtime fixes ([fa67e84](https://github.com/Craigtut/animus/commit/fa67e84f779739ac531aebdefc13f0f01e49d61a))
+
 # Changelog
 
 All notable changes to the Animus Engine will be documented in this file.
