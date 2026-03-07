@@ -220,6 +220,7 @@ function main() {
 export { main as bumpVersion };
 
 // Run if called directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+import { pathToFileURL } from 'node:url';
+if (import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   main();
 }
