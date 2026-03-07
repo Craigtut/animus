@@ -1,3 +1,13 @@
+## [0.2.1](https://github.com/Craigtut/animus/compare/v0.2.0...v0.2.1) (2026-03-07)
+
+### Features
+
+* **tauri:** add Apple code signing and notarization for macOS builds ([a7247ea](https://github.com/Craigtut/animus/commit/a7247ea3043e867f046120dd7bca143fe389eedf))
+
+### Bug Fixes
+
+* **ci:** pull release notes from CHANGELOG.md into GitHub release ([88ba70c](https://github.com/Craigtut/animus/commit/88ba70c24d13dd68267c6a679fbfbe755ce92016))
+
 # Changelog
 
 All notable changes to the Animus Engine will be documented in this file.

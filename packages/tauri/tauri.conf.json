@@ -1,6 +1,6 @@
 {
   "productName": "Animus",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "identifier": "com.animus.desktop",
   "build": {
     "frontendDist": "../frontend/dist",
