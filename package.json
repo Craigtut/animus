@@ -11,7 +11,7 @@
     "dev": "node scripts/check-native.mjs && concurrently -n backend,frontend -c green,magenta \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "node scripts/check-native.mjs && npm run dev -w @animus-labs/backend",
     "dev:frontend": "npm run dev -w @animus-labs/frontend",
-    "dev:tauri": "cd packages/tauri && cargo tauri dev",
+    "dev:tauri": "node scripts/prepare-tauri-dev.mjs && cd packages/tauri && cargo tauri dev",
     "build": "npm run build --workspaces --if-present",
     "build:frontend": "npm run build -w @animus-labs/frontend",
     "build:backend": "npm run build -w @animus-labs/backend",
@@ -55,5 +55,9 @@
   "engines": {
     "node": ">=24.0.0"
   },
-  "packageManager": "npm@10.0.0"
+  "packageManager": "npm@10.0.0",
+  "dependencies": {
+    "@lancedb/lancedb-win32-x64-msvc": "^0.26.2",
+    "sharp": "^0.34.5"
+  }
 }

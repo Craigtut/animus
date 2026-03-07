@@ -40,29 +40,34 @@ function getPlatformInfo() {
 
   const map = {
     'darwin-arm64': {
-      targetTriple: 'node-aarch64-apple-darwin',
+      targetTriple: 'aarch64-apple-darwin',
       nodePlatform: 'darwin-arm64',
       ext: '.tar.gz',
+      ffmpegArch: 'arm64',
     },
     'darwin-x64': {
-      targetTriple: 'node-x86_64-apple-darwin',
+      targetTriple: 'x86_64-apple-darwin',
       nodePlatform: 'darwin-x64',
       ext: '.tar.gz',
+      ffmpegArch: 'amd64',
     },
     'linux-x64': {
-      targetTriple: 'node-x86_64-unknown-linux-gnu',
+      targetTriple: 'x86_64-unknown-linux-gnu',
       nodePlatform: 'linux-x64',
       ext: '.tar.xz',
+      ffmpegArch: 'amd64',
     },
     'linux-arm64': {
-      targetTriple: 'node-aarch64-unknown-linux-gnu',
+      targetTriple: 'aarch64-unknown-linux-gnu',
       nodePlatform: 'linux-arm64',
       ext: '.tar.xz',
+      ffmpegArch: 'arm64',
     },
     'win32-x64': {
-      targetTriple: 'node-x86_64-pc-windows-msvc.exe',
+      targetTriple: 'x86_64-pc-windows-msvc',
       nodePlatform: 'win-x64',
       ext: '.zip',
+      ffmpegArch: 'amd64',
     },
   };
 
@@ -81,10 +86,13 @@ function getPlatformInfo() {
 
 async function downloadNodeBinary() {
   const { targetTriple, nodePlatform, ext } = getPlatformInfo();
-  const destPath = path.join(BINARIES_DIR, targetTriple);
+  const platform = process.env.TAURI_TARGET_PLATFORM || process.platform;
+  // Tauri externalBin naming: <name>-<target-triple>[.exe]
+  const binExt = platform === 'win32' ? '.exe' : '';
+  const destPath = path.join(BINARIES_DIR, `node-${targetTriple}${binExt}`);
 
-  if (fs.existsSync(destPath)) {
-    console.log(`[1/10] Node.js binary already exists at ${destPath}, skipping download`);
+  if (fs.existsSync(destPath) && fs.statSync(destPath).size > 0) {
+    console.log(`[1/12] Node.js binary already exists at ${destPath}, skipping download`);
     return;
   }
 
@@ -92,7 +100,7 @@ async function downloadNodeBinary() {
   const archiveName = `node-${nodeVersion}-${nodePlatform}`;
   const url = `https://nodejs.org/dist/${nodeVersion}/${archiveName}${ext}`;
 
-  console.log(`[1/10] Downloading Node.js ${nodeVersion} for ${nodePlatform}...`);
+  console.log(`[1/12] Downloading Node.js ${nodeVersion} for ${nodePlatform}...`);
   console.log(`      URL: ${url}`);
 
   fs.mkdirSync(BINARIES_DIR, { recursive: true });
@@ -154,11 +162,126 @@ async function downloadNodeBinary() {
 }
 
 // ---------------------------------------------------------------------------
+// Step A2: Download FFmpeg binary
+// ---------------------------------------------------------------------------
+
+/**
+ * FFmpeg version to bundle. Uses LGPL builds from https://github.com/BtbN/FFmpeg-Builds
+ * (GPL-free, no libx264/libx265). Only the ffmpeg binary is extracted.
+ */
+const FFMPEG_VERSION = 'n7.1';
+
+async function downloadFfmpegBinary() {
+  const { targetTriple, ffmpegArch } = getPlatformInfo();
+  const platform = process.env.TAURI_TARGET_PLATFORM || process.platform;
+  const binExt = platform === 'win32' ? '.exe' : '';
+  const destPath = path.join(BINARIES_DIR, `ffmpeg-${targetTriple}${binExt}`);
+
+  if (fs.existsSync(destPath) && fs.statSync(destPath).size > 0) {
+    console.log(`[2/12] FFmpeg binary already exists at ${destPath}, skipping download`);
+    return;
+  }
+
+  // BtbN/FFmpeg-Builds release naming:
+  //   ffmpeg-n7.1-linux-amd64-lgpl-7.1.tar.xz
+  //   ffmpeg-n7.1-win64-lgpl-7.1.zip
+  //   ffmpeg-n7.1-macOS-amd64-lgpl-7.1.tar.xz (hypothetical)
+  // Note: BtbN only builds linux and windows. For macOS we use evermeet.cx.
+  let url;
+  let archiveName;
+  let archiveExt;
+  let ffmpegPathInArchive;
+
+  if (platform === 'win32') {
+    archiveName = `ffmpeg-${FFMPEG_VERSION}-latest-win64-lgpl-${FFMPEG_VERSION.slice(1)}`;
+    archiveExt = '.zip';
+    url = `https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${archiveName}${archiveExt}`;
+    ffmpegPathInArchive = `${archiveName}/bin/ffmpeg.exe`;
+  } else if (platform === 'linux') {
+    archiveName = `ffmpeg-${FFMPEG_VERSION}-latest-linux${ffmpegArch === 'arm64' ? 'arm64' : '64'}-lgpl-${FFMPEG_VERSION.slice(1)}`;
+    archiveExt = '.tar.xz';
+    url = `https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${archiveName}${archiveExt}`;
+    ffmpegPathInArchive = `${archiveName}/bin/ffmpeg`;
+  } else if (platform === 'darwin') {
+    // macOS: use evermeet.cx static builds (universal or arch-specific)
+    archiveExt = '.zip';
+    url = `https://evermeet.cx/ffmpeg/ffmpeg-${FFMPEG_VERSION.slice(1)}.zip`;
+    ffmpegPathInArchive = 'ffmpeg'; // flat zip, no subdirectory
+  } else {
+    console.log(`      WARN: No ffmpeg download source for platform ${platform}, skipping`);
+    return;
+  }
+
+  console.log(`[2/12] Downloading FFmpeg ${FFMPEG_VERSION} for ${platform}-${ffmpegArch}...`);
+  console.log(`      URL: ${url}`);
+
+  fs.mkdirSync(BINARIES_DIR, { recursive: true });
+
+  const tmpArchive = path.join(BINARIES_DIR, `ffmpeg-download${archiveExt}`);
+
+  try {
+    const response = await fetch(url, { redirect: 'follow' });
+    if (!response.ok) {
+      throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+    }
+
+    const fileStream = fs.createWriteStream(tmpArchive);
+    await pipeline(Readable.fromWeb(response.body), fileStream);
+
+    // Extract just the ffmpeg binary
+    if (archiveExt === '.tar.xz') {
+      const tmpExtract = path.join(BINARIES_DIR, '_ffmpeg_extract_tmp');
+      fs.mkdirSync(tmpExtract, { recursive: true });
+      execSync(
+        `tar -xf "${tmpArchive}" -C "${tmpExtract}" "${ffmpegPathInArchive}"`,
+        { stdio: 'inherit' }
+      );
+      fs.renameSync(path.join(tmpExtract, ffmpegPathInArchive), destPath);
+      fs.rmSync(tmpExtract, { recursive: true, force: true });
+    } else if (archiveExt === '.zip') {
+      if (platform === 'darwin') {
+        // macOS evermeet.cx zip: ffmpeg is at the root
+        const tmpExtract = path.join(BINARIES_DIR, '_ffmpeg_extract_tmp');
+        fs.mkdirSync(tmpExtract, { recursive: true });
+        execSync(`unzip -o "${tmpArchive}" ffmpeg -d "${tmpExtract}"`, { stdio: 'inherit' });
+        fs.renameSync(path.join(tmpExtract, 'ffmpeg'), destPath);
+        fs.rmSync(tmpExtract, { recursive: true, force: true });
+      } else {
+        // Windows: extract ffmpeg.exe using PowerShell
+        const ps1Path = path.join(BINARIES_DIR, '_ffmpeg_extract.ps1');
+        const ps1Content = [
+          'Add-Type -AssemblyName System.IO.Compression.FileSystem',
+          `$zip = [System.IO.Compression.ZipFile]::OpenRead("${tmpArchive.replace(/\\/g, '\\\\')}")`,
+          `$entry = $zip.Entries | Where-Object { $_.FullName -eq "${ffmpegPathInArchive.replace(/\\/g, '/')}" }`,
+          `[System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, "${destPath.replace(/\\/g, '\\\\')}", $true)`,
+          '$zip.Dispose()',
+        ].join('\n');
+        fs.writeFileSync(ps1Path, ps1Content);
+        try {
+          execSync(`powershell -ExecutionPolicy Bypass -File "${ps1Path}"`, { stdio: 'inherit' });
+        } finally {
+          fs.unlinkSync(ps1Path);
+        }
+      }
+    }
+
+    if (process.platform !== 'win32') {
+      fs.chmodSync(destPath, 0o755);
+    }
+    console.log(`      Saved to ${destPath}`);
+  } finally {
+    if (fs.existsSync(tmpArchive)) {
+      fs.unlinkSync(tmpArchive);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Step B: Populate resources/ with sidecar payload
 // ---------------------------------------------------------------------------
 
 function cleanResources() {
-  console.log('[2/10] Cleaning resources/ directory...');
+  console.log('[3/12] Cleaning resources/ directory...');
 
   if (!fs.existsSync(RESOURCES_DIR)) {
     fs.mkdirSync(RESOURCES_DIR, { recursive: true });
@@ -180,11 +303,11 @@ function cleanResources() {
  */
 function prepareMacOSBgPolicy() {
   if (process.platform !== 'darwin') {
-    console.log('[3/10] macOS background policy addon: skipped (not macOS)');
+    console.log('[4/12] macOS background policy addon: skipped (not macOS)');
     return;
   }
 
-  console.log('[3/10] Compiling macOS background policy addon...');
+  console.log('[4/12] Compiling macOS background policy addon...');
 
   const srcFile = path.join(NATIVE_DIR, 'macos_bg_policy.m');
   const preloadSrc = path.join(NATIVE_DIR, 'preload-bg-policy.js');
@@ -218,7 +341,7 @@ function prepareMacOSBgPolicy() {
 }
 
 function copyBackendDist() {
-  console.log('[4/10] Copying backend dist to resources/backend/...');
+  console.log('[5/12] Copying backend dist to resources/backend/...');
 
   const src = path.join(ROOT, 'packages', 'backend', 'dist');
   const dest = path.join(RESOURCES_DIR, 'backend');
@@ -233,7 +356,7 @@ function copyBackendDist() {
 }
 
 function copyWorkspacePackages() {
-  console.log('[9/10] Copying workspace packages (@animus-labs/shared, @animus-labs/agents, @animus-labs/tts-native)...');
+  console.log('[10/12] Copying workspace packages (@animus-labs/shared, @animus-labs/agents, @animus-labs/tts-native)...');
 
   const packages = ['shared', 'agents', 'tts-native'];
 
@@ -268,7 +391,7 @@ function copyWorkspacePackages() {
 }
 
 function generatePackageJson() {
-  console.log('[5/10] Generating resources/package.json...');
+  console.log('[6/12] Generating resources/package.json...');
 
   const backendPkgPath = path.join(ROOT, 'packages', 'backend', 'package.json');
   const backendPkg = JSON.parse(fs.readFileSync(backendPkgPath, 'utf-8'));
@@ -294,7 +417,7 @@ function generatePackageJson() {
 }
 
 function installDependencies() {
-  console.log('[6/10] Installing production dependencies in resources/...');
+  console.log('[7/12] Installing production dependencies in resources/...');
 
   execSync('npm install --omit=dev', {
     cwd: RESOURCES_DIR,
@@ -334,7 +457,7 @@ function formatMB(bytes) {
  *   - @anthropic-ai/claude-agent-sdk: vendor/ripgrep/{arch}-{os}/
  */
 function prunePlatformBinaries() {
-  console.log('[7/10] Pruning foreign-platform binaries...');
+  console.log('[8/12] Pruning foreign-platform binaries...');
 
   // Use target platform/arch (may differ from host when cross-compiling in CI)
   const platform = process.env.TAURI_TARGET_PLATFORM || process.platform;
@@ -438,7 +561,7 @@ function prunePlatformBinaries() {
  * declarations, test directories, C/C++ source, documentation, etc.
  */
 function pruneNonEssentialFiles() {
-  console.log('[8/10] Pruning non-essential files from node_modules...');
+  console.log('[9/12] Pruning non-essential files from node_modules...');
 
   const nodeModules = path.join(RESOURCES_DIR, 'node_modules');
   if (!fs.existsSync(nodeModules)) return;
@@ -571,11 +694,11 @@ function pruneNonEssentialFiles() {
  */
 function signNativeBinaries() {
   if (process.platform !== 'darwin') {
-    console.log('[10/11] Signing native binaries: skipped (not macOS)');
+    console.log('[11/12] Signing native binaries: skipped (not macOS)');
     return;
   }
 
-  console.log('[10/11] Signing native binaries for macOS notarization...');
+  console.log('[11/12] Signing native binaries for macOS notarization...');
 
   const identity = process.env.APPLE_SIGNING_IDENTITY || '-';
   const isAdHoc = identity === '-';
@@ -600,7 +723,7 @@ function signNativeBinaries() {
       } else if (entry.isFile() || entry.isSymbolicLink()) {
         const ext = path.extname(entry.name).toLowerCase();
         // Sign .node, .bare, .dylib, .so files and known native executables
-        if (ext === '.node' || ext === '.bare' || ext === '.dylib' || ext === '.so' || entry.name === 'rg') {
+        if (ext === '.node' || ext === '.bare' || ext === '.dylib' || ext === '.so' || entry.name === 'rg' || entry.name === 'ffmpeg') {
           nativeBinaries.push(fullPath);
         }
       }
@@ -633,7 +756,11 @@ function signNativeBinaries() {
 }
 
 function verify() {
-  console.log('[11/11] Verifying sidecar payload...');
+  console.log('[12/12] Verifying sidecar payload...');
+
+  const { targetTriple } = getPlatformInfo();
+  const platform = process.env.TAURI_TARGET_PLATFORM || process.platform;
+  const binExt = platform === 'win32' ? '.exe' : '';
 
   const checks = [
     { path: path.join(RESOURCES_DIR, 'backend', 'index.js'), label: 'resources/backend/index.js' },
@@ -642,6 +769,7 @@ function verify() {
     { path: path.join(RESOURCES_DIR, 'node_modules', '@animus-labs', 'agents', 'dist'), label: 'resources/node_modules/@animus-labs/agents/dist' },
     { path: path.join(RESOURCES_DIR, 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'cli.js'), label: 'Claude SDK cli.js' },
     { path: path.join(RESOURCES_DIR, 'node_modules', '@openai', 'codex-sdk', 'vendor'), label: 'Codex SDK vendor/' },
+    { path: path.join(BINARIES_DIR, `ffmpeg-${targetTriple}${binExt}`), label: `binaries/ffmpeg-${targetTriple}${binExt}` },
   ];
 
   // On macOS, verify the dock icon suppression files
@@ -679,6 +807,7 @@ async function main() {
 
   try {
     await downloadNodeBinary();
+    await downloadFfmpegBinary();
     cleanResources();
     prepareMacOSBgPolicy();
     copyBackendDist();

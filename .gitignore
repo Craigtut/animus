@@ -65,6 +65,7 @@ docker-compose.override.yml
 
 # Tauri build artifacts
 packages/tauri/binaries/node-*
+packages/tauri/binaries/ffmpeg-*
 packages/tauri/resources/backend/
 packages/tauri/resources/node_modules/
 packages/tauri/resources/package.json

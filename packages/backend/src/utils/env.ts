@@ -5,6 +5,7 @@
  * All data paths are derived from a single DATA_DIR.
  */
 
+import fs from 'node:fs';
 import { z } from 'zod';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -79,3 +80,25 @@ function loadEnv() {
 export const env = loadEnv();
 
 export type Env = z.infer<typeof envSchema>;
+
+// ---------------------------------------------------------------------------
+// App version — read once at startup from the nearest package.json
+// ---------------------------------------------------------------------------
+
+function readVersion(): string {
+  // In dev: monorepo root package.json has the canonical version.
+  // In production: the build script writes dist/version.json next to the entry point.
+  const candidates = [
+    path.join(PROJECT_ROOT, 'package.json'),
+    path.resolve(__dirname, '..', 'version.json'),
+  ];
+  for (const p of candidates) {
+    try {
+      const data = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      if (data.version) return data.version;
+    } catch { /* try next */ }
+  }
+  return '0.0.0';
+}
+
+export const APP_VERSION = readVersion();

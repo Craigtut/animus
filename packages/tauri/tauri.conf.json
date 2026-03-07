@@ -38,7 +38,8 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/node"
+      "binaries/node",
+      "binaries/ffmpeg"
     ],
     "resources": [
       "resources/"

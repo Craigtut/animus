@@ -11,10 +11,15 @@ import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('AudioUtils', 'speech');
 
+/** Resolve the ffmpeg binary: ANIMUS_FFMPEG_BIN env var, or 'ffmpeg' on PATH. */
+function ffmpegBin(): string {
+  return process.env['ANIMUS_FFMPEG_BIN'] || 'ffmpeg';
+}
+
 /** Check if ffmpeg is available on the system. */
 export async function checkFfmpeg(): Promise<boolean> {
   return new Promise((resolve) => {
-    const proc = spawn('ffmpeg', ['-version'], { stdio: 'ignore' });
+    const proc = spawn(ffmpegBin(), ['-version'], { stdio: 'ignore' });
     proc.on('error', () => resolve(false));
     proc.on('close', (code) => resolve(code === 0));
   });
@@ -23,7 +28,7 @@ export async function checkFfmpeg(): Promise<boolean> {
 /** Convert WebM/Opus audio buffer to raw PCM (16kHz mono Float32). */
 export async function webmToPcm(webmBuffer: Buffer): Promise<{ samples: Float32Array; sampleRate: number }> {
   return new Promise((resolve, reject) => {
-    const ffmpeg = spawn('ffmpeg', [
+    const ffmpeg = spawn(ffmpegBin(), [
       '-i', 'pipe:0',
       '-f', 'f32le',     // 32-bit float little-endian
       '-ar', '16000',     // 16kHz
@@ -90,7 +95,7 @@ export function pcmToWav(samples: Float32Array, sampleRate: number): Buffer {
 /** Convert WAV buffer to OGG/Opus using ffmpeg. */
 export async function wavToOggOpus(wavBuffer: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const ffmpeg = spawn('ffmpeg', [
+    const ffmpeg = spawn(ffmpegBin(), [
       '-i', 'pipe:0',
       '-c:a', 'libopus',
       '-b:a', '64k',

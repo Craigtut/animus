@@ -3,6 +3,22 @@ export function isTauri(): boolean {
 }
 
 /**
+ * Unregister any Service Workers left over from previous browser-mode builds.
+ * In Tauri, the PWA plugin is disabled, but a previously-registered SW may
+ * still be cached in WebView2 and intercept requests. Call once at startup.
+ */
+export function cleanupServiceWorkers(): void {
+  if (!isTauri()) return;
+  if (!('serviceWorker' in navigator)) return;
+
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    for (const reg of registrations) {
+      reg.unregister();
+    }
+  });
+}
+
+/**
  * Detect if running in Tauri on macOS.
  * macOS with transparent titlebar needs extra top padding for traffic lights.
  */

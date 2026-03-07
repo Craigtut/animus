@@ -6,7 +6,11 @@ This guide will help you set up Animus for local development.
 
 - **Node.js** 24.0 or higher
 - **npm** 10.0 or higher
-- Git
+- **Git**
+- **ffmpeg** (optional, required for voice/speech features)
+  - Windows: `winget install ffmpeg`
+  - macOS: `brew install ffmpeg`
+  - Linux: `sudo apt install ffmpeg` (Debian/Ubuntu) or `sudo dnf install ffmpeg` (Fedora)
 
 ## Installation
 

@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
 
+const isTauri = !!process.env.TAURI_ENV_TARGET_TRIPLE;
+
 export default defineConfig({
   plugins: [
     react({
@@ -11,7 +13,9 @@ export default defineConfig({
         plugins: ['@emotion/babel-plugin'],
       },
     }),
-    VitePWA({
+    // Disable PWA/Service Worker for Tauri builds — the desktop app
+    // doesn't need offline caching and the SW interferes with real-time updates.
+    !isTauri && VitePWA({
       registerType: 'autoUpdate',
       strategies: 'generateSW',
       workbox: {
