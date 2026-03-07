@@ -599,8 +599,8 @@ function signNativeBinaries() {
         findBinaries(fullPath);
       } else if (entry.isFile() || entry.isSymbolicLink()) {
         const ext = path.extname(entry.name).toLowerCase();
-        // Sign .node files, .bare files, and known native executables
-        if (ext === '.node' || ext === '.bare' || entry.name === 'rg') {
+        // Sign .node, .bare, .dylib, .so files and known native executables
+        if (ext === '.node' || ext === '.bare' || ext === '.dylib' || ext === '.so' || entry.name === 'rg') {
           nativeBinaries.push(fullPath);
         }
       }
