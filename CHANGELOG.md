@@ -1,15 +1,20 @@
-## [0.2.2](https://github.com/Craigtut/animus/compare/v0.2.1...v0.2.2) (2026-03-07)
-
-### Bug Fixes
-
-* **release:** fix bump-version entry guard on windows ([1c6acd5](https://github.com/Craigtut/animus/commit/1c6acd50aa400006945b4ca16a9baeea41ef5f19))
-* **tauri:** windows production build and runtime fixes ([fa67e84](https://github.com/Craigtut/animus/commit/fa67e84f779739ac531aebdefc13f0f01e49d61a))
-
 # Changelog
 
 All notable changes to the Animus Engine will be documented in this file.
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
+
+## [0.2.2](https://github.com/Craigtut/animus/compare/v0.2.1...v0.2.2) (2026-03-07)
+
+### Features
+
+* **tauri:** runtime Claude SDK installation and WebSocket auth for production builds ([ecbd0e2](https://github.com/Craigtut/animus/commit/ecbd0e2))
+
+### Bug Fixes
+
+* **ci:** move platform-specific deps to optionalDependencies ([d5d2c0b](https://github.com/Craigtut/animus/commit/d5d2c0b))
+* **release:** fix bump-version entry guard on windows ([1c6acd5](https://github.com/Craigtut/animus/commit/1c6acd5))
+* **tauri:** windows production build and runtime fixes ([fa67e84](https://github.com/Craigtut/animus/commit/fa67e84))
 
 ## [0.2.1](https://github.com/Craigtut/animus/compare/v0.2.0...v0.2.1) (2026-03-07)
 
