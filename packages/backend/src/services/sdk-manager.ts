@@ -67,8 +67,13 @@ class SdkManager {
     const resourcesDir = process.env['ANIMUS_RESOURCES_DIR'];
     if (resourcesDir) {
       // Use the npm-cli.js directly to avoid CJS/ESM shebang conflict
-      const npmCliJs = join(resourcesDir, 'npm', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
-      if (existsSync(npmCliJs)) {
+      // Try both possible npm-cli.js locations (with and without lib/ prefix)
+      const candidates = [
+        join(resourcesDir, 'npm', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+        join(resourcesDir, 'npm', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+      ];
+      const npmCliJs = candidates.find(p => existsSync(p));
+      if (npmCliJs) {
         log.debug(`Using bundled npm-cli.js at ${npmCliJs}`);
         return { bin: process.execPath, prefixArgs: [npmCliJs] };
       }
@@ -128,6 +133,8 @@ class SdkManager {
         execFile(npmBin, args, {
           cwd: installPath,
           timeout: 120_000,
+          // npm.cmd on Windows requires shell to execute
+          shell: platform() === 'win32' && npmBin.endsWith('.cmd'),
         }, (error, stdout, stderr) => {
           if (error) {
             log.error('npm install failed:', error);
