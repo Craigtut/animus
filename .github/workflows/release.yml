@@ -124,7 +124,7 @@ jobs:
           TAG="${{ github.ref_name }}"
           VERSION="${TAG#v}"
           # Parse artifact paths from JSON array via env var to avoid backslash mangling on Windows
-          echo "$ARTIFACT_JSON" | jq -r '.[]' | while IFS= read -r ARTIFACT; do
+          echo "$ARTIFACT_JSON" | jq -r '.[]' | tr -d '\r' | while IFS= read -r ARTIFACT; do
             [ -z "$ARTIFACT" ] && continue
             BASENAME=$(basename "$ARTIFACT")
             # Strip version from filename: Animus_0.2.1_aarch64.dmg -> Animus_aarch64.dmg
