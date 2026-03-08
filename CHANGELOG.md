@@ -1,3 +1,17 @@
+## [0.2.3](https://github.com/Craigtut/animus/compare/v0.2.2...v0.2.3) (2026-03-08)
+
+### Features
+
+* **tauri:** runtime SDK installation and WebSocket auth for production builds ([ecbd0e2](https://github.com/Craigtut/animus/commit/ecbd0e25176d4589af0fa0ab9cb437b59972e5d3))
+
+### Bug Fixes
+
+* **backend:** resolve npm spawn EINVAL on Windows for SDK installation ([3ae900a](https://github.com/Craigtut/animus/commit/3ae900a34477e279c5437a423f84d174eba32735))
+* **ci:** move platform-specific deps to optionalDependencies ([d5d2c0b](https://github.com/Craigtut/animus/commit/d5d2c0b4f063d45e0b28f4ca28585ce12b1697eb))
+* **ci:** preserve Windows backslash paths in release artifact upload ([0ac79d7](https://github.com/Craigtut/animus/commit/0ac79d71fd03edefe39039bd6d3dcff7071470bc))
+* **ci:** strip Windows carriage returns from artifact paths ([c52e73b](https://github.com/Craigtut/animus/commit/c52e73b3d6c6a1b819f74871a05c1a47d57bb1ce))
+* **deps:** bump swiper, fastify, dompurify, tar for security patches ([9195487](https://github.com/Craigtut/animus/commit/9195487a798ff553f548ba45aae1c5cc5ae44af7))
+
 # Changelog
 
 All notable changes to the Animus Engine will be documented in this file.
