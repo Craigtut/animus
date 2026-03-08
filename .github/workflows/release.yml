@@ -115,14 +115,17 @@ jobs:
           args: ${{ matrix.tauri-args }}
 
       - name: Upload stable-named download assets
+        if: steps.tauri.outputs.artifactPaths != '[]'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACT_JSON: ${{ steps.tauri.outputs.artifactPaths }}
         run: |
           TAG="${{ github.ref_name }}"
           VERSION="${TAG#v}"
-          # For each artifact the tauri-action uploaded, upload a copy without the version number
-          for ARTIFACT in ${{ join(fromJson(steps.tauri.outputs.artifactPaths), ' ') }}; do
+          # Parse artifact paths from JSON array via env var to avoid backslash mangling on Windows
+          echo "$ARTIFACT_JSON" | jq -r '.[]' | while IFS= read -r ARTIFACT; do
+            [ -z "$ARTIFACT" ] && continue
             BASENAME=$(basename "$ARTIFACT")
             # Strip version from filename: Animus_0.2.1_aarch64.dmg -> Animus_aarch64.dmg
             STABLE_NAME=$(echo "$BASENAME" | sed "s/_${VERSION}//; s/_${VERSION}//")
