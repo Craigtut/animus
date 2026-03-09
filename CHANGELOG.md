@@ -1,3 +1,10 @@
+## [0.3.1](https://github.com/Craigtut/animus/compare/v0.3.0...v0.3.1) (2026-03-09)
+
+### Bug Fixes
+
+* **ci:** ensure workspace node_modules dirs exist after prune in Docker build ([2409ec2](https://github.com/Craigtut/animus/commit/2409ec26da2ee04af7f74fb77c06988fbbeab550))
+* **frontend:** rename max saves label and add Tauri native export dialog ([c891192](https://github.com/Craigtut/animus/commit/c891192206fa301318f1416104ce6a903e0844c3))
+
 ## [0.3.0](https://github.com/Craigtut/animus/compare/v0.2.4...v0.3.0) (2026-03-09)
 
 ### Features
