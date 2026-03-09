@@ -1,3 +1,12 @@
+## [0.3.0](https://github.com/Craigtut/animus/compare/v0.2.4...v0.3.0) (2026-03-09)
+
+### Features
+
+* **backend:** add automatic save system for AI state ([db832ec](https://github.com/Craigtut/animus/commit/db832ecfa8eb8aca7d66bd47f09a4c06e31019d9))
+* **ci:** add Docker image build to release pipeline ([490c1a7](https://github.com/Craigtut/animus/commit/490c1a7a6fb959909a59aaca3478da4ad4c6b65c))
+* **frontend:** add context inspector for heartbeat tick prompts ([a04b872](https://github.com/Craigtut/animus/commit/a04b87278137fe6059d9090294180cbf7ec14c0c))
+* **tauri:** add desktop auto-update system ([4cba870](https://github.com/Craigtut/animus/commit/4cba8706f2711da000e509e6e66a251b0a735548))
+
 ## [0.2.4](https://github.com/Craigtut/animus/compare/v0.2.3...v0.2.4) (2026-03-09)
 
 ### Bug Fixes

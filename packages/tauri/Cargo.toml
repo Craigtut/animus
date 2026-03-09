@@ -1,6 +1,6 @@
 [package]
 name = "animus-desktop"
-version = "0.2.4"
+version = "0.3.0"
 description = "Animus Desktop App"
 authors = ["Animus Contributors"]
 edition = "2021"
