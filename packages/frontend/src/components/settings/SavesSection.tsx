@@ -21,6 +21,7 @@ import { trpc } from '../../utils/trpc';
 import { toast } from '../../store/toast-store';
 import { useHeartbeatStore } from '../../store/heartbeat-store';
 import { useMessagesStore } from '../../store/messages-store';
+import { isTauri } from '../../utils/tauri';
 
 // ============================================================================
 // Types
@@ -425,7 +426,7 @@ function AutosaveBanner() {
 
               <div css={css`flex: 1; min-width: 100px;`}>
                 <Select
-                  label="Max saves"
+                  label="Max autosaves"
                   options={MAX_COUNT_OPTIONS}
                   value={String(maxCount)}
                   onChange={handleMaxCountChange}
@@ -526,20 +527,42 @@ export function SavesSection() {
 
   const handleExport = async (saveId: string, saveName: string) => {
     setExportingId(saveId);
+    const fileName = `${saveName.replace(/[^a-zA-Z0-9_-]/g, '_')}.animus`;
     try {
-      const response = await fetch(`/api/saves/${saveId}/export`, { credentials: 'include' });
-      if (!response.ok) throw new Error('Export failed');
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${saveName.replace(/[^a-zA-Z0-9_-]/g, '_')}.animus`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch {
-      // Export failed silently
+      if (isTauri()) {
+        // Tauri: use native save dialog, then tell backend to copy the file directly
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        const destPath = await save({
+          defaultPath: fileName,
+          filters: [{ name: 'Animus Save', extensions: ['animus'] }],
+        });
+        if (!destPath) return; // User cancelled
+        const response = await fetch(`/api/saves/${saveId}/export-to-path`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ destPath }),
+        });
+        if (!response.ok) throw new Error('Export failed');
+        toast.success('Save exported successfully.');
+      } else {
+        // Browser: download via blob URL
+        const response = await fetch(`/api/saves/${saveId}/export`, { credentials: 'include' });
+        if (!response.ok) throw new Error('Export failed');
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message === 'Export failed') {
+        toast.error('Failed to export save.');
+      }
     } finally {
       setExportingId(null);
     }
