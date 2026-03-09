@@ -1,3 +1,9 @@
+## [0.2.4](https://github.com/Craigtut/animus/compare/v0.2.3...v0.2.4) (2026-03-09)
+
+### Bug Fixes
+
+* **agents:** resolve codex binary in ESM-only SDK packages ([94105aa](https://github.com/Craigtut/animus/commit/94105aacd04a728e79964e85b846833339a44bfa))
+
 ## [0.2.3](https://github.com/Craigtut/animus/compare/v0.2.2...v0.2.3) (2026-03-08)
 
 ### Features
