@@ -377,6 +377,29 @@ export interface PaginatedResponse<T> {
 }
 
 // ============================================================================
+// Context Builder (context-builder output types, shared with frontend)
+// ============================================================================
+
+export type ContextSectionCategory =
+  | 'identity'
+  | 'trigger'
+  | 'state'
+  | 'memory'
+  | 'goals'
+  | 'system'
+  | 'plugins';
+
+export interface ContextSection {
+  id: string;
+  title: string;
+  included: boolean;
+  content?: string;
+  reason?: string;
+  category: ContextSectionCategory;
+  tokenCount: number;
+}
+
+// ============================================================================
 // Distribution (Package System)
 // ============================================================================
 

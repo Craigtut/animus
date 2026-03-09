@@ -370,6 +370,28 @@ export function getLastColdSystemPrompt(
   return (data as Record<string, unknown>)['systemPrompt'] as string | null;
 }
 
+/**
+ * Get the system prompt manifest from the most recent cold-session tick_input.
+ * Used to backfill warm sessions that don't carry their own system prompt manifest.
+ */
+export function getLastColdSystemPromptManifest(
+  db: Database.Database,
+): unknown[] | null {
+  const row = db
+    .prepare(
+      `SELECT * FROM agent_events
+       WHERE event_type = 'tick_input'
+         AND JSON_EXTRACT(data, '$.systemPromptManifest') IS NOT NULL
+       ORDER BY created_at DESC LIMIT 1`
+    )
+    .get() as Record<string, unknown> | undefined;
+
+  if (!row) return null;
+  const e = snakeToCamel<AgentEvent>(row);
+  const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+  return (data as Record<string, unknown>)['systemPromptManifest'] as unknown[] | null;
+}
+
 // ============================================================================
 // Timeline (for Agent Timeline feature)
 // ============================================================================

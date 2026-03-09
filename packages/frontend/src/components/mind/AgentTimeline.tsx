@@ -19,6 +19,7 @@ import {
   PaperPlaneRight,
   Database,
   Gear,
+  MagnifyingGlass,
 } from '@phosphor-icons/react';
 import { trpc } from '../../utils/trpc';
 import { useHeartbeatStore } from '../../store/heartbeat-store';
@@ -80,6 +81,7 @@ interface TickUsage {
 interface AgentTimelineProps {
   tickNumber: number;
   onBack: () => void;
+  onInspectContext?: () => void;
 }
 
 // ============================================================================
@@ -375,7 +377,7 @@ function getPreviewContent(event: TimelineEvent): string {
       const toolName = str(d['toolName']);
       const input = (d['toolInput'] ?? d['input']) as Record<string, unknown> | undefined;
       const summary = getToolCallSummary(toolName, input);
-      return summary ? `${toolName} — ${summary}` : toolName;
+      return summary ? `${toolName}: ${summary}` : toolName;
     }
     case 'tool_call_end': {
       const toolName = str(d['toolName']);
@@ -385,11 +387,11 @@ function getPreviewContent(event: TimelineEvent): string {
       // For some tools, show a brief output summary
       const outputSummary = getToolOutputSummary(toolName, output);
       return outputSummary
-        ? `${toolName} — ${outputSummary}${durStr}`
-        : `${toolName} — done${durStr}`;
+        ? `${toolName}: ${outputSummary}${durStr}`
+        : `${toolName}: done${durStr}`;
     }
     case 'tool_error':
-      return `${str(d['toolName'])} — ${truncate(str(d['error']) || str(d['message']), 60)}`;
+      return `${str(d['toolName'])}: ${truncate(str(d['error']) || str(d['message']), 60)}`;
     case 'response_start':
       return '';
     case 'response_end': {
@@ -934,7 +936,7 @@ function ToolInputDetail({ toolName, input }: { toolName: string; input: Record<
 // Event Detail Content
 // ============================================================================
 
-function EventDetail({ event, allEvents }: { event: TimelineEvent; allEvents: TimelineEvent[] }) {
+function EventDetail({ event, allEvents, onInspectContext }: { event: TimelineEvent; allEvents: TimelineEvent[]; onInspectContext?: () => void }) {
   const theme = useTheme();
   const d = event.data;
 
@@ -1023,6 +1025,36 @@ function EventDetail({ event, allEvents }: { event: TimelineEvent; allEvents: Ti
               <CodeBlock content={str(d['userMessage'])} maxHeight={300} />
             </DetailCollapsible>
           ) : null}
+          {onInspectContext != null && (
+            <div css={css`margin-top: ${theme.spacing[3]};`}>
+              <button
+                onClick={(e) => { e.stopPropagation(); onInspectContext(); }}
+                css={css`
+                  display: inline-flex;
+                  align-items: center;
+                  gap: ${theme.spacing[1]};
+                  font-size: ${theme.typography.fontSize.xs};
+                  font-weight: ${theme.typography.fontWeight.medium};
+                  color: ${theme.colors.text.secondary};
+                  border: 1px solid ${theme.colors.border.default};
+                  padding: ${theme.spacing[1]} ${theme.spacing[2]};
+                  border-radius: ${theme.borderRadius.sm};
+                  cursor: pointer;
+                  transition: all ${theme.transitions.micro};
+                  background: transparent;
+
+                  &:hover {
+                    color: ${theme.colors.text.primary};
+                    border-color: ${theme.colors.border.focus};
+                    background: ${theme.colors.background.elevated};
+                  }
+                `}
+              >
+                <MagnifyingGlass size={12} />
+                Inspect Context
+              </button>
+            </div>
+          )}
         </div>
       );
     }
@@ -1279,11 +1311,13 @@ function TimelineEventRow({
   allEvents,
   index,
   isLive,
+  onInspectContext,
 }: {
   event: TimelineEvent;
   allEvents: TimelineEvent[];
   index: number;
   isLive: boolean;
+  onInspectContext?: () => void;
 }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
@@ -1461,7 +1495,7 @@ function TimelineEventRow({
                 border: 1px solid ${theme.colors.border.light};
               `}
             >
-              <EventDetail event={event} allEvents={allEvents} />
+              <EventDetail event={event} allEvents={allEvents} onInspectContext={onInspectContext} />
             </motion.div>
           </motion.div>
         )}
@@ -1980,7 +2014,7 @@ function TimelineSkeleton() {
 // AgentTimeline (Main Component)
 // ============================================================================
 
-export function AgentTimeline({ tickNumber, onBack }: AgentTimelineProps) {
+export function AgentTimeline({ tickNumber, onBack, onInspectContext }: AgentTimelineProps) {
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -2066,7 +2100,13 @@ export function AgentTimeline({ tickNumber, onBack }: AgentTimelineProps) {
 
   // Filter out tick_output from event rows (it gets the completion card)
   const eventRows = useMemo(() => {
-    return allEvents.filter((e) => e.eventType !== 'tick_output');
+    const hasTickInput = allEvents.some((e) => e.eventType === 'tick_input');
+    return allEvents.filter((e) => {
+      if (e.eventType === 'tick_output') return false;
+      // Hide input_received when tick_input exists (tick_input is a superset)
+      if (hasTickInput && e.eventType === 'input_received') return false;
+      return true;
+    });
   }, [allEvents]);
 
   // Auto-scroll logic
@@ -2268,6 +2308,7 @@ export function AgentTimeline({ tickNumber, onBack }: AgentTimelineProps) {
             allEvents={allEvents}
             index={i}
             isLive={liveEvents.some((le) => le.id === event.id)}
+            onInspectContext={event.eventType === 'tick_input' ? onInspectContext : undefined}
           />
         ))}
 

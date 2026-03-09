@@ -115,6 +115,49 @@ function buildPersonaConfig(
 }
 
 // ============================================================================
+// Tick Input Logging Helper
+// ============================================================================
+
+function logTickInput(params: {
+  logSessionId: string;
+  tickNumber: number;
+  triggerType: string;
+  triggerContext: unknown;
+  sessionState: string;
+  compiledContext: CompiledContext;
+}): void {
+  const agentLogsDb = getAgentLogsDb();
+  const event = agentLogStore.insertEvent(agentLogsDb, {
+    sessionId: params.logSessionId,
+    eventType: 'tick_input',
+    data: {
+      tickNumber: params.tickNumber,
+      triggerType: params.triggerType,
+      triggerContext: params.triggerContext,
+      sessionState: params.sessionState,
+      systemPrompt: params.compiledContext.systemPrompt,
+      userMessage: params.compiledContext.userMessage,
+      systemPromptManifest: params.compiledContext.systemPromptManifest,
+      userMessageManifest: params.compiledContext.userMessageManifest,
+      tokenBreakdown: params.compiledContext.tokenBreakdown,
+    },
+  });
+  const eventBus = getEventBus();
+  eventBus.emit('agent:event:logged', {
+    id: event.id,
+    sessionId: event.sessionId,
+    eventType: event.eventType,
+    data: event.data,
+    createdAt: event.createdAt,
+  });
+  eventBus.emit('tick:input_stored', {
+    tickNumber: params.tickNumber,
+    triggerType: params.triggerType,
+    sessionState: params.sessionState,
+  });
+}
+
+// ============================================================================
 // Pipeline: Stage 2 -- MIND QUERY
 // ============================================================================
 
@@ -253,31 +296,13 @@ async function mindQuery(
     const logSessionId = ctx.mindSession.logSessionId?.() ?? null;
     if (logSessionId) {
       try {
-        const agentLogsDb = getAgentLogsDb();
-        const tickInputEvent = agentLogStore.insertEvent(agentLogsDb, {
-          sessionId: logSessionId,
-          eventType: 'tick_input',
-          data: {
-            tickNumber,
-            triggerType: gathered.trigger.type,
-            triggerContext: gathered.trigger,
-            sessionState: gathered.sessionState,
-            systemPrompt: context.systemPrompt,
-            userMessage: context.userMessage,
-            tokenBreakdown: context.tokenBreakdown,
-          },
-        });
-        eventBus.emit('agent:event:logged', {
-          id: tickInputEvent.id,
-          sessionId: tickInputEvent.sessionId,
-          eventType: tickInputEvent.eventType,
-          data: tickInputEvent.data,
-          createdAt: tickInputEvent.createdAt,
-        });
-        eventBus.emit('tick:input_stored', {
+        logTickInput({
+          logSessionId,
           tickNumber,
           triggerType: gathered.trigger.type,
+          triggerContext: gathered.trigger,
           sessionState: gathered.sessionState,
+          compiledContext: context,
         });
         tickInputLogged = true;
         log.info(`tick_input logged early for tick #${tickNumber}`);
@@ -635,31 +660,13 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     const logSessionId = ctx.mindSession.logSessionId?.() ?? null;
     if (logSessionId && !tickInputLogged) {
       try {
-        const agentLogsDb = getAgentLogsDb();
-        const tickInputEvent = agentLogStore.insertEvent(agentLogsDb, {
-          sessionId: logSessionId,
-          eventType: 'tick_input',
-          data: {
-            tickNumber,
-            triggerType: queuedTick.trigger.type,
-            triggerContext: queuedTick.trigger,
-            sessionState: gathered.sessionState,
-            systemPrompt: compiledContext.systemPrompt,
-            userMessage: compiledContext.userMessage,
-            tokenBreakdown: compiledContext.tokenBreakdown,
-          },
-        });
-        eventBus.emit('agent:event:logged', {
-          id: tickInputEvent.id,
-          sessionId: tickInputEvent.sessionId,
-          eventType: tickInputEvent.eventType,
-          data: tickInputEvent.data,
-          createdAt: tickInputEvent.createdAt,
-        });
-        eventBus.emit('tick:input_stored', {
+        logTickInput({
+          logSessionId,
           tickNumber,
           triggerType: queuedTick.trigger.type,
+          triggerContext: queuedTick.trigger,
           sessionState: gathered.sessionState,
+          compiledContext,
         });
       } catch (err) {
         log.warn('Failed to log tick_input event:', err);

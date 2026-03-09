@@ -8,6 +8,7 @@ import { trpc } from '../../utils/trpc';
 import { useHeartbeatStore } from '../../store/heartbeat-store';
 import { Typography } from '../ui';
 import { AgentTimeline } from './AgentTimeline';
+import { ContextInspector } from './ContextInspector';
 
 // ============================================================================
 // Trigger badge colors
@@ -80,7 +81,7 @@ function CollapsibleSection({
 // Badge
 // ============================================================================
 
-function Badge({ label, color }: { label: string; color: string }) {
+export function Badge({ label, color }: { label: string; color: string }) {
   const theme = useTheme();
   return (
     <span css={css`
@@ -240,7 +241,7 @@ function TickList({ onSelect }: { onSelect: (tickNumber: number) => void }) {
                 font-style: italic;
               `}
             >
-              In Progress — {heartbeatState.currentStage}
+              In Progress: {heartbeatState.currentStage}
             </Typography.SmallBody>
           </motion.button>
         )}
@@ -672,6 +673,14 @@ export function HeartbeatsSection() {
   const { viewMode, selectedTick } = useMemo(() => {
     const subPath = location.pathname.replace('/mind/heartbeats', '').replace(/^\//, '');
     if (subPath) {
+      // Check for /context suffix first
+      const contextMatch = subPath.match(/^(\d+)\/context$/);
+      if (contextMatch) {
+        const tickNum = parseInt(contextMatch[1]!, 10);
+        if (!isNaN(tickNum) && tickNum > 0) {
+          return { viewMode: 'context' as const, selectedTick: tickNum };
+        }
+      }
       const tickNum = parseInt(subPath, 10);
       if (!isNaN(tickNum) && tickNum > 0) {
         return { viewMode: 'detail' as const, selectedTick: tickNum };
@@ -688,6 +697,16 @@ export function HeartbeatsSection() {
     navigate('/mind/heartbeats');
   };
 
+  const handleInspectContext = (tickNumber: number) => {
+    navigate(`/mind/heartbeats/${tickNumber}/context`);
+  };
+
+  const handleBackFromContext = () => {
+    if (selectedTick != null) {
+      navigate(`/mind/heartbeats/${selectedTick}`);
+    }
+  };
+
   return (
     <AnimatePresence mode="wait">
       {viewMode === 'list' ? (
@@ -700,6 +719,16 @@ export function HeartbeatsSection() {
         >
           <TickList onSelect={handleSelect} />
         </motion.div>
+      ) : viewMode === 'context' && selectedTick != null ? (
+        <motion.div
+          key={`context-${selectedTick}`}
+          initial={{ opacity: 0, x: 12 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -12 }}
+          transition={{ duration: 0.15 }}
+        >
+          <ContextInspector tickNumber={selectedTick} onBack={handleBackFromContext} />
+        </motion.div>
       ) : selectedTick != null ? (
         <motion.div
           key={`detail-${selectedTick}`}
@@ -708,7 +737,7 @@ export function HeartbeatsSection() {
           exit={{ opacity: 0, x: -12 }}
           transition={{ duration: 0.15 }}
         >
-          <AgentTimeline tickNumber={selectedTick} onBack={handleBack} />
+          <AgentTimeline tickNumber={selectedTick} onBack={handleBack} onInspectContext={() => handleInspectContext(selectedTick)} />
         </motion.div>
       ) : null}
     </AnimatePresence>

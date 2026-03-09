@@ -520,6 +520,8 @@ export const heartbeatRouter = router({
         sessionState: string;
         systemPrompt: string | null;
         userMessage: string;
+        systemPromptManifest?: unknown[] | null;
+        userMessageManifest?: unknown[] | null;
         tokenBreakdown?: Record<string, number>;
       }
 
@@ -533,10 +535,14 @@ export const heartbeatRouter = router({
         ? (tickOutput.data as unknown as TickOutputData)
         : null;
 
-      // For warm sessions, resolve the system prompt from the last cold session
+      // For warm sessions, resolve the system prompt and manifest from the last cold session
       let systemPrompt = inputData.systemPrompt;
+      let systemPromptManifest = inputData.systemPromptManifest ?? null;
       if (!systemPrompt) {
         systemPrompt = agentLogStore.getLastColdSystemPrompt(agentLogsDb);
+      }
+      if (!systemPromptManifest) {
+        systemPromptManifest = agentLogStore.getLastColdSystemPromptManifest(agentLogsDb);
       }
 
       // Get related data from heartbeat.db
@@ -570,6 +576,8 @@ export const heartbeatRouter = router({
         sessionState: inputData.sessionState,
         systemPrompt,
         userMessage: inputData.userMessage,
+        systemPromptManifest,
+        userMessageManifest: inputData.userMessageManifest ?? null,
         tokenBreakdown: inputData.tokenBreakdown,
         rawOutput: outputData?.rawOutput ?? null,
         durationMs: outputData?.durationMs ?? null,
