@@ -72,6 +72,7 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/architecture/package-installation.md` | Package distribution (.anpk install flow), verification chain, rollback, update checking, config migration, store browser UI. **STATUS: PARTIALLY IMPLEMENTED** |
 | `docs/architecture/backend-architecture.md` | Backend modular monolith architecture: store patterns, service layer, subsystem lifecycles, pipeline deps, decision handler registry, anti-patterns |
 | `docs/architecture/release-engineering.md` | Release engineering: versioning policy (lockstep vs independent packages), conventional commits, CI pipeline (typecheck/lint/test), release workflow (tag-triggered Tauri builds for macOS + Windows), bump-version and release scripts, cross-compilation, code signing (future), changelog generation |
+| `docs/architecture/telemetry.md` | Telemetry system: 5 PostHog events (install, app_started, daily_active, feature_used, error_occurred), anonymous ID, deduplication, opt-out mechanisms, privacy guarantees, TelemetryService singleton, event bus integration |
 | `docs/architecture/tech-stack.md` | Full technology overview, frontend stack (Vite, React 19, Zustand, Emotion, Motion), backend stack (Fastify, tRPC, SQLite), seven databases, LanceDB, agent SDKs, deployment paths, shared abstractions (Embedding Provider, Context Builder, Decay Engine, Event Bus, Encryption Service, Database Stores, Migrations) |
 
 ### Agent SDKs
@@ -138,6 +139,7 @@ When you need context for a task, follow this approach:
 24. **For new contributors**: Read `docs/guides/getting-started.md`
 25. **For reflex/fast-response (PLANNED)**: Read `docs/research/reflex-system.md`
 26. **For Codex OAuth**: Read `docs/agents/codex/oauth.md`
+27. **For telemetry/analytics/PostHog**: Read `docs/architecture/telemetry.md`
 
 ## Topic Keyword Guide
 
@@ -171,6 +173,7 @@ Use this to quickly map user questions to the right docs:
 - **data directory, ANIMUS_DATA_DIR, database paths, deployment modes** -> `docs/architecture/data-directory.md`
 - **package installation, .anpk, store browser, update checking** -> `docs/architecture/package-installation.md`
 - **backend architecture, modular monolith, store pattern, service layer, decision handler** -> `docs/architecture/backend-architecture.md`
+- **telemetry, analytics, PostHog, usage tracking, anonymous, opt-out, DO_NOT_TRACK** -> `docs/architecture/telemetry.md`
 - **agent SDK, sdk comparison, claude vs codex vs opencode** -> `docs/agents/sdk-comparison.md`
 - **agent abstraction, unified interface, event normalization** -> `docs/agents/architecture-overview.md`
 - **claude sdk, anthropic, query, async generator** -> `docs/agents/claude/sdk-research.md`

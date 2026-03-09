@@ -367,6 +367,7 @@ docs/
 - **Tools & Permissions**: `docs/architecture/mcp-tools.md`, `docs/architecture/tool-permissions.md`
 - **Voice/Speech**: `docs/architecture/voice-channel.md`, `docs/architecture/speech-engine.md`, `docs/architecture/tts-licensing-and-distribution.md`
 - **Security**: `docs/architecture/encryption-architecture.md`, `docs/architecture/credential-passing.md`
+- **Telemetry**: `docs/architecture/telemetry.md`
 - **Infrastructure**: `docs/architecture/data-directory.md`, `docs/architecture/backend-architecture.md`, `docs/architecture/tech-stack.md`, `docs/architecture/sleep-energy.md`, `docs/architecture/release-engineering.md`
 - **Agent SDKs**: `docs/agents/sdk-comparison.md`, `docs/agents/architecture-overview.md`, plus per-provider docs in `docs/agents/claude/`, `docs/agents/codex/`, `docs/agents/opencode/`
 - **Planned (not built)**: `docs/research/reflex-system.md`, `docs/research/voice-mode.md`, `docs/agents/pi/research/`

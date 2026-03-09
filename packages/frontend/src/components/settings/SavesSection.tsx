@@ -1,6 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
 import { useState, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   FloppyDisk,
   Plus,
@@ -18,6 +19,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Button, Input, Modal, Typography, Card, Toggle, Select } from '../ui';
 import { trpc } from '../../utils/trpc';
 import { toast } from '../../store/toast-store';
+import { useHeartbeatStore } from '../../store/heartbeat-store';
+import { useMessagesStore } from '../../store/messages-store';
 
 // ============================================================================
 // Types
@@ -443,6 +446,7 @@ function AutosaveBanner() {
 export function SavesSection() {
   const theme = useTheme();
   const utils = trpc.useUtils();
+  const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Data
@@ -459,8 +463,12 @@ export function SavesSection() {
   });
   const restoreMutation = trpc.saves.restore.useMutation({
     onSuccess: () => {
-      utils.saves.list.invalidate();
-      utils.saves.listAutosaves.invalidate();
+      // Restore replaces ALL databases. Clear everything:
+      // 1. Zustand stores fed by WebSocket subscriptions (not in React Query)
+      useHeartbeatStore.getState().reset();
+      useMessagesStore.getState().clearLiveMessages();
+      // 2. React Query cache for all tRPC queries
+      queryClient.invalidateQueries();
     },
   });
 

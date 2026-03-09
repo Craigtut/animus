@@ -117,6 +117,8 @@ interface HeartbeatStoreState {
   clearReplyStream: () => void;
   addSystemError: (error: Omit<SystemError, 'id' | 'receivedAt'>) => void;
   dismissSystemError: (id: string) => void;
+  /** Reset all state to initial values. Used after a save restore. */
+  reset: () => void;
 }
 
 const MAX_RECENT_THOUGHTS = 50;
@@ -288,6 +290,21 @@ export const useHeartbeatStore = create<HeartbeatStoreState>()((set) => ({
     set((prev) => ({
       systemErrors: prev.systemErrors.filter((e) => e.id !== id),
     })),
+
+  reset: () =>
+    set({
+      heartbeatState: null,
+      isHeartbeatActive: false,
+      emotions: new Map(),
+      energyLevel: null,
+      energyBand: null,
+      recentThoughts: [],
+      recentExperiences: [],
+      agentEvents: [],
+      subAgentEvents: new Map(),
+      replyStream: { turns: [] },
+      systemErrors: [],
+    }),
 }));
 
 // ============================================================================
