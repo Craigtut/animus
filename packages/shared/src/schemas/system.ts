@@ -96,6 +96,12 @@ export const systemSettingsSchema = z.object({
   reasoningEffort: z.enum(['low', 'medium', 'high', 'max']).nullable().default(null),
   memoryPoolMaxSize: z.number().int().min(100).default(40000),
   telemetryEnabled: z.boolean().default(true),
+  // Autosave system
+  autosaveEnabled: z.boolean().default(true),
+  autosaveMaxCount: z.number().int().min(1).max(50).default(5),
+  autosaveFrequency: z.enum(['1h', '6h', '12h', '24h', '3d', '7d']).default('24h'),
+  autosaveTimeOfDay: z.number().int().min(0).max(23).default(3),
+  lastAutosaveAt: z.string().nullable().default(null), // ISO 8601, persisted for restart recovery
 });
 
 export const updateSystemSettingsInputSchema = systemSettingsSchema.partial();

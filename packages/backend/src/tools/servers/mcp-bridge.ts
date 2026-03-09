@@ -273,6 +273,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     // POST /cognitive/state — records cognitive state
     if (req.method === 'POST' && path === '/cognitive/state') {
       const body = JSON.parse(await readBody(req));
+      // Coerce string "null" to actual null — LLMs frequently emit "null" as a string
+      for (const key of ['energyDelta', 'coreSelfUpdate', 'workingMemoryUpdate'] as const) {
+        if ((body as Record<string, unknown>)[key] === 'null') {
+          (body as Record<string, unknown>)[key] = null;
+        }
+      }
       const parsed = recordCognitiveStateSchema.safeParse(body);
       if (!parsed.success) {
         log.warn('Invalid record_cognitive_state input:', parsed.error.message);

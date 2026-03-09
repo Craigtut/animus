@@ -24,6 +24,7 @@ import { MemorySubsystem } from './memory/index.js';
 import { GoalSubsystem } from './goals/index.js';
 import { TaskSubsystem } from './tasks/index.js';
 import { AgentSubsystem } from './heartbeat/agent-subsystem.js';
+import { getAutosaveSubsystem } from './services/autosave-subsystem.js';
 import { loadCredentialsIntoEnv, ensureClaudeOnboardingFile } from './services/credential-service.js';
 import { env, DATA_DIR } from './utils/env.js';
 import {
@@ -515,7 +516,8 @@ async function main() {
   lifecycle.register(memorySubsystem)
     .register(goalSubsystem)
     .register(agentSubsystem)
-    .register(taskSubsystem);
+    .register(taskSubsystem)
+    .register(getAutosaveSubsystem());
   await lifecycle.startAll();
 
   // Initialize heartbeat system (receives pre-started subsystem references)

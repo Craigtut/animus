@@ -157,25 +157,28 @@ export const recordCognitiveStateSchema = z.object({
       reasoning: z.string().describe('Brief explanation of why your energy shifted'),
     })
     .nullable()
-    .describe('How your energy level changed. null if no change.'),
+    .optional()
+    .describe('How your energy level changed. null or omit if no change.'),
 
   // 5. Core self update — rare self-knowledge updates
   coreSelfUpdate: z
     .string()
     .nullable()
+    .optional()
     .describe(
       'If you gained genuine new self-knowledge, provide the complete updated self-description. ' +
-      'This REPLACES entirely. null if no update needed.',
+      'This REPLACES entirely. null or omit if no update needed.',
     ),
 
   // 6. Working memory update — per-contact notepad
   workingMemoryUpdate: z
     .string()
     .nullable()
+    .optional()
     .describe(
       'If you learned something new about the contact you\'re interacting with, ' +
       'provide the complete updated notepad here. This REPLACES the entire previous content. ' +
-      'null if no update needed.',
+      'null or omit if no update needed.',
     ),
 
   // 7. Memory candidates — knowledge worth preserving long-term

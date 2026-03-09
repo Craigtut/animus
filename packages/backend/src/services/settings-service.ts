@@ -12,6 +12,7 @@ import * as systemStore from '../db/stores/system-store.js';
 import * as personaStore from '../db/stores/persona-store.js';
 import { updateCategoryCache } from '../lib/logger.js';
 import { getEventBus } from '../lib/event-bus.js';
+import { getAutosaveSubsystem } from './autosave-subsystem.js';
 import type { SystemSettings, PersonalitySettings } from '@animus-labs/shared';
 
 const log = createLogger('SettingsService', 'server');
@@ -39,6 +40,16 @@ class SettingsService {
     systemStore.updateSystemSettings(getSystemDb(), clean as Partial<SystemSettings>);
     if (Object.keys(clean).length > 0) {
       getEventBus().emit('system:settings_updated', clean);
+
+      // Reconfigure autosave subsystem if any autosave-related fields changed
+      const autosaveFields = ['autosaveEnabled', 'autosaveMaxCount', 'autosaveFrequency', 'autosaveTimeOfDay'];
+      const hasAutosaveChange = autosaveFields.some((field) => field in clean);
+      if (hasAutosaveChange) {
+        log.info('Autosave settings changed, reconfiguring autosave subsystem');
+        getAutosaveSubsystem().reconfigure().catch((err) => {
+          log.error('Failed to reconfigure autosave subsystem:', err);
+        });
+      }
     }
     return systemStore.getSystemSettings(getSystemDb());
   }

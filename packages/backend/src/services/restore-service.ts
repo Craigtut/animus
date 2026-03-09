@@ -24,7 +24,7 @@ import { tmpdir } from 'os';
 import { DATA_DIR, DB_PERSONA_PATH, DB_HEARTBEAT_PATH, DB_MEMORY_PATH, DB_MESSAGES_PATH, DB_AGENT_LOGS_PATH, DB_CONTACTS_PATH, LANCEDB_PATH } from '../utils/env.js';
 import { createLogger } from '../lib/logger.js';
 import { setMaintenanceMode } from '../lib/maintenance.js';
-import { operationInProgress, getSave, extractArchive } from './save-service.js';
+import { operationInProgress, getSave, extractArchive, getArchivePath } from './save-service.js';
 
 const log = createLogger('RestoreService', 'saves');
 
@@ -32,7 +32,7 @@ const log = createLogger('RestoreService', 'saves');
 // Constants
 // ---------------------------------------------------------------------------
 
-const SAVES_DIR = path.join(DATA_DIR, 'saves');
+
 const ROLLBACK_DIR = path.join(DATA_DIR, '.restore-backup');
 
 const AI_DB_FILES = [
@@ -167,7 +167,10 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     }
 
     const saveName = save.manifest.name;
-    const animusPath = path.join(SAVES_DIR, `${saveId}.animus`);
+    const animusPath = await getArchivePath(saveId);
+    if (!animusPath) {
+      throw new Error(`Save archive "${saveId}" not found on disk`);
+    }
 
     log.info(`Starting restore from save "${saveName}" (${saveId})`);
 
@@ -308,13 +311,16 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     const { TaskSubsystem } = await import('../tasks/task-subsystem.js');
     const { LifecycleManager } = await import('../lib/lifecycle.js');
 
+    const { getAutosaveSubsystem } = await import('./autosave-subsystem.js');
+
     const memSub = new MemorySubsystem();
     const goalSub = new GoalSubsystem(memSub);
     const agentSub = new AgentSubsystem(handleAgentComplete);
     const taskSub = new TaskSubsystem(handleScheduledTask);
 
     const lifecycle = new LifecycleManager();
-    lifecycle.register(memSub).register(goalSub).register(agentSub).register(taskSub);
+    lifecycle.register(memSub).register(goalSub).register(agentSub).register(taskSub)
+      .register(getAutosaveSubsystem());
     await lifecycle.startAll();
 
     await initializeHeartbeat({ memory: memSub, goals: goalSub, agents: agentSub });

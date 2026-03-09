@@ -19,6 +19,7 @@ export function getSystemSettings(db: Database.Database): SystemSettings {
     ...rest,
     energySystemEnabled: intToBool(rest['energySystemEnabled'] as number),
     telemetryEnabled: intToBool(rest['telemetryEnabled'] as number),
+    autosaveEnabled: intToBool(rest['autosaveEnabled'] as number),
   } as SystemSettings;
 }
 
@@ -48,10 +49,15 @@ export function updateSystemSettings(
     sleepTickIntervalMs: 'sleep_tick_interval_ms',
     reasoningEffort: 'reasoning_effort',
     memoryPoolMaxSize: 'memory_pool_max_size',
+    autosaveEnabled: 'autosave_enabled',
+    autosaveMaxCount: 'autosave_max_count',
+    autosaveFrequency: 'autosave_frequency',
+    autosaveTimeOfDay: 'autosave_time_of_day',
+    lastAutosaveAt: 'last_autosave_at',
   };
 
   // Boolean fields need int conversion
-  const booleanFields = new Set(['energySystemEnabled', 'telemetryEnabled']);
+  const booleanFields = new Set(['energySystemEnabled', 'telemetryEnabled', 'autosaveEnabled']);
 
   for (const [camelKey, snakeKey] of Object.entries(mapping)) {
     const value = (data as Record<string, unknown>)[camelKey];

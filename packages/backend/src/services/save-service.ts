@@ -32,6 +32,24 @@ const log = createLogger('SaveService', 'saves');
 // ---------------------------------------------------------------------------
 
 const SAVES_DIR = path.join(DATA_DIR, 'saves');
+const AUTOSAVE_DIR = path.join(SAVES_DIR, 'autosave');
+
+/**
+ * Resolve the .animus file path for a save ID, checking both manual and autosave directories.
+ * Returns null if not found.
+ */
+export async function getArchivePath(saveId: string): Promise<string | null> {
+  for (const dir of [SAVES_DIR, AUTOSAVE_DIR]) {
+    const p = path.join(dir, `${saveId}.animus`);
+    try {
+      await fs.access(p);
+      return p;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
 
 const DB_NAMES = ['persona', 'heartbeat', 'memory', 'messages', 'agent_logs', 'contacts'] as const;
 type DbName = (typeof DB_NAMES)[number];
@@ -202,16 +220,22 @@ export async function extractArchive(archivePath: string, destDir: string): Prom
  * 6. Write {uuid}.json sidecar
  * 7. Clean up staging dir
  */
-export async function createSave(name: string, description?: string): Promise<SaveInfo> {
+export async function createSave(
+  name: string,
+  description?: string,
+  options?: { autosave?: boolean },
+): Promise<SaveInfo> {
   acquireGuard();
   const stageDir = path.join(tmpdir(), `animus-save-${randomUUID()}`);
+  const isAutosave = options?.autosave === true;
+  const targetDir = isAutosave ? AUTOSAVE_DIR : SAVES_DIR;
 
   try {
     const id = randomUUID();
-    await fs.mkdir(SAVES_DIR, { recursive: true });
+    await fs.mkdir(targetDir, { recursive: true });
     await fs.mkdir(stageDir, { recursive: true });
 
-    log.info(`Creating save "${name}" (${id})`);
+    log.info(`Creating ${isAutosave ? 'autosave' : 'save'} "${name}" (${id})`);
 
     // Backup each database using better-sqlite3's safe backup API
     for (const dbName of DB_NAMES) {
@@ -242,24 +266,25 @@ export async function createSave(name: string, description?: string): Promise<Sa
       animusVersion: await getAnimusVersion(),
       schemaVersions,
       stats,
+      ...(isAutosave ? { isAutosave: true } : {}),
     };
 
     // Write manifest into staging dir (included in the zip)
     await fs.writeFile(path.join(stageDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
     // Zip staging dir → .animus file
-    const animusPath = path.join(SAVES_DIR, `${id}.animus`);
+    const animusPath = path.join(targetDir, `${id}.animus`);
     await zipDirectory(stageDir, animusPath);
 
     // Write sidecar JSON (for fast listing)
-    await fs.writeFile(path.join(SAVES_DIR, `${id}.json`), JSON.stringify(manifest, null, 2));
+    await fs.writeFile(path.join(targetDir, `${id}.json`), JSON.stringify(manifest, null, 2));
 
     const stat = await fs.stat(animusPath);
     const sizeBytes = stat.size;
 
-    log.info(`Save "${name}" created (${id}), ${(sizeBytes / 1024 / 1024).toFixed(1)} MB`);
+    log.info(`${isAutosave ? 'Autosave' : 'Save'} "${name}" created (${id}), ${(sizeBytes / 1024 / 1024).toFixed(1)} MB`);
 
-    return { id, manifest, sizeBytes };
+    return { id, manifest, sizeBytes, isAutosave };
   } catch (err) {
     log.error('Failed to create save:', err);
     throw err;
@@ -299,7 +324,7 @@ export async function listSaves(): Promise<SaveInfo[]> {
 
     try {
       const stat = await fs.stat(animusPath);
-      saves.push({ id, manifest, sizeBytes: stat.size });
+      saves.push({ id, manifest, sizeBytes: stat.size, isAutosave: false });
     } catch {
       log.warn(`Skipping save "${id}" — cannot stat .animus file`);
     }
@@ -310,21 +335,25 @@ export async function listSaves(): Promise<SaveInfo[]> {
 }
 
 /**
- * Get a single save by ID.
+ * Get a single save by ID. Checks both manual and autosave directories.
  */
 export async function getSave(saveId: string): Promise<SaveInfo | null> {
-  const sidecarPath = path.join(SAVES_DIR, `${saveId}.json`);
-  const animusPath = path.join(SAVES_DIR, `${saveId}.animus`);
+  // Check manual saves first, then autosaves
+  for (const [dir, isAutosave] of [[SAVES_DIR, false], [AUTOSAVE_DIR, true]] as const) {
+    const sidecarPath = path.join(dir, `${saveId}.json`);
+    const animusPath = path.join(dir, `${saveId}.animus`);
 
-  const manifest = await readSidecar(sidecarPath);
-  if (!manifest) return null;
+    const manifest = await readSidecar(sidecarPath);
+    if (!manifest) continue;
 
-  try {
-    const stat = await fs.stat(animusPath);
-    return { id: saveId, manifest, sizeBytes: stat.size };
-  } catch {
-    return null;
+    try {
+      const stat = await fs.stat(animusPath);
+      return { id: saveId, manifest, sizeBytes: stat.size, isAutosave };
+    } catch {
+      continue;
+    }
   }
+  return null;
 }
 
 /**
@@ -348,22 +377,26 @@ export async function deleteSave(saveId: string): Promise<void> {
 /**
  * Export a save — returns the .animus file buffer directly.
  * The .animus file IS the export format; no extra zipping needed.
+ * Checks both manual and autosave directories.
  */
 export async function exportSave(saveId: string): Promise<{ buffer: Buffer; name: string }> {
-  const animusPath = path.join(SAVES_DIR, `${saveId}.animus`);
-  const sidecarPath = path.join(SAVES_DIR, `${saveId}.json`);
+  // Check manual saves first, then autosaves
+  for (const dir of [SAVES_DIR, AUTOSAVE_DIR]) {
+    const animusPath = path.join(dir, `${saveId}.animus`);
+    const sidecarPath = path.join(dir, `${saveId}.json`);
 
-  const manifest = await readSidecar(sidecarPath);
-  if (!manifest) {
-    throw new Error(`Save "${saveId}" not found or has invalid manifest`);
+    const manifest = await readSidecar(sidecarPath);
+    if (!manifest) continue;
+
+    log.info(`Exporting save "${manifest.name}" (${saveId})`);
+
+    const buffer = await fs.readFile(animusPath);
+    const safeName = manifest.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    return { buffer, name: safeName };
   }
 
-  log.info(`Exporting save "${manifest.name}" (${saveId})`);
-
-  const buffer = await fs.readFile(animusPath);
-  const safeName = manifest.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-
-  return { buffer, name: safeName };
+  throw new Error(`Save "${saveId}" not found or has invalid manifest`);
 }
 
 /**
@@ -430,7 +463,7 @@ export async function importSave(fileBuffer: Buffer): Promise<SaveInfo> {
 
     log.info(`Imported save "${manifest.name}" as ${id}`);
 
-    return { id, manifest, sizeBytes: stat.size };
+    return { id, manifest, sizeBytes: stat.size, isAutosave: false };
   } catch (err) {
     log.error('Failed to import save:', err);
     throw err;
@@ -438,4 +471,86 @@ export async function importSave(fileBuffer: Buffer): Promise<SaveInfo> {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
     releaseGuard();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Autosave API
+// ---------------------------------------------------------------------------
+
+/**
+ * List all autosaves, sorted by creation date (newest first).
+ * Reads from sidecar .json files in the autosave directory.
+ */
+export async function listAutosaves(): Promise<SaveInfo[]> {
+  const saves: SaveInfo[] = [];
+
+  let entries: string[];
+  try {
+    entries = await fs.readdir(AUTOSAVE_DIR);
+  } catch {
+    return [];
+  }
+
+  const animusFiles = entries.filter((e) => e.endsWith('.animus'));
+
+  for (const file of animusFiles) {
+    const id = file.replace('.animus', '');
+    const sidecarPath = path.join(AUTOSAVE_DIR, `${id}.json`);
+    const animusPath = path.join(AUTOSAVE_DIR, file);
+
+    const manifest = await readSidecar(sidecarPath);
+    if (!manifest) {
+      log.warn(`Skipping autosave "${id}" — missing or invalid sidecar`);
+      continue;
+    }
+
+    try {
+      const stat = await fs.stat(animusPath);
+      saves.push({ id, manifest, sizeBytes: stat.size, isAutosave: true });
+    } catch {
+      log.warn(`Skipping autosave "${id}" — cannot stat .animus file`);
+    }
+  }
+
+  saves.sort((a, b) => b.manifest.createdAt.localeCompare(a.manifest.createdAt));
+  return saves;
+}
+
+/**
+ * Rotate autosaves, keeping at most `maxCount` entries.
+ * Deletes the oldest autosaves (by manifest createdAt) when the count exceeds maxCount.
+ */
+export async function rotateAutosaves(maxCount: number): Promise<void> {
+  const autosaves = await listAutosaves();
+  if (autosaves.length <= maxCount) return;
+
+  // autosaves are sorted newest-first, so slice from maxCount onward to get the oldest
+  const toDelete = autosaves.slice(maxCount);
+  for (const save of toDelete) {
+    try {
+      await deleteAutosave(save.id);
+    } catch (err) {
+      log.warn(`Failed to delete old autosave "${save.id}" during rotation:`, err);
+    }
+  }
+
+  log.info(`Rotated autosaves: deleted ${toDelete.length}, kept ${maxCount}`);
+}
+
+/**
+ * Delete an autosave (both .animus and .json sidecar).
+ */
+export async function deleteAutosave(saveId: string): Promise<void> {
+  const animusPath = path.join(AUTOSAVE_DIR, `${saveId}.animus`);
+  const sidecarPath = path.join(AUTOSAVE_DIR, `${saveId}.json`);
+
+  try {
+    await fs.access(animusPath);
+  } catch {
+    throw new Error(`Autosave "${saveId}" not found`);
+  }
+
+  await fs.rm(animusPath, { force: true });
+  await fs.rm(sidecarPath, { force: true });
+  log.info(`Deleted autosave "${saveId}"`);
 }

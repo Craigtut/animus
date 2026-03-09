@@ -73,8 +73,8 @@ export const mindOutputSchema = z.object({
   ),
 
   // Memory management
-  workingMemoryUpdate: z.string().nullable(),
-  coreSelfUpdate: z.string().nullable(),
+  workingMemoryUpdate: z.string().nullable().optional(),
+  coreSelfUpdate: z.string().nullable().optional(),
   memoryCandidate: z
     .array(
       z.object({

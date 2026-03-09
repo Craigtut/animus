@@ -25,6 +25,7 @@ export const saveManifestSchema = z.object({
     memoryCount: z.number(),
     personaName: z.string().optional(),
   }),
+  isAutosave: z.boolean().optional(),
 });
 
 // ============================================================================
@@ -35,4 +36,5 @@ export const saveInfoSchema = z.object({
   id: uuidSchema,
   manifest: saveManifestSchema,
   sizeBytes: z.number(),
+  isAutosave: z.boolean(),
 });
