@@ -44,7 +44,7 @@ ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 # NOTE: npm ci fetches the Claude Agent SDK from the npm registry during build.
 # This is a user-initiated install (you are building the image), not redistribution.
 # If publishing pre-built images, exclude the SDK and install at container startup.
-RUN npm ci
+RUN npm install
 
 # Copy the pre-built tts-native binary from rust-builder
 COPY --from=rust-builder /app/packages/tts-native/tts-native.*.node packages/tts-native/

@@ -47,7 +47,7 @@
     "macOS": {
       "entitlements": "Entitlements.plist"
     },
-    "createUpdaterArtifacts": "v2Compatible"
+    "createUpdaterArtifacts": true
   },
   "plugins": {
     "updater": {
