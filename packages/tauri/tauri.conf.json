@@ -46,6 +46,18 @@
     ],
     "macOS": {
       "entitlements": "Entitlements.plist"
+    },
+    "createUpdaterArtifacts": "v2Compatible"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFCNTBERkQ1QjU0NzNFOUMKUldTY1BrZTExZDlRcTlZMHNkUFdMYWtKMlhEUmJpWmo1SVVlajZrQ0pVaS9ka3YzL2dTUWhxTDQK",
+      "endpoints": [
+        "https://github.com/Craigtut/animus/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

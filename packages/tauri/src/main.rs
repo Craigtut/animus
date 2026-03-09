@@ -10,6 +10,7 @@ use std::time::Duration;
 use tauri::image::Image;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
+use tauri::Emitter;
 use tauri::Manager;
 
 struct Sidecar(Mutex<Option<Child>>);
@@ -95,9 +96,11 @@ fn hide_main_window(app_handle: &tauri::AppHandle) {
 /// Set up the system tray icon with menu
 fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let show_item = MenuItemBuilder::with_id("show", "Show Animus").build(app)?;
+    let update_item = MenuItemBuilder::with_id("check_updates", "Check for Updates").build(app)?;
     let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let menu = MenuBuilder::new(app)
         .item(&show_item)
+        .item(&update_item)
         .separator()
         .item(&quit_item)
         .build()?;
@@ -110,6 +113,12 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .on_menu_event(|app_handle, event| {
             match event.id().as_ref() {
                 "show" => show_main_window(app_handle),
+                "check_updates" => {
+                    show_main_window(app_handle);
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.emit("check-for-updates", ());
+                    }
+                }
                 "quit" => app_handle.exit(0),
                 _ => {}
             }
@@ -148,6 +157,8 @@ fn main() {
                 .args(["--minimized"])
                 .build()
             )
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_process::init())
             .setup(move |app| {
                 setup_tray(app).expect("Failed to setup tray");
 
@@ -468,6 +479,8 @@ fn main() {
                 .args(["--minimized"])
                 .build()
             )
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_process::init())
             .manage(sidecar)
             .setup(move |app| {
                 setup_tray(app).expect("Failed to setup tray");

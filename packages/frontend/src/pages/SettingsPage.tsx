@@ -43,6 +43,7 @@ import { Card, SelectionCard, Button, Input, Select, Modal, Badge, Toggle, Slide
 import { trpc } from '../utils/trpc';
 import { isTauri } from '../utils/tauri';
 import { useAutostart } from '../hooks/useAutostart';
+import { useAutoUpdate } from '../hooks/useAutoUpdate';
 import type { Theme } from '../styles/theme';
 import { SavesSection } from '../components/settings/SavesSection';
 import { ToolsSection } from '../components/settings/ToolsSection';
@@ -4396,6 +4397,7 @@ function SystemSection() {
   const [factoryResetting, setFactoryResetting] = useState(false);
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const autostart = useAutostart();
+  const autoUpdate = useAutoUpdate();
 
   const handleConfirmAction = async () => {
     const onSuccess = () => setConfirmAction(null);
@@ -4535,6 +4537,32 @@ function SystemSection() {
           <Typography.Caption as="p" color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
             Automatically start Animus when you log in. The app will launch hidden in the system tray.
           </Typography.Caption>
+
+          {autoUpdate.available && (
+            <>
+              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]}; margin-top: ${theme.spacing[2]};`}>
+                <Toggle
+                  checked={autoUpdate.enabled}
+                  onChange={autoUpdate.toggle}
+                  label="Automatic updates"
+                />
+              </div>
+              <Typography.Caption as="p" color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+                Check for updates in the background and notify you when a new version is ready.
+              </Typography.Caption>
+              <div css={css`margin-top: ${theme.spacing[1]};`}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={autoUpdate.checkNow}
+                  disabled={autoUpdate.checking || autoUpdate.downloading}
+                  loading={autoUpdate.checking || autoUpdate.downloading}
+                >
+                  {autoUpdate.checking ? 'Checking...' : autoUpdate.downloading ? 'Downloading...' : 'Check for updates'}
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       )}
 

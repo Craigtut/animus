@@ -55,6 +55,7 @@ import { SetupPage } from './pages/SetupPage';
 import { MaintenanceOverlay } from './components/MaintenanceOverlay';
 import { DownloadToast } from './components/DownloadToast';
 import { ToastContainer } from './components/ToastContainer';
+import { AutoUpdateManager } from './components/AutoUpdateManager';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -218,6 +219,7 @@ export function App() {
           </BrowserRouter>
           <MaintenanceOverlay />
           <DownloadToast />
+          <AutoUpdateManager />
           <ToastContainer />
         </ThemeSelector>
       </QueryClientProvider>

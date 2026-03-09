@@ -95,7 +95,11 @@ Uses `ubuntu-latest` with Node.js 24. Concurrent runs are cancelled when new com
 
 ### Release Build (`.github/workflows/release.yml`)
 
-Triggered by pushing a tag matching `v*`. Builds the Tauri desktop app for three targets:
+Triggered by pushing a tag matching `v*`. Runs two independent jobs in parallel: desktop app builds and Docker image builds.
+
+#### Desktop Builds (`build-tauri`)
+
+Builds the Tauri desktop app for three targets:
 
 | Runner | Target | Notes |
 |--------|--------|-------|
@@ -111,6 +115,40 @@ Each job:
 5. Uploads artifacts to a **draft** GitHub Release
 
 The release is created as a draft so the maintainer can review artifacts, edit release notes, and publish manually.
+
+#### Docker Image (`build-docker`)
+
+Builds a multi-architecture Docker image and pushes to GitHub Container Registry (GHCR).
+
+| Platform | Architecture |
+|----------|-------------|
+| `linux/amd64` | x86_64 servers, most cloud VMs |
+| `linux/arm64` | ARM servers, Raspberry Pi, Apple Silicon VMs |
+
+The job uses the standard Docker GitHub Actions toolkit:
+1. `docker/setup-qemu-action` enables cross-platform builds via emulation
+2. `docker/setup-buildx-action` creates a BuildKit builder with multi-arch support
+3. `docker/login-action` authenticates to GHCR using the built-in `GITHUB_TOKEN`
+4. `docker/metadata-action` generates tags from the Git tag (see tagging below)
+5. `docker/build-push-action` builds and pushes with GitHub Actions layer caching
+
+**Tagging strategy:**
+
+| Tag pattern | Example | Purpose |
+|-------------|---------|---------|
+| `{{version}}` | `0.2.4` | Exact version pin |
+| `{{major}}.{{minor}}` | `0.2` | Latest patch within a minor version |
+| `sha-{{sha}}` | `sha-a04b872` | Immutable commit reference |
+
+The `v` prefix from Git tags is stripped automatically (Docker convention). No `latest` tag is published; users should pin to a specific version.
+
+**Pull the image:**
+
+```bash
+docker pull ghcr.io/craigtut/animus:0.2.4
+```
+
+**SDK licensing note:** The Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) has a proprietary license and is excluded from the published Docker image. On first container startup, the SDK manager installs it at runtime via npm into the `/app/data/sdks/claude/` directory (persisted on the data volume). This is the same mechanism used by the desktop app.
 
 ### Cross-compilation
 
@@ -131,8 +169,9 @@ The macOS Intel build runs on an ARM runner. The `TAURI_TARGET_ARCH` environment
    git push && git push origin vX.Y.Z
    ```
 5. Wait for GitHub Actions to build all platforms (~15-20 min first run, faster with cache)
-6. Go to GitHub Releases, review the draft, edit release notes if needed
-7. Publish the release
+6. The Docker image is pushed to GHCR immediately (registries have no draft concept)
+7. Go to GitHub Releases, review the draft, edit release notes if needed
+8. Publish the release
 
 ## Code Signing (Future)
 
@@ -143,6 +182,63 @@ Currently, releases are unsigned:
 When ready to sign:
 - macOS: Add Apple Developer ID certificate as GitHub Secrets, configure in `tauri.conf.json`
 - Windows: Add Authenticode certificate as GitHub Secrets, configure signing in workflow
+
+## Auto-Update Signing
+
+Animus uses Tauri v2's built-in auto-updater to deliver updates to desktop installations. The updater checks for new versions by fetching a JSON manifest from GitHub Releases and verifies update integrity using Ed25519 signatures.
+
+### How It Works
+
+On each release build, `tauri-action` generates a `latest.json` manifest containing download URLs and Ed25519 signatures for each platform artifact. The app fetches this manifest from:
+
+```
+https://github.com/Craigtut/animus/releases/latest/download/latest.json
+```
+
+When an update is available, the app downloads the new version, verifies its Ed25519 signature against the public key embedded in `tauri.conf.json`, and installs it.
+
+### Signing Keypair Setup (One-Time)
+
+Generate the Ed25519 keypair:
+
+```bash
+npx tauri signer generate -w ~/.animus/keys/tauri-update.key
+```
+
+This creates two files: `~/.animus/keys/tauri-update.key` (private) and `~/.animus/keys/tauri-update.key.pub` (public). This keeps the Tauri update signing key alongside the existing plugin signing keys in `~/.animus/keys/`.
+
+Configure the keys:
+
+| Key | Where it goes |
+|-----|---------------|
+| Public key (`tauri-update.key.pub` contents) | `packages/tauri/tauri.conf.json` under `plugins.updater.pubkey` |
+| Private key (`tauri-update.key` contents) | GitHub repo secret: `TAURI_SIGNING_PRIVATE_KEY` |
+| Password (if set during generation) | GitHub repo secret: `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` |
+
+**CRITICAL**: Back up the private key securely. If lost, existing installations cannot verify updates from a new keypair and will be unable to auto-update.
+
+### Update Lifecycle
+
+1. The app checks for updates on launch, every 24 hours, and on manual trigger via the tray menu
+2. If an update is found, it downloads silently in the background
+3. The user is notified via an in-app toast with "Restart Now" / "Later" options
+4. Users can disable auto-updates in Settings
+5. On Windows, the installer uses "passive" mode (brief progress bar, no user interaction required)
+
+### CI Integration
+
+The release workflow (`release.yml`) passes `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as environment variables to `tauri-action`. The action automatically signs each platform artifact and generates the `latest.json` manifest with the corresponding signatures.
+
+### Ed25519 vs. Apple Code Signing
+
+These are two separate signing systems that serve different purposes:
+
+| Signing type | Purpose | Required for |
+|--------------|---------|-------------|
+| Ed25519 (Tauri updater) | Verifies update integrity before installation | Auto-updates to work |
+| Apple Developer ID | Satisfies Gatekeeper and notarization requirements | macOS distribution without security warnings |
+
+Both are needed for a fully signed macOS release. Windows requires Ed25519 for updates and (optionally) Authenticode for SmartScreen trust.
 
 ## Independent Package Releases
 
