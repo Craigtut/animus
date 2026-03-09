@@ -52,15 +52,28 @@ async function generateChangelog() {
   });
 
   if (newEntry.trim()) {
-    // Insert new entry after the header block, not before it
-    const headerMatch = existing.match(/^(# Changelog\n(?:.*\n)*?\n)/);
-    if (headerMatch) {
-      const header = headerMatch[1];
-      const rest = existing.slice(header.length);
-      fs.writeFileSync(changelogPath, header + newEntry + '\n' + rest);
+    // Split on the header block to insert the new entry after it.
+    // The header is: "# Changelog\n\n...description paragraphs...\n\n"
+    // We find it by looking for the first version entry (## [...]) and
+    // treating everything before it as the header.
+    const firstVersionIdx = existing.search(/^## /m);
+    let header;
+    let rest;
+
+    if (firstVersionIdx > 0) {
+      header = existing.slice(0, firstVersionIdx);
+      rest = existing.slice(firstVersionIdx);
+    } else if (firstVersionIdx === 0) {
+      // No header at all, add one
+      header = '# Changelog\n\nAll notable changes to the Animus Engine will be documented in this file.\n\nThis project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).\n\n';
+      rest = existing;
     } else {
-      fs.writeFileSync(changelogPath, newEntry + '\n' + existing);
+      // No version entries yet
+      header = existing.endsWith('\n') ? existing : existing + '\n';
+      rest = '';
     }
+
+    fs.writeFileSync(changelogPath, header + newEntry + '\n' + rest);
   }
 }
 

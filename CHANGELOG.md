@@ -1,3 +1,9 @@
+# Changelog
+
+All notable changes to the Animus Engine will be documented in this file.
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
+
 ## [0.3.1](https://github.com/Craigtut/animus/compare/v0.3.0...v0.3.1) (2026-03-09)
 
 ### Bug Fixes
@@ -33,12 +39,6 @@
 * **ci:** preserve Windows backslash paths in release artifact upload ([0ac79d7](https://github.com/Craigtut/animus/commit/0ac79d71fd03edefe39039bd6d3dcff7071470bc))
 * **ci:** strip Windows carriage returns from artifact paths ([c52e73b](https://github.com/Craigtut/animus/commit/c52e73b3d6c6a1b819f74871a05c1a47d57bb1ce))
 * **deps:** bump swiper, fastify, dompurify, tar for security patches ([9195487](https://github.com/Craigtut/animus/commit/9195487a798ff553f548ba45aae1c5cc5ae44af7))
-
-# Changelog
-
-All notable changes to the Animus Engine will be documented in this file.
-
-This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
 
 ## [0.2.2](https://github.com/Craigtut/animus/compare/v0.2.1...v0.2.2) (2026-03-07)
 
