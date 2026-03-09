@@ -73,7 +73,10 @@ RUN cd packages/shared && rm -rf dist && npx tsc && \
 # Prune dev dependencies after build (keeps native addons intact).
 # LanceDB, sharp, and sherpa-onnx platform binaries are optionalDeps that get
 # removed during prune. Re-install the correct ones for the container's arch.
+# The Claude Agent SDK has a proprietary license and cannot be redistributed in
+# pre-built images. It is installed at container startup via the SDK manager.
 RUN npm prune --omit=dev && \
+    rm -rf node_modules/@anthropic-ai/claude-agent-sdk && \
     LANCE_VER=$(node -p "JSON.parse(require('fs').readFileSync('node_modules/@lancedb/lancedb/package.json','utf8')).version") && \
     SHARP_VER=$(node -p "JSON.parse(require('fs').readFileSync('node_modules/sharp/package.json','utf8')).version") && \
     SHERPA_VER=$(node -p "JSON.parse(require('fs').readFileSync('node_modules/sherpa-onnx-node/package.json','utf8')).version") && \
