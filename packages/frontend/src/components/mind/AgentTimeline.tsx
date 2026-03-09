@@ -936,7 +936,7 @@ function ToolInputDetail({ toolName, input }: { toolName: string; input: Record<
 // Event Detail Content
 // ============================================================================
 
-function EventDetail({ event, allEvents, onInspectContext }: { event: TimelineEvent; allEvents: TimelineEvent[]; onInspectContext?: () => void }) {
+function EventDetail({ event, allEvents, onInspectContext }: { event: TimelineEvent; allEvents: TimelineEvent[]; onInspectContext?: (() => void) | undefined }) {
   const theme = useTheme();
   const d = event.data;
 
@@ -1299,7 +1299,7 @@ function TimelineEventRow({
   allEvents: TimelineEvent[];
   index: number;
   isLive: boolean;
-  onInspectContext?: () => void;
+  onInspectContext?: (() => void) | undefined;
 }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);

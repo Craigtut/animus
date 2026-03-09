@@ -23,7 +23,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Typecheck
         run: npm run typecheck
@@ -34,3 +34,6 @@ jobs:
 
       - name: Test
         run: npm run test:run
+
+      - name: Build production assets
+        run: npm run build:prod
