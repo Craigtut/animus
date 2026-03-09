@@ -92,12 +92,21 @@ export interface CodexAppServerOptions {
  */
 function resolveCodexBinary(): string {
   // Strategy 1: Resolve via @openai/codex-sdk vendor path
+  // The Codex SDK's exports field only has an "import" condition (no "require"),
+  // so createRequire().resolve() fails. Use resolve.paths to get the
+  // node_modules search directories, then check each for the package directly.
   try {
     const require = createRequire(import.meta.url);
-    const sdkPath = require.resolve('@openai/codex-sdk');
-    // sdkPath is something like .../node_modules/@openai/codex-sdk/dist/index.js
-    // The vendor binaries are at .../node_modules/@openai/codex-sdk/vendor/{triple}/codex/codex
-    const sdkRoot = sdkPath.replace(/\/dist\/.*$/, '');
+    const searchPaths = require.resolve.paths('@openai/codex-sdk') ?? [];
+    let sdkRoot: string | null = null;
+    for (const searchPath of searchPaths) {
+      const candidate = join(searchPath, '@openai', 'codex-sdk');
+      if (existsSync(join(candidate, 'package.json'))) {
+        sdkRoot = candidate;
+        break;
+      }
+    }
+    if (!sdkRoot) throw new Error('Codex SDK not found in node_modules');
 
     const platform = process.platform;
     const arch = process.arch;
@@ -131,7 +140,8 @@ function resolveCodexBinary(): string {
 
   // Strategy 2: Fall back to system PATH
   try {
-    const which = execSync('which codex', { encoding: 'utf-8' }).trim();
+    const whichCmd = process.platform === 'win32' ? 'where codex' : 'which codex';
+    const which = execSync(whichCmd, { encoding: 'utf-8' }).trim().split('\n')[0]?.trim();
     if (which && existsSync(which)) {
       return which;
     }
