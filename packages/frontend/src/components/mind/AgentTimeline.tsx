@@ -981,52 +981,10 @@ function EventDetail({ event, allEvents, onInspectContext }: { event: TimelineEv
 
     case 'tick_input': {
       const trigger = str(d['triggerType']);
-      const session = str(d['sessionState']);
       return (
         <div>
-          <DetailField label="TICK" mono>{String(d['tickNumber'] ?? '')}</DetailField>
-          <DetailField label="TRIGGER">
-            <Badge label={trigger || ''} color={triggerColor(trigger, theme)} />
-          </DetailField>
-          <DetailField label="SESSION">
-            <Badge
-              label={session || ''}
-              color={session === 'cold' ? '#5B8DEF' : '#E8A838'}
-            />
-          </DetailField>
-          {d['tokenBreakdown'] != null ? (
-            <DetailField label="TOKENS">
-              <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[3]};`}>
-                {Object.entries(d['tokenBreakdown'] as Record<string, number>).map(([key, val]) => (
-                  <div key={key}>
-                    <span css={css`
-                      font-size: 11px;
-                      color: ${theme.colors.text.hint};
-                      text-transform: uppercase;
-                      display: block;
-                    `}>{key}</span>
-                    <span css={css`
-                      font-family: ${theme.typography.fontFamily.mono};
-                      font-size: 12px;
-                      color: ${theme.colors.text.primary};
-                    `}>{val.toLocaleString()}</span>
-                  </div>
-                ))}
-              </div>
-            </DetailField>
-          ) : null}
-          {d['systemPrompt'] != null ? (
-            <DetailCollapsible title="System Prompt">
-              <CodeBlock content={str(d['systemPrompt'])} maxHeight={300} />
-            </DetailCollapsible>
-          ) : null}
-          {d['userMessage'] != null ? (
-            <DetailCollapsible title="User Message">
-              <CodeBlock content={str(d['userMessage'])} maxHeight={300} />
-            </DetailCollapsible>
-          ) : null}
           {onInspectContext != null && (
-            <div css={css`margin-top: ${theme.spacing[3]};`}>
+            <div css={css`margin-bottom: ${theme.spacing[3]};`}>
               <button
                 onClick={(e) => { e.stopPropagation(); onInspectContext(); }}
                 css={css`
@@ -1055,6 +1013,30 @@ function EventDetail({ event, allEvents, onInspectContext }: { event: TimelineEv
               </button>
             </div>
           )}
+          <DetailField label="TRIGGER">
+            <Badge label={trigger || ''} color={triggerColor(trigger, theme)} />
+          </DetailField>
+          {d['tokenBreakdown'] != null ? (
+            <DetailField label="TOKENS">
+              <div css={css`display: flex; flex-wrap: wrap; gap: ${theme.spacing[3]};`}>
+                {Object.entries(d['tokenBreakdown'] as Record<string, number>).map(([key, val]) => (
+                  <div key={key}>
+                    <span css={css`
+                      font-size: 11px;
+                      color: ${theme.colors.text.hint};
+                      text-transform: uppercase;
+                      display: block;
+                    `}>{key}</span>
+                    <span css={css`
+                      font-family: ${theme.typography.fontFamily.mono};
+                      font-size: 12px;
+                      color: ${theme.colors.text.primary};
+                    `}>{val.toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            </DetailField>
+          ) : null}
         </div>
       );
     }
