@@ -4,7 +4,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import {
   updateSystemSettingsInputSchema,
   updatePersonalitySettingsInputSchema,

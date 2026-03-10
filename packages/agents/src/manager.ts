@@ -28,6 +28,7 @@ import { CodexAdapter } from './adapters/codex.js';
 import { OpenCodeAdapter } from './adapters/opencode.js';
 import { BaseAdapter } from './adapters/base.js';
 import { getModelRegistry } from './model-registry.js';
+import { configureSdkResolver } from './sdk/sdk-resolver.js';
 
 // ============================================================================
 // Session Warmth Tracking
@@ -89,6 +90,10 @@ export interface AgentManagerConfig {
 
   /** Path to runtime-installed SDK directory (Tauri production: data/sdks/claude) */
   runtimeSdkPath?: string;
+
+  /** Base directory for SDK data (binary resolution, installation).
+   *  When set, configures the SDK resolver to find binaries under this path. */
+  dataDir?: string;
 }
 
 /**
@@ -156,9 +161,18 @@ export class AgentManager {
    * Register the default adapters for all providers.
    */
   private registerDefaultAdapters(config?: AgentManagerConfig): void {
-    const { logger, runtimeSdkPath } = config ?? {};
-    this.registerAdapter(new ClaudeAdapter({ logger, runtimeSdkPath }));
-    this.registerAdapter(new CodexAdapter({ logger }));
+    const { logger, runtimeSdkPath, dataDir } = config ?? {};
+
+    // Configure SDK resolver before creating adapters
+    if (dataDir || runtimeSdkPath) {
+      configureSdkResolver({
+        dataDir: dataDir ?? runtimeSdkPath,
+        logger: logger ?? this.logger,
+      });
+    }
+
+    this.registerAdapter(new ClaudeAdapter({ logger, runtimeSdkPath, dataDir }));
+    this.registerAdapter(new CodexAdapter({ logger, dataDir }));
     this.registerAdapter(new OpenCodeAdapter({ logger }));
   }
 

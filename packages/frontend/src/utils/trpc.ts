@@ -52,11 +52,25 @@ const getWsUrl = (): string => {
 // first WebSocket message (not in the URL), so it never leaks to logs
 // or proxies. The server waits for this message before creating the
 // context, making it available via info.connectionParams.
+//
+// The token is set asynchronously (after an HTTP query completes), but
+// tRPC's lazy WebSocket may open before the token is available (due to
+// React StrictMode double-mount effects). We use a promise to make the
+// connectionParams callback wait for the token.
 let _wsAuthToken: string | null = null;
+let _tokenResolve: ((token: string) => void) | null = null;
+let _tokenPromise: Promise<string> | null = new Promise<string>((resolve) => {
+  _tokenResolve = resolve;
+});
 
 /** Set the JWT token for WebSocket authentication via connectionParams. */
 export function setWsAuthToken(token: string | null) {
   _wsAuthToken = token;
+  if (token && _tokenResolve) {
+    _tokenResolve(token);
+    _tokenResolve = null;
+    _tokenPromise = null;
+  }
 }
 
 // Create WebSocket client for subscriptions.
@@ -70,8 +84,16 @@ const wsClient = createWSClient({
     closeMs: 0,
   },
   connectionParams: async () => {
+    // If the token is already available, return it immediately.
+    // Otherwise, wait for setWsAuthToken() to be called. This handles
+    // the race where React StrictMode effects trigger the WS connection
+    // before the auth token query has completed.
     if (_wsAuthToken) {
       return { token: _wsAuthToken };
+    }
+    if (_tokenPromise) {
+      const token = await _tokenPromise;
+      return { token };
     }
     return null;
   },

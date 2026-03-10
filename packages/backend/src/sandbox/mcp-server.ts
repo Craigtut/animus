@@ -36,7 +36,7 @@ export async function buildSandboxMcpServer(): Promise<{
   const sdkTool = sdk.tool(
     'run_with_credentials',
     runWithCredentialsDef.description,
-    (runWithCredentialsDef.inputSchema as import('zod').ZodObject<any>).shape,
+    (runWithCredentialsDef.inputSchema as any).shape, // eslint-disable-line @typescript-eslint/no-explicit-any -- Zod v3 compat shim
     async (args: Record<string, unknown>) => {
       log.info('Sandbox run_with_credentials call');
       // The handler's _context param is unused — it only needs getPluginManager() singleton

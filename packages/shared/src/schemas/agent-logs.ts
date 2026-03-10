@@ -4,7 +4,7 @@
  * Tables: agent_sessions, agent_events, agent_usage
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { uuidSchema, timestampSchema, agentProviderSchema } from './common.js';
 
 // ============================================================================

@@ -46,6 +46,7 @@ export class AgentSubsystem implements SubsystemLifecycle {
     this.agentManager = createAgentManager({
       maxConcurrentSessions: 8,
       runtimeSdkPath: join(DATA_DIR, 'sdks', 'claude'),
+      dataDir: join(DATA_DIR, 'sdks'),
     });
     const configuredProviders = this.agentManager.getConfiguredProviders();
     if (configuredProviders.length > 0) {

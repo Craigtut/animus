@@ -5,7 +5,7 @@
  * for all agent configuration options.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 // ============================================================================
 // Base Schemas
@@ -146,9 +146,6 @@ export const claudeConfigSchema = baseSessionConfigSchema.extend({
 
   /** Maximum budget in USD */
   maxBudgetUsd: z.number().positive().optional(),
-
-  /** Maximum thinking tokens for extended thinking */
-  maxThinkingTokens: z.number().positive().optional(),
 
   /** Session ID to resume */
   resume: z.string().optional(),

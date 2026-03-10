@@ -5,7 +5,7 @@
  * Uses the EncryptionService for encrypted storage in the credentials table.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { router, protectedProcedure } from '../trpc.js';
 import { getSystemDb } from '../../db/index.js';
 import * as systemStore from '../../db/stores/system-store.js';

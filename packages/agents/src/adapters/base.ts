@@ -20,6 +20,7 @@ import type {
   PromptOptions,
   StreamChunkMeta,
   ModelInfo,
+  IAuthProvider,
 } from '../types.js';
 import { AgentError } from '../errors.js';
 import { getModelRegistry } from '../model-registry.js';
@@ -35,6 +36,8 @@ export interface AdapterOptions {
   logger?: Logger | undefined;
   /** Path to runtime-installed SDK (e.g. data/sdks/claude for Tauri production) */
   runtimeSdkPath?: string | undefined;
+  /** Base directory for SDK data (binary resolution, installation) */
+  dataDir?: string | undefined;
 }
 
 /**
@@ -66,6 +69,14 @@ export abstract class BaseAdapter implements IAgentAdapter {
   abstract isConfigured(): boolean;
   abstract createSession(config: AgentSessionConfig): Promise<IAgentSession>;
   abstract listModels(): Promise<ModelInfo[]>;
+
+  /**
+   * Get the auth provider for this adapter.
+   * Override in subclasses that support authentication flows.
+   */
+  getAuthProvider(): IAuthProvider | null {
+    return null;
+  }
 
   /**
    * Resume an existing session by ID.

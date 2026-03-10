@@ -4,7 +4,7 @@
  * Tables: conversations, messages, media_attachments
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { uuidSchema, timestampSchema, channelTypeSchema } from './common.js';
 
 // ============================================================================

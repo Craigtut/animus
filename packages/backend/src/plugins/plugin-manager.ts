@@ -52,7 +52,7 @@ import type {
   VerificationResult,
   PackageManifest,
 } from '@animus-labs/shared';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { verifyPackage } from '../services/package-verifier.js';
 
 const log = createLogger('PluginManager', 'plugins');

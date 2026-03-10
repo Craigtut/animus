@@ -72,3 +72,6 @@ packages/tauri/resources/package.json
 packages/tauri/resources/package-lock.json
 packages/tauri/resources/*.node
 packages/tauri/gen/
+
+# Native addon build artifacts
+*.node

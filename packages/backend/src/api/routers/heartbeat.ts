@@ -2,7 +2,7 @@
  * Heartbeat Router — tRPC procedures for heartbeat state, emotions, and control.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';
 import { getHeartbeatDb, getAgentLogsDb, getPersonaDb } from '../../db/index.js';

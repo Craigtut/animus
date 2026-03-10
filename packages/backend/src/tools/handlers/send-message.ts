@@ -5,7 +5,7 @@
  * or intermediate findings.
  */
 
-import type { z } from 'zod';
+import type { z } from 'zod/v3';
 import type { ToolHandler, ToolResult } from '../types.js';
 import { sendMessageDef } from '@animus-labs/shared';
 

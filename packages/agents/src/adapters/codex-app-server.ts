@@ -14,11 +14,9 @@
 import { EventEmitter } from 'node:events';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { existsSync } from 'node:fs';
-import { execSync } from 'node:child_process';
 import { createTaggedLogger, type Logger } from '../logger.js';
+import { getCodexBundledBinary } from '../sdk/sdk-resolver.js';
 import type {
   JsonRpcRequest,
   JsonRpcResponse,
@@ -85,69 +83,11 @@ export interface CodexAppServerOptions {
 
 /**
  * Resolve the path to the `codex` binary.
- *
- * Strategy:
- * 1. Use createRequire to find @openai/codex-sdk, then construct vendor path
- * 2. Fall back to `which codex` on PATH
+ * Delegates to the centralized SDK resolver.
  */
 function resolveCodexBinary(): string {
-  // Strategy 1: Resolve via @openai/codex-sdk vendor path
-  // The Codex SDK's exports field only has an "import" condition (no "require"),
-  // so createRequire().resolve() fails. Use resolve.paths to get the
-  // node_modules search directories, then check each for the package directly.
-  try {
-    const require = createRequire(import.meta.url);
-    const searchPaths = require.resolve.paths('@openai/codex-sdk') ?? [];
-    let sdkRoot: string | null = null;
-    for (const searchPath of searchPaths) {
-      const candidate = join(searchPath, '@openai', 'codex-sdk');
-      if (existsSync(join(candidate, 'package.json'))) {
-        sdkRoot = candidate;
-        break;
-      }
-    }
-    if (!sdkRoot) throw new Error('Codex SDK not found in node_modules');
-
-    const platform = process.platform;
-    const arch = process.arch;
-
-    let triple: string;
-    if (platform === 'darwin' && arch === 'arm64') {
-      triple = 'aarch64-apple-darwin';
-    } else if (platform === 'darwin' && arch === 'x64') {
-      triple = 'x86_64-apple-darwin';
-    } else if (platform === 'linux' && arch === 'arm64') {
-      triple = 'aarch64-unknown-linux-musl';
-    } else if (platform === 'linux' && arch === 'x64') {
-      triple = 'x86_64-unknown-linux-musl';
-    } else if (platform === 'win32' && arch === 'arm64') {
-      triple = 'aarch64-pc-windows-msvc';
-    } else if (platform === 'win32' && arch === 'x64') {
-      triple = 'x86_64-pc-windows-msvc';
-    } else {
-      throw new Error(`Unsupported platform: ${platform}/${arch}`);
-    }
-
-    const binaryName = platform === 'win32' ? 'codex.exe' : 'codex';
-    const vendorPath = join(sdkRoot, 'vendor', triple, 'codex', binaryName);
-
-    if (existsSync(vendorPath)) {
-      return vendorPath;
-    }
-  } catch {
-    // Fall through to PATH lookup
-  }
-
-  // Strategy 2: Fall back to system PATH
-  try {
-    const whichCmd = process.platform === 'win32' ? 'where codex' : 'which codex';
-    const which = execSync(whichCmd, { encoding: 'utf-8' }).trim().split('\n')[0]?.trim();
-    if (which && existsSync(which)) {
-      return which;
-    }
-  } catch {
-    // Not found on PATH either
-  }
+  const binary = getCodexBundledBinary();
+  if (binary) return binary;
 
   throw new Error(
     'Could not find codex binary. Is @openai/codex-sdk installed?',

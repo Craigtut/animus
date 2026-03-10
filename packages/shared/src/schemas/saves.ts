@@ -5,7 +5,7 @@
  * on-disk save archive format and the runtime save listing.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { uuidSchema } from './common.js';
 
 // ============================================================================

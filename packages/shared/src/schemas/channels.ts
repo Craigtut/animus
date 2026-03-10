@@ -5,7 +5,7 @@
  * runtime types used by the channel adapter layer and heartbeat pipeline.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { uuidSchema, timestampSchema, channelTypeSchema, permissionTierSchema } from './common.js';
 import { mediaAttachmentTypeSchema } from './messages.js';
 

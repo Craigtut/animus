@@ -8,6 +8,75 @@
 import type { AgentProvider, AgentEventType } from '@animus-labs/shared';
 
 // ============================================================================
+// Credential Store Interface
+// ============================================================================
+
+/**
+ * Interface for credential persistence.
+ * Implemented by the backend to provide DB-backed storage.
+ * Auth providers operate against this interface without any DB dependency.
+ */
+export interface ICredentialStore {
+  saveCredential(provider: string, type: string, data: string, metadata?: Record<string, unknown>): void;
+  getCredential(provider: string, type: string): { data: string; metadata?: Record<string, unknown> } | null;
+  deleteCredential(provider: string, type?: string): boolean;
+  getCredentialMetadata(provider: string): Array<{ credentialType: string; metadata?: Record<string, unknown> }>;
+}
+
+// ============================================================================
+// Auth Provider Interface
+// ============================================================================
+
+/**
+ * Status update emitted during an authentication flow.
+ */
+export interface AuthFlowStatusUpdate {
+  status: 'pending' | 'success' | 'error' | 'expired' | 'cancelled';
+  message?: string;
+  /** Device code for device-code flows */
+  userCode?: string;
+  /** Verification URL for device-code flows */
+  verificationUrl?: string;
+  /** Time until expiration in seconds */
+  expiresIn?: number;
+}
+
+/**
+ * Auth status for a provider.
+ */
+export interface ProviderAuthStatus {
+  provider: 'claude' | 'codex';
+  configured: boolean;
+  cliInstalled: boolean;
+  methods: ProviderAuthMethod[];
+}
+
+export interface ProviderAuthMethod {
+  method: 'api_key' | 'oauth_token' | 'codex_oauth' | 'cli';
+  available: boolean;
+  source: 'database' | 'environment' | 'filesystem';
+  detail?: string;
+}
+
+/**
+ * Interface for provider-specific authentication.
+ * Each adapter can optionally implement this to own its auth lifecycle.
+ */
+export interface IAuthProvider {
+  readonly provider: AgentProvider;
+  detectAuth(store: ICredentialStore): Promise<ProviderAuthStatus>;
+  initiateAuth(store: ICredentialStore, method: 'cli' | 'oauth'): Promise<{ sessionId: string; status?: 'success' | 'error'; message?: string; userCode?: string; verificationUrl?: string; expiresIn?: number }>;
+  subscribeToAuthStatus(sessionId: string, cb: (s: AuthFlowStatusUpdate) => void): () => void;
+  getAuthFlowStatus(sessionId: string): AuthFlowStatusUpdate | null;
+  cancelAuthFlow(sessionId: string): boolean;
+  logout(store: ICredentialStore): Promise<boolean>;
+  /** Prepare environment variables for a session (e.g., refresh tokens, write auth files) */
+  prepareSessionEnv?(store: ICredentialStore, sessionDir: string): Promise<Record<string, string>>;
+  /** Validate a credential against the provider's API */
+  validateCredential?(key: string, type: string): Promise<{ valid: boolean; message: string }>;
+}
+
+// ============================================================================
 // Permission Configuration
 // ============================================================================
 
@@ -287,8 +356,8 @@ export interface AgentSessionConfig {
   /**
    * Unified reasoning effort level.
    * Controls how much the model thinks before responding.
-   * When set, takes precedence over provider-specific thinking config.
-   * Currently supported: Codex (maps to model_reasoning_effort).
+   * Maps to Claude's `effort` option and Codex's `model_reasoning_effort`.
+   * Values: 'low', 'medium', 'high', 'max' (max is Claude-only, mapped to high for Codex).
    */
   reasoningEffort?: 'low' | 'medium' | 'high' | 'max';
 
@@ -297,7 +366,6 @@ export interface AgentSessionConfig {
   // Claude-specific
   maxTurns?: number;
   maxBudgetUsd?: number;
-  maxThinkingTokens?: number;
   resume?: string;
   forkSession?: boolean;
   allowedTools?: string[];
@@ -677,6 +745,9 @@ export interface IAgentAdapter {
 
   /** List available models for this provider */
   listModels(): Promise<ModelInfo[]>;
+
+  /** Get the auth provider for this adapter (if authentication is supported) */
+  getAuthProvider?(): IAuthProvider | null;
 }
 
 // ============================================================================

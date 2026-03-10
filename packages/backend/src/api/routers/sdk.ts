@@ -4,7 +4,7 @@
  * Exposes SDK status, installation trigger, and real-time progress subscription.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { observable } from '@trpc/server/observable';
 import { router, publicProcedure, protectedProcedure } from '../trpc.js';
 import { getSdkManager } from '../../services/sdk-manager.js';

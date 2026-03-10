@@ -2,7 +2,7 @@
  * Tools Router — tRPC procedures for tool permissions and approval requests.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { observable } from '@trpc/server/observable';
 import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../trpc.js';

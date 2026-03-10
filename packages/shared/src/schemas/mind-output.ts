@@ -9,7 +9,7 @@
  *   thoughts → reply → experiences → emotionDeltas → decisions → memory
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { channelTypeSchema } from './common.js';
 import { emotionNameSchema, decisionTypeSchema } from './heartbeat.js';
 import { memoryTypeSchema } from './memory.js';

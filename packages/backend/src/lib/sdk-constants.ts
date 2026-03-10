@@ -1,2 +1,4 @@
-export const CLAUDE_SDK_VERSION = '^0.1.29';
-export const CLAUDE_SDK_PACKAGE = '@anthropic-ai/claude-agent-sdk';
+/**
+ * SDK Constants -- re-exported from @animus-labs/agents.
+ */
+export { CLAUDE_SDK_VERSION, CLAUDE_SDK_PACKAGE } from '@animus-labs/agents';

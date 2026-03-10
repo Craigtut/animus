@@ -43,7 +43,7 @@ export function getAllowedTools(tier: PermissionTier): readonly AnimusToolName[]
 export function getMindTools(): Array<{
   name: AnimusToolName;
   description: string;
-  inputSchema: import('zod').ZodTypeAny;
+  inputSchema: import('zod/v3').ZodTypeAny;
 }> {
   return MIND_TOOL_NAMES.map((name) => {
     const def = ANIMUS_TOOL_DEFS[name];

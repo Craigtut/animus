@@ -4,7 +4,7 @@
  * Tables: users, contacts, contact_channels, channel_configs, settings
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import {
   uuidSchema,
   timestampSchema,

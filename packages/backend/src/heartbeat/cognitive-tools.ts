@@ -22,7 +22,7 @@
  * Promoted from sandbox/cognitive-tools.ts.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { emotionNameSchema, decisionTypeSchema, memoryTypeSchema } from '@animus-labs/shared';
 import type { MindOutput, ChannelType } from '@animus-labs/shared';
 import { createLogger } from '../lib/logger.js';
@@ -318,8 +318,8 @@ export async function buildCognitiveMcpServer(): Promise<{
     'record_thought',
     'Your first action every time you respond. Call this once before writing any reply ' +
     'or calling any other tool. It is critical that this is the very first thing you do.',
-    recordThoughtSchema.shape,
-    async (args: z.infer<typeof recordThoughtSchema>) => handleRecordThought(args),
+    recordThoughtSchema.shape as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- Zod v3 compat shim; SDK expects v4 schema shapes
+    async (args: any) => handleRecordThought(args), // eslint-disable-line @typescript-eslint/no-explicit-any -- Zod v3 compat shim
   );
 
   // --- record_cognitive_state --- (delegates to standalone handler)
@@ -329,8 +329,8 @@ export async function buildCognitiveMcpServer(): Promise<{
     'until you call this tool. record_thought bookends the start of your turn; this ' +
     'bookends the end. Without it, your thoughts, emotions, and experiences are lost. ' +
     'Call it after your final reply text, then you are done.',
-    recordCognitiveStateSchema.shape,
-    async (args: z.infer<typeof recordCognitiveStateSchema>) => handleRecordCognitiveState(args),
+    recordCognitiveStateSchema.shape as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- Zod v3 compat shim; SDK expects v4 schema shapes
+    async (args: any) => handleRecordCognitiveState(args), // eslint-disable-line @typescript-eslint/no-explicit-any -- Zod v3 compat shim
   );
 
   const server = sdk.createSdkMcpServer({

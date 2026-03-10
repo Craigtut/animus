@@ -245,7 +245,18 @@ export function AgentProviderStep() {
     setClaudeOAuthStatus('pending');
     setClaudeOAuthMessage('');
     claudeInitiateMutation.mutate(undefined, {
-      onSuccess: (result) => setClaudeOAuthSession(result.sessionId),
+      onSuccess: (result) => {
+        setClaudeOAuthSession(result.sessionId);
+        // The mutation now awaits auth completion and returns the result directly
+        if (result.status === 'success') {
+          setClaudeOAuthStatus('success');
+          setAuthMethod('claude_oauth');
+          refetchDetect();
+        } else if (result.status === 'error') {
+          setClaudeOAuthStatus('error');
+          setClaudeOAuthMessage(result.message ?? 'Authentication failed');
+        }
+      },
       onError: (err) => {
         setClaudeOAuthStatus('error');
         setClaudeOAuthMessage(err.message ?? 'Failed to start authentication');
@@ -300,12 +311,12 @@ export function AgentProviderStep() {
     codexInitiateMutation.mutate(undefined, {
       onSuccess: (result) => {
         setCodexOAuthData({
-          userCode: result.userCode,
-          verificationUrl: result.verificationUrl,
-          expiresIn: result.expiresIn,
+          userCode: result.userCode ?? '',
+          verificationUrl: result.verificationUrl ?? '',
+          expiresIn: result.expiresIn ?? 0,
         });
         setCodexOAuthSession(result.sessionId);
-        setCodexCountdown(result.expiresIn);
+        setCodexCountdown(result.expiresIn ?? 0);
         stopCountdown();
         countdownRef.current = setInterval(() => {
           setCodexCountdown((prev) => {

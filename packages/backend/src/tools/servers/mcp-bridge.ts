@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { getMindTools, getAllowedTools, ANIMUS_TOOL_DEFS, type AnimusToolName, type PermissionTier } from '@animus-labs/shared';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import type { ZodTypeAny } from 'zod';
+import type { ZodTypeAny } from 'zod/v3';
 import { executeTool } from '../registry.js';
 import type { ToolHandlerContext, ToolResult } from '../types.js';
 import {

@@ -6,7 +6,7 @@
  * database record shape.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 // ============================================================================
 // Plugin Manifest

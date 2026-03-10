@@ -4,7 +4,7 @@
  * Tracks progress through the 8-step persona creation flow.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../trpc.js';
 import { getSystemDb, getPersonaDb } from '../../db/index.js';

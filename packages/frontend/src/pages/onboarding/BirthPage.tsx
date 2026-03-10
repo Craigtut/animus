@@ -30,11 +30,6 @@ export function BirthPage() {
   useEffect(() => {
     finalizeMutation.mutate(undefined, {
       onSuccess: () => {
-        // Set cache directly instead of invalidating — avoids a race where
-        // navigate('/') fires before the background re-fetch completes,
-        // causing AuthGuard to read stale isComplete:false and redirect
-        // back to /onboarding.
-        utils.onboarding.getState.setData(undefined, { isComplete: true, currentStep: 8 });
         setFinalized(true);
       },
       onError: (err) => console.error('Failed to finalize persona:', err),
@@ -42,14 +37,18 @@ export function BirthPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Navigate once both animation is ready AND finalize has completed
+  // Navigate once both animation is ready AND finalize has completed.
+  // We set isComplete in the tRPC cache HERE (not in the mutation callback)
+  // because AuthGuard redirects onboarding routes to "/" when isComplete is
+  // true. Setting it earlier kills the birth animation mid-play.
   useEffect(() => {
     if (animationReady && finalized) {
+      utils.onboarding.getState.setData(undefined, { isComplete: true, currentStep: 8 });
       markStepComplete('birth');
       setCurrentStep('complete');
       navigate('/');
     }
-  }, [animationReady, finalized, markStepComplete, setCurrentStep, navigate]);
+  }, [animationReady, finalized, utils, markStepComplete, setCurrentStep, navigate]);
 
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];

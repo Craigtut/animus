@@ -2,7 +2,7 @@
 import { css, useTheme } from '@emotion/react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { useEffect, useState } from 'react';
+import { useRef } from 'react';
 import { NavigationPill } from './NavigationPill';
 import { CommandPalette } from './CommandPalette';
 import { TauriDragRegion } from './TauriDragRegion';
@@ -28,14 +28,15 @@ export function AppLayout() {
     retry: 3,
     retryDelay: 1000,
   });
-  const [wsReady, setWsReady] = useState(false);
 
-  useEffect(() => {
-    if (tokenData?.token && !wsReady) {
-      setWsAuthToken(tokenData.token);
-      setWsReady(true);
-    }
-  }, [tokenData, wsReady]);
+  // Set the WS auth token synchronously during render to avoid React 19
+  // passive effect scheduling issues where useEffect may not flush promptly.
+  const wsReadyRef = useRef(false);
+  if (tokenData?.token && !wsReadyRef.current) {
+    setWsAuthToken(tokenData.token);
+    wsReadyRef.current = true;
+  }
+  const wsReady = wsReadyRef.current;
 
   const theme = useTheme();
   const location = useLocation();

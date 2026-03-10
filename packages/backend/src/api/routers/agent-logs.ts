@@ -2,7 +2,7 @@
  * Agent Logs Router — tRPC procedures for agent sessions, events, and usage.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { router, protectedProcedure } from '../trpc.js';
 import { getAgentLogsDb } from '../../db/index.js';
 import * as agentLogStore from '../../db/stores/agent-log-store.js';

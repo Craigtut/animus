@@ -5,7 +5,7 @@
  * package DB records, IPC message types, and frontend channel info.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 // ============================================================================
 // Channel Manifest (from channel.json)

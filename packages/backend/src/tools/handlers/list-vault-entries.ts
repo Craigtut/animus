@@ -7,7 +7,7 @@
  * See docs/architecture/credential-passing.md
  */
 
-import type { z } from 'zod';
+import type { z } from 'zod/v3';
 import type { ToolHandler, ToolResult } from '../types.js';
 import { listVaultEntriesDef } from '@animus-labs/shared';
 import { getSystemDb } from '../../db/index.js';

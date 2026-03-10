@@ -7,7 +7,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { TRPCError } from '@trpc/server';
 import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';

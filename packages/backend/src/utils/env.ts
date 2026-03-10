@@ -6,7 +6,7 @@
  */
 
 import fs from 'node:fs';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 

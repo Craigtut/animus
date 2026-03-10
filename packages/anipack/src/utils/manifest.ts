@@ -5,7 +5,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { PluginManifestSchema, channelManifestSchema } from '@animus-labs/shared';
-import type { z } from 'zod';
+import type { z } from 'zod/v3';
 
 export type ManifestType = 'plugin' | 'channel';
 

@@ -6,7 +6,7 @@
  *         tasks, task_runs, agent_tasks
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import {
   uuidSchema,
   timestampSchema,

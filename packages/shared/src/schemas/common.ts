@@ -2,7 +2,7 @@
  * Common base schemas used across all domains.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 // ============================================================================
 // Primitives

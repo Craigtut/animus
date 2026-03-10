@@ -5,7 +5,7 @@
  * what the sub-agent is working on.
  */
 
-import type { z } from 'zod';
+import type { z } from 'zod/v3';
 import type { ToolHandler, ToolResult } from '../types.js';
 import { updateProgressDef } from '@animus-labs/shared';
 

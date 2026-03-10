@@ -5,7 +5,7 @@
  * so calling this from a sub-agent context returns an error.
  */
 
-import type { z } from 'zod';
+import type { z } from 'zod/v3';
 import type { ToolHandler, ToolResult } from '../types.js';
 import { lookupContactsDef } from '@animus-labs/shared';
 

@@ -8,7 +8,7 @@
  * See docs/architecture/mcp-tools.md
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 /**
  * A tool definition without a handler.

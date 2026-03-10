@@ -9,7 +9,7 @@
  * session exists.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import * as argon2 from 'argon2';
 import { TRPCError } from '@trpc/server';
 import { router, publicProcedure, protectedProcedure } from '../trpc.js';

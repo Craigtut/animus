@@ -1,23 +1,21 @@
 /**
- * Codex Auth Router — tRPC procedures for Codex OAuth device code flow.
+ * Codex Auth Router -- tRPC procedures for Codex OAuth device code flow.
  *
- * Provides real-time device code flow with WebSocket subscription for status updates.
+ * Delegates to the CodexAuthProvider from @animus-labs/agents,
+ * with credential persistence via CredentialStoreAdapter.
  * @see docs/agents/codex/oauth.md
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';
 import { getSystemDb } from '../../db/index.js';
 import * as systemStore from '../../db/stores/system-store.js';
-import {
-  initiateDeviceCodeFlow,
-  getSessionStatus,
-  subscribeToStatus,
-  cancelFlow,
-  type AuthStatusUpdate,
-} from '../../services/codex-oauth.js';
+import { createCredentialStore } from '../../services/credential-store-adapter.js';
 import { removeCredential } from '../../services/credential-service.js';
+import { CodexAuthProvider, type AuthFlowStatusUpdate } from '@animus-labs/agents';
+
+const authProvider = new CodexAuthProvider();
 
 export const codexAuthRouter = router({
   /**
@@ -25,7 +23,8 @@ export const codexAuthRouter = router({
    * Returns a user code and verification URL for the frontend to display.
    */
   initiate: protectedProcedure.mutation(async () => {
-    const result = await initiateDeviceCodeFlow(getSystemDb());
+    const store = createCredentialStore(getSystemDb());
+    const result = await authProvider.initiateAuth(store, 'oauth');
     return {
       userCode: result.userCode,
       verificationUrl: result.verificationUrl,
@@ -36,19 +35,15 @@ export const codexAuthRouter = router({
 
   /**
    * Subscribe to real-time status updates for an active device code flow.
-   * Emits AuthStatusUpdate events via WebSocket.
+   * Emits AuthFlowStatusUpdate events via WebSocket.
    */
   status: protectedProcedure
     .input(z.object({ sessionId: z.string() }))
     .subscription(({ input }) => {
-      return observable<AuthStatusUpdate>((emit) => {
-        const unsubscribe = subscribeToStatus(input.sessionId, (status) => {
+      return observable<AuthFlowStatusUpdate>((emit) => {
+        const unsubscribe = authProvider.subscribeToAuthStatus(input.sessionId, (status) => {
           emit.next(status);
 
-          // Auto-complete the observable on terminal states.
-          // Wrapped in try-catch because the frontend may disconnect after
-          // receiving the terminal status, closing the controller before
-          // this timeout fires.
           if (status.status === 'success' || status.status === 'error' || status.status === 'expired' || status.status === 'cancelled') {
             setTimeout(() => {
               try { emit.complete(); } catch { /* controller already closed */ }
@@ -66,7 +61,7 @@ export const codexAuthRouter = router({
   cancel: protectedProcedure
     .input(z.object({ sessionId: z.string() }))
     .mutation(({ input }) => {
-      const cancelled = cancelFlow(input.sessionId);
+      const cancelled = authProvider.cancelAuthFlow(input.sessionId);
       return { cancelled };
     }),
 

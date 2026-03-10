@@ -25,15 +25,18 @@ import type {
 import { AgentError, wrapError } from '../errors.js';
 import { createTaggedLogger, type Logger } from '../logger.js';
 import { CLAUDE_CAPABILITIES } from '../capabilities.js';
+import type { IAuthProvider } from '../types.js';
 import { BaseAdapter, BaseSession, type AdapterOptions } from './base.js';
 import { generateUUID, now, createPendingSessionId } from '../utils/index.js';
+import { ClaudeAuthProvider } from '../auth/claude-auth-provider.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-// Type declarations for the Claude Agent SDK
-// The actual SDK will be dynamically imported
+// Type declarations for the Claude Agent SDK (v0.2.x)
+// The actual SDK is dynamically imported at runtime via loadSDK().
+// These local interfaces document the subset of the SDK API we use.
 interface ClaudeSDK {
   query: (params: QueryParams) => Query;
 }
@@ -53,14 +56,19 @@ interface QueryOptions {
   disallowedTools?: string[];
   maxTurns?: number;
   maxBudgetUsd?: number;
+  /** @deprecated Use `thinking` instead */
   maxThinkingTokens?: number;
+  /** Thinking configuration (v0.2+) */
+  thinking?: ThinkingConfig;
+  /** Reasoning effort level (v0.2+) */
+  effort?: 'low' | 'medium' | 'high' | 'max';
   includePartialMessages?: boolean;
   abortController?: AbortController;
   resume?: string;
   forkSession?: boolean;
   mcpServers?: Record<string, unknown>;
   hooks?: Record<string, HookMatcher[]>;
-  env?: Record<string, string>;
+  env?: Record<string, string | undefined>;
   outputFormat?: {
     type: 'json_schema';
     schema: Record<string, unknown>;
@@ -80,6 +88,12 @@ interface QueryOptions {
   >;
   stderr?: (message: string) => void;
 }
+
+/** Thinking configuration for Claude SDK v0.2+ */
+type ThinkingConfig =
+  | { type: 'adaptive' }
+  | { type: 'enabled'; budgetTokens?: number }
+  | { type: 'disabled' };
 
 interface HookMatcher {
   matcher: string;
@@ -220,12 +234,21 @@ interface ContentPart {
   };
 }
 
+/**
+ * SDK message union type.
+ *
+ * We handle the core message types directly and log/ignore the rest.
+ * The SDK v0.2+ emits ~21 distinct message types; we process the subset
+ * relevant to our adapter abstraction.
+ */
 type SDKMessage =
   | SystemMessage
   | AssistantMessage
-  | ResultMessage
+  | ResultSuccessMessage
+  | ResultErrorMessage
   | PartialMessage
-  | StreamEventMessage;
+  | StreamEventMessage
+  | { type: string; [key: string]: unknown };  // catch-all for new/unknown types
 
 interface SystemMessage {
   type: 'system';
@@ -249,21 +272,39 @@ interface ContentBlock {
   input?: unknown;
 }
 
-interface ResultMessage {
+/** Result message for successful completion (v0.2+) */
+interface ResultSuccessMessage {
   type: 'result';
-  subtype: 'success' | 'error_max_turns' | 'error_during_execution' | 'error_max_budget_usd' | 'error_max_structured_output_retries';
+  subtype: 'success';
   session_id: string;
   duration_ms: number;
   num_turns: number;
   result: string;
   total_cost_usd: number;
   structured_output?: unknown;
-  usage: {
-    input_tokens: number;
-    output_tokens: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-  };
+  usage: ResultUsage;
+}
+
+/** Result message for errors (v0.2+) */
+interface ResultErrorMessage {
+  type: 'result';
+  subtype: 'error_max_turns' | 'error_during_execution' | 'error_max_budget_usd' | 'error_max_structured_output_retries';
+  session_id: string;
+  duration_ms: number;
+  num_turns: number;
+  errors: string[];
+  total_cost_usd: number;
+  usage: ResultUsage;
+}
+
+/** Unified result message type (discriminated on subtype) */
+type ResultMessage = ResultSuccessMessage | ResultErrorMessage;
+
+interface ResultUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
 }
 
 interface PartialMessage {
@@ -303,11 +344,17 @@ export class ClaudeAdapter extends BaseAdapter {
 
   private sdk: ClaudeSDK | null = null;
   private runtimeSdkPath: string | undefined;
+  private authProvider: ClaudeAuthProvider;
 
   constructor(options?: AdapterOptions) {
     super(options);
     this.runtimeSdkPath = options?.runtimeSdkPath;
     this.initLogger(options);
+    this.authProvider = new ClaudeAuthProvider(this.logger);
+  }
+
+  override getAuthProvider(): IAuthProvider {
+    return this.authProvider;
   }
 
   /**
@@ -708,14 +755,16 @@ class ClaudeSession extends BaseSession {
 
         // Extract session ID from init message
         if (message.type === 'system' && message.subtype === 'init') {
-          this.nativeSessionId = message.session_id;
-          this.vlog('Session ID resolved', { nativeSessionId: message.session_id });
+          const sysMsg = message as SystemMessage;
+          this.nativeSessionId = sysMsg.session_id;
+          this.vlog('Session ID resolved', { nativeSessionId: sysMsg.session_id });
         }
 
         // Extract response from assistant message and track turns
         if (message.type === 'assistant') {
-          response = this.extractContent(message);
-          const contentBlocks = (message as AssistantMessage).message.content;
+          const assistMsg = message as AssistantMessage;
+          response = this.extractContent(assistMsg);
+          const contentBlocks = assistMsg.message.content;
           const toolUseBlocks = contentBlocks.filter(b => b.type === 'tool_use');
           turns.push({
             turnIndex,
@@ -729,24 +778,32 @@ class ClaudeSession extends BaseSession {
 
         // Extract result info
         if (message.type === 'result') {
+          const resultMsg = message as ResultMessage;
+
           // Guard: don't let a spurious error result overwrite a prior success
           if (gotSuccessResult) {
             this.logger.warn('Ignoring duplicate result message after success', {
-              subtype: message.subtype,
+              subtype: resultMsg.subtype,
               sessionId: this.id,
             });
             continue;
           }
 
-          this.updateUsageFromResult(message);
-          finishReason = this.mapFinishReason(message.subtype);
-          response = message.result || response;
-          if (message.structured_output !== undefined) {
-            structuredOutput = message.structured_output;
-          }
+          this.updateUsageFromResult(resultMsg);
+          finishReason = this.mapFinishReason(resultMsg.subtype);
 
-          if (message.subtype === 'success') {
+          // SDK v0.2+ splits result messages: success has `result`, error has `errors`
+          if (resultMsg.subtype === 'success') {
+            response = (resultMsg as ResultSuccessMessage).result || response;
+            if ((resultMsg as ResultSuccessMessage).structured_output !== undefined) {
+              structuredOutput = (resultMsg as ResultSuccessMessage).structured_output;
+            }
             gotSuccessResult = true;
+          } else {
+            const errorResult = resultMsg as ResultErrorMessage;
+            if (errorResult.errors?.length) {
+              response = errorResult.errors.join('\n') || response;
+            }
           }
         }
       }
@@ -966,16 +1023,17 @@ class ClaudeSession extends BaseSession {
 
         // Extract session ID from init message
         if (message.type === 'system' && message.subtype === 'init') {
-          this.nativeSessionId = message.session_id;
+          const sysMsg = message as SystemMessage;
+          this.nativeSessionId = sysMsg.session_id;
           this.vlog('Session ID resolved', {
-            nativeSessionId: message.session_id,
-            resolvedModel: message.model,
+            nativeSessionId: sysMsg.session_id,
+            resolvedModel: sysMsg.model,
           });
         }
 
         // Handle streaming events
         if (message.type === 'stream_event') {
-          const event = message.event;
+          const event = (message as StreamEventMessage).event;
           if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
             const chunk = event.delta.text ?? '';
             accumulated += chunk;
@@ -993,11 +1051,12 @@ class ClaudeSession extends BaseSession {
 
         // Extract final response from assistant message
         if (message.type === 'assistant') {
-          response = this.extractContent(message);
+          const assistMsg = message as AssistantMessage;
+          response = this.extractContent(assistMsg);
           this.vlog('Assistant message received', {
-            contentBlocks: (message as AssistantMessage).message.content.length,
+            contentBlocks: assistMsg.message.content.length,
             textLength: response.length,
-            toolCalls: (message as AssistantMessage).message.content
+            toolCalls: assistMsg.message.content
               .filter(b => b.type === 'tool_use')
               .map(b => b.name),
           });
@@ -1014,7 +1073,9 @@ class ClaudeSession extends BaseSession {
             inputTokens: resultMsg.usage.input_tokens,
             outputTokens: resultMsg.usage.output_tokens,
             cacheReadTokens: resultMsg.usage.cache_read_input_tokens,
-            hasStructuredOutput: resultMsg.structured_output !== undefined,
+            hasStructuredOutput: resultMsg.subtype === 'success'
+              ? (resultMsg as ResultSuccessMessage).structured_output !== undefined
+              : false,
           });
 
           // End the message stream now that the CLI has produced its result.
@@ -1033,13 +1094,19 @@ class ClaudeSession extends BaseSession {
 
           this.updateUsageFromResult(resultMsg);
           finishReason = this.mapFinishReason(resultMsg.subtype);
-          response = resultMsg.result || response;
-          if (resultMsg.structured_output !== undefined) {
-            structuredOutput = resultMsg.structured_output;
-          }
 
+          // SDK v0.2+ splits result messages: success has `result`, error has `errors`
           if (resultMsg.subtype === 'success') {
+            response = (resultMsg as ResultSuccessMessage).result || response;
+            if ((resultMsg as ResultSuccessMessage).structured_output !== undefined) {
+              structuredOutput = (resultMsg as ResultSuccessMessage).structured_output;
+            }
             gotSuccessResult = true;
+          } else {
+            const errorResult = resultMsg as ResultErrorMessage;
+            if (errorResult.errors?.length) {
+              response = errorResult.errors.join('\n') || response;
+            }
           }
         }
       }
@@ -1222,7 +1289,13 @@ class ClaudeSession extends BaseSession {
       disallowedTools: this.getDisallowedTools(),
       maxTurns: this.config.maxTurns,
       maxBudgetUsd: this.config.maxBudgetUsd,
-      maxThinkingTokens: this.config.maxThinkingTokens,
+      // Adaptive thinking: let Claude decide when/how much to think.
+      // Combined with `effort`, this is the intended pattern: `effort`
+      // controls overall depth, while `adaptive` handles the decision
+      // of whether to use extended thinking for a given turn.
+      thinking: { type: 'adaptive' },
+      // Map unified reasoningEffort to SDK effort option
+      effort: this.config.reasoningEffort,
       includePartialMessages: this.config.includePartialMessages,
       abortController: this.abortController ?? undefined,
       resume: this.config.resume ?? this.nativeSessionId ?? undefined,
@@ -1454,10 +1527,10 @@ class ClaudeSession extends BaseSession {
   private async processMessage(message: SDKMessage): Promise<void> {
     switch (message.type) {
       case 'system':
-        if (message.subtype === 'init') {
+        if ((message as SystemMessage).subtype === 'init') {
           // Capture actual model from SDK init message
-          if (message.model) {
-            this.resolvedModel = message.model;
+          if ((message as SystemMessage).model) {
+            this.resolvedModel = (message as SystemMessage).model!;
           }
 
           // Strip non-serializable fields (e.g. MCP server instances) for logging
@@ -1482,10 +1555,34 @@ class ClaudeSession extends BaseSession {
         }
         break;
 
-      case 'assistant':
-        // Process content blocks for tool calls
-        for (const block of message.message.content) {
+      case 'assistant': {
+        const assistantMsg = message as AssistantMessage;
+        let hasThinkingBlock = false;
+        let thinkingContent = '';
+
+        // Process content blocks for thinking and tool calls.
+        // Order matters: thinking blocks are checked first so content is
+        // accumulated before a subsequent tool_use triggers thinking_end.
+        for (const block of assistantMsg.message.content) {
+          if (block.type === 'thinking') {
+            thinkingContent += block.text ?? '';
+            if (!hasThinkingBlock) {
+              await this.emit(this.createEvent('thinking_start', {}));
+              hasThinkingBlock = true;
+            }
+          }
+
           if (block.type === 'tool_use' && block.name && block.id) {
+            // If we were in a thinking block, emit thinking_end before tool_call_start
+            if (hasThinkingBlock) {
+              await this.emit(this.createEvent('thinking_end', {
+                thinkingDurationMs: 0, // Duration not available from content blocks
+                content: thinkingContent || undefined,
+              }));
+              hasThinkingBlock = false;
+              thinkingContent = '';
+            }
+
             await this.emit(
               this.createEvent('tool_call_start', {
                 toolName: block.name,
@@ -1494,13 +1591,17 @@ class ClaudeSession extends BaseSession {
               }),
             );
           }
+        }
 
-          if (block.type === 'thinking') {
-            await this.emit(this.createEvent('thinking_start', {}));
-            // Note: thinking_end would be emitted when we see the next non-thinking block
-          }
+        // Emit thinking_end if the last block was thinking (no tool_use followed it)
+        if (hasThinkingBlock) {
+          await this.emit(this.createEvent('thinking_end', {
+            thinkingDurationMs: 0,
+            content: thinkingContent || undefined,
+          }));
         }
         break;
+      }
 
       case 'result':
         // Result is handled in prompt methods
@@ -1508,6 +1609,15 @@ class ClaudeSession extends BaseSession {
 
       case 'stream_event':
         // Stream events are handled in promptStreaming
+        break;
+
+      default:
+        // SDK v0.2+ adds many new message types (task_progress, rate_limit, etc.)
+        // Log them at debug level for diagnostics without processing
+        this.logger.debug('Unhandled SDK message type', {
+          type: message.type,
+          sessionId: this.id,
+        });
         break;
     }
   }
@@ -1523,7 +1633,7 @@ class ClaudeSession extends BaseSession {
   }
 
   /**
-   * Update usage from a result message.
+   * Update usage from a result message (success or error).
    */
   private updateUsageFromResult(result: ResultMessage): void {
     this.updateUsage({

@@ -1,45 +1,42 @@
 /**
  * Codex CLI Auth Router -- tRPC procedures for Codex CLI auth flow.
  *
- * Orchestrates `codex login` to provide browser-based authentication
- * for desktop users with ChatGPT Plus/Pro/Team subscriptions.
+ * Delegates to the CodexAuthProvider from @animus-labs/agents,
+ * with credential persistence via CredentialStoreAdapter.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';
 import { getSystemDb } from '../../db/index.js';
-import {
-  initiateCodexCliAuth,
-  subscribeToStatus,
-  cancelFlow,
-  logoutCodex,
-  type CodexCliAuthStatusUpdate,
-} from '../../services/codex-cli-auth.js';
+import { createCredentialStore } from '../../services/credential-store-adapter.js';
 import { removeCredential } from '../../services/credential-service.js';
+import { CodexAuthProvider, type AuthFlowStatusUpdate } from '@animus-labs/agents';
+
+const authProvider = new CodexAuthProvider();
 
 export const codexCliAuthRouter = router({
   /**
    * Initiate the Codex CLI auth flow.
    * Spawns `codex login` which opens a browser for authentication.
    */
-  initiate: protectedProcedure.mutation(() => {
-    const result = initiateCodexCliAuth(getSystemDb());
+  initiate: protectedProcedure.mutation(async () => {
+    const store = createCredentialStore(getSystemDb());
+    const result = await authProvider.initiateAuth(store, 'cli');
     return { sessionId: result.sessionId };
   }),
 
   /**
    * Subscribe to real-time status updates for an active auth flow.
-   * Emits CodexCliAuthStatusUpdate events via WebSocket.
+   * Emits AuthFlowStatusUpdate events via WebSocket.
    */
   status: protectedProcedure
     .input(z.object({ sessionId: z.string() }))
     .subscription(({ input }) => {
-      return observable<CodexCliAuthStatusUpdate>((emit) => {
-        const unsubscribe = subscribeToStatus(input.sessionId, (status) => {
+      return observable<AuthFlowStatusUpdate>((emit) => {
+        const unsubscribe = authProvider.subscribeToAuthStatus(input.sessionId, (status) => {
           emit.next(status);
 
-          // Auto-complete the observable on terminal states.
           if (status.status === 'success' || status.status === 'error' || status.status === 'cancelled') {
             setTimeout(() => {
               try { emit.complete(); } catch { /* controller already closed */ }
@@ -57,7 +54,7 @@ export const codexCliAuthRouter = router({
   cancel: protectedProcedure
     .input(z.object({ sessionId: z.string() }))
     .mutation(({ input }) => {
-      const cancelled = cancelFlow(input.sessionId);
+      const cancelled = authProvider.cancelAuthFlow(input.sessionId);
       return { cancelled };
     }),
 
@@ -66,8 +63,8 @@ export const codexCliAuthRouter = router({
    */
   logout: protectedProcedure.mutation(async () => {
     const db = getSystemDb();
-    await logoutCodex(db);
-    // Also remove any stored credentials to fully reset state
+    const store = createCredentialStore(db);
+    await authProvider.logout(store);
     removeCredential(db, 'codex', 'cli_detected');
     return { success: true };
   }),

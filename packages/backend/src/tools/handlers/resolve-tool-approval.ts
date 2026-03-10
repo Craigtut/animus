@@ -5,7 +5,7 @@
  * via natural language conversation.
  */
 
-import type { z } from 'zod';
+import type { z } from 'zod/v3';
 import type { ToolHandler, ToolResult } from '../types.js';
 import { resolveToolApprovalDef } from '@animus-labs/shared';
 import { getHeartbeatDb } from '../../db/index.js';

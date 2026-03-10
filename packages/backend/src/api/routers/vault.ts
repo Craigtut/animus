@@ -6,7 +6,7 @@
  * Only create/update accept raw passwords; reads return hints only.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { router, protectedProcedure } from '../trpc.js';
 import { getSystemDb } from '../../db/index.js';
 import * as vaultStore from '../../db/stores/vault-store.js';

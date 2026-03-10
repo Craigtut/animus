@@ -2,7 +2,7 @@
  * Saves Router — tRPC procedures for save/restore management.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { router, publicProcedure } from '../trpc.js';
 import { isMaintenanceMode, getMaintenanceReason } from '../../lib/maintenance.js';
 import * as saveService from '../../services/save-service.js';

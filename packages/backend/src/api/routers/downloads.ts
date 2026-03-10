@@ -5,7 +5,7 @@
  * and a real-time progress subscription via EventBus.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';
 import { getDownloadManager, getSpeechAssets } from '../../downloads/index.js';

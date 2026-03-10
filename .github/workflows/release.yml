@@ -117,6 +117,75 @@ jobs:
           prerelease: false
           args: ${{ matrix.tauri-args }}
 
+  # Replace versioned installer names with stable names for /latest/download/ URLs
+  rename-installers:
+    needs: build-tauri
+    runs-on: ubuntu-latest
+    steps:
+      - name: Replace versioned assets with non-versioned names
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          REPO="${{ github.repository }}"
+
+          declare -A FILES
+          FILES["Animus_${VERSION}_aarch64.dmg"]="Animus_aarch64.dmg"
+          FILES["Animus_${VERSION}_x64.dmg"]="Animus_x64.dmg"
+          FILES["Animus_${VERSION}_x64-setup.exe"]="Animus_x64-setup.exe"
+
+          for VERSIONED in "${!FILES[@]}"; do
+            STABLE="${FILES[$VERSIONED]}"
+            echo "Downloading $VERSIONED..."
+            gh release download "$TAG" --repo "$REPO" --pattern "$VERSIONED" --dir /tmp/assets || {
+              echo "Warning: $VERSIONED not found, skipping"
+              continue
+            }
+
+            echo "Uploading as $STABLE..."
+            cp "/tmp/assets/$VERSIONED" "/tmp/assets/$STABLE"
+            gh release upload "$TAG" "/tmp/assets/$STABLE" --repo "$REPO"
+
+            echo "Removing versioned asset $VERSIONED..."
+            gh release delete-asset "$TAG" "$VERSIONED" --repo "$REPO" --yes
+          done
+
+  # Tauri hardcodes the version into installer filenames — rename to stable names
+  # so /releases/latest/download/ URLs work without knowing the version
+  rename-installers:
+    needs: build-tauri
+    runs-on: ubuntu-latest
+    steps:
+      - name: Replace versioned assets with non-versioned names
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          REPO="${{ github.repository }}"
+
+          declare -A FILES
+          FILES["Animus_${VERSION}_aarch64.dmg"]="Animus_aarch64.dmg"
+          FILES["Animus_${VERSION}_x64.dmg"]="Animus_x64.dmg"
+          FILES["Animus_${VERSION}_x64-setup.exe"]="Animus_x64-setup.exe"
+
+          for VERSIONED in "${!FILES[@]}"; do
+            STABLE="${FILES[$VERSIONED]}"
+            echo "Downloading $VERSIONED..."
+            gh release download "$TAG" --repo "$REPO" --pattern "$VERSIONED" --dir /tmp/assets || {
+              echo "Warning: $VERSIONED not found, skipping"
+              continue
+            }
+
+            echo "Uploading as $STABLE..."
+            cp "/tmp/assets/$VERSIONED" "/tmp/assets/$STABLE"
+            gh release upload "$TAG" "/tmp/assets/$STABLE" --repo "$REPO"
+
+            echo "Removing versioned asset $VERSIONED..."
+            gh release delete-asset "$TAG" "$VERSIONED" --repo "$REPO" --yes
+          done
+
   build-docker:
     runs-on: ubuntu-24.04
 
@@ -141,6 +210,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
+            type=raw,value=latest
 
       - uses: docker/build-push-action@v6
         with:

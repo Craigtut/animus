@@ -17,7 +17,8 @@ import type {
 } from '@animus-labs/agents';
 import { attachSessionLogging, type AgentLogStore } from '@animus-labs/agents';
 import type { IEventBus } from '@animus-labs/shared';
-import { prepareCodexSessionAuth, copyCodexCliAuth } from '../services/codex-oauth.js';
+import { CodexAuthProvider } from '@animus-labs/agents';
+import { createCredentialStore } from '../services/credential-store-adapter.js';
 import { getSystemDb, getContactsDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
 import * as contactStore from '../db/stores/contact-store.js';
@@ -271,12 +272,14 @@ export class AgentOrchestrator {
     try {
       // Prepare Codex session auth if needed
       let sessionEnv: Record<string, string> | undefined;
-      if (provider === 'codex' && process.env['CODEX_OAUTH_CONFIGURED']) {
+      if (provider === 'codex' && (process.env['CODEX_OAUTH_CONFIGURED'] || process.env['CODEX_CLI_CONFIGURED'])) {
         try {
           codexTempDir = await mkdtemp(join(tmpdir(), 'animus-codex-'));
-          sessionEnv = await prepareCodexSessionAuth(getSystemDb(), codexTempDir);
+          const codexAuth = new CodexAuthProvider();
+          const store = createCredentialStore(getSystemDb());
+          sessionEnv = await codexAuth.prepareSessionEnv(store, codexTempDir);
         } catch (err) {
-          log.warn('Codex OAuth session prep failed, falling back:', err);
+          log.warn('Codex session auth prep failed, falling back:', err);
           if (codexTempDir) {
             rm(codexTempDir, { recursive: true, force: true }).catch(() => {});
             codexTempDir = null;
@@ -348,11 +351,6 @@ export class AgentOrchestrator {
       let sdkPlugins: Array<{ type: 'local'; path: string }> | undefined;
       if (provider === 'codex') {
         sessionEnv = await getPluginManager().buildCodexRuntimeEnv(sessionEnv);
-        // CLI auth: copy ~/.codex/auth.json into CODEX_HOME so the binary
-        // finds it at the overridden path (keyring may not be available).
-        if (process.env['CODEX_CLI_CONFIGURED'] && !process.env['CODEX_OAUTH_CONFIGURED']) {
-          await copyCodexCliAuth(sessionEnv['CODEX_HOME']!);
-        }
       }
       if (provider === 'claude') {
         const bridgePath = getPluginManager().getSkillBridgePath();

@@ -4,7 +4,7 @@
  * Tables: working_memory, core_self, long_term_memories
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { uuidSchema, timestampSchema } from './common.js';
 
 // ============================================================================

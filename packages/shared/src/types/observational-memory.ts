@@ -4,7 +4,7 @@
  * DO NOT define types manually here — derive them from schemas.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type {
   streamTypeSchema,
   observationSchema,

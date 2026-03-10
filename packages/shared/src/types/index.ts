@@ -5,7 +5,7 @@
  * The schemas in /schemas/ are the single source of truth.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type {
   // Common
   uuidSchema,

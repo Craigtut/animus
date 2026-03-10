@@ -4,7 +4,7 @@
  * Tables: observations
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { uuidSchema, timestampSchema } from './common.js';
 
 // ============================================================================

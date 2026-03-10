@@ -8,7 +8,7 @@
  * See: docs/architecture/package-installation.md
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { channelCapabilitySchema, channelIdentitySchema } from './channel-packages.js';
 
 // ============================================================================

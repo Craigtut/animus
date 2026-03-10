@@ -105,6 +105,13 @@ export type {
   // Interfaces
   IAgentAdapter,
   IAgentSession,
+
+  // Credential & Auth
+  ICredentialStore,
+  IAuthProvider,
+  AuthFlowStatusUpdate,
+  ProviderAuthStatus,
+  ProviderAuthMethod,
 } from './types.js';
 
 // ============================================================================
@@ -267,3 +274,41 @@ export {
   readFile,
   readJson,
 } from './utils/index.js';
+
+// ============================================================================
+// SDK Resolution
+// ============================================================================
+
+export {
+  configureSdkResolver,
+  resolveClaudeCliPaths,
+  getClaudeNativeBinary,
+  resolveCodexCliPaths,
+  getCodexBundledBinary,
+  checkSdkAvailable,
+  _resetCache as _resetSdkCache,
+  type SdkResolverConfig,
+  CLAUDE_SDK_VERSION,
+  CLAUDE_SDK_PACKAGE,
+  SdkManager,
+  createSdkManager,
+  type SdkInstallStatus,
+  type SdkInstallProgress,
+  type SdkManagerConfig,
+} from './sdk/index.js';
+
+// ============================================================================
+// Auth Providers
+// ============================================================================
+
+export {
+  AuthSessionManager,
+  ClaudeAuthProvider,
+  CodexAuthProvider,
+  inferCredentialType,
+  ensureClaudeOnboardingFile,
+  validateClaudeCredential,
+  validateCodexCredential,
+  type AuthSession,
+  type CredentialType,
+} from './auth/index.js';

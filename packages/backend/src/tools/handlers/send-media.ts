@@ -8,7 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { z } from 'zod';
+import type { z } from 'zod/v3';
 import type { ToolHandler, ToolResult } from '../types.js';
 import type { ChannelType } from '@animus-labs/shared';
 import { sendMediaDef } from '@animus-labs/shared';

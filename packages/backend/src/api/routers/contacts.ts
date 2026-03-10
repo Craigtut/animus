@@ -5,7 +5,7 @@
  * Business logic delegated to ContactService.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { router, protectedProcedure } from '../trpc.js';
 import { getContactService } from '../../services/contact-service.js';
 import { channelTypeSchema } from '@animus-labs/shared';

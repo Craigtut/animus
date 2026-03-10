@@ -7,7 +7,7 @@
  * This is the first code path that actually calls ChannelRouter.sendOutbound().
  */
 
-import type { z } from 'zod';
+import type { z } from 'zod/v3';
 import type { ToolHandler, ToolResult } from '../types.js';
 import { sendProactiveMessageDef } from '@animus-labs/shared';
 

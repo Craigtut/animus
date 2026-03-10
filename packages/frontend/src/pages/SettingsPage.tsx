@@ -725,6 +725,13 @@ function ProviderSection() {
     }
   }, [systemSettings, activeProvider]);
 
+  // Auto-reset reasoning effort from 'max' when switching away from Claude
+  useEffect(() => {
+    if (systemSettings?.reasoningEffort === 'max' && activeProvider !== 'claude') {
+      updateSettingsMutation.mutate({ reasoningEffort: 'high' });
+    }
+  }, [activeProvider, systemSettings?.reasoningEffort]);
+
   // detect may clean up stale CLI credentials; refetch hasKey to stay in sync
   useEffect(() => {
     if (detectUpdatedAt) {
@@ -968,12 +975,12 @@ function ProviderSection() {
     codexInitiateMutation.mutate(undefined, {
       onSuccess: (result) => {
         setCodexOAuthData({
-          userCode: result.userCode,
-          verificationUrl: result.verificationUrl,
-          expiresIn: result.expiresIn,
+          userCode: result.userCode ?? '',
+          verificationUrl: result.verificationUrl ?? '',
+          expiresIn: result.expiresIn ?? 0,
         });
         setCodexOAuthSession(result.sessionId);
-        setCodexCountdown(result.expiresIn);
+        setCodexCountdown(result.expiresIn ?? 0);
 
         stopCountdown();
         countdownRef.current = setInterval(() => {
@@ -1010,6 +1017,14 @@ function ProviderSection() {
     claudeInitiateMutation.mutate(undefined, {
       onSuccess: (result) => {
         setClaudeOAuthSession(result.sessionId);
+        if (result.status === 'success') {
+          setClaudeOAuthStatus('success');
+          utils.provider.hasKey.invalidate();
+          utils.provider.detect.invalidate();
+        } else if (result.status === 'error') {
+          setClaudeOAuthStatus('error');
+          setClaudeOAuthMessage(result.message ?? 'Authentication failed');
+        }
       },
       onError: (err) => {
         setClaudeOAuthStatus('error');
@@ -1994,7 +2009,9 @@ function ProviderSection() {
           margin-bottom: ${theme.spacing[2]};
         `}>
           {activeModelSupportsThinking
-            ? 'Controls how much the model thinks before responding.'
+            ? activeProvider === 'claude'
+              ? 'Controls how much the model thinks before responding. Max is Claude-only.'
+              : 'Controls how much the model thinks before responding.'
             : 'Not supported by the current model.'}
         </Typography.SmallBody>
         <div css={css`
@@ -2008,7 +2025,7 @@ function ProviderSection() {
             { value: 'low' as const, label: 'Low' },
             { value: 'medium' as const, label: 'Medium' },
             { value: 'high' as const, label: 'High' },
-            { value: 'max' as const, label: 'Max' },
+            ...(activeProvider === 'claude' ? [{ value: 'max' as const, label: 'Max' }] : []),
           ].map((effort, idx) => {
             const isSelected = (systemSettings?.reasoningEffort ?? null) === effort.value;
             return (

@@ -46,7 +46,8 @@ import {
 } from '../db/stores/heartbeat-store.js';
 import { getHeartbeatDb } from '../db/index.js';
 import { getPluginManager } from '../plugins/index.js';
-import { prepareCodexSessionAuth, copyCodexCliAuth } from '../services/codex-oauth.js';
+import { CodexAuthProvider } from '@animus-labs/agents';
+import { createCredentialStore } from '../services/credential-store-adapter.js';
 import { getChannelRouter } from '../channels/index.js';
 import type { MemoryManager } from '../memory/index.js';
 
@@ -340,17 +341,15 @@ export async function getOrCreateMindSession(
     });
   } else if (provider === 'codex') {
     sessionEnv = await pluginMgr.buildCodexRuntimeEnv();
-    if (process.env['CODEX_OAUTH_CONFIGURED']) {
+    if (process.env['CODEX_OAUTH_CONFIGURED'] || process.env['CODEX_CLI_CONFIGURED']) {
       try {
-        sessionEnv = await prepareCodexSessionAuth(getSystemDb(), sessionEnv['CODEX_HOME']!);
+        const codexAuth = new CodexAuthProvider();
+        const store = createCredentialStore(getSystemDb());
+        const authEnv = await codexAuth.prepareSessionEnv(store, sessionEnv['CODEX_HOME']!);
+        sessionEnv = { ...sessionEnv, ...authEnv };
       } catch (err) {
-        log.warn('Codex OAuth session prep failed, continuing without refresh:', err);
+        log.warn('Codex session auth prep failed, continuing without refresh:', err);
       }
-    } else if (process.env['CODEX_CLI_CONFIGURED']) {
-      // CLI auth: credentials live at ~/.codex/auth.json (or system keyring).
-      // Since CODEX_HOME is overridden for plugin config, copy the auth file
-      // so the binary finds it at $CODEX_HOME/auth.json as a file fallback.
-      await copyCodexCliAuth(sessionEnv['CODEX_HOME']!);
     }
     sessionEnv = await pluginMgr.buildCodexRuntimeEnv(sessionEnv);
     log.info('Codex runtime config prepared for session', {

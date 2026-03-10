@@ -27,7 +27,6 @@ const mockProcess = Object.assign(new EventEmitter(), {
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(() => mockProcess),
-  execSync: vi.fn(() => '/usr/local/bin/codex'),
 }));
 
 vi.mock('node:fs', () => ({

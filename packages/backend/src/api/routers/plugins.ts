@@ -7,7 +7,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../trpc.js';
 import { getPluginManager } from '../../plugins/index.js';

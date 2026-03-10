@@ -27,8 +27,10 @@ import type {
 import { AgentError, wrapError } from '../errors.js';
 import { createTaggedLogger, type Logger } from '../logger.js';
 import { CODEX_CAPABILITIES } from '../capabilities.js';
+import type { IAuthProvider } from '../types.js';
 import { BaseAdapter, BaseSession, type AdapterOptions } from './base.js';
 import { generateUUID, createPendingSessionId } from '../utils/index.js';
+import { CodexAuthProvider } from '../auth/codex-auth-provider.js';
 import { getCodexReasoningEffort } from '../reasoning.js';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -76,10 +78,16 @@ export class CodexAdapter extends BaseAdapter {
   readonly capabilities: AdapterCapabilities = CODEX_CAPABILITIES;
 
   private appServer: CodexAppServerClient | null = null;
+  private authProvider: CodexAuthProvider;
 
   constructor(options?: AdapterOptions) {
     super(options);
     this.initLogger(options);
+    this.authProvider = new CodexAuthProvider(this.logger);
+  }
+
+  override getAuthProvider(): IAuthProvider {
+    return this.authProvider;
   }
 
   /**

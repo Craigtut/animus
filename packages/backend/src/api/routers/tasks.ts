@@ -2,7 +2,7 @@
  * Tasks Router — tRPC procedures for tasks and task runs.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';
 import { getTaskService } from '../../services/task-service.js';

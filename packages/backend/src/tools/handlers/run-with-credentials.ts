@@ -17,7 +17,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import type { z } from 'zod';
+import type { z } from 'zod/v3';
 import type { ToolHandler, ToolResult } from '../types.js';
 import { runWithCredentialsDef } from '@animus-labs/shared';
 import { getPluginManager } from '../../plugins/index.js';

@@ -13,7 +13,7 @@
  * replace OUTPUT_SCHEMA_REF in the production mind pipeline.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('CognitiveTools', 'agents');
@@ -219,8 +219,8 @@ export async function buildCognitiveMcpServer(): Promise<{
     'record_thought',
     'Your first action every time you respond. Call this once before writing any reply ' +
     'or calling any other tool. It is critical that this is the very first thing you do.',
-    recordThoughtSchema.shape,
-    async (args: z.infer<typeof recordThoughtSchema>) => {
+    recordThoughtSchema.shape as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- Zod v3 compat shim; SDK expects v4 schema shapes
+    async (args: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
       if (snapshotBox.current.thought) {
         log.warn('record_thought called again — already recorded, ignoring duplicate');
         return { content: [{ type: 'text' as const, text: 'Already recorded.' }] };
@@ -237,8 +237,8 @@ export async function buildCognitiveMcpServer(): Promise<{
     'Your last action every time you respond. Call this once after you have delivered your ' +
     'final reply and completed all other work. It is critical that this is always called ' +
     'and that it is the very last thing you do.',
-    recordCognitiveStateSchema.shape,
-    async (args: z.infer<typeof recordCognitiveStateSchema>) => {
+    recordCognitiveStateSchema.shape as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- Zod v3 compat shim; SDK expects v4 schema shapes
+    async (args: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
       log.info('record_cognitive_state called', {
         emotionCount: args.emotionDeltas.length,
         decisionCount: args.decisions.length,

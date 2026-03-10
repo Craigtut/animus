@@ -5,7 +5,7 @@
  * Only the mind writes memories.
  */
 
-import type { z } from 'zod';
+import type { z } from 'zod/v3';
 import type { ToolHandler, ToolResult } from '../types.js';
 import { readMemoryDef } from '@animus-labs/shared';
 
