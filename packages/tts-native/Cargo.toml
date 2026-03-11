@@ -12,6 +12,12 @@ napi-derive = "2"
 pocket-tts = { git = "https://github.com/babybirdprd/pocket-tts", rev = "dbf78c816cd83c89f11dbeb9d87290ad0a3dccd0", default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 
+# Vendored OpenSSL for cross-compilation (Linux ARM64 CI).
+# pocket-tts -> hf-hub -> native-tls -> openssl-sys needs OpenSSL on Linux.
+# Vendoring builds it from source, avoiding cross-arch system package issues.
+[target.'cfg(target_os = "linux")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
+
 [build-dependencies]
 napi-build = "2"
 
