@@ -250,8 +250,10 @@ export async function verifyPackage(anpkPath: string): Promise<VerificationResul
  */
 async function computeArchiveHash(dir: string, excludeFile: string): Promise<string> {
   const files = await collectFiles(dir);
+  // Normalize to forward slashes so the hash matches across platforms.
+  // Packages are signed with forward-slash paths; Windows path.relative uses backslashes.
   const relativePaths = files
-    .map(f => path.relative(dir, f))
+    .map(f => path.relative(dir, f).replaceAll('\\', '/'))
     .filter(p => p !== excludeFile)
     .sort();
 
@@ -341,6 +343,11 @@ function checkEngineVersionCompatibility(
 function getCurrentEngineVersion(): [number, number, number] | null {
   try {
     let dir = path.dirname(new URL(import.meta.url).pathname);
+    // On Windows, URL.pathname has a leading slash before the drive letter (/C:/...)
+    // which is not a valid Windows path. Strip it.
+    if (process.platform === 'win32' && dir.startsWith('/') && /^\/[A-Za-z]:/.test(dir)) {
+      dir = dir.slice(1);
+    }
     for (let i = 0; i < 6; i++) {
       const pkgPath = path.join(dir, 'package.json');
       if (fs.existsSync(pkgPath)) {
