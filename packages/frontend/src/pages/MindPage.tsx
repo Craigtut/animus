@@ -14,6 +14,7 @@ import {
   ListChecks,
   List,
   X,
+  type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
 
 import { EmotionsSection } from '../components/mind/EmotionsSection';
@@ -34,7 +35,7 @@ type MindSection = 'emotions' | 'energy' | 'journal' | 'memories' | 'goals' | 't
 interface SidebarItem {
   id: MindSection;
   label: string;
-  icon: React.ElementType;
+  icon: PhosphorIcon;
 }
 
 const sections: SidebarItem[] = [

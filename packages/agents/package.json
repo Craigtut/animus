@@ -14,7 +14,7 @@
     }
   },
   "scripts": {
-    "build": "tsc && cp src/models.json dist/models.json",
+    "build": "tsc && node -e \"require('fs').cpSync('src/models.json','dist/models.json')\"",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest",

@@ -1,10 +1,10 @@
 /** @jsxImportSource @emotion/react */
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store';
-import { trpc } from '../../utils/trpc';
+import { trpc, setWsAuthToken } from '../../utils/trpc';
 import { Spinner } from '../ui/Spinner';
 import { css, useTheme } from '@emotion/react';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -49,6 +49,19 @@ export function AuthGuard({ children }: AuthGuardProps) {
     undefined,
     { enabled: !!meData, retry: false, refetchOnWindowFocus: false }
   );
+
+  // Fetch the WS auth token once authenticated so WebSocket subscriptions
+  // work from any authed route (setup, onboarding, main app).
+  const { data: tokenData } = trpc.auth.wsToken.useQuery(undefined, {
+    enabled: !!meData,
+    retry: 3,
+    retryDelay: 1000,
+  });
+  const wsReadyRef = useRef(false);
+  if (tokenData?.token && !wsReadyRef.current) {
+    setWsAuthToken(tokenData.token);
+    wsReadyRef.current = true;
+  }
 
   useEffect(() => {
     if (meData) {

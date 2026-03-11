@@ -53,18 +53,22 @@ export function SetupPage() {
     refetchOnWindowFocus: false,
   });
 
+  const navigateAway = useCallback(() => {
+    utils.sdk.status.setData(undefined, {
+      installed: true,
+      version: null,
+      installPath: '',
+      installing: false,
+      error: null,
+    });
+    navigate(onboardingState?.isComplete ? '/' : '/onboarding');
+  }, [utils, navigate, onboardingState]);
+
   // Subscribe to install progress
   trpc.sdk.onInstallProgress.useSubscription(undefined, {
     onData: (data) => {
       if (data.phase === 'complete') {
-        utils.sdk.status.setData(undefined, {
-          installed: true,
-          version: null,
-          installPath: '',
-          installing: false,
-          error: null,
-        });
-        navigate(onboardingState?.isComplete ? '/' : '/onboarding');
+        navigateAway();
       } else if (data.phase === 'error') {
         setError(data.error ?? 'Something went wrong. Please check your internet connection.');
         setInstalling(false);
@@ -75,6 +79,19 @@ export function SetupPage() {
       }
     },
   });
+
+  // Fallback: poll SDK status in case the subscription misses the complete event
+  // (e.g., install finishes before the WebSocket connects)
+  const { data: sdkStatus } = trpc.sdk.status.useQuery(undefined, {
+    refetchInterval: installing ? 3000 : false,
+    refetchOnWindowFocus: false,
+  });
+
+  useEffect(() => {
+    if (installing && sdkStatus?.installed) {
+      navigateAway();
+    }
+  }, [installing, sdkStatus, navigateAway]);
 
   const startInstall = useCallback(() => {
     setError(null);

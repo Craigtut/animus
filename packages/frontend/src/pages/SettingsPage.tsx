@@ -38,6 +38,7 @@ import {
   SignOut,
   MagnifyingGlass,
   Key,
+  type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
 import { Card, SelectionCard, Button, Input, Select, Modal, Badge, Toggle, Slider, Typography, Tooltip } from '../components/ui';
 import { trpc } from '../utils/trpc';
@@ -80,7 +81,7 @@ interface ModelData {
 interface SidebarItem {
   id: SettingsSection;
   label: string;
-  icon: React.ElementType;
+  icon: PhosphorIcon;
 }
 
 const sections: SidebarItem[] = [
@@ -2770,7 +2771,7 @@ const channelStatusBadge: Record<string, { variant: 'default' | 'success' | 'war
 };
 
 // Icon mapping for common channel types
-const channelIconMap: Record<string, React.ElementType> = {
+const channelIconMap: Record<string, PhosphorIcon> = {
   web: Globe,
   sms: ChatText,
   discord: DiscordLogo,

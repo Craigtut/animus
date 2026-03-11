@@ -2,42 +2,18 @@
 import { css, useTheme } from '@emotion/react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { useRef } from 'react';
 import { NavigationPill } from './NavigationPill';
 import { CommandPalette } from './CommandPalette';
 import { TauriDragRegion } from './TauriDragRegion';
 import { useSubscriptionManager } from '../../hooks/useSubscriptionManager';
-import { trpc, setWsAuthToken } from '../../utils/trpc';
 
-/**
- * Mounts all tRPC WebSocket subscriptions.
- * Rendered as a standalone component so it can be conditionally mounted
- * after the WebSocket auth token is available.
- */
+/** Mounts all tRPC WebSocket subscriptions for the main app. */
 function SubscriptionMount() {
   useSubscriptionManager();
   return null;
 }
 
 export function AppLayout() {
-  // Fetch the JWT for WebSocket connectionParams authentication.
-  // WKWebView on macOS doesn't reliably send cookies with WebSocket upgrade
-  // requests. tRPC's connectionParams sends the token as the first WS message
-  // (not in the URL), so it works securely across all platforms.
-  const { data: tokenData } = trpc.auth.wsToken.useQuery(undefined, {
-    retry: 3,
-    retryDelay: 1000,
-  });
-
-  // Set the WS auth token synchronously during render to avoid React 19
-  // passive effect scheduling issues where useEffect may not flush promptly.
-  const wsReadyRef = useRef(false);
-  if (tokenData?.token && !wsReadyRef.current) {
-    setWsAuthToken(tokenData.token);
-    wsReadyRef.current = true;
-  }
-  const wsReady = wsReadyRef.current;
-
   const theme = useTheme();
   const location = useLocation();
 
@@ -61,8 +37,8 @@ export function AppLayout() {
       <TauriDragRegion />
       <NavigationPill />
       <CommandPalette />
-      {/* Mount subscriptions only after WS auth token is available */}
-      {wsReady && <SubscriptionMount />}
+      {/* WS auth token is set by AuthGuard, which wraps all authed routes */}
+      <SubscriptionMount />
 
       <motion.main
         key={getSpaceKey()}

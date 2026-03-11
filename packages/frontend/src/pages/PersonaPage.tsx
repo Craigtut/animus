@@ -13,6 +13,7 @@ import {
   CaretUp,
   List,
   X,
+  type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
 import { Card, SelectionCard, Button, Input, Slider, Typography, CityAutocomplete, TimezoneSelect } from '../components/ui';
 import { VoiceTab } from '../components/persona/VoiceTab';
@@ -91,7 +92,7 @@ type PersonaTab = 'identity' | 'personality' | 'traits-values' | 'background' | 
 interface SidebarItem {
   id: PersonaTab;
   label: string;
-  icon: React.ElementType;
+  icon: PhosphorIcon;
 }
 
 const tabs: SidebarItem[] = [

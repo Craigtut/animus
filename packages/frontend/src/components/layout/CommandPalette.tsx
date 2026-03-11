@@ -3,7 +3,7 @@ import { css, useTheme } from '@emotion/react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { MagnifyingGlass, Pulse, Brain, User, GearSix } from '@phosphor-icons/react';
+import { MagnifyingGlass, Pulse, Brain, User, GearSix, type Icon as PhosphorIcon } from '@phosphor-icons/react';
 import { useShellStore } from '../../store';
 import { Typography } from '../ui';
 
@@ -11,7 +11,7 @@ interface CommandItem {
   id: string;
   label: string;
   secondaryLabel: string;
-  icon: React.ElementType;
+  icon: PhosphorIcon;
   path: string;
 }
 

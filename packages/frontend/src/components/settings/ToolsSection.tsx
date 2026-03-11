@@ -11,6 +11,7 @@ import {
   Lightning,
   Warning,
   ShieldWarning,
+  type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
 import { Typography, Badge, Button, Modal } from '../ui';
 import { trpc } from '../../utils/trpc';
@@ -21,7 +22,7 @@ import type { ToolPermission, ToolPermissionMode, RiskTier } from '@animus-labs/
 // Risk tier visual config
 // ============================================================================
 
-const riskTierConfig: Record<RiskTier, { color: (t: Theme) => string; icon: React.ElementType; label: string }> = {
+const riskTierConfig: Record<RiskTier, { color: (t: Theme) => string; icon: PhosphorIcon; label: string }> = {
   safe: { color: (t) => t.colors.success.main, icon: ShieldCheck, label: 'Safe' },
   communicates: { color: (t) => t.colors.info.main, icon: ChatCircle, label: 'Communicates' },
   acts: { color: (t) => t.colors.warning.main, icon: Lightning, label: 'Acts' },

@@ -18,6 +18,7 @@ import {
   Tray,
   PencilSimple,
   Trash,
+  type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
 import { trpc } from '../../utils/trpc';
 import { Card } from '../ui/Card';
@@ -38,7 +39,7 @@ const STATUS_BADGE: Record<string, 'default' | 'success' | 'warning' | 'error' |
   paused: 'warning',
 };
 
-const STATUS_ICON: Record<string, React.ElementType> = {
+const STATUS_ICON: Record<string, PhosphorIcon> = {
   pending: Clock,
   scheduled: CalendarBlank,
   in_progress: Lightning,

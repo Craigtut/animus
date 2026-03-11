@@ -296,13 +296,19 @@ async function extractBundledNpm() {
   console.log('[1b/11] Extracting bundled npm from Node.js archive...');
 
   fs.mkdirSync(BINARIES_DIR, { recursive: true });
-  const tmpArchive = path.join(BINARIES_DIR, `node-npm-download${ext}`);
+  // Cache archive in binaries/ so it survives cleanResources() wiping resources/
+  const cachedArchive = path.join(BINARIES_DIR, `node-npm-cache${ext}`);
+  const tmpArchive = cachedArchive;
 
   try {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Download failed: ${response.status} ${response.statusText}`);
-    const fileStream = fs.createWriteStream(tmpArchive);
-    await pipeline(Readable.fromWeb(response.body), fileStream);
+    if (fs.existsSync(cachedArchive) && fs.statSync(cachedArchive).size > 0) {
+      console.log('      Using cached Node.js archive from previous build');
+    } else {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+      const fileStream = fs.createWriteStream(cachedArchive);
+      await pipeline(Readable.fromWeb(response.body), fileStream);
+    }
 
     if (ext === '.tar.gz' || ext === '.tar.xz') {
       const tmpExtract = path.join(BINARIES_DIR, '_npm_extract_tmp');
@@ -367,8 +373,10 @@ async function extractBundledNpm() {
     }
 
     console.log(`      Extracted npm to ${npmDest}`);
-  } finally {
-    if (fs.existsSync(tmpArchive)) fs.unlinkSync(tmpArchive);
+  } catch (err) {
+    // Clean up cached archive on failure so next run retries the download
+    if (fs.existsSync(cachedArchive)) fs.unlinkSync(cachedArchive);
+    throw err;
   }
 }
 
