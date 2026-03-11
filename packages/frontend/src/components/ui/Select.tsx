@@ -1,6 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
-import { useState, useRef, useEffect, useCallback, useId } from 'react';
+import { useState, useRef, useEffect, useCallback, useId, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { CaretDown, Check } from '@phosphor-icons/react';
 
@@ -22,6 +23,9 @@ export interface SelectProps {
   maxWidth?: string | undefined;
 }
 
+const DROPDOWN_MAX_HEIGHT = 240;
+const DROPDOWN_GAP = 4;
+
 export function Select({
   options,
   value,
@@ -40,29 +44,81 @@ export function Select({
   const listRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listboxId = useId();
+  const isKeyboardNav = useRef(false);
+
+  // Portal positioning state
+  const [dropdownPos, setDropdownPos] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    flipUp: boolean;
+  }>({ top: 0, left: 0, width: 0, flipUp: false });
 
   const selectedOption = options.find((o) => o.value === value);
+
+  // Compute dropdown position from trigger rect
+  const updatePosition = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom - DROPDOWN_GAP;
+    const spaceAbove = rect.top - DROPDOWN_GAP;
+    const flipUp = spaceBelow < DROPDOWN_MAX_HEIGHT && spaceAbove > spaceBelow;
+
+    setDropdownPos({
+      top: flipUp
+        ? rect.top + window.scrollY - DROPDOWN_GAP
+        : rect.bottom + window.scrollY + DROPDOWN_GAP,
+      left: rect.left + window.scrollX,
+      width: rect.width,
+      flipUp,
+    });
+  }, []);
+
+  // Update position when opening and on scroll/resize while open
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    updatePosition();
+
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [isOpen, updatePosition]);
 
   // Reset active index when opening
   useEffect(() => {
     if (isOpen) {
       const idx = options.findIndex((o) => o.value === value);
       setActiveIndex(idx >= 0 ? idx : 0);
+      // Scroll selected item into view on open
+      requestAnimationFrame(() => {
+        if (listRef.current) {
+          const active = listRef.current.querySelector('[data-active="true"]');
+          active?.scrollIntoView({ block: 'nearest' });
+        }
+      });
     }
   }, [isOpen, options, value]);
 
-  // Scroll active item into view
+  // Scroll active item into view only for keyboard navigation
   useEffect(() => {
-    if (!isOpen || !listRef.current || activeIndex < 0) return;
+    if (!isOpen || !listRef.current || activeIndex < 0 || !isKeyboardNav.current) return;
     const active = listRef.current.querySelector('[data-active="true"]');
     active?.scrollIntoView({ block: 'nearest' });
+    isKeyboardNav.current = false;
   }, [activeIndex, isOpen]);
 
-  // Close on click outside
+  // Close on click outside (portal-aware: check both container and list)
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        containerRef.current && !containerRef.current.contains(target) &&
+        listRef.current && !listRef.current.contains(target)
+      ) {
         setIsOpen(false);
       }
     };
@@ -84,6 +140,7 @@ export function Select({
         if (!isOpen) {
           setIsOpen(true);
         } else {
+          isKeyboardNav.current = true;
           setActiveIndex((i) => Math.min(i + 1, options.length - 1));
         }
         break;
@@ -92,6 +149,7 @@ export function Select({
         if (!isOpen) {
           setIsOpen(true);
         } else {
+          isKeyboardNav.current = true;
           setActiveIndex((i) => Math.max(i - 1, 0));
         }
         break;
@@ -111,12 +169,14 @@ export function Select({
       case 'Home':
         if (isOpen) {
           e.preventDefault();
+          isKeyboardNav.current = true;
           setActiveIndex(0);
         }
         break;
       case 'End':
         if (isOpen) {
           e.preventDefault();
+          isKeyboardNav.current = true;
           setActiveIndex(options.length - 1);
         }
         break;
@@ -127,6 +187,112 @@ export function Select({
         break;
     }
   };
+
+  // Dropdown rendered via portal
+  const dropdown = (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0, y: dropdownPos.flipUp ? 4 : -4, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: dropdownPos.flipUp ? 4 : -4, scale: 0.98 }}
+          transition={{ duration: 0.12, ease: 'easeOut' }}
+          css={css`
+            position: absolute;
+            z-index: ${theme.zIndex.dropdown};
+            top: ${dropdownPos.top}px;
+            left: ${dropdownPos.left}px;
+            width: ${dropdownPos.width}px;
+            ${dropdownPos.flipUp ? `transform-origin: bottom;` : `transform-origin: top;`}
+            ${dropdownPos.flipUp ? `transform: translateY(-100%);` : ''}
+            background: ${theme.mode === 'light'
+              ? 'rgba(255, 255, 255, 0.82)'
+              : 'rgba(40, 38, 36, 0.88)'};
+            backdrop-filter: blur(20px) saturate(1.2);
+            -webkit-backdrop-filter: blur(20px) saturate(1.2);
+            border: 1px solid ${theme.colors.border.default};
+            border-radius: ${theme.borderRadius.default};
+            box-shadow: ${theme.shadows.lg};
+            overflow: hidden;
+          `}
+        >
+          <div
+            ref={listRef}
+            role="listbox"
+            id={listboxId}
+            css={css`
+              max-height: ${DROPDOWN_MAX_HEIGHT}px;
+              overflow-y: auto;
+              padding: ${theme.spacing[1]} 0;
+
+              /* Custom scrollbar */
+              &::-webkit-scrollbar { width: 6px; }
+              &::-webkit-scrollbar-track { background: transparent; }
+              &::-webkit-scrollbar-thumb {
+                background: ${theme.colors.border.default};
+                border-radius: 3px;
+              }
+            `}
+          >
+            {options.map((opt, idx) => {
+              const isActive = idx === activeIndex;
+              const isSelected = opt.value === value;
+              return (
+                <div
+                  key={opt.value}
+                  id={`${listboxId}-opt-${idx}`}
+                  role="option"
+                  aria-selected={isSelected}
+                  data-active={isActive}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    selectOption(opt);
+                  }}
+                  onMouseEnter={() => setActiveIndex(idx)}
+                  css={css`
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                    color: ${theme.colors.text.primary};
+                    font-size: ${theme.typography.fontSize.sm};
+                    cursor: pointer;
+                    transition: background ${theme.transitions.micro};
+                    background: ${isActive ? theme.colors.background.elevated : 'transparent'};
+                    user-select: none;
+                  `}
+                >
+                  <span>{opt.label}</span>
+                  {isSelected && (
+                    <Check
+                      size={14}
+                      weight="bold"
+                      css={css`
+                        color: ${theme.colors.text.secondary};
+                        flex-shrink: 0;
+                      `}
+                    />
+                  )}
+                </div>
+              );
+            })}
+            {options.length === 0 && (
+              <div
+                css={css`
+                  padding: ${theme.spacing[4]} ${theme.spacing[3]};
+                  text-align: center;
+                  font-size: ${theme.typography.fontSize.sm};
+                  color: ${theme.colors.text.hint};
+                `}
+              >
+                No options
+              </div>
+            )}
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
 
   return (
     <div
@@ -233,108 +399,8 @@ export function Select({
         </span>
       )}
 
-      {/* Dropdown panel */}
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: -4, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.98 }}
-            transition={{ duration: 0.12, ease: 'easeOut' }}
-            css={css`
-              position: absolute;
-              top: 100%;
-              left: 0;
-              right: 0;
-              z-index: ${theme.zIndex.dropdown};
-              margin-top: ${theme.spacing[1]};
-              background: ${theme.mode === 'light'
-                ? 'rgba(255, 255, 255, 0.82)'
-                : 'rgba(40, 38, 36, 0.88)'};
-              backdrop-filter: blur(20px) saturate(1.2);
-              -webkit-backdrop-filter: blur(20px) saturate(1.2);
-              border: 1px solid ${theme.colors.border.default};
-              border-radius: ${theme.borderRadius.default};
-              box-shadow: ${theme.shadows.lg};
-              overflow: hidden;
-            `}
-          >
-            <div
-              ref={listRef}
-              role="listbox"
-              id={listboxId}
-              css={css`
-                max-height: 240px;
-                overflow-y: auto;
-                padding: ${theme.spacing[1]} 0;
-
-                /* Custom scrollbar */
-                &::-webkit-scrollbar { width: 6px; }
-                &::-webkit-scrollbar-track { background: transparent; }
-                &::-webkit-scrollbar-thumb {
-                  background: ${theme.colors.border.default};
-                  border-radius: 3px;
-                }
-              `}
-            >
-              {options.map((opt, idx) => {
-                const isActive = idx === activeIndex;
-                const isSelected = opt.value === value;
-                return (
-                  <div
-                    key={opt.value}
-                    id={`${listboxId}-opt-${idx}`}
-                    role="option"
-                    aria-selected={isSelected}
-                    data-active={isActive}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      selectOption(opt);
-                    }}
-                    onMouseEnter={() => setActiveIndex(idx)}
-                    css={css`
-                      display: flex;
-                      align-items: center;
-                      justify-content: space-between;
-                      padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                      color: ${theme.colors.text.primary};
-                      font-size: ${theme.typography.fontSize.sm};
-                      cursor: pointer;
-                      transition: background ${theme.transitions.micro};
-                      background: ${isActive ? theme.colors.background.elevated : 'transparent'};
-                      user-select: none;
-                    `}
-                  >
-                    <span>{opt.label}</span>
-                    {isSelected && (
-                      <Check
-                        size={14}
-                        weight="bold"
-                        css={css`
-                          color: ${theme.colors.text.secondary};
-                          flex-shrink: 0;
-                        `}
-                      />
-                    )}
-                  </div>
-                );
-              })}
-              {options.length === 0 && (
-                <div
-                  css={css`
-                    padding: ${theme.spacing[4]} ${theme.spacing[3]};
-                    text-align: center;
-                    font-size: ${theme.typography.fontSize.sm};
-                    color: ${theme.colors.text.hint};
-                  `}
-                >
-                  No options
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Dropdown portalled to body to escape overflow clipping */}
+      {createPortal(dropdown, document.body)}
     </div>
   );
 }
