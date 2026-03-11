@@ -67,10 +67,10 @@ export class AuthSessionManager<T extends AuthSession> {
     session.listeners.add(callback);
     this.log.debug(`Subscribe: session ${sessionId} now has ${session.listeners.size} listener(s), current status: ${session.status}`);
 
-    // Send current status on next tick so tRPC observable has time to wire up
+    // Send current status synchronously to the new subscriber
     const initial: AuthFlowStatusUpdate = { status: session.status };
     if (session.error) initial.message = session.error;
-    setImmediate(() => callback(initial));
+    callback(initial);
 
     return () => {
       session.listeners.delete(callback);
