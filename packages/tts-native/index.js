@@ -91,6 +91,36 @@ switch (platform) {
         throw new Error(`Unsupported architecture on Linux: ${arch}`)
     }
     break
+  case 'win32':
+    switch (arch) {
+      case 'x64':
+        localFileExisted = existsSync(join(__dirname, 'tts-native.win32-x64-msvc.node'))
+        try {
+          if (localFileExisted) {
+            nativeBinding = require('./tts-native.win32-x64-msvc.node')
+          } else {
+            nativeBinding = require('@animus/tts-native-win32-x64-msvc')
+          }
+        } catch (e) {
+          loadError = e
+        }
+        break
+      case 'arm64':
+        localFileExisted = existsSync(join(__dirname, 'tts-native.win32-arm64-msvc.node'))
+        try {
+          if (localFileExisted) {
+            nativeBinding = require('./tts-native.win32-arm64-msvc.node')
+          } else {
+            nativeBinding = require('@animus/tts-native-win32-arm64-msvc')
+          }
+        } catch (e) {
+          loadError = e
+        }
+        break
+      default:
+        throw new Error(`Unsupported architecture on Windows: ${arch}`)
+    }
+    break
   default:
     throw new Error(`Unsupported OS: ${platform}, architecture: ${arch}`)
 }

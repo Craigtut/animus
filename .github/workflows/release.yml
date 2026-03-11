@@ -57,6 +57,32 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Download prebuilt tts-native binary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Determine the expected binary name for this platform
+          case "${{ matrix.platform }}" in
+            macos-latest)
+              case "${{ matrix.rust-targets }}" in
+                aarch64-apple-darwin) BINARY="tts-native.darwin-arm64.node" ;;
+                x86_64-apple-darwin)  BINARY="tts-native.darwin-x64.node" ;;
+              esac
+              ;;
+            windows-latest) BINARY="tts-native.win32-x64-msvc.node" ;;
+          esac
+
+          if [ -n "$BINARY" ]; then
+            echo "Downloading $BINARY from tts-native-latest release..."
+            gh release download tts-native-latest \
+              --pattern "$BINARY" \
+              --dir packages/tts-native/ \
+              --clobber || echo "WARN: tts-native prebuilt not available, TTS will be excluded"
+          else
+            echo "WARN: No tts-native binary mapping for this platform"
+          fi
+
       - name: Build production assets
         run: npm run build:prod
 

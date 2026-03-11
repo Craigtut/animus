@@ -11,6 +11,10 @@ This guide will help you set up Animus for local development.
   - Windows: `winget install ffmpeg`
   - macOS: `brew install ffmpeg`
   - Linux: `sudo apt install ffmpeg` (Debian/Ubuntu) or `sudo dnf install ffmpeg` (Fedora)
+- **Rust toolchain** (optional, only needed if modifying `packages/tts-native/`)
+  - Prebuilt TTS binaries are downloaded automatically on `npm run dev`
+  - Only install Rust if you need to change the native addon source code
+  - Install via [rustup](https://rustup.rs/) if needed
 
 ## Installation
 

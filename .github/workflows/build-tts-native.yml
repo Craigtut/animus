@@ -1,0 +1,128 @@
+name: Build TTS Native Addon
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/tts-native/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: tts-native.darwin-arm64.node
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary: tts-native.darwin-x64.node
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: tts-native.linux-x64-gnu.node
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            binary: tts-native.linux-arm64-gnu.node
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: tts-native.win32-x64-msvc.node
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/tts-native/target
+          key: tts-native-${{ matrix.target }}-${{ hashFiles('packages/tts-native/Cargo.lock') }}
+          restore-keys: |
+            tts-native-${{ matrix.target }}-
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build native addon
+        run: npx napi build --release --platform --target ${{ matrix.target }}
+        working-directory: packages/tts-native
+        env:
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}
+          path: packages/tts-native/${{ matrix.binary }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute content hash
+        id: meta
+        run: |
+          # Hash the source files that affect the binary output
+          HASH=$(cat packages/tts-native/Cargo.toml packages/tts-native/Cargo.lock packages/tts-native/src/lib.rs packages/tts-native/build.rs | sha256sum | cut -c1-12)
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          for dir in artifacts/*/; do
+            cp "$dir"/*.node release/
+          done
+          ls -la release/
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="tts-native-latest"
+
+          # Delete existing release assets and recreate with fresh binaries
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          git push --delete origin "$TAG" 2>/dev/null || true
+
+          gh release create "$TAG" release/*.node \
+            --title "TTS Native Addon (latest)" \
+            --notes "Prebuilt native binaries for @animus-labs/tts-native. Downloaded automatically on \`npm run dev\`.
+
+          Built from commit ${{ github.sha }} (source hash: ${{ steps.meta.outputs.hash }})
+
+          These binaries are rebuilt automatically whenever \`packages/tts-native/\` changes on main." \
+            --latest=false
