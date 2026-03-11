@@ -4,6 +4,17 @@ All notable changes to the Animus Engine will be documented in this file.
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
 
+## [0.3.2](https://github.com/Craigtut/animus/compare/v0.3.1...v0.3.2) (2026-03-11)
+
+### Features
+
+* **agents:** upgrade Claude Agent SDK to v0.2.x and refactor SDK lifecycle ([b793fc8](https://github.com/Craigtut/animus/commit/b793fc8f2e3c51e0b0e75f37044e6c4ddf1f1e9f))
+
+### Bug Fixes
+
+* **frontend:** websocket auth fix ([bc210bb](https://github.com/Craigtut/animus/commit/bc210bb8de80dcd28b43d05fdb54974365519198))
+* **release:** keep changelog header at top when generating entries ([de92133](https://github.com/Craigtut/animus/commit/de921331d18c6124ed7c5d9fc79a965124132086))
+
 ## [0.3.1](https://github.com/Craigtut/animus/compare/v0.3.0...v0.3.1) (2026-03-09)
 
 ### Bug Fixes
