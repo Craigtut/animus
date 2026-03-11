@@ -51,6 +51,19 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo dpkg --add-architecture arm64
+
+          # Ubuntu 24.04 (Noble) on GitHub runners uses deb822 format.
+          # Restrict existing sources to amd64, then add ports.ubuntu.com for arm64.
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i 's/^Architectures:.*/Architectures: amd64/' /etc/apt/sources.list.d/ubuntu.sources
+          fi
+
+          sudo tee /etc/apt/sources.list.d/arm64-cross.list > /dev/null <<'EOF'
+          deb [arch=arm64] http://ports.ubuntu.com/ noble main restricted universe
+          deb [arch=arm64] http://ports.ubuntu.com/ noble-updates main restricted universe
+          deb [arch=arm64] http://ports.ubuntu.com/ noble-security main restricted universe
+          EOF
+
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libssl-dev:arm64
 
