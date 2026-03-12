@@ -27,7 +27,6 @@ import type {
   ContactChannel,
   ChannelType,
   Message,
-  ToolApprovalRequest,
 } from '@animus-labs/shared';
 
 import { MemoryManager, buildMemoryContext } from '../memory/index.js';
@@ -88,8 +87,6 @@ export interface GatherResult {
   thoughtContext: StreamContext;
   experienceContext: StreamContext;
   messageContext: StreamContext | null;
-  /** Pending tool approval requests for the current contact */
-  pendingApprovals: ToolApprovalRequest[];
   /** Trust ramp context for tools with repeated approvals (interval ticks only) */
   trustRampContext: string | null;
   /** AI's timezone (from persona.db) */
@@ -464,9 +461,6 @@ export async function gatherContext(
     credentialManifest = credentialManifest ? credentialManifest + vaultSummary : vaultSummary.trim();
   }
 
-  // Load pending tool approvals for the current contact
-  const pendingApprovals = heartbeatStore.getPendingApprovals(hbDb, contact?.id ?? undefined);
-
   // Build trust ramp context (interval ticks only — non-intrusive)
   let trustRampContext: string | null = null;
   if (trigger.type === 'interval') {
@@ -503,7 +497,7 @@ export async function gatherContext(
   }
 
   const gatherMs = Date.now() - gatherStart;
-  log.info(`Gather complete (${gatherMs}ms): ${recentMessages.length} messages, ${recentThoughts.length} recent thoughts, ${emotions.filter(e => e.intensity > 0.1).length} active emotions${energyBand ? `, energy=${energyBand}` : ''}${memCtx ? ', memory=yes' : ''}${goalCtx ? ', goals=yes' : ''}${pendingApprovals.length > 0 ? `, approvals=${pendingApprovals.length}` : ''}${deliveryFailures.length > 0 ? `, deliveryFailures=${deliveryFailures.length}` : ''}`);
+  log.info(`Gather complete (${gatherMs}ms): ${recentMessages.length} messages, ${recentThoughts.length} recent thoughts, ${emotions.filter(e => e.intensity > 0.1).length} active emotions${energyBand ? `, energy=${energyBand}` : ''}${memCtx ? ', memory=yes' : ''}${goalCtx ? ', goals=yes' : ''}${deliveryFailures.length > 0 ? `, deliveryFailures=${deliveryFailures.length}` : ''}`);
 
   return {
     trigger,
@@ -531,7 +525,6 @@ export async function gatherContext(
     thoughtContext,
     experienceContext,
     messageContext,
-    pendingApprovals,
     aiTimezone,
     trustRampContext,
     externalHistory,

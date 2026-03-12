@@ -7,7 +7,7 @@ import type { Components } from 'react-markdown';
 import { File as FileIcon, DownloadSimple, WarningCircle, X } from '@phosphor-icons/react';
 import { Typography } from '../ui';
 import { trpc } from '../../utils/trpc';
-import { ToolApprovalCard, BatchApprovalCard } from './ToolApprovalCard';
+import { ToolApprovalCard } from './ToolApprovalCard';
 import type { ToolApprovalRequest } from '@animus-labs/shared';
 import type { SystemError } from '../../store/heartbeat-store';
 
@@ -651,23 +651,9 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
     },
   });
 
-  // Group pending approvals by batchId for batch rendering
+  // Flat list of pending approvals
   const pendingApprovals = useMemo(() => {
-    const pending = Array.from(approvalMap.values()).filter((r) => r.status === 'pending');
-    const batched = new Map<string, ToolApprovalRequest[]>();
-    const singles: ToolApprovalRequest[] = [];
-
-    for (const req of pending) {
-      if (req.batchId) {
-        const existing = batched.get(req.batchId) ?? [];
-        existing.push(req);
-        batched.set(req.batchId, existing);
-      } else {
-        singles.push(req);
-      }
-    }
-
-    return { batched, singles };
+    return Array.from(approvalMap.values()).filter((r) => r.status === 'pending');
   }, [approvalMap]);
 
   // Recently resolved approvals — transient pills
@@ -846,11 +832,8 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
             )}
 
             {/* Pending approval cards — interactive requests, always at the bottom */}
-            {pendingApprovals.singles.map((req) => (
+            {pendingApprovals.map((req) => (
               <ToolApprovalCard key={req.id} request={req} />
-            ))}
-            {Array.from(pendingApprovals.batched.entries()).map(([batchId, reqs]) => (
-              <BatchApprovalCard key={batchId} requests={reqs} />
             ))}
           </div>
         )}

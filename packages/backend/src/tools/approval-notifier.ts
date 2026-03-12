@@ -52,7 +52,7 @@ function buildApprovalText(request: ToolApprovalRequest, displayName: string): s
     lines.push(request.agentContext.pendingAction);
   }
   lines.push('');
-  lines.push('Please approve or deny this action.');
+  lines.push('Reply "approve" to allow this action, or "deny" to reject it.');
   return lines.join('\n');
 }
 

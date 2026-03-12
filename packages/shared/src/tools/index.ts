@@ -14,7 +14,6 @@ export {
   runWithCredentialsDef,
   listVaultEntriesDef,
   manageVaultEntryDef,
-  resolveToolApprovalDef,
   transcribeAudioDef,
   generateSpeechDef,
   sendVoiceReplyDef,

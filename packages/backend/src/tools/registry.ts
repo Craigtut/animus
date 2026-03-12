@@ -24,7 +24,6 @@ import { sendMediaHandler } from './handlers/send-media.js';
 import { runWithCredentialsHandler } from './handlers/run-with-credentials.js';
 import { listVaultEntriesHandler } from './handlers/list-vault-entries.js';
 import { manageVaultEntryHandler } from './handlers/manage-vault-entry.js';
-import { resolveToolApprovalHandler } from './handlers/resolve-tool-approval.js';
 import { transcribeAudioHandler } from './handlers/transcribe-audio.js';
 import { generateSpeechHandler } from './handlers/generate-speech.js';
 import { sendVoiceReplyHandler } from './handlers/send-voice-reply.js';
@@ -46,13 +45,11 @@ const log = createLogger('ToolRegistry', 'heartbeat');
 
 /**
  * Tools that bypass the permission gate entirely.
- * - resolve_tool_approval: must always work so the user can respond to approval requests
  * - send_message: primary communication channel, blocking it would break agent UX
  * - Cognitive tools (record_thought, record_cognitive_state) would also go here
  *   if/when they are registered as Animus tools.
  */
 const PERMISSION_EXEMPT_TOOLS = new Set<string>([
-  'resolve_tool_approval',
   'send_message',
 ]);
 
@@ -122,13 +119,6 @@ const TOOL_REGISTRY: Record<AnimusToolName, AnimusTool> = {
     inputSchema: ANIMUS_TOOL_DEFS.manage_vault_entry.inputSchema,
     category: ANIMUS_TOOL_DEFS.manage_vault_entry.category,
     handler: manageVaultEntryHandler,
-  },
-  resolve_tool_approval: {
-    name: 'resolve_tool_approval',
-    description: ANIMUS_TOOL_DEFS.resolve_tool_approval.description,
-    inputSchema: ANIMUS_TOOL_DEFS.resolve_tool_approval.inputSchema,
-    category: ANIMUS_TOOL_DEFS.resolve_tool_approval.category,
-    handler: resolveToolApprovalHandler,
   },
   transcribe_audio: {
     name: 'transcribe_audio',
@@ -239,24 +229,34 @@ async function checkToolPermission(
     return null;
   }
 
-  // Check if there's already a pending request for this tool + contact
+  // Enforce one pending approval at a time per contact.
+  // If there's already ANY pending approval, block without creating a new one.
   const pendingRequests = getPendingApprovals(heartbeatDb, contactId);
-  const existingPending = pendingRequests.find((r) => r.toolName === name);
-  if (existingPending) {
-    // Don't create a duplicate — just return the blocking message
+  if (pendingRequests.length > 0) {
+    const existingTool = pendingRequests[0]!.toolName;
+    if (existingTool !== name) {
+      return {
+        content: [{
+          type: 'text',
+          text: 'There is already a pending tool approval request. ' +
+            'Wait for the user to respond to it before attempting any other gated tools.',
+        }],
+        isError: true,
+      };
+    }
+    // Same tool already pending
     return {
       content: [{
         type: 'text',
-        text: `Tool "${permission.displayName}" requires user approval before it can run.\n` +
-          'Please explain to the user what you want to do with this tool and why.\n' +
-          'The system will present them with an approval request.\n' +
+        text: `Tool "${permission.displayName}" requires user approval.\n` +
+          'Tell the user what you want to do and why, then ask them to reply with "approve" or "deny".\n' +
           'Do NOT attempt to call this tool again until the user has responded.',
       }],
       isError: true,
     };
   }
 
-  // No active approval and no pending request — create one
+  // No pending requests — create a new approval request
   const heartbeatState = getHeartbeatState(heartbeatDb);
   const approvalRequest = createApprovalRequest(heartbeatDb, {
     toolName: name,
@@ -275,17 +275,14 @@ async function checkToolPermission(
     originatingAgent: 'mind',
   });
 
-  // Emit event for real-time UI updates
   context.eventBus.emit('tool:approval_requested', approvalRequest);
-
   log.info(`Created approval request ${approvalRequest.id} for tool "${name}"`);
 
   return {
     content: [{
       type: 'text',
-      text: `Tool "${permission.displayName}" requires user approval before it can run.\n` +
-        'Please explain to the user what you want to do with this tool and why.\n' +
-        'The system will present them with an approval request.\n' +
+      text: `Tool "${permission.displayName}" requires user approval.\n` +
+        'Tell the user what you want to do and why, then ask them to reply with "approve" or "deny".\n' +
         'Do NOT attempt to call this tool again until the user has responded.',
     }],
     isError: true,

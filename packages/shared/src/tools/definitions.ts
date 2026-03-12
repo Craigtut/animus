@@ -216,26 +216,6 @@ export const runWithCredentialsDef: AnimusToolDef = {
 };
 
 /**
- * resolve_tool_approval - Resolve a pending tool approval request.
- * Mind-only tool. Used when the user approves or denies a tool usage
- * request via natural language conversation.
- */
-export const resolveToolApprovalDef: AnimusToolDef = {
-  name: 'resolve_tool_approval',
-  description:
-    "Resolve a pending tool approval request based on the user's response. " +
-    'Use this when a user approves or denies a tool usage request via natural language. ' +
-    'The request ID will be provided in the tick context under pending approval requests.',
-  inputSchema: z.object({
-    requestId: z.string().describe('The approval request ID from context'),
-    approved: z
-      .boolean()
-      .describe('Whether the user approved the tool usage'),
-  }),
-  category: 'system',
-};
-
-/**
  * transcribe_audio - Transcribe an audio file to text using local STT.
  * Mind-only tool.
  */
@@ -377,7 +357,6 @@ export const ANIMUS_TOOL_DEFS = {
   run_with_credentials: runWithCredentialsDef,
   list_vault_entries: listVaultEntriesDef,
   manage_vault_entry: manageVaultEntryDef,
-  resolve_tool_approval: resolveToolApprovalDef,
   transcribe_audio: transcribeAudioDef,
   generate_speech: generateSpeechDef,
   send_voice_reply: sendVoiceReplyDef,
@@ -395,11 +374,10 @@ export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
  * - read_memory: dynamic memory search beyond pre-loaded context
  * - lookup_contacts: discover contacts and channels at call time
  * - send_proactive_message: send to any contact on any channel
- * - resolve_tool_approval: handle user responses to tool approval requests
  *
  * Excludes send_message (sub-agent only) and update_progress (sub-agent only).
  */
 export const MIND_TOOL_NAMES: readonly AnimusToolName[] = [
   'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials', 'list_vault_entries',
-  'manage_vault_entry', 'resolve_tool_approval', 'transcribe_audio', 'generate_speech', 'send_voice_reply',
+  'manage_vault_entry', 'transcribe_audio', 'generate_speech', 'send_voice_reply',
 ] as const;

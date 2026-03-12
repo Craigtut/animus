@@ -161,7 +161,7 @@ export const personaSchema = z.object({
   personalityNotes: z.string().nullable(),
   archetype: archetypeSchema.nullable(),
   voiceId: z.string().nullable(),
-  voiceSpeed: z.number().min(0.5).max(2.0).default(1.0),
+  voiceSpeed: z.number().min(0.5).max(1.5).default(1.0),
   isFinalized: z.boolean(),
   // Legacy field for backwards compat with old personalitySettings reads
   communicationStyle: z.string().optional(),

@@ -668,37 +668,54 @@ function buildCanUseToolCallback(
       return { behavior: 'allow' };
     }
 
-    // Check for existing pending request to avoid duplicates
+    // Enforce one pending approval at a time per contact.
+    // If there's already ANY pending approval, block without creating a new one.
     const pendingRequests = getPendingApprovals(heartbeatDb, contactId);
-    const existingPending = pendingRequests.find((r) => r.toolName === permKey);
-    if (!existingPending) {
-      const heartbeatState = getHeartbeatState(heartbeatDb);
-      const approvalRequest = createApprovalRequest(heartbeatDb, {
-        toolName: permKey,
-        toolSource: permission.toolSource,
-        contactId,
-        channel: ctx?.sourceChannel ?? 'web',
-        tickNumber: heartbeatState.tickNumber,
-        agentContext: {
-          taskDescription: `Tool "${toolName}" invoked during tick ${heartbeatState.tickNumber}`,
-          conversationSummary: `Conversation ${ctx?.conversationId ?? 'unknown'}`,
-          pendingAction: `Execute tool "${toolName}"`,
-        },
-        toolInput: input,
-        triggerSummary: `Agent wants to use "${permission.displayName}"`,
-        conversationId: ctx?.conversationId ?? '',
-        originatingAgent: 'mind',
-      });
-
-      ctx?.eventBus.emit('tool:approval_requested', approvalRequest);
-      log.info(`Created approval request ${approvalRequest.id} for tool "${toolName}"`);
+    if (pendingRequests.length > 0) {
+      const existingTool = pendingRequests[0]!.toolName;
+      if (existingTool !== permKey) {
+        // Different tool already pending — block without creating a new request
+        return {
+          behavior: 'deny',
+          message: 'There is already a pending tool approval request. ' +
+            'Wait for the user to respond to it before attempting any other gated tools.',
+        };
+      }
+      // Same tool already pending — remind the agent
+      return {
+        behavior: 'deny',
+        message: `Tool "${permission.displayName}" requires user approval. ` +
+          'Tell the user what you want to do and why, then ask them to reply with "approve" or "deny". ' +
+          'Do NOT attempt to call this tool again until the user has responded.',
+      };
     }
+
+    // No pending requests — create a new approval request
+    const heartbeatState = getHeartbeatState(heartbeatDb);
+    const approvalRequest = createApprovalRequest(heartbeatDb, {
+      toolName: permKey,
+      toolSource: permission.toolSource,
+      contactId,
+      channel: ctx?.sourceChannel ?? 'web',
+      tickNumber: heartbeatState.tickNumber,
+      agentContext: {
+        taskDescription: `Tool "${toolName}" invoked during tick ${heartbeatState.tickNumber}`,
+        conversationSummary: `Conversation ${ctx?.conversationId ?? 'unknown'}`,
+        pendingAction: `Execute tool "${toolName}"`,
+      },
+      toolInput: input,
+      triggerSummary: `Agent wants to use "${permission.displayName}"`,
+      conversationId: ctx?.conversationId ?? '',
+      originatingAgent: 'mind',
+    });
+
+    ctx?.eventBus.emit('tool:approval_requested', approvalRequest);
+    log.info(`Created approval request ${approvalRequest.id} for tool "${toolName}"`);
 
     return {
       behavior: 'deny',
-      message: `Tool "${permission.displayName}" requires user approval before it can run. ` +
-        'Please explain to the user what you want to do with this tool and why. ' +
-        'The system will present them with an approval request. ' +
+      message: `Tool "${permission.displayName}" requires user approval. ` +
+        'Tell the user what you want to do and why, then ask them to reply with "approve" or "deny". ' +
         'Do NOT attempt to call this tool again until the user has responded.',
     };
   };
@@ -767,33 +784,35 @@ function buildPreToolUseHook(
       return; // Allow
     }
 
-    // No approval — create request and block
+    // Enforce one pending approval at a time per contact.
     const pendingRequests = getPendingApprovals(heartbeatDb, contactId);
-    const existingPending = pendingRequests.find((r) => r.toolName === permKey);
-    if (!existingPending) {
-      const heartbeatState = getHeartbeatState(heartbeatDb);
-      const approvalRequest = createApprovalRequest(heartbeatDb, {
-        toolName: permKey,
-        toolSource: permission.toolSource,
-        contactId,
-        channel: ctx?.sourceChannel ?? 'web',
-        tickNumber: heartbeatState.tickNumber,
-        agentContext: {
-          taskDescription: `Tool "${toolName}" invoked during tick ${heartbeatState.tickNumber}`,
-          conversationSummary: `Conversation ${ctx?.conversationId ?? 'unknown'}`,
-          pendingAction: `Execute tool "${toolName}"`,
-        },
-        toolInput: event.toolInput as Record<string, unknown> | null,
-        triggerSummary: `Agent wants to use "${permission.displayName}"`,
-        conversationId: ctx?.conversationId ?? '',
-        originatingAgent: 'mind',
-      });
-
-      ctx?.eventBus.emit('tool:approval_requested', approvalRequest);
-      log.info(`[PreToolUse] Created approval request ${approvalRequest.id} for "${toolName}"`);
-    } else {
-      log.info(`[PreToolUse] Pending approval already exists for "${toolName}", blocking`);
+    if (pendingRequests.length > 0) {
+      // Already a pending approval (same or different tool) — block without creating
+      log.info(`[PreToolUse] Pending approval already exists (${pendingRequests[0]!.toolName}), blocking "${toolName}"`);
+      return { allow: false };
     }
+
+    // No pending requests — create a new approval request
+    const heartbeatState = getHeartbeatState(heartbeatDb);
+    const approvalRequest = createApprovalRequest(heartbeatDb, {
+      toolName: permKey,
+      toolSource: permission.toolSource,
+      contactId,
+      channel: ctx?.sourceChannel ?? 'web',
+      tickNumber: heartbeatState.tickNumber,
+      agentContext: {
+        taskDescription: `Tool "${toolName}" invoked during tick ${heartbeatState.tickNumber}`,
+        conversationSummary: `Conversation ${ctx?.conversationId ?? 'unknown'}`,
+        pendingAction: `Execute tool "${toolName}"`,
+      },
+      toolInput: event.toolInput as Record<string, unknown> | null,
+      triggerSummary: `Agent wants to use "${permission.displayName}"`,
+      conversationId: ctx?.conversationId ?? '',
+      originatingAgent: 'mind',
+    });
+
+    ctx?.eventBus.emit('tool:approval_requested', approvalRequest);
+    log.info(`[PreToolUse] Created approval request ${approvalRequest.id} for "${toolName}"`);
 
     return { allow: false };
   };

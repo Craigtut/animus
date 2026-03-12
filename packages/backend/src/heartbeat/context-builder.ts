@@ -19,7 +19,6 @@ import type {
   ContactChannel,
   EnergyBand,
   Task,
-  ToolApprovalRequest,
   ContextSection,
   ContextSectionCategory,
 } from '@animus-labs/shared';
@@ -121,8 +120,6 @@ export interface MindContextParams {
   thoughtContext?: StreamContext | null;
   experienceContext?: StreamContext | null;
   messageContext?: StreamContext | null;
-  /** Pending tool approval requests for the current contact */
-  pendingApprovals?: ToolApprovalRequest[];
   /** Trust ramp suggestions for tools with repeated approvals (interval ticks only) */
   trustRampContext?: string | null;
   /** External conversation history from channel adapters */
@@ -817,30 +814,6 @@ function buildExternalHistorySection(
   return lines.join('\n');
 }
 
-function buildPendingApprovalsSection(approvals: ToolApprovalRequest[]): string {
-  const lines = [
-    '── PENDING TOOL APPROVALS ──',
-    'The following tool approval requests are waiting for user response.',
-    'If the user\'s message indicates approval or denial, use resolve_tool_approval',
-    'to record their decision, then retry the tool if approved.',
-    '',
-  ];
-
-  for (const [i, a] of approvals.entries()) {
-    const elapsed = Date.now() - new Date(a.createdAt).getTime();
-    const agoStr = formatElapsedTime(elapsed);
-
-    lines.push(`${i + 1}. [${a.id}] ${a.toolName} (${a.toolSource}) — PENDING since ${agoStr} ago`);
-    lines.push(`   Original context: ${a.agentContext.taskDescription}`);
-    lines.push(`   You wanted to: ${a.agentContext.pendingAction}`);
-    if (a.toolInput && Object.keys(a.toolInput).length > 0) {
-      lines.push(`   Tool parameters: ${JSON.stringify(a.toolInput)}`);
-    }
-  }
-
-  return lines.join('\n');
-}
-
 function buildDeliveryFailuresSection(failures: Message[]): string {
   const lines = [
     '── DELIVERY FAILURES ──',
@@ -1199,14 +1172,7 @@ function buildUserMessageManifest(params: MindContextParams): ContextSection[] {
     manifest.push(excluded('delivery_failures', 'Delivery Failures', 'no delivery failures', 'state'));
   }
 
-  // 9b. Pending tool approvals
-  if (params.pendingApprovals && params.pendingApprovals.length > 0) {
-    manifest.push(included('pending_approvals', 'Pending Tool Approvals', buildPendingApprovalsSection(params.pendingApprovals), 'state'));
-  } else {
-    manifest.push(excluded('pending_approvals', 'Pending Tool Approvals', 'no pending approvals', 'state'));
-  }
-
-  // 9c. Trust ramp
+  // 9b. Trust ramp
   if (params.trustRampContext) {
     manifest.push(included('trust_ramp', 'Trust Observation', params.trustRampContext, 'state'));
   } else {

@@ -21,7 +21,6 @@ const log = createLogger('PermissionSeeder', 'heartbeat');
 const CORE_TOOL_RISK_TIERS: Record<string, RiskTier> = {
   read_memory: 'safe',
   lookup_contacts: 'safe',
-  resolve_tool_approval: 'safe',
   transcribe_audio: 'safe',
   send_message: 'communicates',
   send_proactive_message: 'communicates',

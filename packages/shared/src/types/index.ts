@@ -352,7 +352,6 @@ export interface ToolApprovalRequest {
   originatingAgent: string;
   status: ToolApprovalStatus;
   scope: 'once' | null;
-  batchId: string | null;
   createdAt: string;
   resolvedAt: string | null;
   expiresAt: string;

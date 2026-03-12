@@ -49,7 +49,6 @@ describe('tool approval store', () => {
       expect(req.tickNumber).toBe(1);
       expect(req.status).toBe('pending');
       expect(req.scope).toBeNull();
-      expect(req.batchId).toBeNull();
       expect(req.agentContext.taskDescription).toBe('Write a file');
       expect(req.toolInput).toEqual({ path: '/tmp/test.txt', content: 'hello' });
       expect(req.triggerSummary).toBe('Agent wants to use "Write File"');
@@ -63,16 +62,6 @@ describe('tool approval store', () => {
       expect(fetched).not.toBeNull();
       expect(fetched!.toolName).toBe('write');
       expect(fetched!.status).toBe('pending');
-    });
-
-    it('supports batch_id grouping', () => {
-      const batchId = 'batch-123';
-      heartbeatStore.createApprovalRequest(db, makeApprovalData({ batchId, toolName: 'write' }));
-      heartbeatStore.createApprovalRequest(db, makeApprovalData({ batchId, toolName: 'edit' }));
-
-      const batch = heartbeatStore.getPendingApprovalsByBatch(db, batchId);
-      expect(batch).toHaveLength(2);
-      expect(batch.map((r) => r.toolName).sort()).toEqual(['edit', 'write']);
     });
 
     it('handles null toolInput', () => {

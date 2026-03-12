@@ -25,7 +25,6 @@ function rowToApprovalRequest(row: Record<string, unknown>): ToolApprovalRequest
     originatingAgent: row['originating_agent'] as string,
     status: row['status'] as ToolApprovalStatus,
     scope: (row['scope'] as 'once') ?? null,
-    batchId: (row['batch_id'] as string) ?? null,
     createdAt: row['created_at'] as string,
     resolvedAt: (row['resolved_at'] as string) ?? null,
     expiresAt: row['expires_at'] as string,
@@ -45,7 +44,6 @@ export function createApprovalRequest(
     triggerSummary: string;
     conversationId?: string | null;
     originatingAgent: string;
-    batchId?: string | null;
     expiresInMs?: number;
   }
 ): ToolApprovalRequest {
@@ -60,8 +58,8 @@ export function createApprovalRequest(
     `INSERT INTO tool_approval_requests
      (id, tool_name, tool_source, contact_id, channel, tick_number,
       agent_context, tool_input, trigger_summary, conversation_id,
-      originating_agent, batch_id, created_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      originating_agent, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     data.toolName,
@@ -74,7 +72,6 @@ export function createApprovalRequest(
     data.triggerSummary,
     data.conversationId ?? null,
     data.originatingAgent,
-    data.batchId ?? null,
     timestamp,
     expiresAt
   );
@@ -93,7 +90,6 @@ export function createApprovalRequest(
     originatingAgent: data.originatingAgent,
     status: 'pending',
     scope: null,
-    batchId: data.batchId ?? null,
     createdAt: timestamp,
     resolvedAt: null,
     expiresAt,
@@ -138,20 +134,6 @@ export function getPendingApprovals(
       )
       .all() as Array<Record<string, unknown>>;
   }
-  return rows.map(rowToApprovalRequest);
-}
-
-export function getPendingApprovalsByBatch(
-  db: Database.Database,
-  batchId: string
-): ToolApprovalRequest[] {
-  const rows = db
-    .prepare(
-      `SELECT * FROM tool_approval_requests
-       WHERE batch_id = ? AND status = 'pending'
-       ORDER BY created_at`
-    )
-    .all(batchId) as Array<Record<string, unknown>>;
   return rows.map(rowToApprovalRequest);
 }
 

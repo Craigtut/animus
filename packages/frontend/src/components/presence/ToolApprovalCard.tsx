@@ -1,16 +1,12 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import {
   Wrench,
   CheckCircle,
   XCircle,
   Clock,
-  ShieldCheck,
-  ChatCircle,
-  Lightning,
-  Warning,
 } from '@phosphor-icons/react';
 import { Typography, Badge, Button } from '../ui';
 import { trpc } from '../../utils/trpc';
@@ -51,12 +47,11 @@ export function ToolApprovalCard({ request, riskTier = 'acts' }: ToolApprovalCar
   const isDenied = request.status === 'denied';
   const isExpired = request.status === 'expired';
 
-  const handleResolve = (approved: boolean, scope?: 'once' | 'always') => {
+  const handleResolve = (approved: boolean) => {
     setResolving(true);
     resolveMutation.mutate({
       requestId: request.id,
       approved,
-      scope,
     });
   };
 
@@ -135,20 +130,11 @@ export function ToolApprovalCard({ request, riskTier = 'acts' }: ToolApprovalCar
       <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
         <Button
           size="sm"
-          onClick={() => handleResolve(true, 'once')}
+          onClick={() => handleResolve(true)}
           disabled={resolving}
-          loading={resolving && resolveMutation.variables?.scope === 'once'}
+          loading={resolving && resolveMutation.variables?.approved === true}
         >
-          Allow Once
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => handleResolve(true, 'always')}
-          disabled={resolving}
-          loading={resolving && resolveMutation.variables?.scope === 'always'}
-        >
-          Always Allow
+          Allow
         </Button>
         <Button
           variant="ghost"
@@ -169,125 +155,3 @@ export function ToolApprovalCard({ request, riskTier = 'acts' }: ToolApprovalCar
   );
 }
 
-// ============================================================================
-// Batch Approval Card — groups multiple tools under one batchId
-// ============================================================================
-
-interface BatchApprovalCardProps {
-  requests: ToolApprovalRequest[];
-  riskTiers?: Record<string, RiskTier>;
-}
-
-export function BatchApprovalCard({ requests, riskTiers = {} }: BatchApprovalCardProps) {
-  const theme = useTheme();
-  const [resolving, setResolving] = useState(false);
-  const resolveMutation = trpc.tools.resolveApproval.useMutation();
-
-  const allPending = requests.filter((r) => r.status === 'pending');
-  if (allPending.length === 0) return null;
-
-  const handleResolveAll = async (approved: boolean, scope?: 'once' | 'always') => {
-    setResolving(true);
-    try {
-      for (const req of allPending) {
-        await resolveMutation.mutateAsync({
-          requestId: req.id,
-          approved,
-          scope,
-        });
-      }
-    } finally {
-      setResolving(false);
-    }
-  };
-
-  // Determine the highest risk tier among the batch for the border color
-  const tierOrder: RiskTier[] = ['safe', 'communicates', 'acts', 'sensitive'];
-  const highestTier = allPending.reduce<RiskTier>((acc, r) => {
-    const tier = riskTiers[r.toolName] ?? 'acts';
-    return tierOrder.indexOf(tier) > tierOrder.indexOf(acc) ? tier : acc;
-  }, 'safe');
-
-  const borderColor = riskTierBorderColor[highestTier](theme);
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.25, ease: 'easeOut' }}
-      css={css`
-        border-radius: ${theme.borderRadius.md};
-        background: ${theme.colors.background.paper};
-        border: 1px solid ${theme.colors.border.default};
-        border-left: 3px solid ${borderColor};
-        padding: ${theme.spacing[4]};
-        display: flex;
-        flex-direction: column;
-        gap: ${theme.spacing[3]};
-      `}
-    >
-      {/* Header */}
-      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-        <Wrench size={16} css={css`color: ${theme.colors.text.secondary};`} />
-        <Typography.SmallBody as="span" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
-          Tool Approvals
-        </Typography.SmallBody>
-        <Badge variant="default">{allPending.length} tools</Badge>
-      </div>
-
-      {/* Tool list */}
-      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
-        {allPending.map((req) => (
-          <div
-            key={req.id}
-            css={css`
-              display: flex;
-              align-items: center;
-              gap: ${theme.spacing[2]};
-              padding: ${theme.spacing[1]} 0;
-            `}
-          >
-            <div
-              css={css`
-                width: 6px;
-                height: 6px;
-                border-radius: 50%;
-                background: ${riskTierBorderColor[riskTiers[req.toolName] ?? 'acts'](theme)};
-              `}
-            />
-            <Typography.Caption as="span">{req.toolName}</Typography.Caption>
-            <Typography.Caption as="span" color="hint">
-              {req.triggerSummary}
-            </Typography.Caption>
-          </div>
-        ))}
-      </div>
-
-      {/* Batch action buttons */}
-      <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
-        <Button
-          size="sm"
-          onClick={() => handleResolveAll(true, 'once')}
-          disabled={resolving}
-          loading={resolving}
-        >
-          Allow All
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => handleResolveAll(false)}
-          disabled={resolving}
-          css={css`
-            color: ${theme.colors.error.main};
-            &:hover:not(:disabled) {
-              color: ${theme.colors.error.dark};
-            }
-          `}
-        >
-          Deny All
-        </Button>
-      </div>
-    </motion.div>
-  );
-}

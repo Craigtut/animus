@@ -62,7 +62,7 @@ The permission system spans three categories of tools with different enforcement
 
 Tools defined in `@animus-labs/shared` and handled in `packages/backend/src/tools/`. These are exposed to agents via the unified stdio MCP bridge (`mcp-bridge.ts` + `animus-mcp-server.ts`). Permission checking happens both at the bridge level (tool list filtering) and in `registry.ts:executeTool()` via `checkToolPermission()`.
 
-**Exempt tools:** `resolve_tool_approval` and `send_message` bypass the permission gate entirely — the approval tool must always work (otherwise the user can't respond to requests), and `send_message` is the primary communication channel.
+**Exempt tools:** `send_message` bypasses the permission gate entirely, as it is the primary communication channel.
 
 ### 2. SDK Built-In Tools
 
@@ -94,28 +94,32 @@ Tick 1 — Gate fires
        │
        ├── Check tool_permissions table → mode is 'ask'
        ├── Check tool_approval_requests → no active approval
+       ├── Check one-at-a-time: any other pending approval? → block
        │
        ▼
   Create approval request in heartbeat.db
   Emit 'tool:approval_requested' event
-  Return deny: "Tool requires user approval..."
+  Return deny: "Tool requires user approval.
+    Tell the user what you want to do and why, then ask them
+    to reply with 'approve' or 'deny'."
        │
        ▼
   Agent explains to user what it wants to do
   Approval notifier sends structured approval prompt
   Channel adapter renders approval UI:
-    • Web: inline card with Allow Once / Always Allow / Deny
+    • Web: inline card with Allow / Deny buttons
     • Discord: embed with button components
-    • SMS: natural language prompt
+    • SMS/text: "Reply 'approve' to allow this action, or 'deny' to reject it."
     • API: structured JSON
 
 Between Ticks — User Decides (seconds to hours)
 ════════════════════════════════════════════════
-  User clicks button or replies naturally
+  User clicks button or replies with a recognized phrase
        │
-       ├── Web button click → tools.resolveApproval mutation
+       ├── Web button click → tools.resolveApproval tRPC mutation
        ├── Discord button → adapter sends tool_approval_response
-       ├── SMS text reply → mind interprets via resolve_tool_approval
+       ├── Text reply ("yes", "approve", "deny", "no", etc.)
+       │     → approval interceptor resolves deterministically
        │
        ▼
   Approval recorded in heartbeat.db
@@ -127,7 +131,6 @@ Tick 2 — Execute
   New tick fires (triggered by approval)
        │
        ▼
-  Context includes pending approval info
   Agent retries the tool call
        │
        ▼
@@ -153,17 +156,18 @@ tool_input JSON:      — The exact parameters passed to the tool
 trigger_summary TEXT: — "Agent wants to use 'Write File'"
 ```
 
-On approval, the context builder injects pending approvals into the mind's context (see [Context Builder Integration](#context-builder-integration)).
-
 ### Approval Resolution Options
 
-| Option | Behavior |
-|--------|----------|
-| **Allow Once** | Approves this single invocation. Consumed on next use. |
-| **Always Allow** | Approves and updates `tool_permissions.mode` to `always_allow`. No future prompts. |
-| **Deny** | Denies the request. Agent informed via deny message. |
+| Option | Behavior | Available via |
+|--------|----------|---------------|
+| **Allow** | Approves this single invocation. Consumed on next use. | Buttons + text phrases |
+| **Deny** | Denies the request. Agent informed via deny message. | Buttons + text phrases |
 
-"Always Allow" is **button-only** (web, Discord). Natural language approvals are always treated as one-time to prevent misinterpretation. The `resolve_tool_approval` core tool only supports `approved: boolean` without a scope parameter.
+All approvals are one-time ("once" scope). There is no "Always Allow" option in the approval flow. Users can change a tool's permission mode to `always_allow` in Settings > Tools if they want to skip approvals permanently.
+
+### One-at-a-Time Enforcement
+
+Only one pending approval can exist per contact at any time. If the agent attempts a second gated tool while a previous approval is still pending, the call is blocked immediately without creating a new request. The agent is told to wait for the user's response to the existing request first. This prevents ambiguity when text-based responses arrive (e.g., "approve" clearly maps to the single pending request).
 
 ### Approval Expiration
 
@@ -248,7 +252,6 @@ CREATE TABLE tool_approval_requests (
 
   status TEXT NOT NULL DEFAULT 'pending',
   scope TEXT,                         -- 'once' on approval
-  batch_id TEXT,                      -- groups same-tick requests
 
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   resolved_at TEXT,
@@ -333,29 +336,41 @@ The callback checks permission mode, looks for active approvals, creates approva
 
 ---
 
+## Approval Interceptor
+
+A deterministic pre-processing step that runs **before** gather-context in the heartbeat pipeline. When a message trigger arrives, the interceptor checks if the contact has a pending approval and whether the message matches a recognized approval or denial phrase. If so, it resolves the approval directly (same as the button path) and transforms the trigger message so the mind knows to retry the tool.
+
+**File:** `packages/backend/src/tools/approval-interceptor.ts`
+
+### How It Works
+
+1. Only intercepts `message` triggers with a `contactId`
+2. Queries `tool_approval_requests` for pending approvals for that contact
+3. Matches the message content against recognized phrases (exact match, case-insensitive)
+4. If matched: resolves the approval in the DB, emits `tool:approval_resolved` event, replaces the trigger's `messageContent` with a synthetic approval/denial message
+5. If not matched: returns the trigger unchanged (the message passes through to the mind as normal conversation)
+
+### Recognized Phrases
+
+**File:** `packages/backend/src/tools/approval-phrases.ts`
+
+**Approval:** approve, approved, yes, yeah, yep, yup, ok, okay, sure, go ahead, go for it, do it, allow, allow it, that's fine, thats fine, proceed, confirmed, confirm, accepted, accept
+
+**Denial:** deny, denied, no, nope, nah, don't, dont, stop, cancel, reject, block, not allowed, absolutely not, no way, decline, declined
+
+Matching is exact (full message match only). Partial matches like "I approve of that" or "yes please do it now" intentionally return null to avoid false positives on regular conversation.
+
+### Why Deterministic (Not LLM-Interpreted)
+
+The previous system used a `resolve_tool_approval` MCP tool that allowed the agent to interpret user responses and approve its own tool requests. This was a security concern: the agent could potentially approve its own actions without genuine user consent. The deterministic interceptor removes the agent from the approval loop entirely.
+
+---
+
 ## Context Builder Integration
 
-The context builder injects two types of permission-related context into the mind's prompt.
+The context builder injects permission-related context into the mind's prompt.
 
 **File:** `packages/backend/src/heartbeat/context-builder.ts`
-
-### Pending Approvals Section
-
-When pending approval requests exist for the current contact, they're included in the user message context:
-
-```
-── PENDING TOOL APPROVALS ──
-The following tool approval requests are waiting for user response.
-If the user's message indicates approval or denial, use resolve_tool_approval
-to record their decision, then retry the tool if approved.
-
-1. [abc-123] write (sdk:claude) — PENDING since 2h ago
-   Original context: Tool "write" invoked during tick 42
-   You wanted to: Execute tool "write"
-   Tool parameters: { "file_path": "/tmp/test.txt", "content": "hello" }
-```
-
-This allows the mind to pick up where it left off, even hours later.
 
 ### Trust Ramp Observations
 
@@ -370,19 +385,6 @@ in Settings > Tools to save time. This is not urgent.
 ```
 
 The mind decides when (or if) to mention it naturally in conversation.
-
-### Tool Reference
-
-The `resolve_tool_approval` tool is documented in the mind's system prompt:
-
-```
-resolve_tool_approval — Approve or deny a pending tool approval request.
-  When the user indicates they approve or deny a tool that was previously
-  blocked by the permission system, use this tool to record their decision.
-  If approved, the tool will be retried automatically.
-
-  Input: { requestId: string, approved: boolean }
-```
 
 ---
 
@@ -434,12 +436,12 @@ Approval prompts include structured metadata (`message_type: 'tool_approval_requ
 
 | Channel | Rendering |
 |---------|-----------|
-| **Web** | Inline card with buttons (Allow Once / Always Allow / Deny) via tRPC subscription |
+| **Web** | Inline card with Allow / Deny buttons via tRPC subscription |
 | **Discord** | Embed with ActionRow button components |
-| **SMS** | Natural language text: "I'd like to use the [tool]. Please approve or deny." |
+| **SMS** | Text prompt: `Reply "approve" to allow this action, or "deny" to reject it.` |
 | **API** | Structured JSON appended to response |
 
-All channels accept natural language responses. Buttons are a convenience layer. The mind interprets replies naturally via the `resolve_tool_approval` tool.
+All channels support both button-based and text-based responses. Buttons trigger the `resolveApproval` tRPC mutation directly. Text responses are intercepted by the approval interceptor before the heartbeat pipeline runs (see [Approval Interceptor](#approval-interceptor)).
 
 ---
 
@@ -489,7 +491,7 @@ if (input.approved) {
 }
 ```
 
-If "Always Allow" scope is selected, the tool's permission mode is also updated to `always_allow` in `tool_permissions`.
+Approvals are always one-time scope ("once"). Users can change a tool's permission mode to `always_allow` via the Settings > Tools page.
 
 ---
 
@@ -507,7 +509,7 @@ The tools section in Settings displays all tools grouped by source, with a segme
 
 ### Approval Card in Chat
 
-When an approval request arrives, the web frontend renders an inline card in the message stream with the tool name, context summary, and three action buttons. The card updates in real-time via the `onApprovalResolved` subscription (collapsed to show outcome).
+When an approval request arrives, the web frontend renders an inline card in the message stream with the tool name, context summary, and two action buttons (Allow / Deny). The card updates in real-time via the `onApprovalResolved` subscription (collapsed to show outcome).
 
 ---
 
@@ -548,7 +550,6 @@ interface ToolApprovalRequest {
   originatingAgent: string;         // 'mind' or agent_task_id
   status: ToolApprovalStatus;
   scope: 'once' | null;
-  batchId: string | null;
   createdAt: string;
   resolvedAt: string | null;
   expiresAt: string;
@@ -566,19 +567,19 @@ interface ToolApprovalRequest {
 - Event bus: Four tool permission events
 - Permission gate: `checkToolPermission()` in `registry.ts` for core MCP tools
 - `canUseTool` callback: Gates SDK built-in + plugin MCP tools in `mind-session.ts`
-- `resolve_tool_approval` core tool for natural language approval responses
+- One-at-a-time enforcement: Only one pending approval per contact at any time
+- Deterministic approval interceptor: Text-based approval/denial via phrase matching (pre-pipeline)
 - Permission seeder: Seeds defaults on startup + runtime re-seeding on `plugin:changed`
 - Approval notifier: Delivers prompts via channel router with structured metadata
-- Context builder: Pending approvals section + trust ramp observations
+- Context builder: Trust ramp observations
 - tRPC router: Full CRUD + real-time subscriptions
 - SDK adapter: `canUseTool` support in `@animus-labs/agents` Claude adapter
 - Sub-agent filtering: Excludes both `off` and `ask` tools from sub-agent sessions
 - Channel adapters: Discord (embed + buttons), SMS (text), API (JSON) support
-- Frontend: Settings > Tools page + inline approval card in chat
+- Frontend: Settings > Tools page + inline approval card in chat (Allow / Deny)
 - Trust ramp: Eligibility query + context injection + anti-nag mechanism
 
 ### Not Yet Implemented
-- Approval batching UI: Multiple same-tick approvals grouped into a single card
 - Codex/OpenCode adapter integration (pending adapter implementations)
 - Approval expiration cleanup in heartbeat EXECUTE stage (schema supports it)
 
@@ -590,7 +591,6 @@ interface ToolApprovalRequest {
 |------|---------|
 | `packages/shared/src/types/index.ts` | `ToolPermission`, `ToolApprovalRequest`, `RiskTier`, `ToolPermissionMode` types |
 | `packages/shared/src/event-bus.ts` | Tool permission events |
-| `packages/shared/src/tools/definitions.ts` | `resolve_tool_approval` tool definition |
 | `packages/backend/src/db/migrations/system/010_tool_permissions.sql` | `tool_permissions` table |
 | `packages/backend/src/db/migrations/heartbeat/003_tool_approvals.sql` | `tool_approval_requests` table |
 | `packages/backend/src/db/stores/tool-permission-store.ts` | `tool_permissions` CRUD functions (re-exported via `system-store.ts` barrel) |
@@ -598,10 +598,11 @@ interface ToolApprovalRequest {
 | `packages/backend/src/tools/permission-seeder.ts` | Seeds default permissions on startup |
 | `packages/backend/src/tools/approval-notifier.ts` | Routes approval requests to channels |
 | `packages/backend/src/tools/registry.ts` | Permission gate for core Animus MCP tools |
-| `packages/backend/src/tools/handlers/resolve-tool-approval.ts` | `resolve_tool_approval` handler |
+| `packages/backend/src/tools/approval-interceptor.ts` | Deterministic text-based approval resolution (pre-pipeline) |
+| `packages/backend/src/tools/approval-phrases.ts` | Recognized approval/denial phrase sets and matcher |
 | `packages/backend/src/heartbeat/mind-session.ts` | `canUseTool` callback, plugin MCP filtering |
 | `packages/backend/src/heartbeat/agent-orchestrator.ts` | Sub-agent tool filtering (off + ask) |
-| `packages/backend/src/heartbeat/context-builder.ts` | Pending approvals + trust ramp in context |
+| `packages/backend/src/heartbeat/context-builder.ts` | Trust ramp observations in context |
 | `packages/backend/src/api/routers/tools.ts` | tRPC router for permissions + approvals |
 | `packages/agents/src/types.ts` | `canUseTool` in `AgentSessionConfig` |
 | `packages/agents/src/adapters/claude.ts` | `canUseTool` wired through to SDK |

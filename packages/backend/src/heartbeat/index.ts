@@ -52,6 +52,7 @@ import { executeOutput } from './execute-output.js';
 import { getPluginManager } from '../plugins/index.js';
 import { getChannelManager } from '../channels/channel-manager.js';
 import { getDeferredQueue, getTaskScheduler, getTaskRunner } from '../tasks/index.js';
+import { interceptApprovalPhrase } from '../tools/approval-interceptor.js';
 
 const log = createLogger('Heartbeat', 'heartbeat');
 
@@ -237,7 +238,6 @@ async function mindQuery(
     thoughtContext: gathered.thoughtContext,
     experienceContext: gathered.experienceContext,
     ...(gathered.messageContext ? { messageContext: gathered.messageContext } : {}),
-    ...(gathered.pendingApprovals.length > 0 ? { pendingApprovals: gathered.pendingApprovals } : {}),
     ...(gathered.trustRampContext ? { trustRampContext: gathered.trustRampContext } : {}),
     ...(gathered.externalHistory ? { externalHistory: gathered.externalHistory } : {}),
     ...(gathered.deliveryFailures.length > 0 ? { deliveryFailures: gathered.deliveryFailures } : {}),
@@ -612,8 +612,16 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     eventBus.emit('heartbeat:stage_change', { stage: 'gather' });
     eventBus.emit('heartbeat:state_change', heartbeatStore.getHeartbeatState(hbDb));
 
+    // Pre-processing: intercept approval/denial phrases before gather.
+    // If the user's message matches a recognized phrase and there's a pending
+    // approval, resolve it deterministically and transform the trigger.
+    const effectiveTrigger = interceptApprovalPhrase(queuedTick.trigger, {
+      heartbeatDb: hbDb,
+      eventBus,
+    });
+
     // Stage 1: GATHER CONTEXT
-    const gathered = await gatherContext(queuedTick.trigger, {
+    const gathered = await gatherContext(effectiveTrigger, {
       tickQueue,
       memoryManager: ctx.memory?.memoryManager ?? null,
       seedManager: ctx.goals?.seedManager ?? null,
