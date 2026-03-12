@@ -4,6 +4,33 @@ All notable changes to the Animus Engine will be documented in this file.
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
 
+## [0.3.3](https://github.com/Craigtut/animus/compare/v0.3.2...v0.3.3) (2026-03-12)
+
+### Features
+
+* **ci:** add prebuilt tts-native binaries with Windows support ([288167e](https://github.com/Craigtut/animus/commit/288167e0a73cf95c151f5e3d9a7c1f8cb2f5b4e2))
+* **speech:** add previewVoice tRPC mutation as streaming fallback ([af02b1b](https://github.com/Craigtut/animus/commit/af02b1b117e95da731e078826835f4deb0a0070d))
+* **speech:** add streaming TTS voice preview for near-instant playback ([52db0f0](https://github.com/Craigtut/animus/commit/52db0f0788e22b887579d69af8959122d0cb2782))
+
+### Bug Fixes
+
+* **agents:** configure Codex sandbox to prevent shell commands hanging on Windows ([9b71abc](https://github.com/Craigtut/animus/commit/9b71abc6e4394bf704083636d3b05827f8e41e1d))
+* **agents:** fix auth provider tests for async session manager and blocking initiateAuth ([e9d88be](https://github.com/Craigtut/animus/commit/e9d88beaa339d379998ee7cdb95f9607c9e5ea27))
+* **backend:** correct telemetry version reporting and prevent IP capture ([75ba871](https://github.com/Craigtut/animus/commit/75ba8716d2274011ef2f95e54bb89c744f3d08ed))
+* **backend:** fix package signature verification on Windows ([2ad051a](https://github.com/Craigtut/animus/commit/2ad051a3f61a73c0fdd7bd0c593a59143ff501bc))
+* **ci:** configure ports.ubuntu.com for ARM64 cross-compilation packages ([ad371f3](https://github.com/Craigtut/animus/commit/ad371f31af761e830d36ab6c489f81c26c9134c3))
+* **ci:** fix build failures and add pre-commit/pre-push hooks ([91b50c2](https://github.com/Craigtut/animus/commit/91b50c26ec40ecb1c89c82b1f4e8d376b6218619))
+* **ci:** install cross-compilation OpenSSL for Linux ARM64 tts-native build ([bbfc9fa](https://github.com/Craigtut/animus/commit/bbfc9faec8c736c7ec0b0b02ad22a637af78eaa8))
+* **ci:** set cross-linker for aarch64-unknown-linux-gnu target ([3245d43](https://github.com/Craigtut/animus/commit/3245d43d85783f278994d319f255533fb673bd0b))
+* **ci:** vendor OpenSSL for Linux cross-compilation instead of system packages ([a07bde6](https://github.com/Craigtut/animus/commit/a07bde677f2963221d6b0d750c8e8e74596d9245))
+* **frontend:** fix Select dropdown scroll and overflow clipping ([a765938](https://github.com/Craigtut/animus/commit/a765938fda4e01ab855ea6db7b65add8346c9eac))
+* **frontend:** normalize Slider neutral calculations to work with any min/max range ([dbf1b66](https://github.com/Craigtut/animus/commit/dbf1b6663553816ae04d54ae141affa77e736434))
+* **frontend:** remove auto-restart on update, prompt user to restart manually ([5743bf5](https://github.com/Craigtut/animus/commit/5743bf5793b82fec3d9e9d059010053f61128f98))
+
+### Performance Improvements
+
+* **ci:** split Docker build into native per-arch jobs and use pre-built tts-native binaries ([88ee292](https://github.com/Craigtut/animus/commit/88ee292b21239778f19678353b33fa95eff3a2cb))
+
 ## [0.3.2](https://github.com/Craigtut/animus/compare/v0.3.1...v0.3.2) (2026-03-11)
 
 ### Features
