@@ -1,4 +1,5 @@
 use napi::bindgen_prelude::*;
+use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 use std::sync::Arc;
 
@@ -158,6 +159,73 @@ impl PocketTTS {
             .into_iter()
             .map(Float32Array::new)
             .collect())
+    }
+
+    /// Streaming generation with per-chunk callback.
+    ///
+    /// Calls `callback(Float32Array)` for each ~13ms audio chunk as it is
+    /// generated, then sends an empty `Float32Array` as a completion sentinel.
+    /// If the callback returns an error (JS side aborted), iteration stops.
+    ///
+    /// Runs on a dedicated OS thread to avoid blocking the tokio pool.
+    #[napi]
+    pub fn generate_stream_cb(
+        &self,
+        text: String,
+        voice: &VoiceState,
+        #[napi(ts_arg_type = "(err: null | Error, chunk: Float32Array) => void")]
+        callback: JsFunction,
+    ) -> Result<()> {
+        let tsfn: ThreadsafeFunction<Vec<f32>, ErrorStrategy::CalleeHandled> = callback
+            .create_threadsafe_function(0, |ctx| Ok(vec![Float32Array::new(ctx.value)]))?;
+
+        let model = self.model.clone();
+        let voice_state = Arc::clone(&voice.inner);
+
+        std::thread::spawn(move || {
+            for chunk in model.generate_stream(&text, &voice_state) {
+                match chunk {
+                    Ok(tensor) => {
+                        let flat = match tensor.flatten_all() {
+                            Ok(f) => f,
+                            Err(e) => {
+                                let _ = tsfn.call(
+                                    Err(Error::from_reason(format!("Flatten failed: {}", e))),
+                                    ThreadsafeFunctionCallMode::Blocking,
+                                );
+                                return;
+                            }
+                        };
+                        let samples = match flat.to_vec1::<f32>() {
+                            Ok(s) => s,
+                            Err(e) => {
+                                let _ = tsfn.call(
+                                    Err(Error::from_reason(format!("to_vec1 failed: {}", e))),
+                                    ThreadsafeFunctionCallMode::Blocking,
+                                );
+                                return;
+                            }
+                        };
+                        let status = tsfn.call(Ok(samples), ThreadsafeFunctionCallMode::Blocking);
+                        if status != napi::Status::Ok {
+                            // JS side aborted — stop generating
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tsfn.call(
+                            Err(Error::from_reason(format!("Stream chunk error: {}", e))),
+                            ThreadsafeFunctionCallMode::Blocking,
+                        );
+                        return;
+                    }
+                }
+            }
+            // Send empty sentinel to signal completion
+            let _ = tsfn.call(Ok(vec![]), ThreadsafeFunctionCallMode::Blocking);
+        });
+
+        Ok(())
     }
 
     /// Audio sample rate — always 24000 Hz.

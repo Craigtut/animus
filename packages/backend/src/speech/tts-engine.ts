@@ -128,6 +128,81 @@ export class TTSEngine {
     return { samples, sampleRate, wavBuffer };
   }
 
+  /** Streaming synthesis — yields Float32Array chunks as they are generated. */
+  async *synthesizeStream(text: string, options?: TTSSynthesisOptions): AsyncGenerator<Float32Array> {
+    await this.ensureLoaded();
+
+    const voiceState = options?.voiceId
+      ? await this.loadVoice(options.voiceId)
+      : await this.getDefaultVoice();
+
+    // Check if the native addon supports streaming callback
+    if (typeof this.tts!.generateStreamCb !== 'function') {
+      // Fallback: generate all at once and yield as single chunk
+      const samples = await this.tts!.generate(text, voiceState);
+      yield samples;
+      return;
+    }
+
+    // Bridge callback-based API to async generator using a queue
+    type QueueItem =
+      | { type: 'chunk'; data: Float32Array }
+      | { type: 'done' }
+      | { type: 'error'; error: Error };
+
+    const queue: QueueItem[] = [];
+    let resolve: (() => void) | null = null;
+    let finished = false;
+
+    const push = (item: QueueItem) => {
+      queue.push(item);
+      if (resolve) {
+        const r = resolve;
+        resolve = null;
+        r();
+      }
+    };
+
+    const waitForItem = (): Promise<void> => {
+      if (queue.length > 0) return Promise.resolve();
+      return new Promise<void>((r) => { resolve = r; });
+    };
+
+    this.tts!.generateStreamCb(text, voiceState, (err: Error | null, chunk: Float32Array) => {
+      if (err) {
+        push({ type: 'error', error: err });
+        return;
+      }
+      if (chunk.length === 0) {
+        push({ type: 'done' });
+        return;
+      }
+      push({ type: 'chunk', data: chunk });
+    });
+
+    try {
+      while (!finished) {
+        await waitForItem();
+
+        while (queue.length > 0) {
+          const item = queue.shift()!;
+          if (item.type === 'chunk') {
+            yield item.data;
+          } else if (item.type === 'done') {
+            finished = true;
+            break;
+          } else {
+            throw item.error;
+          }
+        }
+      }
+    } finally {
+      // If consumer aborts early, the Rust thread will get an error
+      // on the next callback call and stop naturally.
+      finished = true;
+    }
+  }
+
   /** Update the cached default voice (called when persona voice changes). */
   async setDefaultVoice(voiceId: string): Promise<void> {
     if (this.loaded) {

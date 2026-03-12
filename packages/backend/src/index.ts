@@ -299,6 +299,10 @@ async function main() {
   const { registerPackageUploadRoutes } = await import('./api/routes/package-upload.js');
   await registerPackageUploadRoutes(fastify);
 
+  // Register speech streaming route (chunked TTS preview)
+  const { registerSpeechStreamRoute } = await import('./api/routes/speech-stream.js');
+  await registerSpeechStreamRoute(fastify);
+
   // Register OAuth callback route (plugin OAuth authorization code flow)
   const { registerOAuthCallbackRoute } = await import('./api/routes/oauth-callback.js');
   await registerOAuthCallbackRoute(fastify);

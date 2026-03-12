@@ -102,7 +102,7 @@ export class VoiceManager {
         name: name.charAt(0).toUpperCase() + name.slice(1),
         type: 'builtin',
         filePath: `builtin/${name}.wav`,
-        description: `Built-in Pocket TTS voice`,
+        description: `Built-in voice`,
         addedAt: new Date().toISOString(),
       });
 
