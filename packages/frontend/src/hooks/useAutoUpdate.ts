@@ -15,7 +15,6 @@ export interface AutoUpdateState {
   updateVersion: string | null;
   toggle: () => void;
   checkNow: () => Promise<void>;
-  installAndRestart: () => Promise<void>;
   dismiss: () => void;
 }
 
@@ -78,20 +77,6 @@ export function useAutoUpdate(): AutoUpdateState {
       setDownloading(false);
     }
   }, []); // stable reference, no state dependencies
-
-  const installAndRestart = useCallback(async () => {
-    const update = updateRef.current;
-    if (!update) return;
-    try {
-      await update.install();
-      const { relaunch } = await import('@tauri-apps/plugin-process');
-      await relaunch();
-    } catch (err) {
-      toast.error('Failed to install update.', {
-        detail: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }, []);
 
   const dismiss = useCallback(() => {
     const version = updateRef.current?.version;
@@ -176,7 +161,6 @@ export function useAutoUpdate(): AutoUpdateState {
     updateVersion,
     toggle,
     checkNow,
-    installAndRestart,
     dismiss,
   };
 }

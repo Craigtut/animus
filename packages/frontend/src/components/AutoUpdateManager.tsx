@@ -3,7 +3,7 @@ import { useAutoUpdate, STORAGE_KEY_DISMISSED } from '../hooks/useAutoUpdate';
 import { toast, useToastStore } from '../store/toast-store';
 
 export function AutoUpdateManager() {
-  const { updateReady, updateVersion, installAndRestart, dismiss } = useAutoUpdate();
+  const { updateReady, updateVersion, dismiss } = useAutoUpdate();
   const toastIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -22,14 +22,16 @@ export function AutoUpdateManager() {
       useToastStore.getState().removeToast(toastIdRef.current);
     }
 
-    toastIdRef.current = toast.info(`Update available (v${updateVersion})`, {
-      duration: 0,
-      actions: [
-        { label: 'Restart Now', onClick: () => { installAndRestart(); } },
-        { label: 'Later', onClick: () => { dismiss(); } },
-      ],
-    });
-  }, [updateReady, updateVersion, installAndRestart, dismiss]);
+    toastIdRef.current = toast.info(
+      `Update v${updateVersion} downloaded. Restart the app to apply it.`,
+      {
+        duration: 0,
+        actions: [
+          { label: 'Dismiss', onClick: () => { dismiss(); } },
+        ],
+      },
+    );
+  }, [updateReady, updateVersion, dismiss]);
 
   return null;
 }
