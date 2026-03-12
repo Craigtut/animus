@@ -1,27 +1,3 @@
-# Stage 0: Build tts-native Rust addon
-FROM node:25 AS rust-builder
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential pkg-config libssl-dev git curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Rust (stable toolchain)
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-WORKDIR /app
-
-# Copy only tts-native source + root package files needed for napi build
-COPY packages/tts-native/package.json packages/tts-native/
-COPY packages/tts-native/Cargo.toml packages/tts-native/Cargo.lock* packages/tts-native/
-COPY packages/tts-native/build.rs packages/tts-native/
-COPY packages/tts-native/src/ packages/tts-native/src/
-
-# Install @napi-rs/cli (build tool) and build the native addon
-RUN cd packages/tts-native && \
-    npm install @napi-rs/cli@3 && \
-    npx napi build --release --platform
-
 # Stage 1: Build
 FROM node:25 AS builder
 
@@ -46,8 +22,13 @@ ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 # If publishing pre-built images, exclude the SDK and install at container startup.
 RUN npm install
 
-# Copy the pre-built tts-native binary from rust-builder
-COPY --from=rust-builder /app/packages/tts-native/tts-native.*.node packages/tts-native/
+# Download pre-built tts-native binary from GitHub release.
+# TARGETARCH is set automatically by Docker buildx (amd64 or arm64).
+ARG TARGETARCH
+RUN TTS_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "x64") && \
+    TTS_BINARY="tts-native.linux-${TTS_ARCH}-gnu.node" && \
+    curl -fSL "https://github.com/Craigtut/animus/releases/download/tts-native-latest/${TTS_BINARY}" \
+      -o "packages/tts-native/${TTS_BINARY}"
 
 # Copy source code
 COPY packages/shared/ packages/shared/

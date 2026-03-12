@@ -143,7 +143,7 @@ jobs:
           prerelease: false
           args: ${{ matrix.tauri-args }}
 
-  # Tauri hardcodes the version into installer filenames — rename to stable names
+  # Tauri hardcodes the version into installer filenames -- rename to stable names
   # so /releases/latest/download/ URLs work without knowing the version
   rename-installers:
     needs: build-tauri
@@ -178,13 +178,74 @@ jobs:
             gh release delete-asset "$TAG" "$VERSIONED" --repo "$REPO" --yes
           done
 
+  # Build Docker images natively per architecture, then merge into a multi-arch
+  # manifest. This avoids QEMU emulation which adds 5-8x overhead.
   build-docker:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            cache-scope: docker-amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            cache-scope: docker-arm64
+
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,"name=ghcr.io/${{ github.repository }}",push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.cache-scope }}
+          cache-to: type=gha,scope=${{ matrix.cache-scope }},mode=max
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.cache-scope }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Merge per-arch images into a single multi-arch manifest
+  merge-docker-manifest:
+    needs: build-docker
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
 
       - uses: docker/setup-buildx-action@v3
 
@@ -204,12 +265,13 @@ jobs:
             type=sha
             type=raw,value=latest
 
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create multi-arch manifest and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf 'ghcr.io/${{ github.repository }}@sha256:%s ' *)
+
+      - name: Inspect manifest
+        run: |
+          docker buildx imagetools inspect "ghcr.io/${{ github.repository }}:latest"
