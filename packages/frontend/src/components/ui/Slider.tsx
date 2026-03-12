@@ -29,17 +29,19 @@ export function Slider({
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
 
-  const neutralMin = 0.45;
-  const neutralMax = 0.55;
-  const isNeutral = showNeutral && value >= neutralMin && value <= neutralMax;
   const percentage = ((value - min) / (max - min)) * 100;
 
+  // Neutral zone uses normalized percentage (0-100) so it works with any min/max range
+  const neutralMinPct = 45;
+  const neutralMaxPct = 55;
+  const isNeutral = showNeutral && percentage >= neutralMinPct && percentage <= neutralMaxPct;
+
   // How far from center (0 = center, 1 = edge)
-  const deviation = Math.abs(value - 0.5) * 2;
+  const deviation = Math.abs(percentage - 50) / 50;
 
   // Which side is active
-  const leaningLeft = value < neutralMin;
-  const leaningRight = value > neutralMax;
+  const leaningLeft = percentage < neutralMinPct;
+  const leaningRight = percentage > neutralMaxPct;
 
   const updateValue = useCallback(
     (clientX: number) => {
@@ -189,10 +191,10 @@ export function Slider({
                   transition: ${dragging ? 'opacity 50ms ease-out' : 'all 120ms ease-out'};
                   ${leaningLeft ? css`
                     right: 50%;
-                    width: ${(0.5 - value) * 100}%;
+                    width: ${50 - percentage}%;
                   ` : css`
                     left: 50%;
-                    width: ${(value - 0.5) * 100}%;
+                    width: ${percentage - 50}%;
                   `}
                 `}
               />
