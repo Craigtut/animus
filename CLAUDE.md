@@ -137,17 +137,15 @@ npm install
 # Copy environment template
 cp .env.example .env
 
-# IMPORTANT: Check if servers are already running before starting them.
-# During development, the backend and frontend are often already running
-# in watch mode and will automatically pick up your changes.
-# Check with: lsof -i:3000 (backend) and lsof -i:5173 (frontend)
+# IMPORTANT: Agents must NEVER run dev servers.
+# Do NOT run: npm run dev, npm run dev:backend, npm run dev:frontend
+# These spawn long-running processes that become orphaned on Windows
+# when the agent session ends, blocking ports indefinitely.
+# The user manages dev servers manually. Your changes are picked up
+# automatically by the running watch-mode servers.
 
-# Start development (backend + frontend)
-npm run dev            # Runs backend + frontend in parallel
-
-# Or run separately:
-npm run dev:backend   # http://localhost:3000
-npm run dev:frontend  # http://localhost:5173
+# If you need to verify the backend is running:
+# netstat -ano | grep ":3000 " | grep LISTEN
 
 # NOTE: In dev mode, the backend imports @animus-labs/shared and @animus-labs/agents
 # source (.ts) directly via the "source" export condition (--conditions source).
