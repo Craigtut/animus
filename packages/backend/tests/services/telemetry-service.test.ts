@@ -17,6 +17,7 @@ vi.mock('posthog-node', () => ({
 // Mock DATA_DIR to use the temp directory
 vi.mock('../../src/utils/env.js', () => ({
   get DATA_DIR() { return tmpDir; },
+  APP_VERSION: '0.0.0-test',
 }));
 
 // Mock the DB and store

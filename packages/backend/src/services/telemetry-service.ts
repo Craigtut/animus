@@ -11,8 +11,7 @@ import { PostHog } from 'posthog-node';
 import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
-import { DATA_DIR } from '../utils/env.js';
+import { APP_VERSION, DATA_DIR } from '../utils/env.js';
 import { getSystemDb } from '../db/index.js';
 import * as settingsStore from '../db/stores/settings-store.js';
 import { createLogger } from '../lib/logger.js';
@@ -22,24 +21,6 @@ const log = createLogger('Telemetry', 'server');
 const POSTHOG_API_KEY = 'phc_tWOlrOoDiJ1dncN5uNhFZ2DqvKuHJzSkCb7FEeYEgyz';
 const POSTHOG_HOST = 'https://us.posthog.com';
 const TELEMETRY_ID_FILE = 'telemetry-id';
-
-// Package version (read once at startup)
-let _version: string | null = null;
-function getVersion(): string {
-  if (!_version) {
-    try {
-      const pkgPath = path.resolve(
-        path.dirname(new URL(import.meta.url).pathname),
-        '../../package.json'
-      );
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-      _version = pkg.version ?? 'unknown';
-    } catch {
-      _version = 'unknown';
-    }
-  }
-  return _version!;
-}
 
 export type TelemetryFeature =
   | 'voice'
@@ -156,7 +137,7 @@ export class TelemetryService {
     if (!this.isEnabled()) return;
     this.installCaptured = true;
     this.capture('install', {
-      version: getVersion(),
+      version: APP_VERSION,
       os: process.platform,
       arch: process.arch,
       nodeVersion: process.version,
@@ -170,7 +151,7 @@ export class TelemetryService {
   }): void {
     if (!this.isEnabled()) return;
     this.capture('app_started', {
-      version: getVersion(),
+      version: APP_VERSION,
       os: process.platform,
       arch: process.arch,
       nodeVersion: process.version,
@@ -188,7 +169,7 @@ export class TelemetryService {
     this.errorCountToday = 0;
     this.errorHashesToday.clear();
     this.capture('daily_active', {
-      version: getVersion(),
+      version: APP_VERSION,
       provider: this.getCurrentProvider(),
       uptimeHours: Math.round(uptimeHours * 10) / 10,
     });
@@ -240,6 +221,8 @@ export class TelemetryService {
       properties: {
         ...properties,
         $lib: 'animus-engine',
+        $ip: null,
+        $geoip_disable: true,
       },
     };
 

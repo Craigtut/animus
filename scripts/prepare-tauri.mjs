@@ -555,6 +555,8 @@ function copyWorkspacePackages() {
 function generatePackageJson() {
   console.log('[6/12] Generating resources/package.json...');
 
+  const rootPkgPath = path.join(ROOT, 'package.json');
+  const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, 'utf-8'));
   const backendPkgPath = path.join(ROOT, 'packages', 'backend', 'package.json');
   const backendPkg = JSON.parse(fs.readFileSync(backendPkgPath, 'utf-8'));
 
@@ -568,6 +570,7 @@ function generatePackageJson() {
   const resourcePkg = {
     private: true,
     type: 'module',
+    version: rootPkg.version,
     dependencies: deps,
   };
 
