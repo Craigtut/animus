@@ -397,6 +397,21 @@ export interface AgentSessionConfig {
   // Codex-specific
   workingDirectory?: string;
   skipGitRepoCheck?: boolean;
+  /**
+   * Codex sandbox mode controlling what shell commands can do.
+   * - 'read-only': Only file reads allowed (no writes, no network)
+   * - 'workspace-write': Read/write in workspace, network configurable
+   * - 'danger-full-access': No restrictions
+   *
+   * Defaults to 'danger-full-access' if not specified.
+   */
+  sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access';
+  /**
+   * Whether to enable network access for Codex shell commands.
+   * Only applies when sandboxMode is 'workspace-write'.
+   * Defaults to true.
+   */
+  networkAccess?: boolean;
 
   // OpenCode-specific
   hostname?: string;

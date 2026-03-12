@@ -79,6 +79,8 @@ export interface CodexAppServerOptions {
   env?: Record<string, string>;
   /** Logger instance */
   logger?: Logger;
+  /** Config overrides passed as --config flags to the app-server process */
+  configOverrides?: Record<string, unknown>;
 }
 
 /**
@@ -107,12 +109,14 @@ export class CodexAppServerClient extends EventEmitter {
   private nextId = 1;
   private logger: Logger;
   private env: Record<string, string> | undefined;
+  private options: CodexAppServerOptions | undefined;
   private _isRunning = false;
 
   constructor(options?: CodexAppServerOptions) {
     super();
     this.logger = options?.logger ?? createTaggedLogger('CodexAppServer');
     this.env = options?.env;
+    this.options = options;
   }
 
   get isRunning(): boolean {
@@ -139,7 +143,17 @@ export class CodexAppServerClient extends EventEmitter {
       Object.assign(mergedEnv, this.env);
     }
 
-    this.process = spawn(binaryPath, ['app-server'], {
+    // Build CLI args: app-server + any config overrides
+    const args = ['app-server'];
+    if (this.options?.configOverrides) {
+      for (const [key, value] of Object.entries(this.options.configOverrides)) {
+        // Format as TOML: strings get quoted, booleans/numbers stay raw
+        const tomlValue = typeof value === 'string' ? `"${value}"` : String(value);
+        args.push('--config', `${key}=${tomlValue}`);
+      }
+    }
+
+    this.process = spawn(binaryPath, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: mergedEnv,
     });

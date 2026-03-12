@@ -135,9 +135,19 @@ export class CodexAdapter extends BaseAdapter {
       Object.assign(mergedEnv, config.env);
     }
 
+    // Configure sandbox at process level for reliable enforcement
+    const sandboxMode = config.sandboxMode ?? 'danger-full-access';
+    const serverConfigOverrides: Record<string, unknown> = {
+      sandbox: sandboxMode,
+    };
+    if (sandboxMode === 'workspace-write') {
+      serverConfigOverrides['sandbox_workspace_write.network_access'] = config.networkAccess ?? true;
+    }
+
     this.appServer = new CodexAppServerClient({
       env: mergedEnv,
       logger: this.logger,
+      configOverrides: serverConfigOverrides,
     });
 
     // Handle unexpected process exits
@@ -442,11 +452,19 @@ class CodexSession extends BaseSession {
       configOverrides['model_reasoning_effort'] = getCodexReasoningEffort(this.config.reasoningEffort);
     }
 
+    // Configure sandbox mode (default: danger-full-access)
+    const sandboxMode = this.config.sandboxMode ?? 'danger-full-access';
+    if (sandboxMode === 'workspace-write') {
+      const networkAccess = this.config.networkAccess ?? true;
+      configOverrides['sandbox_workspace_write.network_access'] = networkAccess;
+    }
+
     const result = await this.client.threadStart({
       model: this.config.model,
       instructions: this.instructions,
       cwd: this.config.workingDirectory ?? this.config.cwd,
       approvalPolicy: this.approvalPolicy,
+      sandbox: sandboxMode,
       ...(Object.keys(configOverrides).length > 0 ? { config: configOverrides } : {}),
     });
     this.threadId = result.threadId;
