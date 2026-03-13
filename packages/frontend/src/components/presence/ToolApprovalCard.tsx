@@ -7,6 +7,7 @@ import {
   CheckCircle,
   XCircle,
   Clock,
+  ShieldCheck,
 } from '@phosphor-icons/react';
 import { Typography, Badge, Button } from '../ui';
 import { trpc } from '../../utils/trpc';
@@ -47,11 +48,12 @@ export function ToolApprovalCard({ request, riskTier = 'acts' }: ToolApprovalCar
   const isDenied = request.status === 'denied';
   const isExpired = request.status === 'expired';
 
-  const handleResolve = (approved: boolean) => {
+  const handleResolve = (approved: boolean, scope?: 'once' | 'always') => {
     setResolving(true);
     resolveMutation.mutate({
       requestId: request.id,
       approved,
+      scope: approved ? (scope ?? 'once') : undefined,
     });
   };
 
@@ -130,11 +132,27 @@ export function ToolApprovalCard({ request, riskTier = 'acts' }: ToolApprovalCar
       <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
         <Button
           size="sm"
-          onClick={() => handleResolve(true)}
+          onClick={() => handleResolve(true, 'once')}
           disabled={resolving}
-          loading={resolving && resolveMutation.variables?.approved === true}
+          loading={resolving && resolveMutation.variables?.approved === true && resolveMutation.variables?.scope === 'once'}
         >
-          Allow
+          Allow Once
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => handleResolve(true, 'always')}
+          disabled={resolving}
+          loading={resolving && resolveMutation.variables?.scope === 'always'}
+          css={css`
+            color: ${theme.colors.success.main};
+            &:hover:not(:disabled) {
+              color: ${theme.colors.success.dark};
+            }
+          `}
+        >
+          <ShieldCheck size={14} weight="bold" css={css`margin-right: ${theme.spacing[1]};`} />
+          Always Allow
         </Button>
         <Button
           variant="ghost"

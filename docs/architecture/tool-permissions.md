@@ -107,7 +107,7 @@ Tick 1 — Gate fires
   Agent explains to user what it wants to do
   Approval notifier sends structured approval prompt
   Channel adapter renders approval UI:
-    • Web: inline card with Allow / Deny buttons
+    • Web: inline card with Allow Once / Always Allow / Deny buttons
     • Discord: embed with button components
     • SMS/text: "Reply 'approve' to allow this action, or 'deny' to reject it."
     • API: structured JSON
@@ -160,10 +160,11 @@ trigger_summary TEXT: — "Agent wants to use 'Write File'"
 
 | Option | Behavior | Available via |
 |--------|----------|---------------|
-| **Allow** | Approves this single invocation. Consumed on next use. | Buttons + text phrases |
+| **Allow Once** | Approves this single invocation. Consumed on next use. | Buttons + text phrases |
+| **Always Allow** | Approves and updates `tool_permissions.mode` to `always_allow`. No future prompts. | Buttons only (web, Discord) |
 | **Deny** | Denies the request. Agent informed via deny message. | Buttons + text phrases |
 
-All approvals are one-time ("once" scope). There is no "Always Allow" option in the approval flow. Users can change a tool's permission mode to `always_allow` in Settings > Tools if they want to skip approvals permanently.
+"Always Allow" is **button-only** (web, Discord). Text-based approvals via the approval interceptor are always treated as one-time to prevent misinterpretation. The interceptor only supports `'approve'` and `'deny'` semantics, never `'always'`.
 
 ### One-at-a-Time Enforcement
 
@@ -436,7 +437,7 @@ Approval prompts include structured metadata (`message_type: 'tool_approval_requ
 
 | Channel | Rendering |
 |---------|-----------|
-| **Web** | Inline card with Allow / Deny buttons via tRPC subscription |
+| **Web** | Inline card with Allow Once / Always Allow / Deny buttons via tRPC subscription |
 | **Discord** | Embed with ActionRow button components |
 | **SMS** | Text prompt: `Reply "approve" to allow this action, or "deny" to reject it.` |
 | **API** | Structured JSON appended to response |
@@ -491,7 +492,7 @@ if (input.approved) {
 }
 ```
 
-Approvals are always one-time scope ("once"). Users can change a tool's permission mode to `always_allow` via the Settings > Tools page.
+If "Always Allow" scope is selected via the button UI, the tool's permission mode is also updated to `always_allow` in `tool_permissions`, preventing future approval prompts. Text-based approvals are always one-time scope.
 
 ---
 
@@ -509,7 +510,7 @@ The tools section in Settings displays all tools grouped by source, with a segme
 
 ### Approval Card in Chat
 
-When an approval request arrives, the web frontend renders an inline card in the message stream with the tool name, context summary, and two action buttons (Allow / Deny). The card updates in real-time via the `onApprovalResolved` subscription (collapsed to show outcome).
+When an approval request arrives, the web frontend renders an inline card in the message stream with the tool name, context summary, and three action buttons (Allow Once / Always Allow / Deny). The card updates in real-time via the `onApprovalResolved` subscription (collapsed to show outcome).
 
 ---
 
@@ -576,7 +577,7 @@ interface ToolApprovalRequest {
 - SDK adapter: `canUseTool` support in `@animus-labs/agents` Claude adapter
 - Sub-agent filtering: Excludes both `off` and `ask` tools from sub-agent sessions
 - Channel adapters: Discord (embed + buttons), SMS (text), API (JSON) support
-- Frontend: Settings > Tools page + inline approval card in chat (Allow / Deny)
+- Frontend: Settings > Tools page + inline approval card in chat (Allow Once / Always Allow / Deny)
 - Trust ramp: Eligibility query + context injection + anti-nag mechanism
 
 ### Not Yet Implemented

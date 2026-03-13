@@ -107,7 +107,7 @@ export const toolsRouter = router({
       }
 
       const resolvedStatus = input.approved ? 'approved' : 'denied';
-      const resolvedScope = input.scope === 'once' ? 'once' : undefined;
+      const resolvedScope = input.scope === 'always' ? undefined : 'once';
       heartbeatStore.resolveApproval(hbDb, input.requestId, resolvedStatus, resolvedScope);
 
       // If "always allow" and approved, also update the tool permission mode

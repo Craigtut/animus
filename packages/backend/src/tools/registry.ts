@@ -32,13 +32,7 @@ import {
   getToolPermission,
   incrementToolUsage,
 } from '../db/stores/system-store.js';
-import {
-  getActiveApproval,
-  getPendingApprovals,
-  createApprovalRequest,
-  consumeApproval,
-} from '../db/stores/heartbeat-store.js';
-import { getHeartbeatState } from '../db/stores/heartbeat-store.js';
+import { resolveToolGate } from './tool-gate.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('ToolRegistry', 'heartbeat');
@@ -203,88 +197,29 @@ async function checkToolPermission(
     return null;
   }
 
-  // Off = disabled entirely
-  if (permission.mode === 'off') {
-    return {
-      content: [{ type: 'text', text: 'This tool is disabled by the user.' }],
-      isError: true,
-    };
-  }
-
-  // Always allow = no gate
-  if (permission.mode === 'always_allow') {
-    return null;
-  }
-
-  // Mode is 'ask' — check for existing approvals
+  // Delegate to the shared tool gate
   const heartbeatDb = getHeartbeatDb();
-  const contactId = context.contactId;
-
-  // Check for an active approved record
-  const activeApproval = getActiveApproval(heartbeatDb, name, contactId);
-  if (activeApproval) {
-    // Consume the one-time approval
-    consumeApproval(heartbeatDb, activeApproval.id);
-    log.info(`Consumed one-time approval ${activeApproval.id} for tool "${name}"`);
-    return null;
-  }
-
-  // Enforce one pending approval at a time per contact.
-  // If there's already ANY pending approval, block without creating a new one.
-  const pendingRequests = getPendingApprovals(heartbeatDb, contactId);
-  if (pendingRequests.length > 0) {
-    const existingTool = pendingRequests[0]!.toolName;
-    if (existingTool !== name) {
-      return {
-        content: [{
-          type: 'text',
-          text: 'There is already a pending tool approval request. ' +
-            'Wait for the user to respond to it before attempting any other gated tools.',
-        }],
-        isError: true,
-      };
-    }
-    // Same tool already pending
-    return {
-      content: [{
-        type: 'text',
-        text: `Tool "${permission.displayName}" requires user approval.\n` +
-          'Tell the user what you want to do and why, then ask them to reply with "approve" or "deny".\n' +
-          'Do NOT attempt to call this tool again until the user has responded.',
-      }],
-      isError: true,
-    };
-  }
-
-  // No pending requests — create a new approval request
-  const heartbeatState = getHeartbeatState(heartbeatDb);
-  const approvalRequest = createApprovalRequest(heartbeatDb, {
-    toolName: name,
+  const result = resolveToolGate({
+    heartbeatDb,
+    permKey: name,
+    mode: permission.mode,
+    displayName: permission.displayName,
     toolSource: permission.toolSource,
-    contactId,
-    channel: context.sourceChannel,
-    tickNumber: heartbeatState.tickNumber,
-    agentContext: {
-      taskDescription: `Tool "${name}" invoked during tick ${heartbeatState.tickNumber}`,
-      conversationSummary: `Conversation ${context.conversationId}`,
-      pendingAction: `Execute tool "${name}" with provided input`,
-    },
-    toolInput: input as Record<string, unknown> | null,
-    triggerSummary: `Agent wants to use "${permission.displayName}"`,
+    contactId: context.contactId,
+    sourceChannel: context.sourceChannel,
     conversationId: context.conversationId,
+    toolName: name,
+    toolInput: input as Record<string, unknown> | null,
     originatingAgent: 'mind',
+    eventBus: context.eventBus,
   });
 
-  context.eventBus.emit('tool:approval_requested', approvalRequest);
-  log.info(`Created approval request ${approvalRequest.id} for tool "${name}"`);
+  if (result.action === 'allow') {
+    return null;
+  }
 
   return {
-    content: [{
-      type: 'text',
-      text: `Tool "${permission.displayName}" requires user approval.\n` +
-        'Tell the user what you want to do and why, then ask them to reply with "approve" or "deny".\n' +
-        'Do NOT attempt to call this tool again until the user has responded.',
-    }],
+    content: [{ type: 'text', text: result.reason }],
     isError: true,
   };
 }

@@ -6,6 +6,7 @@
 
 export { getToolsForTier, getTool, getToolNames, getMindToolRegistry, executeTool } from './registry.js';
 export type { ToolHandlerContext, ToolResult, ToolHandler, AnimusTool } from './types.js';
+export { resolveToolGate, type ToolGateParams, type ToolGateResult } from './tool-gate.js';
 export {
   startBridge,
   stopBridge,

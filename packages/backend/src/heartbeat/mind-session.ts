@@ -32,18 +32,12 @@ import {
   registerContext,
   updatePermissions,
   buildMcpServerConfig,
+  resolveToolGate,
   type MutableToolContext,
   type ToolPermissionLookup,
 } from '../tools/index.js';
 import type { ToolHandlerContext } from '../tools/index.js';
 import { getToolPermissions, getToolPermission } from '../db/stores/system-store.js';
-import {
-  getActiveApproval,
-  getPendingApprovals,
-  createApprovalRequest,
-  consumeApproval,
-  getHeartbeatState,
-} from '../db/stores/heartbeat-store.js';
 import { getHeartbeatDb } from '../db/index.js';
 import { getPluginManager } from '../plugins/index.js';
 import { CodexAuthProvider } from '@animus-labs/agents';
@@ -600,8 +594,10 @@ function resolveToolPermission(toolName: string): {
  * SDK internal operations (e.g., git status via Bash during CLI startup).
  * This prevents false approval prompts on normal conversations.
  *
- * Also handles plugin MCP tools as a fallback (primary gate is PreToolUse hook).
- * Animus core MCP tools are skipped (they have their own in-process gate).
+ * Plugin MCP tools are skipped here (PreToolUse hook is their gate).
+ * The Claude SDK fires both canUseTool and PreToolUse for plugin MCP tools,
+ * so we must only gate in one place to avoid double-consumption of approvals.
+ * Animus core MCP tools are also skipped (they have their own in-process gate).
  */
 function buildCanUseToolCallback(
   toolContextRef: MutableToolContext,
@@ -631,11 +627,23 @@ function buildCanUseToolCallback(
       }
     }
 
+    // Plugin MCP tools (mcp__<plugin>__<server>__<func>) are gated by the
+    // PreToolUse hook, which is the primary gate for wildcard-allowed tools.
+    // The Claude SDK fires BOTH PreToolUse and canUseTool for these tools.
+    // If we gate here too, PreToolUse consumes the approval, then canUseTool
+    // finds nothing and creates a new request (infinite loop).
+    // For Codex, canUseTool IS the primary gate (PreToolUse is secondary),
+    // so this skip only applies to Claude. The Codex adapter calls them
+    // sequentially, not independently.
+    if (toolName.startsWith('mcp__') && !toolName.startsWith('mcp__animus__') && !toolName.startsWith('mcp__cognitive__')) {
+      return { behavior: 'allow' };
+    }
+
     const resolved = resolveToolPermission(toolName);
 
     // No resolved info means tool is exempt (core MCP, cognitive, unknown)
     if (!resolved) {
-      log.info(`canUseTool: "${toolName}" → exempt (no permission record), allowing`);
+      log.info(`canUseTool: "${toolName}" → exempt, allowing`);
       return { behavior: 'allow' };
     }
 
@@ -646,78 +654,28 @@ function buildCanUseToolCallback(
       return { behavior: 'allow' };
     }
 
-    // Off = disabled entirely
-    if (permission.mode === 'off') {
-      return { behavior: 'deny', message: `Tool "${permission.displayName}" is disabled.` };
-    }
-
-    // Always allow = no gate
-    if (permission.mode === 'always_allow') {
-      return { behavior: 'allow' };
-    }
-
-    // Mode is 'ask' — check for active approval
-    const heartbeatDb = getHeartbeatDb();
+    // Delegate to the shared tool gate
     const ctx = toolContextRef.current;
-    const contactId = ctx?.contactId ?? '';
-
-    const activeApproval = getActiveApproval(heartbeatDb, permKey, contactId);
-    if (activeApproval) {
-      consumeApproval(heartbeatDb, activeApproval.id);
-      log.info(`Consumed approval ${activeApproval.id} for tool "${toolName}"`);
-      return { behavior: 'allow' };
-    }
-
-    // Enforce one pending approval at a time per contact.
-    // If there's already ANY pending approval, block without creating a new one.
-    const pendingRequests = getPendingApprovals(heartbeatDb, contactId);
-    if (pendingRequests.length > 0) {
-      const existingTool = pendingRequests[0]!.toolName;
-      if (existingTool !== permKey) {
-        // Different tool already pending — block without creating a new request
-        return {
-          behavior: 'deny',
-          message: 'There is already a pending tool approval request. ' +
-            'Wait for the user to respond to it before attempting any other gated tools.',
-        };
-      }
-      // Same tool already pending — remind the agent
-      return {
-        behavior: 'deny',
-        message: `Tool "${permission.displayName}" requires user approval. ` +
-          'Tell the user what you want to do and why, then ask them to reply with "approve" or "deny". ' +
-          'Do NOT attempt to call this tool again until the user has responded.',
-      };
-    }
-
-    // No pending requests — create a new approval request
-    const heartbeatState = getHeartbeatState(heartbeatDb);
-    const approvalRequest = createApprovalRequest(heartbeatDb, {
-      toolName: permKey,
+    const result = resolveToolGate({
+      heartbeatDb: getHeartbeatDb(),
+      permKey,
+      mode: permission.mode,
+      displayName: permission.displayName,
       toolSource: permission.toolSource,
-      contactId,
-      channel: ctx?.sourceChannel ?? 'web',
-      tickNumber: heartbeatState.tickNumber,
-      agentContext: {
-        taskDescription: `Tool "${toolName}" invoked during tick ${heartbeatState.tickNumber}`,
-        conversationSummary: `Conversation ${ctx?.conversationId ?? 'unknown'}`,
-        pendingAction: `Execute tool "${toolName}"`,
-      },
-      toolInput: input,
-      triggerSummary: `Agent wants to use "${permission.displayName}"`,
+      contactId: ctx?.contactId ?? '',
+      sourceChannel: ctx?.sourceChannel ?? 'web',
       conversationId: ctx?.conversationId ?? '',
+      toolName,
+      toolInput: input,
       originatingAgent: 'mind',
+      eventBus: ctx?.eventBus ?? getEventBus(),
     });
 
-    ctx?.eventBus.emit('tool:approval_requested', approvalRequest);
-    log.info(`Created approval request ${approvalRequest.id} for tool "${toolName}"`);
+    if (result.action === 'allow') {
+      return { behavior: 'allow' };
+    }
 
-    return {
-      behavior: 'deny',
-      message: `Tool "${permission.displayName}" requires user approval. ` +
-        'Tell the user what you want to do and why, then ask them to reply with "approve" or "deny". ' +
-        'Do NOT attempt to call this tool again until the user has responded.',
-    };
+    return { behavior: 'deny', message: result.reason };
   };
 }
 
@@ -728,21 +686,16 @@ function buildCanUseToolCallback(
 /**
  * Build a PreToolUse hook that enforces 'ask' mode for plugin MCP tools.
  *
- * Plugin MCP tools are registered with wildcard patterns in allowedTools
- * (e.g., mcp__home-assistant__ha__*), so the SDK auto-approves them.
- * This hook catches those calls and enforces the approval gate.
+ * Plugin MCP tools are in allowedTools via wildcard patterns, so the SDK
+ * auto-approves them without calling canUseTool. This hook catches those
+ * calls and enforces the approval gate via resolveToolGate().
  *
- * For SDK built-in tools: canUseTool is the primary gate (it only fires for
- * model-initiated calls, avoiding false positives on SDK internal operations).
- * This hook may also fire for SDK tools as a secondary check.
+ * SDK built-in tools are NOT gated here (hooks fire for ALL calls including
+ * SDK internal operations like git status during startup). canUseTool is
+ * the primary gate for SDK tools since it only fires for model-initiated calls.
  *
- * For 'ask' mode tools:
- *   - No active approval → creates approval request, emits event, blocks tool
- *   - Active approval → consumes it and allows tool
- * For 'always_allow' and unknown tools: allows (no-op)
- * For 'off' tools: handled by disallowedTools (never reaches here)
- *
- * Core Animus MCP tools are skipped (they have their own in-process gate).
+ * Core Animus MCP tools are skipped (they have their own in-process gate
+ * via checkToolPermission in registry.ts).
  */
 function buildPreToolUseHook(
   toolContextRef: MutableToolContext,
@@ -750,71 +703,43 @@ function buildPreToolUseHook(
   return async (event: PreToolUseEvent) => {
     const { toolName } = event;
 
-    // SDK built-in tools (Bash, Write, Edit, WebSearch, etc.) are NOT gated here.
-    // Hooks fire for ALL tool calls including SDK internal operations (git status,
-    // environment checks) that happen during CLI startup. We can't distinguish
-    // those from model-initiated calls in this hook.
-    // Instead, canUseTool handles SDK built-in tools — it only fires for
-    // model-initiated calls, correctly skipping SDK internal operations.
+    // Skip non-MCP tools — canUseTool handles SDK built-in tools
     if (!toolName.startsWith('mcp__')) {
-      return; // Not an MCP tool — canUseTool handles SDK tools
+      return;
     }
 
     const resolved = resolveToolPermission(toolName);
     if (!resolved) {
-      // Exempt tool (core MCP, cognitive, unknown) — allow
-      return;
+      return; // Exempt (core MCP, cognitive)
     }
 
     const { permKey, permission } = resolved;
-    if (!permission || permission.mode !== 'ask') {
-      // No record or not 'ask' mode — allow
-      return;
+    if (!permission) {
+      return; // No record — seeder will catch up
     }
 
-    // Mode is 'ask' — check for active approval
-    const heartbeatDb = getHeartbeatDb();
+    // Delegate to the shared tool gate
     const ctx = toolContextRef.current;
-    const contactId = ctx?.contactId ?? '';
+    const result = resolveToolGate({
+      heartbeatDb: getHeartbeatDb(),
+      permKey,
+      mode: permission.mode,
+      displayName: permission.displayName,
+      toolSource: permission.toolSource,
+      contactId: ctx?.contactId ?? '',
+      sourceChannel: ctx?.sourceChannel ?? 'web',
+      conversationId: ctx?.conversationId ?? '',
+      toolName,
+      toolInput: event.toolInput as Record<string, unknown> | null,
+      originatingAgent: 'mind',
+      eventBus: ctx?.eventBus ?? getEventBus(),
+    });
 
-    const activeApproval = getActiveApproval(heartbeatDb, permKey, contactId);
-    if (activeApproval) {
-      consumeApproval(heartbeatDb, activeApproval.id);
-      log.info(`[PreToolUse] Consumed approval ${activeApproval.id} for "${toolName}"`);
-      return; // Allow
-    }
-
-    // Enforce one pending approval at a time per contact.
-    const pendingRequests = getPendingApprovals(heartbeatDb, contactId);
-    if (pendingRequests.length > 0) {
-      // Already a pending approval (same or different tool) — block without creating
-      log.info(`[PreToolUse] Pending approval already exists (${pendingRequests[0]!.toolName}), blocking "${toolName}"`);
+    if (result.action === 'deny') {
       return { allow: false };
     }
 
-    // No pending requests — create a new approval request
-    const heartbeatState = getHeartbeatState(heartbeatDb);
-    const approvalRequest = createApprovalRequest(heartbeatDb, {
-      toolName: permKey,
-      toolSource: permission.toolSource,
-      contactId,
-      channel: ctx?.sourceChannel ?? 'web',
-      tickNumber: heartbeatState.tickNumber,
-      agentContext: {
-        taskDescription: `Tool "${toolName}" invoked during tick ${heartbeatState.tickNumber}`,
-        conversationSummary: `Conversation ${ctx?.conversationId ?? 'unknown'}`,
-        pendingAction: `Execute tool "${toolName}"`,
-      },
-      toolInput: event.toolInput as Record<string, unknown> | null,
-      triggerSummary: `Agent wants to use "${permission.displayName}"`,
-      conversationId: ctx?.conversationId ?? '',
-      originatingAgent: 'mind',
-    });
-
-    ctx?.eventBus.emit('tool:approval_requested', approvalRequest);
-    log.info(`[PreToolUse] Created approval request ${approvalRequest.id} for "${toolName}"`);
-
-    return { allow: false };
+    // Allow (void return = no-op, SDK proceeds)
   };
 }
 
