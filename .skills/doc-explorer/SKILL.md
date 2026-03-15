@@ -99,6 +99,7 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/research/twilio-mms-media-hosting.md` | Twilio MMS media hosting options: ImgBB, Cloudflare R2, pluggable hosting. **STATUS: RESEARCH, not implemented.** |
 | `docs/research/Claude-Agent-SDK-Research.md` | Deep Claude Agent SDK API reference. **STATUS: REFERENCE** |
 | `docs/research/opencode-sdk-research.md` | Deep OpenCode SDK API reference. **STATUS: REFERENCE** |
+| `docs/research/agentic-loop-architecture.md` | Blueprint for building Animus's own agentic loop. Covers Pi Agent Core patterns, Claude Code internals comparison, missing features checklist (compaction, budget guards, permissions, MCP, sub-agents), implementation phases, single-vs-double loop analysis. **STATUS: RESEARCH, active design.** |
 | `docs/agents/pi/research/sdk-research.md` | Pi AI + Pi Agent Core research: in-process library, transformContext hook, multi-provider gateway. **STATUS: RESEARCH, Pi adapter not implemented.** |
 | `docs/agents/pi/research/adapter-implementation.md` | Pi adapter implementation plan: PiAdapter/PiSession design, transformContext exposure, MCP tool bridging. **STATUS: RESEARCH, not implemented.** |
 

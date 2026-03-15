@@ -629,7 +629,7 @@ The mind's system prompt includes instructions about its memory capabilities:
 
 ## Future Considerations
 
-1. **Hybrid search** — Complement vector similarity with BM25 keyword search (like OpenClaw does) for better retrieval of exact terms, error codes, and identifiers. Vector search handles semantic matching; keyword search handles literal matching.
+1. **Hybrid search** — Complement vector similarity with keyword search for better retrieval of exact terms, error codes, and identifiers. Vector search handles semantic matching; keyword search handles literal matching.
 2. **Memory graph** — Add relationships between memories (like A-MEM's linked notes) for multi-hop reasoning. Start with flat vector search; add graph structure if relational queries become important.
 3. **Contact-scoped retrieval** — Weight memories tagged with the current contact's `contact_id` higher during retrieval. General memories (no contact) are always candidates.
 4. **Local embedding upgrade** — Evaluate nomic-embed-text-v1.5 via node-llama-cpp for higher embedding quality (matches OpenAI text-embedding-3-small on MTEB benchmarks) at the cost of more complex setup and slightly larger model.
