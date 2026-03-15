@@ -4233,49 +4233,34 @@ function PluginDetail({
       flex-direction: column;
       gap: ${theme.spacing[4]};
     `}>
-      {/* Author & license */}
-      {(detail.author || detail.license) && (
+      {/* Author */}
+      {detail.author && (
         <div css={css`display: flex; gap: ${theme.spacing[6]};`}>
-          {detail.author && (
-            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]};`}>
-              <Typography.Tiny as="span" css={css`
-                color: ${theme.colors.text.disabled};
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-                font-weight: ${theme.typography.fontWeight.medium};
-              `}>Author</Typography.Tiny>
-              <Typography.Caption as="span" color="secondary" css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
-                {detail.author.name}
-                {detail.author.url && (
-                  <a
-                    href={detail.author.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    css={css`
-                      color: ${theme.colors.text.hint};
-                      &:hover { color: ${theme.colors.text.primary}; }
-                    `}
-                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                  >
-                    <ArrowSquareOut size={10} />
-                  </a>
-                )}
-              </Typography.Caption>
-            </div>
-          )}
-          {detail.license && (
-            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]};`}>
-              <Typography.Tiny as="span" css={css`
-                color: ${theme.colors.text.disabled};
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-                font-weight: ${theme.typography.fontWeight.medium};
-              `}>License</Typography.Tiny>
-              <Typography.Caption as="span" color="secondary">
-                {detail.license}
-              </Typography.Caption>
-            </div>
-          )}
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]};`}>
+            <Typography.Tiny as="span" css={css`
+              color: ${theme.colors.text.disabled};
+              text-transform: uppercase;
+              letter-spacing: 0.06em;
+              font-weight: ${theme.typography.fontWeight.medium};
+            `}>Author</Typography.Tiny>
+            <Typography.Caption as="span" color="secondary" css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+              {detail.author.name}
+              {detail.author.url && (
+                <a
+                  href={detail.author.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  css={css`
+                    color: ${theme.colors.text.hint};
+                    &:hover { color: ${theme.colors.text.primary}; }
+                  `}
+                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                >
+                  <ArrowSquareOut size={10} />
+                </a>
+              )}
+            </Typography.Caption>
+          </div>
         </div>
       )}
 
