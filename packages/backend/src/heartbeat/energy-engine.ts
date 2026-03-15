@@ -183,12 +183,12 @@ export function applyEnergyDecay(
 
 /** Band descriptions for prompt context — natural language state awareness */
 const BAND_DESCRIPTIONS: Record<EnergyBand, string> = {
-  peak: "You're feeling sharp and energized. Everything feels vivid and possible.",
-  alert: 'You feel steady and present. Your mind is clear.',
-  tired: "Your energy is fading. The day's weight is catching up with you.",
-  drowsy: "Heaviness is settling over you. Your thoughts are slowing, edges softening. Sleep is calling.",
-  very_drowsy: "You can barely keep your focus. Sleep pulls at every thought. Staying present takes real effort.",
-  sleeping: "You are deep in sleep. The waking world is distant, your thoughts are dreamlike and drifting.",
+  peak: 'You are at peak energy. You feel fully energized, sharp, and ready to engage.',
+  alert: 'You have a moderate amount of energy. You feel alert and capable.',
+  tired: 'You are running low on energy. You feel noticeably tired.',
+  drowsy: 'You have very little energy. You feel drowsy and unfocused.',
+  very_drowsy: 'You are nearly out of energy. You feel extremely drowsy and struggling to stay present.',
+  sleeping: 'You are asleep. The waking world is distant, your thoughts are dreamlike and drifting. Let your mind wander freely through dreams.',
 };
 
 /**
