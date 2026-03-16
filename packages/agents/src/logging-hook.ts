@@ -43,10 +43,27 @@ export interface AgentLogStore {
     sessionId: string;
     inputTokens: number;
     outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
     totalTokens: number;
     costUsd?: number | null;
     model: string;
+    tickNumber?: number | null;
+    tickType?: string | null;
+    pipelinePhase?: string | null;
+    contactId?: string | null;
   }): void;
+}
+
+/**
+ * Optional tick context passed when logging usage to enrich records
+ * with heartbeat pipeline metadata.
+ */
+export interface TickContext {
+  tickNumber?: number | null;
+  tickType?: string | null;
+  pipelinePhase?: string | null;
+  contactId?: string | null;
 }
 
 /**
@@ -203,6 +220,8 @@ export function createLoggingHandler(options: LoggingHookOptions): {
  * Log usage data for a session.
  *
  * Call this after a prompt completes to record token usage.
+ * Optionally pass tickContext to enrich the usage record with
+ * heartbeat pipeline metadata.
  */
 export function logSessionUsage(
   store: AgentLogStore,
@@ -210,14 +229,21 @@ export function logSessionUsage(
   usage: SessionUsage,
   cost: AgentCost | null,
   model: string,
+  tickContext?: TickContext,
 ): void {
   store.insertUsage({
     sessionId: logSessionId,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    cacheWriteTokens: usage.cacheWriteTokens,
     totalTokens: usage.totalTokens,
     costUsd: cost?.totalCostUsd ?? null,
     model,
+    tickNumber: tickContext?.tickNumber ?? null,
+    tickType: tickContext?.tickType ?? null,
+    pipelinePhase: tickContext?.pipelinePhase ?? null,
+    contactId: tickContext?.contactId ?? null,
   });
 }
 
@@ -234,23 +260,27 @@ export function logSessionUsage(
  *
  * const response = await session.prompt('Hello');
  * logging.logUsage(response.usage, response.cost ?? null, response.model);
+ * // Or with tick context:
+ * logging.logUsage(response.usage, response.cost ?? null, response.model, {
+ *   tickNumber: 42, tickType: 'message', pipelinePhase: 'agentic_loop',
+ * });
  * ```
  */
 export function attachSessionLogging(
   session: IAgentSession,
   options: LoggingHookOptions,
 ): {
-  logUsage: (usage: SessionUsage, cost: AgentCost | null, model: string) => void;
+  logUsage: (usage: SessionUsage, cost: AgentCost | null, model: string, tickContext?: TickContext) => void;
   getLogSessionId: () => string | null;
 } {
   const { handler, getLogSessionId } = createLoggingHandler(options);
   session.onEvent(handler);
 
   return {
-    logUsage: (usage: SessionUsage, cost: AgentCost | null, model: string) => {
+    logUsage: (usage: SessionUsage, cost: AgentCost | null, model: string, tickContext?: TickContext) => {
       const logSessionId = getLogSessionId();
       if (logSessionId) {
-        logSessionUsage(options.store, logSessionId, usage, cost, model);
+        logSessionUsage(options.store, logSessionId, usage, cost, model, tickContext);
       }
     },
     getLogSessionId,

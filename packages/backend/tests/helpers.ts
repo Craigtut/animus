@@ -69,6 +69,8 @@ export function createTestAgentLogsDb(): Database.Database {
   db.pragma('foreign_keys = ON');
   applySql(db, path.join(MIGRATIONS_DIR, 'agent-logs', '001_initial.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'agent-logs', '002_credential_audit.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'agent-logs', '002_performance_indexes.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'agent-logs', '003_usage_enhancements.sql'));
   return db;
 }
 

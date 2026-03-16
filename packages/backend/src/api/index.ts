@@ -35,6 +35,7 @@ import { pluginOAuthRouter } from './routers/plugin-oauth.js';
 import { vaultRouter } from './routers/vault.js';
 import { sealRouter } from './routers/seal.js';
 import { sdkRouter } from './routers/sdk.js';
+import { usageRouter } from './routers/usage.js';
 
 // ============================================================================
 // App Router
@@ -71,6 +72,7 @@ export const appRouter = router({
   vault: vaultRouter,
   seal: sealRouter,
   sdk: sdkRouter,
+  usage: usageRouter,
 });
 
 export type AppRouter = typeof appRouter;

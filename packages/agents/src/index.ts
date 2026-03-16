@@ -196,6 +196,7 @@ export {
   attachSessionLogging,
   type AgentLogStore,
   type LoggingHookOptions,
+  type TickContext,
 } from './logging-hook.js';
 
 // ============================================================================

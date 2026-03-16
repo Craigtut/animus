@@ -211,30 +211,53 @@ export function insertUsage(
     sessionId: string;
     inputTokens: number;
     outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
     totalTokens: number;
     costUsd?: number | null;
     model: string;
+    tickNumber?: number | null;
+    tickType?: string | null;
+    pipelinePhase?: string | null;
+    contactId?: string | null;
   }
 ): AgentUsage {
   const id = generateUUID();
   const timestamp = now();
   db.prepare(
-    `INSERT INTO agent_usage (id, session_id, input_tokens, output_tokens, total_tokens, cost_usd, model, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO agent_usage (
+      id, session_id, input_tokens, output_tokens,
+      cache_read_tokens, cache_write_tokens,
+      total_tokens, cost_usd, model,
+      tick_number, tick_type, pipeline_phase, contact_id,
+      created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     data.sessionId,
     data.inputTokens,
     data.outputTokens,
+    data.cacheReadTokens ?? 0,
+    data.cacheWriteTokens ?? 0,
     data.totalTokens,
     data.costUsd ?? null,
     data.model,
+    data.tickNumber ?? null,
+    data.tickType ?? null,
+    data.pipelinePhase ?? null,
+    data.contactId ?? null,
     timestamp
   );
   return {
     sessionId: data.sessionId,
+    tickNumber: data.tickNumber ?? null,
+    tickType: data.tickType ?? null,
+    pipelinePhase: data.pipelinePhase ?? null,
+    contactId: data.contactId ?? null,
     inputTokens: data.inputTokens,
     outputTokens: data.outputTokens,
+    cacheReadTokens: data.cacheReadTokens ?? 0,
+    cacheWriteTokens: data.cacheWriteTokens ?? 0,
     totalTokens: data.totalTokens,
     costUsd: data.costUsd ?? null,
     model: data.model,
