@@ -64,7 +64,6 @@ export interface MindSessionState {
   session: IAgentSession | null;
   sessionId: string | null;
   logSessionId: (() => string | null) | null;
-  warmSince: number | null;
   /** Stdio MCP config for Animus built-in tools */
   mcpServer: { serverConfig: Record<string, unknown>; allowedTools: string[] } | null;
   /** Cognitive tools: snapshot accessors (in-process) + stdio MCP config */
@@ -84,7 +83,6 @@ export function createMindSessionState(): MindSessionState {
     session: null,
     sessionId: null,
     logSessionId: null,
-    warmSince: null,
     mcpServer: null,
     cognitiveServer: null,
     toolContext: { current: null },
@@ -157,31 +155,26 @@ export function buildMindToolContext(
 // ============================================================================
 
 /**
- * Create or reuse the mind agent session based on warmth state.
+ * Get or create the mind agent session.
+ * Reuses the existing session if it is still active, otherwise creates a new one.
  *
- * MUTATES `state` — sets session, sessionId, logSessionId, mcpServer.
+ * MUTATES `state` -- sets session, sessionId, logSessionId, mcpServer.
  * This is intentional; the caller owns the state object.
  */
 export async function getOrCreateMindSession(
   state: MindSessionState,
-  sessionState: 'cold' | 'warm',
-  systemPrompt: string | null,
+  systemPrompt: string,
   agentManager: AgentManager,
   agentLogStoreAdapter: AgentLogStore | null,
 ): Promise<IAgentSession> {
-  // Warm session: reuse existing (only if the session is actually alive)
-  if (sessionState === 'warm' && state.session && state.session.isActive) {
-    log.info(`Reusing warm session: ${state.session.id}`);
+  // Reuse existing session if still alive
+  if (state.session && state.session.isActive) {
+    log.info(`Reusing active session: ${state.session.id}`);
     return state.session;
   }
 
-  // If we expected warm but session is dead, log warning — system prompt may be null
-  if (sessionState === 'warm' && (!state.session || !state.session.isActive)) {
-    log.warn('Session state is "warm" but mind session is dead/missing — forcing cold session with system prompt rebuild');
-  }
-
-  // Cold session: end old session and create new one
-  if (state.session && state.session.isActive) {
+  // End dead session if it exists
+  if (state.session) {
     try {
       await state.session.end();
     } catch (err) {
@@ -476,7 +469,7 @@ export async function getOrCreateMindSession(
   state.session = session;
   state.sessionId = session.id;
 
-  log.info(`Cold session created: ${session.id}, provider=${provider}, mcpServers=${Object.keys(mergedMcpServers).join(',') || 'none'}, tools=${mergedAllowedTools.length}`);
+  log.info(`New session created: ${session.id}, provider=${provider}, mcpServers=${Object.keys(mergedMcpServers).join(',') || 'none'}, tools=${mergedAllowedTools.length}`);
 
   return session;
 }

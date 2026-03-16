@@ -65,3 +65,30 @@ export function updateHeartbeatState(
   values.push(1); // WHERE id = 1
   db.prepare(`UPDATE heartbeat_state SET ${fields.join(', ')} WHERE id = ?`).run(...values);
 }
+
+// ============================================================================
+// Conversation History (cortex session persistence)
+// ============================================================================
+
+/**
+ * Get the serialized conversation history for crash recovery.
+ * Returns null if no history has been checkpointed yet.
+ */
+export function getConversationHistory(db: Database.Database): string | null {
+  const row = db
+    .prepare('SELECT conversation_history FROM heartbeat_state WHERE id = 1')
+    .get() as { conversation_history: string | null } | undefined;
+  return row?.conversation_history ?? null;
+}
+
+/**
+ * Update the serialized conversation history.
+ * Called after each tick to checkpoint the cortex agent's message array.
+ * Pass null to clear the history (e.g., on session reset).
+ */
+export function updateConversationHistory(
+  db: Database.Database,
+  history: string | null
+): void {
+  db.prepare('UPDATE heartbeat_state SET conversation_history = ? WHERE id = 1').run(history);
+}

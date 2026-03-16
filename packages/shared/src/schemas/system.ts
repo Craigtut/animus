@@ -107,6 +107,11 @@ export const systemSettingsSchema = z.object({
   budgetStartDate: z.string().nullable().default(null),
   budgetThrottleEnabled: z.boolean().default(true),
   budgetLastAlertedThreshold: z.number().min(0).default(0),
+  // Cortex settings (provider/model for the cortex migration)
+  cortexProvider: z.string().nullable().default(null),
+  cortexModel: z.string().nullable().default(null),
+  cortexThinkingLevel: z.enum(['off', 'low', 'medium', 'high']).default('off'),
+  utilityModel: z.string().default('default'),
 });
 
 export const updateSystemSettingsInputSchema = systemSettingsSchema.partial();

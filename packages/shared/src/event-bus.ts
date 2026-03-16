@@ -84,12 +84,10 @@ export interface AnimusEventMap {
   'tick:input_stored': {
     tickNumber: number;
     triggerType: string;
-    sessionState: string;
   };
   'tick:context_stored': {
     tickNumber: number;
     triggerType: string;
-    sessionState: string;
     durationMs: number | null;
     createdAt: string;
   };

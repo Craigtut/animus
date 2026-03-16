@@ -139,3 +139,94 @@ export function getCredentialMetadata(
     updatedAt: row.updated_at,
   }));
 }
+
+// ============================================================================
+// Cortex Credential Helpers
+// ============================================================================
+
+/**
+ * Find all credentials whose credential_type starts with a given prefix.
+ * Used to find cortex credentials (e.g., prefix "cortex_" matches
+ * "cortex_api_key", "cortex_oauth", etc.).
+ */
+export function getByProviderPrefix(
+  db: Database.Database,
+  prefix: string
+): Credential[] {
+  const rows = db
+    .prepare('SELECT * FROM credentials WHERE credential_type LIKE ?')
+    .all(`${prefix}%`) as CredentialRow[];
+  return rows.map((row) => ({
+    id: row.id,
+    provider: row.provider,
+    credentialType: row.credential_type,
+    data: decrypt(row.encrypted_data),
+    metadata: row.metadata ? JSON.parse(row.metadata) as Record<string, unknown> : null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
+/**
+ * Insert or update a credential by provider + credential_type composite key.
+ * If a matching row exists, update its data and metadata. Otherwise insert.
+ */
+export function upsertCredential(
+  db: Database.Database,
+  credentialType: string,
+  provider: string,
+  data: string,
+  metadata?: Record<string, unknown>
+): void {
+  const encrypted = encrypt(data);
+  const metaJson = metadata ? JSON.stringify(metadata) : null;
+  const timestamp = now();
+  const existing = db
+    .prepare('SELECT id FROM credentials WHERE provider = ? AND credential_type = ?')
+    .get(provider, credentialType) as { id: string } | undefined;
+
+  if (existing) {
+    db.prepare(
+      'UPDATE credentials SET encrypted_data = ?, metadata = ?, updated_at = ? WHERE id = ?'
+    ).run(encrypted, metaJson, timestamp, existing.id);
+  } else {
+    db.prepare(
+      `INSERT INTO credentials (id, provider, credential_type, encrypted_data, metadata, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(generateUUID(), provider, credentialType, encrypted, metaJson, timestamp, timestamp);
+  }
+}
+
+/**
+ * Update only the encrypted data blob for an existing credential.
+ * Returns true if a row was updated, false if no matching credential exists.
+ */
+export function updateCredentialData(
+  db: Database.Database,
+  credentialType: string,
+  provider: string,
+  newData: string
+): boolean {
+  const encrypted = encrypt(newData);
+  const result = db
+    .prepare(
+      'UPDATE credentials SET encrypted_data = ?, updated_at = ? WHERE provider = ? AND credential_type = ?'
+    )
+    .run(encrypted, now(), provider, credentialType);
+  return result.changes > 0;
+}
+
+/**
+ * Delete a credential by provider and credential_type.
+ * Returns true if a row was deleted.
+ */
+export function deleteByProviderAndType(
+  db: Database.Database,
+  provider: string,
+  credentialType: string
+): boolean {
+  const result = db
+    .prepare('DELETE FROM credentials WHERE provider = ? AND credential_type = ?')
+    .run(provider, credentialType);
+  return result.changes > 0;
+}

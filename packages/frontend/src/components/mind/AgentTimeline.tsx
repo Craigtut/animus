@@ -42,7 +42,6 @@ interface TickTimeline {
   tickNumber: number;
   sessionId: string;
   triggerType: string;
-  sessionState: string;
   isComplete: boolean;
   durationMs: number | null;
   createdAt: string;
@@ -366,8 +365,7 @@ function getPreviewContent(event: TimelineEvent): string {
     }
     case 'tick_input': {
       const trigger = str(d['triggerType']);
-      const session = str(d['sessionState']);
-      return `${trigger} trigger${session ? ` - ${session} session` : ''}`;
+      return `${trigger} trigger`;
     }
     case 'thinking_start':
       return '';
@@ -531,7 +529,6 @@ function normalizeTimeline(raw: any): TickTimeline | null {
     tickNumber: Number(raw.tickNumber),
     sessionId: String(raw.sessionId ?? ''),
     triggerType: String(raw.triggerType ?? 'unknown'),
-    sessionState: String(raw.sessionState ?? 'unknown'),
     isComplete: Boolean(raw.isComplete),
     durationMs: raw.durationMs ?? null,
     createdAt: String(raw.createdAt ?? ''),
@@ -2365,12 +2362,6 @@ function TimelineHeader({ timeline }: { timeline: TickTimeline }) {
 
         {/* Trigger badge */}
         <Badge label={timeline.triggerType} color={triggerColor(timeline.triggerType, theme)} />
-
-        {/* Session state badge */}
-        <Badge
-          label={timeline.sessionState}
-          color={timeline.sessionState === 'cold' ? '#5B8DEF' : '#E8A838'}
-        />
 
         {/* Duration */}
         {timeline.durationMs != null && (

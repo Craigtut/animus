@@ -285,7 +285,6 @@ export function ContextInspector({
   }, [data]);
 
   const activeSections = activeTab === 'system' ? systemSections : userSections;
-  const isWarmSession = data?.sessionState === 'warm';
   const noSystemManifest = activeTab === 'system' && systemSections.length === 0;
 
   if (isLoading) {
@@ -322,9 +321,7 @@ export function ContextInspector({
 
       {noSystemManifest ? (
         <Typography.Body serif italic color="hint" css={css`text-align: center; padding: 2rem 0;`}>
-          {isWarmSession
-            ? 'System prompt not available for warm sessions. It was sent during the initial cold session.'
-            : 'No system prompt manifest available for this tick. This tick was recorded before the context inspector feature was added.'}
+          No system prompt manifest available for this tick. This tick was recorded before the context inspector feature was added.
         </Typography.Body>
       ) : activeSections.length === 0 ? (
         <Typography.Body serif italic color="hint" css={css`text-align: center; padding: 2rem 0;`}>

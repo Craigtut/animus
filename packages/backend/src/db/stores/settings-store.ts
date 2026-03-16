@@ -59,6 +59,10 @@ export function updateSystemSettings(
     budgetStartDate: 'budget_start_date',
     budgetThrottleEnabled: 'budget_throttle_enabled',
     budgetLastAlertedThreshold: 'budget_last_alerted_threshold',
+    cortexProvider: 'cortex_provider',
+    cortexModel: 'cortex_model',
+    cortexThinkingLevel: 'cortex_thinking_level',
+    utilityModel: 'utility_model',
   };
 
   // Boolean fields need int conversion
@@ -77,6 +81,59 @@ export function updateSystemSettings(
     }
   }
 
+  if (fields.length === 0) return;
+  fields.push('updated_at = ?');
+  values.push(now());
+  db.prepare(`UPDATE system_settings SET ${fields.join(', ')} WHERE id = 1`).run(...values);
+}
+
+// ============================================================================
+// Cortex Settings
+// ============================================================================
+
+export interface CortexSettings {
+  cortexProvider: string | null;
+  cortexModel: string | null;
+  cortexThinkingLevel: string;
+  utilityModel: string;
+}
+
+export function getCortexSettings(db: Database.Database): CortexSettings {
+  const row = db.prepare(
+    'SELECT cortex_provider, cortex_model, cortex_thinking_level, utility_model FROM system_settings WHERE id = 1'
+  ).get() as {
+    cortex_provider: string | null;
+    cortex_model: string | null;
+    cortex_thinking_level: string | null;
+    utility_model: string | null;
+  } | undefined;
+  return {
+    cortexProvider: row?.cortex_provider ?? null,
+    cortexModel: row?.cortex_model ?? null,
+    cortexThinkingLevel: row?.cortex_thinking_level ?? 'off',
+    utilityModel: row?.utility_model ?? 'default',
+  };
+}
+
+export function updateCortexSettings(
+  db: Database.Database,
+  data: Partial<CortexSettings>
+): void {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  const mapping: Record<string, string> = {
+    cortexProvider: 'cortex_provider',
+    cortexModel: 'cortex_model',
+    cortexThinkingLevel: 'cortex_thinking_level',
+    utilityModel: 'utility_model',
+  };
+  for (const [camelKey, snakeKey] of Object.entries(mapping)) {
+    const value = (data as Record<string, unknown>)[camelKey];
+    if (value !== undefined) {
+      fields.push(`${snakeKey} = ?`);
+      values.push(value);
+    }
+  }
   if (fields.length === 0) return;
   fields.push('updated_at = ?');
   values.push(now());
