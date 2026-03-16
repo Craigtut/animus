@@ -89,6 +89,24 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/agents/codex/app-server-protocol.md` | Codex app-server JSON-RPC protocol: initialization handshake, method inventory, turn management. **STATUS: REFERENCE** |
 | `docs/agents/opencode/sdk-research.md` | OpenCode SDK: client/server architecture, session management, plugin system, 75+ providers. **STATUS: REFERENCE** |
 
+### Cortex Migration
+
+| File | Covers |
+|------|--------|
+| `docs/cortex/pi-agent-core-migration.md` | Migration overview: why pi-agent-core, two parallel changes (cortex package + mind pipeline), 6 migration phases (Phase 0 prep through Phase 5 compaction), what stays the same, what gets deprecated, open questions |
+| `docs/cortex/cortex-architecture.md` | `@animus-labs/cortex` package design: always-warm session, context management (slots + ephemeral), MCP client (unified tool integration), built-in tools (Bash/Read/Write), pi-ai model access, tool permissions, budget guards, compaction, skill system, event bridge, system prompt management |
+| `docs/cortex/context-manager.md` | ContextManager design: message array layout (slots + history + ephemeral + prompt), prefix caching strategy, slot API, 9 mind slots (credentials through tasks), 3 split observation slots, ephemeral context API, composability with transformContext |
+| `docs/cortex/mind-migration.md` | Mind pipeline migration: 5-phase pipeline (GATHER/THOUGHT/AGENTIC LOOP/REFLECT/EXECUTE), context slot configuration, ephemeral context sections, system prompt composition, session persistence (conversation_history checkpointing), warm/cold removal, event bridge, built-in tools, frontend changes, system prompt rebuild |
+| `docs/cortex/mcp-integration.md` | MCP tool integration: Cortex as unified MCP client, McpClientManager, Animus tools via stdio, plugin tools via stdio/HTTP, tool wrapping (MCP to AgentTool), namespacing, permission integration, schema conversion, error handling, shared infrastructure with sub-agents |
+| `docs/cortex/skill-system.md` | Cortex skill system: progressive disclosure (advertise/load/use), SKILL.md format with Cortex extensions, SkillRegistry (config-driven, not directory-scanned), load_skill AgentTool, ephemeral injection via skillBuffer, dynamic context injection preprocessor (shell commands, in-process JS scripts, variable substitution), consumer pre-loading API, plugin integration, future sub-agent skills |
+| `docs/cortex/compaction-strategy.md` | Three-layer compaction: microcompaction (tool result trimming), conversation summarization, emergency truncation. Token tracking, observational memory coordination, compaction lifecycle events, configuration |
+| `docs/cortex/system-prompt.md` | Cortex system prompt assembly: consumer content + cortex operational rules, 5 operational sections (system rules, taking action, tool usage, executing with care, environment), rebuild triggers |
+| `docs/cortex/provider-manager.md` | ProviderManager: standalone class wrapping pi-ai for provider discovery, OAuth login/refresh, API key validation, model resolution, custom endpoint creation. IProviderManager interface, envelope pattern for OAuth credentials (opaque blob + typed OAuthMeta), CortexModel opaque type, provider registry |
+| `docs/cortex/backend-auth-integration.md` | Backend auth integration: CortexCredentialService, credential storage (system.db), AES-256-GCM encryption, cortex-provider.ts tRPC router, getApiKey callback wiring, OAuth flow coordination, headless/Docker detection, system_settings schema, event bus events, legacy auth coexistence |
+| `docs/cortex/frontend-auth-ux.md` | Frontend auth UX: progressive disclosure (OAuth > API key > custom endpoint), CortexProviderStep onboarding component, provider card states, headless device-code variant, settings page AI Provider section, model picker, thinking level, legacy SDK demotion, visual design notes |
+| `docs/cortex/working-tags.md` | Working tags response delivery architecture: `<working>` XML tags for separating internal reasoning from user-facing text during agentic loops, configuration (`workingTags.enabled`), system prompt guidance (Response Delivery section), `AgentTextOutput` type (`userFacing`/`working`/`raw`), dual event model (raw streaming + structured turn completion), parsing utilities, channel-aware delivery (strip for SMS, dim for frontend, disable for voice), compaction interaction, sub-agent behavior, four-layer response delivery framework |
+| `docs/cortex/research/working-tags-response-delivery.md` | Original exploration and problem analysis for working tags. Superseded by `docs/cortex/working-tags.md` as the authoritative spec. **STATUS: PROPOSAL** |
+
 ### Research (Planned/Exploratory)
 
 | File | Covers |
@@ -141,6 +159,9 @@ When you need context for a task, follow this approach:
 25. **For reflex/fast-response (PLANNED)**: Read `docs/research/reflex-system.md`
 26. **For Codex OAuth**: Read `docs/agents/codex/oauth.md`
 27. **For telemetry/analytics/PostHog**: Read `docs/architecture/telemetry.md`
+28. **For Cortex migration/pi-agent-core**: Start with `docs/cortex/pi-agent-core-migration.md` for overview, then read specific docs (`cortex-architecture.md`, `mind-migration.md`, `context-manager.md`, `mcp-integration.md`, `compaction-strategy.md`, `system-prompt.md`, `skill-system.md`)
+29. **For Cortex auth/providers**: Start with `docs/cortex/provider-manager.md` for the ProviderManager design, then `docs/cortex/backend-auth-integration.md` for backend wiring, then `docs/cortex/frontend-auth-ux.md` for the UX
+30. **For working tags/response delivery**: Read `docs/cortex/working-tags.md` for the `<working>` tag system, event model (raw streaming + structured turn completion), channel-aware delivery, and the multi-layer response delivery approach
 
 ## Topic Keyword Guide
 
@@ -181,6 +202,18 @@ Use this to quickly map user questions to the right docs:
 - **codex, openai, thread, codex sdk** -> `docs/agents/codex/sdk-research.md`
 - **codex oauth, chatgpt auth, device code** -> `docs/agents/codex/oauth.md`
 - **opencode, provider-agnostic, client-server** -> `docs/agents/opencode/sdk-research.md`
+- **skill, skills, SKILL.md, progressive disclosure, skill registry, load_skill, skill preprocessor, dynamic context injection** -> `docs/cortex/skill-system.md`
+- **cortex, cortex agent, pi-agent-core, migration, always-warm session, context slots** -> `docs/cortex/pi-agent-core-migration.md`, `docs/cortex/cortex-architecture.md`
+- **context manager, slots, ephemeral context, prefix caching, message array layout** -> `docs/cortex/context-manager.md`
+- **mind migration, 5-phase pipeline, THOUGHT phase, REFLECT phase, cognitive tools removal, conversation history** -> `docs/cortex/mind-migration.md`
+- **MCP client, MCP integration, tool wrapping, McpClientManager, plugin MCP, animus tools MCP** -> `docs/cortex/mcp-integration.md`
+- **compaction, context compaction, summarization, token tracking, microcompaction, tool result trimming** -> `docs/cortex/compaction-strategy.md`
+- **system prompt, cortex prompt, operational rules, prompt rebuild** -> `docs/cortex/system-prompt.md`
+- **provider manager, provider discovery, OAuth, OAuth login, OAuth refresh, API key validation, model resolution, CortexModel, pi-ai providers** -> `docs/cortex/provider-manager.md`
+- **cortex auth, cortex credentials, CortexCredentialService, cortex provider router, getApiKey callback, provider switching** -> `docs/cortex/backend-auth-integration.md`
+- **auth UX, onboarding auth, provider step, progressive disclosure, OAuth UX, API key UX, custom endpoint UX, settings provider** -> `docs/cortex/frontend-auth-ux.md`
+- **working tags, response delivery, internal reasoning, user-facing text, AgentTextOutput, tag stripping, channel delivery** -> `docs/cortex/working-tags.md`
+- **working tags, response delivery, internal reasoning, user-facing text, tag stripping, channel delivery, streaming tags** -> `docs/cortex/research/working-tags-response-delivery.md`
 - **pi, pi-ai, transformContext, multi-provider** -> `docs/agents/pi/research/sdk-research.md`
 - **reflex, fast response, voice latency, dual path, Vercel AI SDK** -> `docs/research/reflex-system.md`
 - **voice mode UI, voice UX, voice visualization, barge-in** -> `docs/research/voice-mode.md`
