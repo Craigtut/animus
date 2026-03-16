@@ -22,9 +22,20 @@ export type {
   AgentTextOutput,
   ToolContentDetails,
   BudgetGuardConfig,
+  ToolCategory,
+  MicrocompactionConfig,
+  CompactionConfig,
+  FailsafeConfig,
+  CortexCompactionConfig,
+  CompactionTarget,
   CompactionResult,
+  PipelinePhase,
   CortexEvents,
   UtilityModelDefaults,
+  McpTransportConfig,
+  McpStdioConfig,
+  McpHttpConfig,
+  McpConnectionState,
 } from './types.js';
 
 // Schema Converter
@@ -69,6 +80,10 @@ export { BudgetGuard } from './budget-guard.js';
 // CortexAgent (Phase 1B)
 export { CortexAgent } from './cortex-agent.js';
 export type { PiAgent, PiModel } from './cortex-agent.js';
+
+// MCP Client Manager (Phase 3)
+export { McpClientManager } from './mcp-client.js';
+export type { AgentTool } from './mcp-client.js';
 
 // Built-in Tools (Phase 1C)
 export {
@@ -128,6 +143,28 @@ export type {
   SafetyCheckResult,
   BuiltInToolName,
 } from './tools/index.js';
+
+// Compaction (Phase 5)
+export {
+  CompactionManager,
+  buildCompactionConfig,
+  DEFAULT_COMPACTION_CONFIG,
+  MicrocompactionEngine,
+  capToolResult,
+  runCompaction,
+  shouldCompact,
+  partitionHistory,
+  buildSummaryMessage,
+  emergencyTruncate,
+  shouldTruncate,
+  isContextOverflow,
+} from './compaction/index.js';
+export type {
+  TrimAction,
+  TrimState,
+  CompleteFn,
+  FailsafeTruncationResult,
+} from './compaction/index.js';
 
 // Model Wrapper (Phase 1D)
 export { wrapModel, unwrapModel, isCortexModel } from './model-wrapper.js';

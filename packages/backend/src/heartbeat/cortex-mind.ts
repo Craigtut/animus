@@ -23,6 +23,8 @@ import {
   type AgentTextOutput,
   type ClassifiedError,
   type CortexModel,
+  type McpStdioConfig,
+  type McpHttpConfig,
 } from '@animus-labs/cortex';
 
 import { getSystemDb, getHeartbeatDb, getContactsDb, getMessagesDb, getMemoryDb } from '../db/index.js';
@@ -348,14 +350,14 @@ export async function createCortexMind(
   const model = await state.providerManager.resolveModel(provider, modelId);
   state.model = model;
 
-  // Build getApiKey callback
-  const getApiKey = async (providerName: string): Promise<string> => {
-    // Check environment first
-    const envKey = state.providerManager!.checkEnvApiKey(providerName);
-    if (envKey) return envKey;
+  // Build getApiKey callback via CortexCredentialService
+  // Checks stored credentials (decrypt on demand), falls back to env vars,
+  // handles OAuth token refresh automatically.
+  const { getCortexCredentialService } = await import('../services/cortex-credential-service.js');
+  const credService = getCortexCredentialService();
 
-    // TODO (Phase 2B): Check CortexCredentialService for stored keys
-    throw new Error(`Could not resolve API key for provider "${providerName}". Set the appropriate environment variable.`);
+  const getApiKey = async (providerName: string): Promise<string> => {
+    return credService.resolveApiKey(providerName);
   };
 
   // Build tools
@@ -385,6 +387,17 @@ export async function createCortexMind(
 
   // Wire event handlers
   wireEventHandlers(cortexAgent, state);
+
+  // Wire EventBus listeners for provider changes from settings UI
+  wireProviderChangeListeners(cortexAgent, state);
+
+  // Wire plugin lifecycle listeners for dynamic MCP connections
+  wirePluginLifecycleListeners(cortexAgent);
+
+  // Connect to plugin MCP servers (non-blocking; failures logged but don't prevent startup)
+  connectPluginMcpServers(cortexAgent).catch(err => {
+    log.warn('Error connecting initial plugin MCP servers:', err);
+  });
 
   state.agent = cortexAgent;
   log.info('CortexAgent created and configured for mind session');
@@ -457,6 +470,207 @@ function wireEventHandlers(
         ? output.userFacing.substring(0, 120) + '...'
         : output.userFacing;
       log.info(`Turn complete: "${preview}"`);
+    }
+  });
+}
+
+// ============================================================================
+// Provider Change Listeners
+// ============================================================================
+
+/**
+ * Wire EventBus listeners for provider/model changes from the settings UI.
+ * When the user changes the provider or model, we update the CortexAgent
+ * without restarting the session.
+ */
+function wireProviderChangeListeners(
+  cortexAgent: CortexAgent,
+  state: CortexMindState,
+): void {
+  const eventBus = getEventBus();
+
+  eventBus.on('cortex:provider-changed', async ({ provider, model: modelId }) => {
+    try {
+      log.info(`Provider changed: ${provider}/${modelId}, updating CortexAgent model`);
+      if (!state.providerManager) {
+        log.warn('ProviderManager not available, cannot switch model');
+        return;
+      }
+      const newModel = await state.providerManager.resolveModel(provider, modelId);
+      state.model = newModel;
+      const piModel = unwrapModel(newModel);
+      cortexAgent.setModel(piModel);
+      log.info(`CortexAgent model updated to ${provider}/${modelId}`);
+    } catch (err) {
+      log.error('Failed to switch model:', err);
+    }
+  });
+
+  eventBus.on('cortex:thinking-level-changed', ({ level }) => {
+    log.info(`Thinking level changed to "${level}"`);
+    cortexAgent.setThinkingLevel(level);
+  });
+
+  eventBus.on('cortex:provider-removed', () => {
+    log.warn('Provider removed, CortexAgent will fail on next LLM call');
+    // The heartbeat should detect the credential failure and pause.
+    // We don't destroy the agent here since the user may reconfigure.
+  });
+}
+
+// ============================================================================
+// MCP Server Connections
+// ============================================================================
+
+/**
+ * Connect to plugin MCP servers discovered from the PluginManager.
+ * Called once during agent creation and dynamically on plugin lifecycle events.
+ *
+ * Each plugin's MCP server config is converted from the PluginManager's format
+ * to Cortex's McpTransportConfig format. Tools are namespaced as
+ * pluginName__serverName__toolName (3-part for plugin tools).
+ */
+async function connectPluginMcpServers(cortexAgent: CortexAgent): Promise<void> {
+  const pluginManager = getPluginManager();
+  if (!pluginManager) {
+    log.debug('PluginManager not available; skipping plugin MCP connections');
+    return;
+  }
+
+  const mcpManager = cortexAgent.getMcpClientManager();
+  const configs = pluginManager.getMcpConfigs();
+
+  for (const [namespacedKey, serverConfig] of Object.entries(configs)) {
+    try {
+      const transportConfig = convertPluginMcpConfig(serverConfig as Record<string, unknown>);
+      if (transportConfig) {
+        await mcpManager.connect(namespacedKey, transportConfig);
+      }
+    } catch (err) {
+      log.warn(`Failed to connect plugin MCP server "${namespacedKey}": ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+}
+
+/**
+ * Convert a PluginMcpServer config to a Cortex McpTransportConfig.
+ * Accepts the raw record from PluginManager.getMcpConfigs() and extracts
+ * the fields needed for either stdio or HTTP transport.
+ */
+function convertPluginMcpConfig(
+  serverConfig: Record<string, unknown>,
+): McpStdioConfig | McpHttpConfig | null {
+  const url = serverConfig['url'] as string | undefined;
+  const command = serverConfig['command'] as string | undefined;
+
+  if (url) {
+    const headers = (serverConfig['headers'] as Record<string, string> | undefined) ?? {};
+    return {
+      transport: 'http',
+      url,
+      headers,
+    };
+  }
+
+  if (command) {
+    const args = (serverConfig['args'] as string[] | undefined) ?? [];
+    const env = (serverConfig['env'] as Record<string, string> | undefined) ?? {};
+    return {
+      transport: 'stdio',
+      command,
+      args,
+      env,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Wire EventBus listeners for plugin lifecycle events.
+ * Dynamically connects/disconnects MCP servers as plugins are installed/removed.
+ */
+function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
+  const eventBus = getEventBus();
+  const mcpManager = cortexAgent.getMcpClientManager();
+
+  // Set up logging on the MCP manager
+  mcpManager.log = {
+    info: (msg: string) => log.info(`[MCP] ${msg}`),
+    warn: (msg: string) => log.warn(`[MCP] ${msg}`),
+    error: (msg: string, err?: unknown) => log.error(`[MCP] ${msg}`, err),
+    debug: (msg: string) => log.debug(`[MCP] ${msg}`),
+  };
+
+  eventBus.on('plugin:changed', async ({ pluginName, action }) => {
+    const pluginManager = getPluginManager();
+    if (!pluginManager) return;
+
+    if (action === 'installed' || action === 'enabled') {
+      // Connect new plugin's MCP servers
+      const configs = pluginManager.getMcpConfigs();
+      for (const [namespacedKey, serverConfig] of Object.entries(configs)) {
+        // Only connect servers belonging to this plugin
+        if (!namespacedKey.startsWith(`${pluginName}__`)) continue;
+
+        try {
+          const transportConfig = convertPluginMcpConfig(serverConfig as Record<string, unknown>);
+          if (transportConfig) {
+            log.info(`Connecting plugin MCP server: ${namespacedKey}`);
+            await mcpManager.connect(namespacedKey, transportConfig);
+          }
+        } catch (err) {
+          log.warn(`Failed to connect plugin MCP server "${namespacedKey}" on ${action}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    } else if (action === 'uninstalled' || action === 'disabled') {
+      // Disconnect all MCP servers belonging to this plugin
+      const states = mcpManager.getConnectionStates();
+      for (const state of states) {
+        if (state.serverName.startsWith(`${pluginName}__`)) {
+          try {
+            log.info(`Disconnecting plugin MCP server: ${state.serverName}`);
+            await mcpManager.disconnect(state.serverName);
+          } catch (err) {
+            log.warn(`Failed to disconnect plugin MCP server "${state.serverName}" on ${action}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      }
+    }
+  });
+
+  // Plugin config updated: reconnect MCP servers (config may have changed credentials)
+  eventBus.on('plugin:config_updated', async ({ pluginName }) => {
+    const pluginManager = getPluginManager();
+    if (!pluginManager) return;
+
+    const configs = pluginManager.getMcpConfigs();
+    const states = mcpManager.getConnectionStates();
+
+    // Disconnect existing servers for this plugin
+    for (const state of states) {
+      if (state.serverName.startsWith(`${pluginName}__`)) {
+        try {
+          await mcpManager.disconnect(state.serverName);
+        } catch {
+          // Best-effort disconnect
+        }
+      }
+    }
+
+    // Reconnect with updated config
+    for (const [namespacedKey, serverConfig] of Object.entries(configs)) {
+      if (!namespacedKey.startsWith(`${pluginName}__`)) continue;
+
+      try {
+        const transportConfig = convertPluginMcpConfig(serverConfig as Record<string, unknown>);
+        if (transportConfig) {
+          log.info(`Reconnecting plugin MCP server after config update: ${namespacedKey}`);
+          await mcpManager.connect(namespacedKey, transportConfig);
+        }
+      } catch (err) {
+        log.warn(`Failed to reconnect plugin MCP server "${namespacedKey}" after config update: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   });
 }

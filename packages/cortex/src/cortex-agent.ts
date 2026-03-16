@@ -27,12 +27,18 @@ import { BudgetGuard } from './budget-guard.js';
 import { classifyError } from './error-classifier.js';
 import { parseWorkingTags } from './working-tags.js';
 import { UTILITY_MODEL_DEFAULTS } from './provider-registry.js';
+import { McpClientManager } from './mcp-client.js';
+import { CompactionManager, buildCompactionConfig } from './compaction/index.js';
+import { isContextOverflow } from './compaction/failsafe.js';
 import type {
   CortexAgentConfig,
   CortexLifecycleState,
   ClassifiedError,
   AgentTextOutput,
   CompactionResult,
+  CompactionTarget,
+  PipelinePhase,
+  McpTransportConfig,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -194,9 +200,13 @@ export class CortexAgent {
   private readonly primaryModel: PiModel;
   private readonly resolvedUtilityModel: PiModel;
 
+  // Compaction Manager
+  private readonly compactionManager: CompactionManager;
+
   // Event handlers (consumer-registered callbacks)
   private loopCompleteHandlers: Array<() => void> = [];
   private errorHandlers: Array<(error: ClassifiedError) => void> = [];
+  private beforeCompactionHandlers: Array<(target: CompactionTarget) => Promise<void>> = [];
   private compactionHandlers: Array<(result: CompactionResult) => void> = [];
   private compactionErrorHandlers: Array<(error: Error) => void> = [];
   private turnCompleteHandlers: Array<(output: AgentTextOutput) => void> = [];
@@ -215,6 +225,9 @@ export class CortexAgent {
 
   // Tracked subprocess PIDs for synchronous exit cleanup (Level 3 safety net)
   private readonly trackedPids = new Set<number>();
+
+  // MCP Client Manager for tool server connections
+  private readonly mcpClientManager: McpClientManager;
 
   /**
    * Create a CortexAgent.
@@ -255,6 +268,43 @@ export class CortexAgent {
     );
     this.budgetGuard.wire(this.eventBridge);
 
+    // Set up MCP Client Manager with PID tracking
+    this.mcpClientManager = new McpClientManager();
+    this.mcpClientManager.onSubprocessSpawned = (pid) => {
+      this.trackedPids.add(pid);
+    };
+    this.mcpClientManager.onSubprocessExited = (pid) => {
+      this.trackedPids.delete(pid);
+    };
+
+    // Set up CompactionManager
+    const compactionConfig = buildCompactionConfig(config.compaction);
+    this.compactionManager = new CompactionManager(
+      compactionConfig,
+      (config.slots ?? []).length,
+    );
+
+    // Set context window from model if available
+    if (this.primaryModel.contextWindow) {
+      this.compactionManager.setContextWindow(this.primaryModel.contextWindow);
+    }
+
+    // Wire compaction completion function (uses directComplete)
+    this.compactionManager.setCompleteFn(async (context) => {
+      return this.directComplete(context);
+    });
+
+    // Wire compaction result -> onCompaction event
+    this.compactionManager.onCompactionResult((result) => {
+      for (const handler of this.compactionHandlers) {
+        try {
+          handler(result);
+        } catch {
+          // Swallow handler errors
+        }
+      }
+    });
+
     // Set up process exit safety net for orphaned subprocesses
     this.setupExitHandler();
   }
@@ -289,6 +339,16 @@ export class CortexAgent {
       return result;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
+
+      // Reactive overflow detection: if the API returns a context overflow
+      // error, perform emergency truncation and let the consumer retry
+      if (isContextOverflow(error)) {
+        this.compactionManager.handleOverflowError(
+          () => this.getConversationHistory(),
+          (history) => this.restoreConversationHistory(history),
+        );
+      }
+
       const classified = classifyError(error, {
         wasAborted: this.isAborted(),
       });
@@ -581,10 +641,10 @@ export class CortexAgent {
    * Steps:
    * 1. Abort any in-progress agentic loop
    * 2. Wait for idle (with timeout)
-   * 3. Cancel all sub-agents (stub in Phase 1B, wired in Phase 4)
+   * 3. Cancel all sub-agents (stub, wired in Phase 4)
    * 4. Emit onLoopComplete for final checkpoint (best-effort)
-   * 5. Close MCP connections (stub in Phase 1B, wired in Phase 3)
-   * 6. Clear skill buffer (stub in Phase 1B, wired in Phase 4)
+   * 5. Close all MCP client connections (kills stdio subprocesses, closes HTTP)
+   * 6. Clear skill buffer (stub, wired in Phase 4)
    * 7. Unsubscribe all event listeners
    * 8. Clear agent state
    * 9. Mark as destroyed
@@ -656,11 +716,31 @@ export class CortexAgent {
   }
 
   /**
+   * Register a handler called before compaction starts.
+   * Handler is awaited. The consumer should flush critical state
+   * (e.g., observational memory) before history is compacted.
+   *
+   * NOT called during mid-loop emergency truncation (Layer 3).
+   */
+  onBeforeCompaction(handler: (target: CompactionTarget) => Promise<void>): void {
+    this.beforeCompactionHandlers.push(handler);
+    this.compactionManager.onBeforeCompaction(handler);
+  }
+
+  /**
    * Register a handler for successful compaction events.
-   * Stub in Phase 1B (compaction not yet implemented).
+   * Emitted after Layer 2 (summarization) completes.
    */
   onCompaction(handler: (result: CompactionResult) => void): void {
     this.compactionHandlers.push(handler);
+  }
+
+  /**
+   * Register a handler called after compaction completes.
+   * The consumer can re-seed messages from messages.db here.
+   */
+  onPostCompaction(handler: (result: CompactionResult) => void): void {
+    this.compactionManager.onPostCompaction(handler);
   }
 
   /**
@@ -668,6 +748,7 @@ export class CortexAgent {
    */
   onCompactionError(handler: (error: Error) => void): void {
     this.compactionErrorHandlers.push(handler);
+    this.compactionManager.onCompactionError(handler);
   }
 
   /**
@@ -714,6 +795,119 @@ export class CortexAgent {
   }
 
   // -----------------------------------------------------------------------
+  // Token Tracking and Pipeline Phase
+  // -----------------------------------------------------------------------
+
+  /**
+   * Update the session token count from LLM usage data.
+   * Called by the consumer after each LLM call with the input_tokens
+   * from AssistantMessage.usage.
+   */
+  updateSessionTokenCount(inputTokens: number): void {
+    this.compactionManager.updateTokenCount(inputTokens);
+  }
+
+  /**
+   * Get the current session token count.
+   */
+  get sessionTokenCount(): number {
+    return this.compactionManager.sessionTokenCount;
+  }
+
+  /**
+   * Set the context window size (from model metadata).
+   * Used for compaction threshold calculations.
+   */
+  setContextWindow(contextWindow: number): void {
+    this.compactionManager.setContextWindow(contextWindow);
+  }
+
+  /**
+   * Set the pipeline phase. Controls when Layer 2 compaction can fire.
+   * - 'idle': between ticks, compaction allowed
+   * - 'thought'/'agentic_loop'/'reflect'/'execute': mid-tick, Layer 2 blocked
+   */
+  setPipelinePhase(phase: PipelinePhase): void {
+    this.compactionManager.setPipelinePhase(phase);
+  }
+
+  /**
+   * Get the current pipeline phase.
+   */
+  get pipelinePhase(): PipelinePhase {
+    return this.compactionManager.pipelinePhase;
+  }
+
+  /**
+   * Cap a tool result at insertion time. If the result exceeds
+   * maxResultTokens, truncates to head+tail bookend format.
+   * Call this when tool results enter conversation history.
+   */
+  capToolResult(content: string): string {
+    return this.compactionManager.capToolResult(content);
+  }
+
+  /**
+   * Run end-of-tick compaction check. Call after EXECUTE completes,
+   * before the next tick starts. Returns the CompactionResult if
+   * Layer 2 compaction ran, null otherwise.
+   */
+  async checkAndRunCompaction(): Promise<CompactionResult | null> {
+    return this.compactionManager.checkAndRunCompaction(
+      () => this.getConversationHistory(),
+      (history) => this.restoreConversationHistory(history),
+    );
+  }
+
+  /**
+   * Get the CompactionManager for advanced use.
+   */
+  getCompactionManager(): CompactionManager {
+    return this.compactionManager;
+  }
+
+  /**
+   * Get the McpClientManager for managing MCP server connections.
+   * Consumers use this to connect/disconnect plugin tool servers
+   * and to retrieve discovered tools.
+   */
+  getMcpClientManager(): McpClientManager {
+    return this.mcpClientManager;
+  }
+
+  /**
+   * Connect to an MCP server and discover its tools.
+   * Convenience wrapper around mcpClientManager.connect().
+   *
+   * @param serverName - Unique name for this server (used for tool namespacing)
+   * @param config - Transport configuration (stdio or http)
+   */
+  async connectMcpServer(serverName: string, config: McpTransportConfig): Promise<void> {
+    await this.mcpClientManager.connect(serverName, config);
+  }
+
+  /**
+   * Disconnect from an MCP server and remove its tools.
+   * Convenience wrapper around mcpClientManager.disconnect().
+   *
+   * @param serverName - The server name to disconnect
+   */
+  async disconnectMcpServer(serverName: string): Promise<void> {
+    await this.mcpClientManager.disconnect(serverName);
+  }
+
+  /**
+   * Get all tools from all sources: built-in tools registered on the
+   * pi-agent-core Agent, plus MCP-wrapped tools from connected servers.
+   *
+   * Returns only the MCP-wrapped tools. Built-in tools are registered
+   * directly on the Agent and are not included here.
+   */
+  getMcpTools(): Array<{ name: string; description: string; parameters: unknown; execute: (args: unknown) => Promise<unknown> }> {
+    return this.mcpClientManager.getTools();
+  }
+
+  // -----------------------------------------------------------------------
   // transformContext hook composition
   // -----------------------------------------------------------------------
 
@@ -722,22 +916,32 @@ export class CortexAgent {
    *
    * Composes three hooks in order:
    * 1. ContextManager ephemeral injection
-   * 2. Compaction step (stub in Phase 1B, wired in Phase 5)
-   * 3. Skill buffer injection (stub in Phase 1B, wired in Phase 4)
+   * 2. Compaction (microcompaction + mid-loop failsafe)
+   * 3. Skill buffer injection (stub, wired in Phase 4)
    *
    * @returns A transformContext function for the Agent constructor
    */
   getTransformContextHook(): (context: AgentContext) => AgentContext {
     const ephemeralHook = this.contextManager.getTransformContextHook();
+    const slotCount = this.contextManager.slotCount;
 
     return (context: AgentContext): AgentContext => {
       // Step 1: Inject ephemeral context
       let result = ephemeralHook(context);
 
-      // Step 2: Compaction (stub - no-op in Phase 1B)
-      result = this.compactionStub(result);
+      // Step 2: Compaction (microcompaction + mid-loop safety valve)
+      result = this.compactionManager.applyInTransformContext(
+        result,
+        // getHistory: extract conversation history (post-slot region)
+        (ctx) => ctx.messages.slice(slotCount),
+        // setHistory: replace conversation history in the context
+        (ctx, history) => ({
+          ...ctx,
+          messages: [...ctx.messages.slice(0, slotCount), ...history],
+        }),
+      );
 
-      // Step 3: Skill buffer (stub - no-op in Phase 1B)
+      // Step 3: Skill buffer (stub - no-op until Phase 4)
       result = this.skillBufferStub(result);
 
       return result;
@@ -1007,8 +1211,12 @@ export class CortexAgent {
       }
     }
 
-    // 4. Close MCP connections (stub: Phase 3)
-    // No-op in Phase 1B
+    // 4. Close all MCP client connections
+    try {
+      await this.mcpClientManager.closeAll();
+    } catch {
+      // Best-effort MCP cleanup
+    }
 
     // 5. Clear skill buffer (stub: Phase 4)
     // No-op in Phase 1B
@@ -1024,9 +1232,13 @@ export class CortexAgent {
     // 7. Clear agent state
     this.agent.reset();
 
-    // 8. Clear all handler arrays
+    // 8. Clean up compaction manager
+    this.compactionManager.destroy();
+
+    // 9. Clear all handler arrays
     this.loopCompleteHandlers = [];
     this.errorHandlers = [];
+    this.beforeCompactionHandlers = [];
     this.compactionHandlers = [];
     this.compactionErrorHandlers = [];
     this.turnCompleteHandlers = [];
@@ -1072,15 +1284,7 @@ export class CortexAgent {
   // -----------------------------------------------------------------------
 
   /**
-   * Compaction step in transformContext. No-op in Phase 1B.
-   * Will implement token tracking and compaction in Phase 5.
-   */
-  private compactionStub(context: AgentContext): AgentContext {
-    return context;
-  }
-
-  /**
-   * Skill buffer injection in transformContext. No-op in Phase 1B.
+   * Skill buffer injection in transformContext. No-op until Phase 4.
    * Will inject loaded skill content in Phase 4.
    */
   private skillBufferStub(context: AgentContext): AgentContext {
