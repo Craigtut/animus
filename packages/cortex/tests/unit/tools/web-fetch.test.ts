@@ -269,4 +269,95 @@ describe('WebFetch tool', () => {
     const text = (result.content[0] as { type: 'text'; text: string }).text;
     expect(text).toContain('URL rejected');
   });
+
+  // Cross-host redirect detection tests
+  describe('redirect handling', () => {
+    it('returns redirect message for cross-host 301 redirect', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(null, {
+          status: 301,
+          headers: { 'location': 'https://other-host.com/page' },
+        }),
+      );
+
+      const result = await webFetchTool.execute({
+        url: 'https://example.com/old',
+        prompt: 'test',
+      });
+
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).toContain('redirects to');
+      expect(text).toContain('https://other-host.com/page');
+      expect(text).toContain('Make a new WebFetch request');
+    });
+
+    it('follows same-host redirects transparently', async () => {
+      let callCount = 0;
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        callCount++;
+        const requestUrl = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
+        if (requestUrl.includes('/old')) {
+          return new Response(null, {
+            status: 302,
+            headers: { 'location': 'https://example.com/new' },
+          });
+        }
+        return new Response('<html><body><p>Final content</p></body></html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        });
+      });
+
+      const result = await webFetchTool.execute({
+        url: 'https://example.com/old',
+        prompt: 'test',
+      });
+
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      // Should have followed the redirect (2 fetch calls)
+      expect(callCount).toBe(2);
+      // Should not contain the redirect message
+      expect(text).not.toContain('redirects to');
+      // Should contain the final content
+      expect(text).toContain('Final content');
+    });
+
+    it('handles cross-host redirect with relative Location header', async () => {
+      // A 302 to an absolute URL on a different host
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(null, {
+          status: 302,
+          headers: { 'location': 'https://cdn.example.org/resource' },
+        }),
+      );
+
+      const result = await webFetchTool.execute({
+        url: 'https://example.com/resource',
+        prompt: 'test',
+      });
+
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).toContain('redirects to');
+      expect(text).toContain('cdn.example.org');
+    });
+
+    it('stops after too many same-host redirects', async () => {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const requestUrl = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
+        const num = parseInt(requestUrl.split('/r')[1] ?? '0', 10);
+        return new Response(null, {
+          status: 302,
+          headers: { 'location': `https://example.com/r${num + 1}` },
+        });
+      });
+
+      const result = await webFetchTool.execute({
+        url: 'https://example.com/r0',
+        prompt: 'test',
+      });
+
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).toContain('Too many redirects');
+    });
+  });
 });

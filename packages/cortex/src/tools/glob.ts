@@ -11,6 +11,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Type, type Static } from '@sinclair/typebox';
 import type { ToolContentDetails } from '../types.js';
+import {
+  readGitignorePatterns,
+  DEFAULT_IGNORE_PATTERNS,
+} from './shared/gitignore.js';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -42,24 +46,6 @@ export interface GlobDetails {
 
 const MAX_RESULTS = 100;
 
-/**
- * Default ignore patterns when no .gitignore is present.
- */
-const DEFAULT_IGNORE_PATTERNS = [
-  'node_modules',
-  '.git',
-  'dist',
-  'build',
-  '__pycache__',
-  '.DS_Store',
-  '.next',
-  '.nuxt',
-  'coverage',
-  '.cache',
-  '.parcel-cache',
-  '.vite',
-];
-
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -74,39 +60,6 @@ export interface GlobToolConfig {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Read and parse a .gitignore file, returning patterns.
- */
-async function readGitignorePatterns(dir: string): Promise<string[]> {
-  const patterns: string[] = [];
-
-  // Walk up directories looking for .gitignore files
-  let current = dir;
-  const visited = new Set<string>();
-  while (!visited.has(current)) {
-    visited.add(current);
-    const gitignorePath = path.join(current, '.gitignore');
-    try {
-      const content = await fs.promises.readFile(gitignorePath, 'utf8');
-      const lines = content.split('\n');
-      for (const line of lines) {
-        const trimmed = line.trim();
-        // Skip comments and empty lines
-        if (trimmed && !trimmed.startsWith('#')) {
-          patterns.push(trimmed);
-        }
-      }
-    } catch {
-      // No .gitignore at this level, continue
-    }
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-
-  return patterns;
-}
 
 /**
  * Recursively walk a directory and collect files matching a glob pattern.

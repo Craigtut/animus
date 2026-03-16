@@ -285,51 +285,98 @@ export function createWebFetchTool(config: WebFetchToolConfig): {
 
       fetchesThisLoop++;
 
-      // Fetch the URL
+      // Fetch the URL (manual redirect to detect cross-host redirects)
       let response: Response;
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+      let currentUrl = urlStr;
+      const maxRedirects = 10;
+      let redirectCount = 0;
 
-        response = await fetch(urlStr, {
-          signal: controller.signal,
-          headers: {
-            'User-Agent': USER_AGENT,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          },
-          redirect: 'follow',
-        });
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
 
-        clearTimeout(timeoutId);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('abort')) {
+          response = await fetch(currentUrl, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': USER_AGENT,
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+            redirect: 'manual',
+          });
+
+          clearTimeout(timeoutId);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('abort')) {
+            return {
+              content: [{ type: 'text', text: `Request timed out: ${currentUrl}` }],
+              details: { finalUrl: currentUrl, statusCode: 0, cacheHit: false, rawSize: 0, markdownSize: 0 },
+            };
+          }
+          if (msg.includes('ENOTFOUND') || msg.includes('getaddrinfo')) {
+            const hostname = url.hostname;
+            return {
+              content: [{ type: 'text', text: `Could not resolve host: ${hostname}` }],
+              details: { finalUrl: currentUrl, statusCode: 0, cacheHit: false, rawSize: 0, markdownSize: 0 },
+            };
+          }
+          if (msg.includes('certificate') || msg.includes('SSL') || msg.includes('TLS')) {
+            return {
+              content: [{ type: 'text', text: `SSL certificate error for ${currentUrl}` }],
+              details: { finalUrl: currentUrl, statusCode: 0, cacheHit: false, rawSize: 0, markdownSize: 0 },
+            };
+          }
           return {
-            content: [{ type: 'text', text: `Request timed out: ${urlStr}` }],
-            details: { finalUrl: urlStr, statusCode: 0, cacheHit: false, rawSize: 0, markdownSize: 0 },
+            content: [{ type: 'text', text: `Failed to fetch ${currentUrl}: ${msg}` }],
+            details: { finalUrl: currentUrl, statusCode: 0, cacheHit: false, rawSize: 0, markdownSize: 0 },
           };
         }
-        if (msg.includes('ENOTFOUND') || msg.includes('getaddrinfo')) {
-          const hostname = url.hostname;
-          return {
-            content: [{ type: 'text', text: `Could not resolve host: ${hostname}` }],
-            details: { finalUrl: urlStr, statusCode: 0, cacheHit: false, rawSize: 0, markdownSize: 0 },
-          };
+
+        // Handle redirects (3xx status)
+        const status = response.status;
+        if (status >= 300 && status < 400) {
+          const location = response.headers.get('location');
+          if (!location) break; // No Location header, treat as final response
+
+          // Resolve relative redirect URLs
+          const redirectUrl = new URL(location, currentUrl).toString();
+          const currentHost = new URL(currentUrl).hostname;
+          const redirectHost = new URL(redirectUrl).hostname;
+
+          // Cross-host redirect: inform the model instead of following
+          if (redirectHost !== currentHost) {
+            return {
+              content: [{ type: 'text', text: `This URL redirects to ${redirectUrl}. Make a new WebFetch request with this URL.` }],
+              details: {
+                finalUrl: redirectUrl,
+                statusCode: status,
+                cacheHit: false,
+                rawSize: 0,
+                markdownSize: 0,
+              },
+            };
+          }
+
+          // Same-host redirect: follow it
+          redirectCount++;
+          if (redirectCount > maxRedirects) {
+            return {
+              content: [{ type: 'text', text: `Too many redirects (${maxRedirects}) for ${urlStr}` }],
+              details: { finalUrl: currentUrl, statusCode: status, cacheHit: false, rawSize: 0, markdownSize: 0 },
+            };
+          }
+          currentUrl = redirectUrl;
+          continue;
         }
-        if (msg.includes('certificate') || msg.includes('SSL') || msg.includes('TLS')) {
-          return {
-            content: [{ type: 'text', text: `SSL certificate error for ${urlStr}` }],
-            details: { finalUrl: urlStr, statusCode: 0, cacheHit: false, rawSize: 0, markdownSize: 0 },
-          };
-        }
-        return {
-          content: [{ type: 'text', text: `Failed to fetch ${urlStr}: ${msg}` }],
-          details: { finalUrl: urlStr, statusCode: 0, cacheHit: false, rawSize: 0, markdownSize: 0 },
-        };
+
+        // Not a redirect, break out of the loop
+        break;
       }
 
-      const finalUrl = response.url;
-      const statusCode = response.status;
+      const finalUrl = currentUrl;
+      const statusCode = response!.status;
 
       // Handle HTTP errors
       if (statusCode === 404) {

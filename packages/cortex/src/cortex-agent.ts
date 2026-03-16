@@ -26,6 +26,7 @@ import type { PiEventSource } from './event-bridge.js';
 import { BudgetGuard } from './budget-guard.js';
 import { classifyError } from './error-classifier.js';
 import { parseWorkingTags } from './working-tags.js';
+import { UTILITY_MODEL_DEFAULTS } from './provider-registry.js';
 import type {
   CortexAgentConfig,
   CortexLifecycleState,
@@ -33,24 +34,6 @@ import type {
   AgentTextOutput,
   CompactionResult,
 } from './types.js';
-
-// ---------------------------------------------------------------------------
-// Utility model defaults per provider
-// ---------------------------------------------------------------------------
-
-/**
- * Default utility model IDs per provider.
- * Used when utilityModel is 'default' or undefined.
- */
-// TODO: consolidate with UTILITY_MODEL_DEFAULTS in provider-registry.ts
-const UTILITY_MODEL_DEFAULTS: Record<string, string> = {
-  anthropic: 'claude-haiku-4-5-20251001',     // $1.00/$5.00 per 1M tokens
-  openai: 'gpt-4.1-nano',                     // $0.10/$0.40 per 1M tokens
-  google: 'gemini-2.5-flash-lite',            // $0.10/$0.40 per 1M tokens
-  groq: 'llama-3.1-8b-instant',              // ~$0.05/$0.08 per 1M tokens
-  cerebras: 'llama3.1-8b',                    // ~$0.10/$0.10 per 1M tokens
-  mistral: 'mistral-small-2506',             // $0.06/$0.18 per 1M tokens
-};
 
 // ---------------------------------------------------------------------------
 // Minimal pi-agent-core/pi-ai type contracts
@@ -216,6 +199,12 @@ export class CortexAgent {
   // Event bridge unsubscribers (for cleanup)
   private eventUnsubscribers: Array<() => void> = [];
 
+  // AbortController for the current agent session
+  private abortController = new AbortController();
+
+  // Whether a prompt() call is currently in progress
+  private _isPrompting = false;
+
   // Tracked subprocess PIDs for synchronous exit cleanup (Level 3 safety net)
   private readonly trackedPids = new Set<number>();
 
@@ -286,6 +275,7 @@ export class CortexAgent {
       this.lifecycleState = 'active';
     }
 
+    this._isPrompting = true;
     try {
       const result = await this.agent.run(input);
       return result;
@@ -305,6 +295,8 @@ export class CortexAgent {
       }
 
       throw error;
+    } finally {
+      this._isPrompting = false;
     }
   }
 
@@ -456,8 +448,11 @@ export class CortexAgent {
    * The agent remains usable for subsequent prompts.
    */
   async abort(): Promise<void> {
+    this.abortController.abort();
     this.agent.abort();
     await this.agent.waitForIdle();
+    // Reset the controller so the agent can be reused for subsequent prompts
+    this.abortController = new AbortController();
   }
 
   /**
@@ -800,25 +795,37 @@ export class CortexAgent {
   // -----------------------------------------------------------------------
 
   /**
-   * Check if the agent was aborted.
+   * Check if the agent was aborted (user or system cancellation).
+   * Only returns true for actual abort/cancel signals, not arbitrary errors.
    */
   private isAborted(): boolean {
-    // Check if there is an abort-related state on the agent
-    const state = this.agent.state as Record<string, unknown>;
-    if (state.error && typeof state.error === 'object') {
+    // Check if the internal abort controller's signal has been triggered
+    if (this.abortController.signal.aborted) {
       return true;
     }
+
+    // Check if the agent's error looks like an abort/cancel
+    const state = this.agent.state as Record<string, unknown>;
+    if (state.error) {
+      const errorMsg = typeof state.error === 'string'
+        ? state.error
+        : state.error instanceof Error
+          ? state.error.message
+          : typeof (state.error as Record<string, unknown>).message === 'string'
+            ? (state.error as Record<string, unknown>).message as string
+            : '';
+      return /abort/i.test(errorMsg) || /cancell?ed/i.test(errorMsg);
+    }
+
     return false;
   }
 
   /**
    * Check if the agent is currently idle (not running a loop).
+   * Tracked via a boolean flag set at prompt() entry and cleared in its finally block.
    */
   private isIdle(): boolean {
-    // Pi-agent-core does not expose an explicit idle state.
-    // We infer from the lifecycle state and the fact that agent.run() is async.
-    // In practice, the consumer tracks this via the event bridge (session_start/session_end).
-    return true; // Conservative: assume idle unless we know otherwise
+    return !this._isPrompting;
   }
 
   /**

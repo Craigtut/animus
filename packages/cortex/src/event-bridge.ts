@@ -269,19 +269,29 @@ export class EventBridge {
 
   /**
    * Emit a normalized event to all matching listeners.
+   * Each listener is wrapped in try/catch so a throwing listener
+   * does not prevent subsequent listeners from receiving the event.
    */
   private emit(event: CortexEvent): void {
     // Notify type-specific listeners
     const typeListeners = this.listeners.get(event.type);
     if (typeListeners) {
       for (const listener of typeListeners) {
-        listener(event);
+        try {
+          listener(event);
+        } catch {
+          // Swallow listener errors to prevent cascading failures
+        }
       }
     }
 
     // Notify catch-all listeners
     for (const listener of this.allListeners) {
-      listener(event);
+      try {
+        listener(event);
+      } catch {
+        // Swallow listener errors to prevent cascading failures
+      }
     }
   }
 }

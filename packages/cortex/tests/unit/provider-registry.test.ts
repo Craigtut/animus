@@ -156,8 +156,8 @@ describe('provider-registry', () => {
       expect(UTILITY_MODEL_DEFAULTS['anthropic']).toContain('haiku');
     });
 
-    it('maps openai to gpt-4o-mini', () => {
-      expect(UTILITY_MODEL_DEFAULTS['openai']).toBe('gpt-4o-mini');
+    it('maps openai to gpt-4.1-nano', () => {
+      expect(UTILITY_MODEL_DEFAULTS['openai']).toBe('gpt-4.1-nano');
     });
 
     it('maps google to gemini flash', () => {

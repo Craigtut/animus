@@ -39,21 +39,13 @@ const RATE_LIMIT_PATTERNS: RegExp[] = [
   /quota.exceeded/i,
 ];
 
+// Full context overflow detection delegates to pi-ai's isContextOverflow() when available.
+// These minimal patterns serve as a fallback when pi-ai is not installed.
 const CONTEXT_OVERFLOW_PATTERNS: RegExp[] = [
-  /context.length/i,
-  /context.window/i,
-  /maximum.context/i,
-  /token.limit/i,
-  /too.many.tokens/i,
-  /context.size/i,
-  /max.*tokens.*exceeded/i,
-  /prompt.is.too.long/i,
-  /input.too.long/i,
-  /maximum.number.of.tokens/i,
-  /content.would.exceed/i,
-  /request.too.large/i,
-  /exceeds.*model.*limit/i,
   /context.*overflow/i,
+  /too.many.tokens/i,
+  /token.limit/i,
+  /prompt.is.too.long/i,
 ];
 
 const SERVER_ERROR_PATTERNS: RegExp[] = [
@@ -139,7 +131,7 @@ export interface ClassifyErrorOptions {
  * 1. Cancelled (if wasAborted is true)
  * 2. Authentication (9 patterns)
  * 3. Rate limit (7 patterns)
- * 4. Context overflow (14 patterns; delegates to pi-ai isContextOverflow if available)
+ * 4. Context overflow (4 fallback patterns; delegates to pi-ai isContextOverflow when available)
  * 5. Server error (7 patterns)
  * 6. Network (8 patterns)
  * 7. Unknown (catch-all)

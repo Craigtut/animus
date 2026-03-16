@@ -148,7 +148,7 @@ describe('CortexAgent', () => {
       const agent = new CortexAgent(piAgent, config);
       const utilityModel = agent.getUtilityModel();
       expect(utilityModel.provider).toBe('anthropic');
-      expect(utilityModel.name).toBe('claude-haiku-4-5-20250609');
+      expect(utilityModel.name).toBe('claude-haiku-4-5-20251001');
     });
 
     it('resolves utility model from defaults for openai', () => {
@@ -158,7 +158,7 @@ describe('CortexAgent', () => {
       });
       const utilityModel = agent.getUtilityModel();
       expect(utilityModel.provider).toBe('openai');
-      expect(utilityModel.name).toBe('gpt-4o-mini');
+      expect(utilityModel.name).toBe('gpt-4.1-nano');
     });
 
     it('uses primary model when no default mapping exists', () => {

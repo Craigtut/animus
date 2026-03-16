@@ -26,6 +26,9 @@ export const ReadParams = Type.Object({
   limit: Type.Optional(
     Type.Number({ description: 'Maximum number of lines to read. Only provide if the file is too large to read at once.' }),
   ),
+  pages: Type.Optional(
+    Type.String({ description: 'Page range for PDF files (e.g., "1-5", "3", "10-20"). Only applicable to PDF files. Max 20 pages per request.' }),
+  ),
 });
 
 export type ReadParamsType = Static<typeof ReadParams>;
@@ -236,6 +239,21 @@ export function createReadTool(config: ReadToolConfig): {
 
         return {
           content: [{ type: 'image', data: base64, mimeType }],
+          details: {
+            filePath,
+            totalLines: 0,
+            byteSize: stat.size,
+            truncated: false,
+            truncatedLines: false,
+            truncatedChars: false,
+          },
+        };
+      }
+
+      // Handle PDF files
+      if (ext === '.pdf') {
+        return {
+          content: [{ type: 'text', text: 'PDF file detected. PDF text extraction requires the pdf-parse package (not yet installed). Use Bash with a PDF tool to read this file.' }],
           details: {
             filePath,
             totalLines: 0,

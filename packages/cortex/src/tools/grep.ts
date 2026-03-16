@@ -14,6 +14,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Type, type Static } from '@sinclair/typebox';
 import type { ToolContentDetails } from '../types.js';
+import {
+  readGitignorePatterns,
+  DEFAULT_IGNORE_PATTERNS,
+} from './shared/gitignore.js';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -73,20 +77,10 @@ export interface GrepDetails {
 // ---------------------------------------------------------------------------
 
 /**
- * Default ignore patterns for walking directories.
+ * Default ignore set (for backward compatibility with collectFiles).
+ * Built from the shared DEFAULT_IGNORE_PATTERNS.
  */
-const DEFAULT_IGNORE = new Set([
-  'node_modules',
-  '.git',
-  'dist',
-  'build',
-  '__pycache__',
-  '.DS_Store',
-  '.next',
-  '.nuxt',
-  'coverage',
-  '.cache',
-]);
+const DEFAULT_IGNORE = new Set(DEFAULT_IGNORE_PATTERNS);
 
 /**
  * File type to extension mapping (mimics ripgrep --type).
@@ -122,6 +116,8 @@ const TYPE_EXTENSIONS: Record<string, string[]> = {
 export interface GrepToolConfig {
   /** Default search directory when no path param is given. */
   defaultCwd: string;
+  /** Whether to respect .gitignore. Default: true. */
+  respectGitignore?: boolean | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,13 +160,39 @@ function fileGlobToRegex(pattern: string): RegExp {
 }
 
 /**
+ * Check if a file/directory name matches any gitignore pattern.
+ * Supports simple name matching and basic glob patterns.
+ */
+function matchesGitignorePattern(name: string, relativePath: string, patterns: string[]): boolean {
+  for (const pattern of patterns) {
+    const cleanPattern = pattern.endsWith('/') ? pattern.slice(0, -1) : pattern;
+
+    if (!cleanPattern.includes('/')) {
+      // Simple name match
+      if (cleanPattern.includes('*') || cleanPattern.includes('?')) {
+        if (fileGlobToRegex(cleanPattern).test(name)) return true;
+      } else {
+        if (name === cleanPattern) return true;
+      }
+    } else {
+      // Path pattern match
+      if (fileGlobToRegex(cleanPattern).test(relativePath)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Recursively collect file paths, respecting ignore patterns.
  */
 async function collectFiles(
   dir: string,
   fileFilter?: (relativePath: string, ext: string) => boolean,
+  gitignorePatterns?: string[],
+  baseDir?: string,
 ): Promise<string[]> {
   const results: string[] = [];
+  const root = baseDir ?? dir;
 
   let entries: fs.Dirent[];
   try {
@@ -180,18 +202,25 @@ async function collectFiles(
   }
 
   for (const entry of entries) {
+    // Always check the default ignore set
     if (DEFAULT_IGNORE.has(entry.name)) continue;
 
     const fullPath = path.join(dir, entry.name);
+    const relativePath = path.relative(root, fullPath).split(path.sep).join('/');
+
+    // Check gitignore patterns if provided
+    if (gitignorePatterns && gitignorePatterns.length > 0) {
+      if (matchesGitignorePattern(entry.name, relativePath, gitignorePatterns)) continue;
+    }
 
     if (entry.isDirectory()) {
-      const subResults = await collectFiles(fullPath, fileFilter);
+      const subResults = await collectFiles(fullPath, fileFilter, gitignorePatterns, root);
       results.push(...subResults);
     } else if (entry.isFile()) {
       if (fileFilter) {
         const ext = path.extname(entry.name).toLowerCase();
-        const relativePath = entry.name;
-        if (!fileFilter(relativePath, ext)) continue;
+        const relName = entry.name;
+        if (!fileFilter(relName, ext)) continue;
       }
       results.push(fullPath);
     }
@@ -242,6 +271,8 @@ export function createGrepTool(config: GrepToolConfig): {
   parameters: typeof GrepParams;
   execute: (params: GrepParamsType) => Promise<ToolContentDetails<GrepDetails>>;
 } {
+  const respectGitignore = config.respectGitignore ?? true;
+
   return {
     name: 'Grep',
     description: 'Search file contents using regex patterns.',
@@ -305,7 +336,15 @@ export function createGrepTool(config: GrepToolConfig): {
         if (stat.isFile()) {
           filesToSearch = [searchPath];
         } else if (stat.isDirectory()) {
-          filesToSearch = await collectFiles(searchPath, fileFilter);
+          // Read .gitignore patterns if enabled
+          let gitignorePatterns: string[] | undefined;
+          if (respectGitignore) {
+            const patterns = await readGitignorePatterns(searchPath);
+            if (patterns.length > 0) {
+              gitignorePatterns = patterns;
+            }
+          }
+          filesToSearch = await collectFiles(searchPath, fileFilter, gitignorePatterns);
         } else {
           return {
             content: [{ type: 'text', text: `Path does not exist: ${searchPath}` }],

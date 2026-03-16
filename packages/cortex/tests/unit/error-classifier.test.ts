@@ -83,21 +83,12 @@ describe('classifyError', () => {
   // Context Overflow
   // -----------------------------------------------------------------------
   describe('context_overflow', () => {
+    // Minimal fallback patterns (full detection delegates to pi-ai's isContextOverflow)
     const overflowMessages = [
-      'context length exceeded',
-      'The context window is too small',
-      'Exceeded maximum context size',
-      'token limit reached for model',
-      'Too many tokens in the request',
-      'context size is over the limit',
-      'max tokens exceeded for this model',
-      'prompt is too long for the model',
-      'input too long for processing',
-      'maximum number of tokens exceeded',
-      'content would exceed the limit',
-      'request too large for processing',
-      "exceeds model's token limit",
       'context overflow detected',
+      'Too many tokens in the request',
+      'token limit reached for model',
+      'prompt is too long for the model',
     ];
 
     for (const msg of overflowMessages) {

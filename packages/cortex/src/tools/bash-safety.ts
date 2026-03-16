@@ -316,6 +316,19 @@ export function extractWritePaths(command: string): string[] {
 }
 
 /**
+ * Resolve a path, following symlinks when the target exists.
+ * Falls back to path.resolve() if the path does not yet exist.
+ */
+function resolveWithSymlinks(targetPath: string): string {
+  try {
+    return fs.realpathSync(targetPath);
+  } catch {
+    // Path does not exist yet (e.g., mkdir for a new directory), fall back
+    return path.resolve(targetPath);
+  }
+}
+
+/**
  * Validate that write paths are within the allowed working directory.
  */
 export function validateWritePaths(
@@ -330,8 +343,9 @@ export function validateWritePaths(
 
   const writePaths = extractWritePaths(command);
   for (const wp of writePaths) {
-    // Resolve relative to current CWD
-    const resolved = path.resolve(currentCwd, wp);
+    // Resolve relative to current CWD, then resolve symlinks
+    const rawResolved = path.resolve(currentCwd, wp);
+    const resolved = resolveWithSymlinks(rawResolved);
 
     // Check critical paths
     if (isCriticalPath(resolved)) {
@@ -431,6 +445,16 @@ const UNIX_OBFUSCATION_PATTERNS: Array<{ pattern: RegExp; description: string }>
   { pattern: /\w+=[^;]*;\s*\w+=[^;]*;\s*\$\{?\w+\}?\$\{?\w+\}?/i, description: 'Variable assignment chains constructing commands' },
   // Process substitution with remote content
   { pattern: /<\(.*(?:curl|wget|nc)\s+/i, description: 'Remote content via process substitution' },
+  // Shell metacharacters
+  { pattern: /\\[;&|]/, description: 'Backslash-escaped operators or whitespace' },
+  { pattern: /[\u200B\u200C\u200D\uFEFF\u00A0]/, description: 'Unicode whitespace characters' },
+  { pattern: /[\x00-\x08\x0E-\x1F]/, description: 'Control characters in command' },
+  { pattern: /\w#\w/, description: 'Mid-word hash (potential comment injection)' },
+  { pattern: /['"]-+\w/, description: 'Obfuscated flags via quotes' },
+  // Structural
+  { pattern: /#.*['"].*\n/, description: 'Comment/quote desync pattern' },
+  { pattern: /'[^']*\n[^']*'/, description: 'Embedded newlines in single-quoted strings' },
+  { pattern: /[|;&]\s*$/, description: 'Incomplete command (trailing pipe or semicolon)' },
   // IFS manipulation
   { pattern: /\bIFS\s*=/, description: 'IFS variable manipulation' },
   // /proc access

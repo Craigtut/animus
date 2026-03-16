@@ -137,6 +137,31 @@ describe('Read tool', () => {
     expect(text).toContain('\u4e16\u754c');
   });
 
+  it('returns PDF message for .pdf files instead of binary error', async () => {
+    const filePath = path.join(tmpDir, 'document.pdf');
+    // PDF files start with %PDF header and contain null bytes (binary)
+    const pdfHeader = Buffer.from('%PDF-1.4 fake pdf content');
+    const pdfContent = Buffer.concat([pdfHeader, Buffer.alloc(100)]);
+    fs.writeFileSync(filePath, pdfContent);
+
+    const result = await readTool.execute({ file_path: filePath });
+
+    const text = (result.content[0] as { type: 'text'; text: string }).text;
+    expect(text).toContain('PDF file detected');
+    expect(text).toContain('pdf-parse');
+    expect(text).not.toContain('Binary file detected');
+  });
+
+  it('accepts the pages parameter for PDF files', async () => {
+    const filePath = path.join(tmpDir, 'document.pdf');
+    fs.writeFileSync(filePath, '%PDF-1.4 fake');
+
+    const result = await readTool.execute({ file_path: filePath, pages: '1-5' });
+
+    const text = (result.content[0] as { type: 'text'; text: string }).text;
+    expect(text).toContain('PDF file detected');
+  });
+
   it('shows truncation notice when file exceeds limit', async () => {
     const lines = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`);
     const filePath = path.join(tmpDir, 'many-lines.txt');
