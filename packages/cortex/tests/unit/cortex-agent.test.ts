@@ -1,0 +1,766 @@
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { CortexAgent } from '../../src/cortex-agent.js';
+import type { PiAgent, PiModel } from '../../src/cortex-agent.js';
+import type { PiEvent } from '../../src/event-bridge.js';
+
+// ---------------------------------------------------------------------------
+// Mock PiAgent factory
+// ---------------------------------------------------------------------------
+
+interface MockPiAgent extends PiAgent {
+  /** Manually emit a pi-agent-core event */
+  emitEvent: (event: PiEvent) => void;
+  /** Track whether abort was called */
+  abortCalled: boolean;
+  /** Track whether reset was called */
+  resetCalled: boolean;
+  /** Control what agent.run() returns or throws */
+  runResult: unknown;
+  runError: Error | null;
+}
+
+function createMockPiAgent(options?: {
+  runResult?: unknown;
+  runError?: Error | null;
+}): MockPiAgent {
+  let eventHandler: ((event: PiEvent) => void) | null = null;
+  let idleResolve: (() => void) | null = null;
+
+  const agent: MockPiAgent = {
+    state: {
+      messages: [],
+    },
+    abortCalled: false,
+    resetCalled: false,
+    runResult: options?.runResult ?? { content: 'Mock response' },
+    runError: options?.runError ?? null,
+
+    subscribe(handler: (event: PiEvent) => void): () => void {
+      eventHandler = handler;
+      return () => {
+        eventHandler = null;
+      };
+    },
+
+    emitEvent(event: PiEvent): void {
+      if (eventHandler) {
+        eventHandler(event);
+      }
+    },
+
+    async run(input: string): Promise<unknown> {
+      // Emit agent_start
+      agent.emitEvent({ type: 'agent_start' });
+
+      if (agent.runError) {
+        // Emit agent_end before throwing
+        agent.emitEvent({ type: 'agent_end' });
+        throw agent.runError;
+      }
+
+      // Simulate a turn
+      agent.emitEvent({ type: 'turn_start' });
+      agent.emitEvent({
+        type: 'turn_end',
+        text: typeof agent.runResult === 'string'
+          ? agent.runResult
+          : 'Mock response text',
+      });
+
+      // Emit agent_end
+      agent.emitEvent({ type: 'agent_end' });
+
+      return agent.runResult;
+    },
+
+    abort(): void {
+      agent.abortCalled = true;
+      if (idleResolve) {
+        idleResolve();
+        idleResolve = null;
+      }
+    },
+
+    async waitForIdle(): Promise<void> {
+      // If already idle, resolve immediately
+      return new Promise<void>((resolve) => {
+        idleResolve = resolve;
+        // Auto-resolve after a tick to prevent hanging
+        setTimeout(() => {
+          resolve();
+          idleResolve = null;
+        }, 10);
+      });
+    },
+
+    reset(): void {
+      agent.resetCalled = true;
+      agent.state.messages = [];
+    },
+  };
+
+  return agent;
+}
+
+function createDefaultConfig(overrides?: Partial<Parameters<typeof CortexAgent['prototype']['prompt']>[0]>): Parameters<typeof CortexAgent>[1] {
+  return {
+    model: { provider: 'anthropic', name: 'claude-sonnet-4-20250514' } as PiModel,
+    workingDirectory: '/tmp/test-workspace',
+    slots: [],
+    ...overrides,
+  };
+}
+
+describe('CortexAgent', () => {
+  let piAgent: MockPiAgent;
+  let config: ReturnType<typeof createDefaultConfig>;
+
+  beforeEach(() => {
+    piAgent = createMockPiAgent();
+    config = createDefaultConfig();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // -----------------------------------------------------------------------
+  // Construction
+  // -----------------------------------------------------------------------
+
+  describe('construction', () => {
+    it('creates with valid config', () => {
+      const agent = new CortexAgent(piAgent, config);
+      expect(agent.state).toBe('created');
+    });
+
+    it('exposes the context manager', () => {
+      const agent = new CortexAgent(piAgent, {
+        ...config,
+        slots: ['a', 'b'],
+      });
+
+      const cm = agent.getContextManager();
+      expect(cm.slotCount).toBe(2);
+    });
+
+    it('resolves utility model from defaults for anthropic', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const utilityModel = agent.getUtilityModel();
+      expect(utilityModel.provider).toBe('anthropic');
+      expect(utilityModel.name).toBe('claude-haiku-4-5-20250609');
+    });
+
+    it('resolves utility model from defaults for openai', () => {
+      const agent = new CortexAgent(piAgent, {
+        ...config,
+        model: { provider: 'openai', name: 'gpt-4o' } as PiModel,
+      });
+      const utilityModel = agent.getUtilityModel();
+      expect(utilityModel.provider).toBe('openai');
+      expect(utilityModel.name).toBe('gpt-4o-mini');
+    });
+
+    it('uses primary model when no default mapping exists', () => {
+      const customModel = { provider: 'custom-provider', name: 'custom-model' } as PiModel;
+      const agent = new CortexAgent(piAgent, {
+        ...config,
+        model: customModel,
+      });
+      const utilityModel = agent.getUtilityModel();
+      expect(utilityModel).toBe(customModel);
+    });
+
+    it('uses explicit utility model when provided', () => {
+      const explicitUtility = { provider: 'anthropic', name: 'claude-haiku-3' } as PiModel;
+      const agent = new CortexAgent(piAgent, {
+        ...config,
+        utilityModel: explicitUtility,
+      });
+      const utilityModel = agent.getUtilityModel();
+      expect(utilityModel).toBe(explicitUtility);
+    });
+
+    it('throws on same-provider constraint violation', () => {
+      expect(() => {
+        new CortexAgent(piAgent, {
+          ...config,
+          model: { provider: 'anthropic', name: 'claude-sonnet' } as PiModel,
+          utilityModel: { provider: 'openai', name: 'gpt-4o-mini' } as PiModel,
+        });
+      }).toThrow('does not match primary model provider');
+    });
+
+    it('allows utilityModel: "default" explicitly', () => {
+      const agent = new CortexAgent(piAgent, {
+        ...config,
+        utilityModel: 'default',
+      });
+      const utilityModel = agent.getUtilityModel();
+      expect(utilityModel.provider).toBe('anthropic');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // prompt()
+  // -----------------------------------------------------------------------
+
+  describe('prompt', () => {
+    it('runs the agent and returns a result', async () => {
+      piAgent.runResult = { content: 'Hello world' };
+      const agent = new CortexAgent(piAgent, config);
+
+      const result = await agent.prompt('Say hello');
+      expect(result).toEqual({ content: 'Hello world' });
+    });
+
+    it('transitions from CREATED to ACTIVE on first prompt', async () => {
+      const agent = new CortexAgent(piAgent, config);
+      expect(agent.state).toBe('created');
+
+      await agent.prompt('Hello');
+      expect(agent.state).toBe('active');
+    });
+
+    it('remains ACTIVE on subsequent prompts', async () => {
+      const agent = new CortexAgent(piAgent, config);
+
+      await agent.prompt('First');
+      expect(agent.state).toBe('active');
+
+      await agent.prompt('Second');
+      expect(agent.state).toBe('active');
+    });
+
+    it('throws when destroyed', async () => {
+      const agent = new CortexAgent(piAgent, config);
+      await agent.destroy();
+
+      await expect(agent.prompt('Hello')).rejects.toThrow('Agent has been destroyed');
+    });
+
+    it('classifies and emits errors on failure', async () => {
+      piAgent.runError = new Error('invalid api key');
+      const agent = new CortexAgent(piAgent, config);
+
+      const errorHandler = vi.fn();
+      agent.onError(errorHandler);
+
+      await expect(agent.prompt('Hello')).rejects.toThrow('invalid api key');
+
+      expect(errorHandler).toHaveBeenCalledTimes(1);
+      expect(errorHandler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: 'authentication',
+          severity: 'fatal',
+          originalMessage: 'invalid api key',
+        }),
+      );
+    });
+
+    it('classifies rate limit errors', async () => {
+      piAgent.runError = new Error('Rate limit exceeded');
+      const agent = new CortexAgent(piAgent, config);
+
+      const errorHandler = vi.fn();
+      agent.onError(errorHandler);
+
+      await expect(agent.prompt('Hello')).rejects.toThrow();
+
+      expect(errorHandler.mock.calls[0][0].category).toBe('rate_limit');
+    });
+
+    it('classifies network errors', async () => {
+      piAgent.runError = new Error('ECONNREFUSED');
+      const agent = new CortexAgent(piAgent, config);
+
+      const errorHandler = vi.fn();
+      agent.onError(errorHandler);
+
+      await expect(agent.prompt('Hello')).rejects.toThrow();
+
+      expect(errorHandler.mock.calls[0][0].category).toBe('network');
+    });
+
+    it('swallows error handler exceptions', async () => {
+      piAgent.runError = new Error('Rate limit exceeded');
+      const agent = new CortexAgent(piAgent, config);
+
+      agent.onError(() => {
+        throw new Error('Handler blew up');
+      });
+
+      // Should still throw the original error, not the handler error
+      await expect(agent.prompt('Hello')).rejects.toThrow('Rate limit exceeded');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // System prompt
+  // -----------------------------------------------------------------------
+
+  describe('buildSystemPrompt', () => {
+    it('puts consumer content first', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const prompt = agent.buildSystemPrompt('You are a helpful assistant.');
+
+      expect(prompt.startsWith('You are a helpful assistant.')).toBe(true);
+    });
+
+    it('includes Response Delivery when working tags enabled (default)', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const prompt = agent.buildSystemPrompt('Consumer content');
+
+      expect(prompt).toContain('# Response Delivery');
+      expect(prompt).toContain('<working>');
+    });
+
+    it('omits Response Delivery when working tags disabled', () => {
+      const agent = new CortexAgent(piAgent, {
+        ...config,
+        workingTags: { enabled: false },
+      });
+      const prompt = agent.buildSystemPrompt('Consumer content');
+
+      expect(prompt).not.toContain('# Response Delivery');
+    });
+
+    it('includes System Rules section', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const prompt = agent.buildSystemPrompt('Consumer');
+
+      expect(prompt).toContain('# System Rules');
+    });
+
+    it('includes Taking Action section', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const prompt = agent.buildSystemPrompt('Consumer');
+
+      expect(prompt).toContain('# Taking Action');
+    });
+
+    it('includes Tool Usage section', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const prompt = agent.buildSystemPrompt('Consumer');
+
+      expect(prompt).toContain('# Tool Usage');
+    });
+
+    it('includes Executing with Care section', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const prompt = agent.buildSystemPrompt('Consumer');
+
+      expect(prompt).toContain('# Executing with Care');
+    });
+
+    it('includes Environment section with platform info', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const prompt = agent.buildSystemPrompt('Consumer');
+
+      expect(prompt).toContain('# Environment');
+      expect(prompt).toContain('Platform:');
+      expect(prompt).toContain('Shell:');
+      expect(prompt).toContain('Working Directory: /tmp/test-workspace');
+    });
+
+    it('preserves consumer content exactly', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const consumerContent = `You are Animus.
+Your personality is warm and curious.
+You have 12 emotions.`;
+      const prompt = agent.buildSystemPrompt(consumerContent);
+
+      expect(prompt.startsWith(consumerContent)).toBe(true);
+    });
+  });
+
+  describe('rebuildSystemPrompt', () => {
+    it('updates the system prompt without losing conversation history', async () => {
+      const agent = new CortexAgent(piAgent, config);
+
+      // Build initial prompt
+      agent.buildSystemPrompt('Original persona');
+
+      // Simulate some conversation history
+      piAgent.state.messages.push(
+        { role: 'user', content: 'Hello' },
+        { role: 'assistant', content: 'Hi there!' },
+      );
+
+      // Rebuild with new content
+      agent.rebuildSystemPrompt('Updated persona');
+
+      // Conversation should still be there
+      const history = agent.getConversationHistory();
+      expect(history.length).toBe(2);
+      expect(history[0]!.content).toBe('Hello');
+
+      // New prompt should contain updated content
+      const currentPrompt = agent.getCurrentSystemPrompt();
+      expect(currentPrompt).toContain('Updated persona');
+      expect(currentPrompt).not.toContain('Original persona');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Conversation history persistence
+  // -----------------------------------------------------------------------
+
+  describe('conversation history', () => {
+    it('getConversationHistory excludes slot region', () => {
+      const agent = new CortexAgent(piAgent, {
+        ...config,
+        slots: ['slot1', 'slot2'],
+      });
+
+      const cm = agent.getContextManager();
+      cm.setSlot('slot1', 'Slot content 1');
+      cm.setSlot('slot2', 'Slot content 2');
+
+      // Simulate conversation history after slots
+      piAgent.state.messages.push(
+        { role: 'user', content: 'Hello' },
+        { role: 'assistant', content: 'Hi!' },
+      );
+
+      const history = agent.getConversationHistory();
+
+      expect(history.length).toBe(2);
+      expect(history[0]!.content).toBe('Hello');
+      expect(history[1]!.content).toBe('Hi!');
+    });
+
+    it('getConversationHistory returns empty when only slots exist', () => {
+      const agent = new CortexAgent(piAgent, {
+        ...config,
+        slots: ['slot1'],
+      });
+
+      const cm = agent.getContextManager();
+      cm.setSlot('slot1', 'Content');
+
+      const history = agent.getConversationHistory();
+      expect(history.length).toBe(0);
+    });
+
+    it('restoreConversationHistory injects after slots', () => {
+      const agent = new CortexAgent(piAgent, {
+        ...config,
+        slots: ['slot1', 'slot2'],
+      });
+
+      const cm = agent.getContextManager();
+      cm.setSlot('slot1', 'Slot 1');
+      cm.setSlot('slot2', 'Slot 2');
+
+      // Restore some saved conversation
+      agent.restoreConversationHistory([
+        { role: 'user', content: 'Restored message 1' },
+        { role: 'assistant', content: 'Restored response 1' },
+        { role: 'user', content: 'Restored message 2' },
+      ]);
+
+      // Slots should be intact
+      expect(piAgent.state.messages[0]!.content).toBe('Slot 1');
+      expect(piAgent.state.messages[1]!.content).toBe('Slot 2');
+
+      // Conversation should be after slots
+      expect(piAgent.state.messages[2]!.content).toBe('Restored message 1');
+      expect(piAgent.state.messages[3]!.content).toBe('Restored response 1');
+      expect(piAgent.state.messages[4]!.content).toBe('Restored message 2');
+    });
+
+    it('restoreConversationHistory replaces existing conversation', () => {
+      const agent = new CortexAgent(piAgent, {
+        ...config,
+        slots: ['slot1'],
+      });
+
+      const cm = agent.getContextManager();
+      cm.setSlot('slot1', 'Slot content');
+
+      // Add some existing conversation
+      piAgent.state.messages.push(
+        { role: 'user', content: 'Old message' },
+      );
+
+      // Restore should replace
+      agent.restoreConversationHistory([
+        { role: 'user', content: 'New message' },
+      ]);
+
+      const history = agent.getConversationHistory();
+      expect(history.length).toBe(1);
+      expect(history[0]!.content).toBe('New message');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Lifecycle
+  // -----------------------------------------------------------------------
+
+  describe('lifecycle', () => {
+    it('starts in CREATED state', () => {
+      const agent = new CortexAgent(piAgent, config);
+      expect(agent.state).toBe('created');
+    });
+
+    it('transitions to ACTIVE after first prompt', async () => {
+      const agent = new CortexAgent(piAgent, config);
+      await agent.prompt('Hello');
+      expect(agent.state).toBe('active');
+    });
+
+    it('transitions to DESTROYED after destroy', async () => {
+      const agent = new CortexAgent(piAgent, config);
+      await agent.destroy();
+      expect(agent.state).toBe('destroyed');
+    });
+
+    it('destroy is idempotent', async () => {
+      const agent = new CortexAgent(piAgent, config);
+      await agent.destroy();
+      await agent.destroy(); // Should not throw
+      expect(agent.state).toBe('destroyed');
+    });
+
+    it('abort calls agent.abort() and waitForIdle()', async () => {
+      const agent = new CortexAgent(piAgent, config);
+      await agent.prompt('Hello');
+
+      await agent.abort();
+
+      expect(piAgent.abortCalled).toBe(true);
+    });
+
+    it('abort keeps the agent in ACTIVE state', async () => {
+      const agent = new CortexAgent(piAgent, config);
+      await agent.prompt('Hello');
+
+      await agent.abort();
+
+      expect(agent.state).toBe('active');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Events
+  // -----------------------------------------------------------------------
+
+  describe('events', () => {
+    it('onLoopComplete fires on session_end (agent_end)', async () => {
+      const agent = new CortexAgent(piAgent, config);
+      const handler = vi.fn();
+      agent.onLoopComplete(handler);
+
+      await agent.prompt('Hello');
+
+      // agent.run() emits agent_end which maps to session_end -> onLoopComplete
+      expect(handler).toHaveBeenCalled();
+    });
+
+    it('onTurnComplete fires with AgentTextOutput', async () => {
+      piAgent.runResult = 'Hello <working>internal</working> world';
+      const agent = new CortexAgent(piAgent, config);
+
+      const handler = vi.fn();
+      agent.onTurnComplete(handler);
+
+      await agent.prompt('Hello');
+
+      expect(handler).toHaveBeenCalled();
+      const output = handler.mock.calls[0][0];
+      expect(output.raw).toBe('Mock response text');
+    });
+
+    it('onError fires for classified errors', async () => {
+      piAgent.runError = new Error('Rate limit exceeded');
+      const agent = new CortexAgent(piAgent, config);
+
+      const handler = vi.fn();
+      agent.onError(handler);
+
+      await expect(agent.prompt('Hello')).rejects.toThrow();
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(handler.mock.calls[0][0].category).toBe('rate_limit');
+    });
+
+    it('multiple handlers can be registered for the same event', async () => {
+      const agent = new CortexAgent(piAgent, config);
+      const handler1 = vi.fn();
+      const handler2 = vi.fn();
+      agent.onLoopComplete(handler1);
+      agent.onLoopComplete(handler2);
+
+      await agent.prompt('Hello');
+
+      expect(handler1).toHaveBeenCalled();
+      expect(handler2).toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Destroy cleanup
+  // -----------------------------------------------------------------------
+
+  describe('destroy cleanup', () => {
+    it('calls agent.abort() during destroy', async () => {
+      const agent = new CortexAgent(piAgent, config);
+      await agent.destroy();
+
+      expect(piAgent.abortCalled).toBe(true);
+    });
+
+    it('calls agent.reset() during destroy', async () => {
+      const agent = new CortexAgent(piAgent, config);
+      await agent.destroy();
+
+      expect(piAgent.resetCalled).toBe(true);
+    });
+
+    it('emits onLoopComplete during destroy for final checkpoint', async () => {
+      const agent = new CortexAgent(piAgent, config);
+      const handler = vi.fn();
+      agent.onLoopComplete(handler);
+
+      await agent.destroy();
+
+      // onLoopComplete should fire once during destroy (the checkpoint emission)
+      expect(handler).toHaveBeenCalled();
+    });
+
+    it('clears handlers after destroy', async () => {
+      const agent = new CortexAgent(piAgent, config);
+      const errorHandler = vi.fn();
+      agent.onError(errorHandler);
+
+      await agent.destroy();
+
+      // After destroy, handlers should be cleared
+      // Attempting to prompt should throw "destroyed" not trigger error handlers
+      await expect(agent.prompt('Hello')).rejects.toThrow('Agent has been destroyed');
+      expect(errorHandler).not.toHaveBeenCalled();
+    });
+
+    it('respects destroy timeout', async () => {
+      // Create an agent where waitForIdle never resolves quickly
+      const slowAgent = createMockPiAgent();
+      const originalWaitForIdle = slowAgent.waitForIdle;
+      slowAgent.waitForIdle = () => new Promise((resolve) => {
+        setTimeout(resolve, 60000); // Very slow
+      });
+
+      const agent = new CortexAgent(slowAgent, config);
+
+      // Destroy with a short timeout
+      const startTime = Date.now();
+      await agent.destroy(100);
+      const elapsed = Date.now() - startTime;
+
+      // Should complete within the timeout (plus some margin)
+      expect(elapsed).toBeLessThan(500);
+      expect(agent.state).toBe('destroyed');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // transformContext hook
+  // -----------------------------------------------------------------------
+
+  describe('transformContext', () => {
+    it('returns a composable hook function', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const hook = agent.getTransformContextHook();
+      expect(typeof hook).toBe('function');
+    });
+
+    it('the hook passes through context when no ephemeral content', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const hook = agent.getTransformContextHook();
+
+      const context = {
+        systemPrompt: 'test',
+        model: {},
+        messages: [{ role: 'user' as const, content: 'Hello' }],
+        tools: [],
+        thinkingLevel: 'medium',
+      };
+
+      const result = hook(context);
+      // With no ephemeral, compaction stub, and skill stub are all no-ops
+      expect(result.messages.length).toBe(1);
+    });
+
+    it('the hook injects ephemeral content', () => {
+      const agent = new CortexAgent(piAgent, {
+        ...config,
+        slots: [],
+      });
+
+      const cm = agent.getContextManager();
+      cm.setEphemeral('Ephemeral data');
+
+      const hook = agent.getTransformContextHook();
+      const context = {
+        systemPrompt: 'test',
+        model: {},
+        messages: [{ role: 'user' as const, content: 'Hello' }],
+        tools: [],
+        thinkingLevel: 'medium',
+      };
+
+      const result = hook(context);
+      expect(result.messages.length).toBe(2);
+      expect(result.messages[1]!.content).toBe('Ephemeral data');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Model access
+  // -----------------------------------------------------------------------
+
+  describe('model access', () => {
+    it('getModel returns the primary model', () => {
+      const model = { provider: 'anthropic', name: 'claude-sonnet-4' } as PiModel;
+      const agent = new CortexAgent(piAgent, {
+        ...config,
+        model,
+      });
+
+      expect(agent.getModel()).toBe(model);
+    });
+
+    it('getUtilityModel returns resolved utility model', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const utility = agent.getUtilityModel();
+
+      expect(utility.provider).toBe('anthropic');
+      expect(utility.name).toBeDefined();
+    });
+
+    it('utilityComplete throws (stub)', async () => {
+      const agent = new CortexAgent(piAgent, config);
+
+      await expect(agent.utilityComplete({})).rejects.toThrow('not yet implemented');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Event bridge access
+  // -----------------------------------------------------------------------
+
+  describe('event bridge access', () => {
+    it('exposes the event bridge', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const bridge = agent.getEventBridge();
+      expect(bridge).toBeDefined();
+    });
+
+    it('exposes the budget guard', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const guard = agent.getBudgetGuard();
+      expect(guard).toBeDefined();
+    });
+  });
+});

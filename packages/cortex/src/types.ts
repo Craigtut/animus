@@ -94,6 +94,14 @@ export interface CortexAgentConfig {
     /** Path to the shell executable. */
     shellPath?: string;
   };
+
+  /**
+   * Tool permission resolver callback.
+   * Called before each tool execution. Return true to allow, false to block.
+   * Throw to block with an error message.
+   * If not provided, all tools are allowed.
+   */
+  resolvePermission?: (toolName: string, toolArgs: unknown) => Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@
  * budget guards, compaction, skill system, and event logging.
  *
  * Phase 1A exports: types and pure utility modules.
+ * Phase 1B exports: CortexAgent, ContextManager, EventBridge, BudgetGuard.
  */
 
 // Types
@@ -40,3 +41,29 @@ export {
 // Error Classifier
 export { classifyError } from './error-classifier.js';
 export type { ClassifyErrorOptions } from './error-classifier.js';
+
+// Context Manager (Phase 1B)
+export { ContextManager } from './context-manager.js';
+export type {
+  AgentMessage,
+  AgentStateAccessor,
+  AgentContext,
+} from './context-manager.js';
+
+// Event Bridge (Phase 1B)
+export { EventBridge } from './event-bridge.js';
+export type {
+  CortexEventType,
+  CortexEvent,
+  CortexEventListener,
+  PiEventType,
+  PiEvent,
+  PiEventSource,
+} from './event-bridge.js';
+
+// Budget Guard (Phase 1B)
+export { BudgetGuard } from './budget-guard.js';
+
+// CortexAgent (Phase 1B)
+export { CortexAgent } from './cortex-agent.js';
+export type { PiAgent, PiModel } from './cortex-agent.js';
