@@ -570,7 +570,7 @@ You have 12 emotions.`;
 
       expect(handler).toHaveBeenCalled();
       const output = handler.mock.calls[0][0];
-      expect(output.raw).toBe('Mock response text');
+      expect(output.raw).toBe('Hello <working>internal</working> world');
     });
 
     it('onError fires for classified errors', async () => {
