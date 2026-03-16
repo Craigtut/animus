@@ -42,13 +42,14 @@ import type {
  * Default utility model IDs per provider.
  * Used when utilityModel is 'default' or undefined.
  */
+// TODO: consolidate with UTILITY_MODEL_DEFAULTS in provider-registry.ts
 const UTILITY_MODEL_DEFAULTS: Record<string, string> = {
-  anthropic: 'claude-haiku-4-5-20250609',
-  openai: 'gpt-4o-mini',
-  google: 'gemini-2.0-flash',
-  groq: 'llama-3.1-8b-instant',
-  cerebras: 'llama-3.1-8b',
-  mistral: 'mistral-small-latest',
+  anthropic: 'claude-haiku-4-5-20251001',     // $1.00/$5.00 per 1M tokens
+  openai: 'gpt-4.1-nano',                     // $0.10/$0.40 per 1M tokens
+  google: 'gemini-2.5-flash-lite',            // $0.10/$0.40 per 1M tokens
+  groq: 'llama-3.1-8b-instant',              // ~$0.05/$0.08 per 1M tokens
+  cerebras: 'llama3.1-8b',                    // ~$0.10/$0.10 per 1M tokens
+  mistral: 'mistral-small-2506',             // $0.06/$0.18 per 1M tokens
 };
 
 // ---------------------------------------------------------------------------
