@@ -7,6 +7,8 @@
  *
  * Phase 1A exports: types and pure utility modules.
  * Phase 1B exports: CortexAgent, ContextManager, EventBridge, BudgetGuard.
+ * Phase 1C exports: Built-in tools (Read, Write, Edit, Glob, Grep, Bash, TaskOutput, WebFetch).
+ * Phase 1D exports: ProviderManager, model wrapper, provider registry.
  */
 
 // Types
@@ -67,3 +69,90 @@ export { BudgetGuard } from './budget-guard.js';
 // CortexAgent (Phase 1B)
 export { CortexAgent } from './cortex-agent.js';
 export type { PiAgent, PiModel } from './cortex-agent.js';
+
+// Built-in Tools (Phase 1C)
+export {
+  ReadRegistry,
+  CwdTracker,
+  createReadTool,
+  createWriteTool,
+  createEditTool,
+  createGlobTool,
+  createGrepTool,
+  createBashTool,
+  createTaskOutputTool,
+  createWebFetchTool,
+  WebFetchCache,
+  getBackgroundTask,
+  getAllBackgroundTasks,
+  buildSafeEnv,
+  isCriticalPath,
+  classifyCommand,
+  checkObfuscation,
+  stripInvisibleChars,
+  checkScriptPreflight,
+  checkAutoModeClassifier,
+  runSafetyChecks,
+  validateWritePaths,
+  extractWritePaths,
+  TOOL_NAMES,
+} from './tools/index.js';
+export type {
+  ReadDetails,
+  ReadParamsType,
+  ReadToolConfig,
+  WriteDetails,
+  WriteParamsType,
+  WriteToolConfig,
+  DiffHunk,
+  EditDetails,
+  EditParamsType,
+  EditToolConfig,
+  GlobDetails,
+  GlobParamsType,
+  GlobToolConfig,
+  GrepDetails,
+  GrepParamsType,
+  GrepToolConfig,
+  BashDetails,
+  BashParamsType,
+  BashToolConfig,
+  BackgroundTask,
+  TaskOutputDetails,
+  TaskOutputParamsType,
+  WebFetchDetails,
+  WebFetchParamsType,
+  WebFetchToolConfig,
+  CacheEntry,
+  CommandClassification,
+  SafetyCheckResult,
+  BuiltInToolName,
+} from './tools/index.js';
+
+// Model Wrapper (Phase 1D)
+export { wrapModel, unwrapModel, isCortexModel } from './model-wrapper.js';
+export type { CortexModel } from './model-wrapper.js';
+
+// Provider Registry (Phase 1D)
+export {
+  PROVIDER_REGISTRY,
+  OAUTH_PROVIDER_IDS,
+  LOGIN_FUNCTION_NAMES,
+  UTILITY_MODEL_DEFAULTS,
+} from './provider-registry.js';
+export type {
+  AuthMethod,
+  ProviderInfo,
+  ModelInfo,
+} from './provider-registry.js';
+
+// Provider Manager (Phase 1D)
+export { ProviderManager } from './provider-manager.js';
+export type {
+  IProviderManager,
+  OAuthCallbacks,
+  OAuthMeta,
+  OAuthResult,
+  OAuthRefreshResult,
+  CustomModelConfig,
+} from './provider-manager.js';
