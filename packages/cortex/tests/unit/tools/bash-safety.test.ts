@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import {
   buildSafeEnv,
   isCriticalPath,
@@ -194,6 +197,65 @@ describe('Bash safety layers', () => {
     });
   });
 
+  describe('Layer 4: symlink resolution', () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-safety-test-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('resolves symlinks before checking critical paths', () => {
+      // Create a directory to use as a "critical" target, then symlink to it
+      // On macOS, /etc -> /private/etc, so instead test with /usr which
+      // resolves to itself and is in the critical paths list.
+      // First check that /usr actually resolves cleanly.
+      let criticalTarget: string;
+      try {
+        criticalTarget = fs.realpathSync('/usr');
+      } catch {
+        // /usr does not exist on this platform, skip
+        return;
+      }
+
+      // Verify the resolved path is considered critical
+      if (!isCriticalPath(criticalTarget)) {
+        // The resolved /usr might differ on this platform, skip
+        return;
+      }
+
+      const symlinkPath = path.join(tmpDir, 'sneaky-link');
+      try {
+        fs.symlinkSync(criticalTarget, symlinkPath);
+      } catch {
+        // Skip if symlinks not supported (some CI environments)
+        return;
+      }
+
+      // The symlink itself is in a safe directory, but resolves to a critical path
+      const result = validateWritePaths(
+        `rm ${symlinkPath}`,
+        tmpDir,
+        tmpDir,
+      );
+      expect(result.allowed).toBe(false);
+    });
+
+    it('falls back to path.resolve for non-existent paths', () => {
+      // This path does not exist, so realpathSync will fail
+      // It should fall back to path.resolve() and still work
+      const result = validateWritePaths(
+        `mkdir ${path.join(tmpDir, 'new-dir')}`,
+        tmpDir,
+        tmpDir,
+      );
+      expect(result.allowed).toBe(true);
+    });
+  });
+
   // -----------------------------------------------------------------------
   // Layer 5: Obfuscation Detection
   // -----------------------------------------------------------------------
@@ -278,6 +340,73 @@ describe('Bash safety layers', () => {
 
     it('blocks python eval patterns', () => {
       const result = checkObfuscation('python3 -c "eval(base64.b64decode(...))"');
+      expect(result.allowed).toBe(false);
+    });
+
+    // New shell metacharacter patterns
+    it('blocks backslash-escaped operators', () => {
+      const result = checkObfuscation('echo test\\;rm -rf /');
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('Backslash-escaped');
+    });
+
+    it('blocks Unicode whitespace (non-breaking space)', () => {
+      const result = checkObfuscation('rm\u00A0-rf /');
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('Unicode whitespace');
+    });
+
+    it('blocks Unicode whitespace (zero-width space)', () => {
+      const result = checkObfuscation('rm\u200B-rf /');
+      // This is caught by the invisible char stripping check first
+      expect(result.allowed).toBe(false);
+    });
+
+    it('blocks control characters in commands', () => {
+      const result = checkObfuscation('echo\x01test');
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('Control characters');
+    });
+
+    it('blocks mid-word hash', () => {
+      const result = checkObfuscation('test#inject');
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('hash');
+    });
+
+    it('blocks obfuscated flags via quotes', () => {
+      const result = checkObfuscation("'-rf' /");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('Obfuscated flags');
+    });
+
+    it('blocks comment/quote desync', () => {
+      const result = checkObfuscation("# comment 'start\nrm -rf /");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('Comment/quote desync');
+    });
+
+    it('blocks embedded newlines in single-quoted strings', () => {
+      const result = checkObfuscation("echo 'hello\nworld'");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('Embedded newlines');
+    });
+
+    it('blocks incomplete commands (trailing pipe)', () => {
+      const result = checkObfuscation('echo hello |');
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('Incomplete command');
+    });
+
+    it('blocks incomplete commands (trailing semicolon)', () => {
+      const result = checkObfuscation('echo hello;');
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('Incomplete command');
+    });
+
+    it('blocks incomplete commands (trailing ampersand)', () => {
+      const result = checkObfuscation('echo hello &&');
+      // The trailing & matches the pattern [|;&]\s*$
       expect(result.allowed).toBe(false);
     });
   });

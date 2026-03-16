@@ -184,4 +184,63 @@ describe('Grep tool', () => {
 
     expect(result.details.usingFallback).toBe(true);
   });
+
+  describe('gitignore support', () => {
+    it('respects .gitignore patterns when searching directories', async () => {
+      // Create a .gitignore
+      fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'ignored-dir/\n*.log\n');
+
+      // Create a file that should be found
+      fs.writeFileSync(path.join(tmpDir, 'found.ts'), 'search-target\n');
+
+      // Create a file matching .gitignore pattern
+      fs.writeFileSync(path.join(tmpDir, 'debug.log'), 'search-target\n');
+
+      // Create a directory matching .gitignore pattern
+      fs.mkdirSync(path.join(tmpDir, 'ignored-dir'));
+      fs.writeFileSync(path.join(tmpDir, 'ignored-dir', 'hidden.ts'), 'search-target\n');
+
+      const result = await grepTool.execute({ pattern: 'search-target' });
+
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).toContain('found.ts');
+      expect(text).not.toContain('debug.log');
+      expect(text).not.toContain('hidden.ts');
+    });
+
+    it('can be disabled via respectGitignore: false', async () => {
+      const noGitignoreTool = createGrepTool({
+        defaultCwd: tmpDir,
+        respectGitignore: false,
+      });
+
+      // Create a .gitignore
+      fs.writeFileSync(path.join(tmpDir, '.gitignore'), '*.log\n');
+
+      // Create files
+      fs.writeFileSync(path.join(tmpDir, 'found.ts'), 'target\n');
+      fs.writeFileSync(path.join(tmpDir, 'also-found.log'), 'target\n');
+
+      const result = await noGitignoreTool.execute({ pattern: 'target' });
+
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).toContain('found.ts');
+      expect(text).toContain('also-found.log');
+    });
+
+    it('still respects DEFAULT_IGNORE even without .gitignore file', async () => {
+      // Create a node_modules directory (in DEFAULT_IGNORE)
+      fs.mkdirSync(path.join(tmpDir, 'node_modules'));
+      fs.writeFileSync(path.join(tmpDir, 'node_modules', 'dep.js'), 'target\n');
+
+      // Create a regular file
+      fs.writeFileSync(path.join(tmpDir, 'app.ts'), 'target\n');
+
+      const result = await grepTool.execute({ pattern: 'target' });
+
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).toContain('app.ts');
+      expect(text).not.toContain('dep.js');
+    });
+  });
 });
