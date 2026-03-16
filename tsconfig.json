@@ -6,14 +6,16 @@
       "@animus-labs/shared": ["packages/shared/src"],
       "@animus-labs/agents": ["packages/agents/src"],
       "@animus-labs/backend": ["packages/backend/src"],
-      "@animus-labs/frontend": ["packages/frontend/src"]
+      "@animus-labs/frontend": ["packages/frontend/src"],
+      "@animus-labs/cortex": ["packages/cortex/src"]
     }
   },
   "references": [
     { "path": "packages/shared" },
     { "path": "packages/agents" },
     { "path": "packages/backend" },
-    { "path": "packages/frontend" }
+    { "path": "packages/frontend" },
+    { "path": "packages/cortex" }
   ],
   "include": [],
   "exclude": ["node_modules", "dist"]

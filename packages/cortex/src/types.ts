@@ -1,0 +1,265 @@
+/**
+ * Core types for the @animus-labs/cortex package.
+ *
+ * These types define the public API surface for CortexAgent configuration,
+ * context management, error classification, working tags, budget guards,
+ * compaction, events, and model tiers.
+ *
+ * References:
+ *   - cortex-architecture.md
+ *   - context-manager.md
+ *   - model-tiers.md
+ *   - error-recovery.md
+ *   - working-tags.md
+ */
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
+/**
+ * The lifecycle state of a CortexAgent instance.
+ *
+ * CREATED -> ACTIVE -> DESTROYED
+ *
+ * abort() returns the agent to ACTIVE (still usable).
+ * destroy() transitions to DESTROYED (all resources released).
+ */
+export type CortexLifecycleState = 'created' | 'active' | 'destroyed';
+
+// ---------------------------------------------------------------------------
+// Agent Configuration
+// ---------------------------------------------------------------------------
+
+/**
+ * Configuration for creating a CortexAgent instance.
+ *
+ * The `model` field accepts any pi-ai Model object. It is typed as `unknown`
+ * here to avoid a hard runtime dependency on pi-ai; the actual type is
+ * `Model` from `@mariozechner/pi-ai`. Consumers pass a real Model object
+ * at construction time.
+ */
+export interface CortexAgentConfig {
+  /** Primary model for the agentic loop, THOUGHT, REFLECT, and all consumer-facing work. */
+  model: unknown;
+
+  /**
+   * Utility model for internal operations (WebFetch summarization, safety classifier).
+   * - `'default'`: Cortex selects from a built-in mapping based on the primary model's provider.
+   * - A Model object: explicit utility model (must be same provider as primary).
+   * - `undefined`: same as `'default'`.
+   */
+  utilityModel?: unknown | 'default';
+
+  /** Working directory for file operations (Bash, Read, Write, Edit, Glob, Grep). */
+  workingDirectory: string;
+
+  /**
+   * Callback to resolve API keys by provider name.
+   * Throws on failure (classified as authentication error).
+   * Returns the API key string on success. Must never return empty string.
+   */
+  getApiKey?: (provider: string) => Promise<string>;
+
+  /** Ordered list of context slot names. Order defines position in the message array. */
+  slots?: string[];
+
+  /** Working tags configuration. */
+  workingTags?: {
+    /** Whether to enable working tags. Default: true. */
+    enabled?: boolean;
+  };
+
+  /** Budget guard configuration. */
+  budgetGuard?: {
+    /** Maximum number of LLM turns before force-stopping the loop. Default: Infinity. */
+    maxTurns?: number;
+    /** Maximum cost in USD before force-stopping the loop. Default: Infinity. */
+    maxCost?: number;
+  };
+
+  /** Maximum number of concurrent sub-agents. */
+  maxConcurrentSubAgents?: number;
+
+  /** WebFetch tool configuration. */
+  webFetch?: {
+    /** Maximum number of web fetches per agentic loop. */
+    maxPerLoop?: number;
+  };
+
+  /** Bash tool configuration. */
+  bash?: {
+    /** Token threshold at which Bash auto-yields control back to the agent. */
+    autoYieldThreshold?: number;
+    /** Path to the shell executable. */
+    shellPath?: string;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Context Manager
+// ---------------------------------------------------------------------------
+
+/**
+ * Configuration for the ContextManager.
+ *
+ * Slots define the ordered list of persistent content blocks at the start
+ * of the message array. Order determines position (first = most stable,
+ * best prefix cache hit rate).
+ */
+export interface ContextManagerConfig {
+  /** Ordered list of slot names. */
+  slots: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Error Classification
+// ---------------------------------------------------------------------------
+
+/**
+ * Error categories for classifying LLM and network errors.
+ * Checked in priority order (first match wins).
+ */
+export type ErrorCategory =
+  | 'authentication'
+  | 'rate_limit'
+  | 'context_overflow'
+  | 'server_error'
+  | 'network'
+  | 'cancelled'
+  | 'unknown';
+
+/**
+ * Error severity levels.
+ * - fatal: unrecoverable, stop processing (e.g., invalid API key)
+ * - retry: transient, can be retried (e.g., rate limit, server error, network)
+ * - recoverable: can be handled without retry (e.g., context overflow triggers compaction)
+ */
+export type ErrorSeverity = 'fatal' | 'retry' | 'recoverable';
+
+/**
+ * A classified error with category, severity, original message, and suggested action.
+ */
+export interface ClassifiedError {
+  /** The error category determined by pattern matching. */
+  category: ErrorCategory;
+  /** The severity level for the category. */
+  severity: ErrorSeverity;
+  /** The original error message string. */
+  originalMessage: string;
+  /** Human-readable suggested action, or undefined if no action is needed. */
+  suggestedAction?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Working Tags
+// ---------------------------------------------------------------------------
+
+/**
+ * Structured output from parsing working tags in agent text.
+ *
+ * Working tags separate internal reasoning (<working>...</working>) from
+ * user-facing communication. Both remain in conversation history; the
+ * difference is only in delivery.
+ */
+export interface AgentTextOutput {
+  /** Text intended for the user (working tag content stripped, whitespace normalized). */
+  userFacing: string;
+  /** Content from inside <working> tags, concatenated. Null if no working tags present. */
+  working: string | null;
+  /** The original unparsed text exactly as the agent produced it. */
+  raw: string;
+}
+
+// ---------------------------------------------------------------------------
+// Tool Results
+// ---------------------------------------------------------------------------
+
+/**
+ * Structured tool result with content array and typed details.
+ */
+export interface ToolContentDetails<T> {
+  content: Array<
+    | { type: 'text'; text: string }
+    | { type: 'image'; data: string; mimeType: string }
+  >;
+  details: T;
+}
+
+// ---------------------------------------------------------------------------
+// Budget Guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Budget guard configuration with explicit limits.
+ * Both default to Infinity (no enforcement).
+ */
+export interface BudgetGuardConfig {
+  /** Maximum number of LLM turns. Default: Infinity. */
+  maxTurns: number;
+  /** Maximum cost in USD. Default: Infinity. */
+  maxCost: number;
+}
+
+// ---------------------------------------------------------------------------
+// Compaction
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of a compaction operation.
+ * Stub type needed so CortexEvents compiles; full implementation in Phase 5.
+ */
+export interface CompactionResult {
+  /** Total tokens before compaction. */
+  tokensBefore: number;
+  /** Total tokens after compaction. */
+  tokensAfter: number;
+  /** Number of conversation turns that were compacted (summarized/removed). */
+  turnsCompacted: number;
+  /** Number of conversation turns preserved after compaction. */
+  turnsPreserved: number;
+  /** Token count of the generated summary. */
+  summaryTokens: number;
+  /** ISO timestamp of the oldest preserved turn. */
+  oldestPreservedTimestamp: string;
+  /** The generated summary text. */
+  summary: string;
+}
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+/**
+ * Event handlers emitted by CortexAgent during the agentic loop lifecycle.
+ */
+export interface CortexEvents {
+  /** Fired when the full agentic loop finishes (agent_end, not turn_end). */
+  onLoopComplete: () => void;
+  /** Fired when context compaction completes successfully. */
+  onCompaction: (result: CompactionResult) => void;
+  /** Fired when context compaction fails. */
+  onCompactionError: (error: Error) => void;
+  /** Fired when an error is classified during the agentic loop. */
+  onError: (error: ClassifiedError) => void;
+  /** Fired at the end of each turn with parsed working tag output. */
+  onTurnComplete: (output: AgentTextOutput) => void;
+  /** Fired when a sub-agent is spawned for delegated work. */
+  onSubAgentSpawned: (taskId: string, instructions: string) => void;
+  /** Fired when a sub-agent completes successfully. */
+  onSubAgentCompleted: (taskId: string, result: string, status: string, usage: unknown) => void;
+  /** Fired when a sub-agent fails. */
+  onSubAgentFailed: (taskId: string, error: string) => void;
+}
+
+// ---------------------------------------------------------------------------
+// Model Tiers
+// ---------------------------------------------------------------------------
+
+/**
+ * Default utility model mapping per provider.
+ * Keys are provider names, values are model IDs.
+ */
+export interface UtilityModelDefaults {
+  [provider: string]: string;
+}
