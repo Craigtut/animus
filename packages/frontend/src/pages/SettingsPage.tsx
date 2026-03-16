@@ -619,7 +619,7 @@ function CortexProviderSection() {
 
   const handleThinkingChange = (level: string) => {
     setThinkingMutation.mutate(
-      { level: level as 'off' | 'low' | 'medium' | 'high' },
+      { level: level as 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' },
       { onSuccess: () => thinkingSave.flash() }
     );
   };
@@ -770,9 +770,11 @@ function CortexProviderSection() {
                     `}
                   >
                     <option value="off">Off</option>
+                    <option value="minimal">Minimal</option>
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
                     <option value="high">High</option>
+                    <option value="xhigh">Extra High</option>
                   </select>
                   <Typography.Caption color="hint">
                     Controls how much the model reasons before responding. Higher levels use more tokens.

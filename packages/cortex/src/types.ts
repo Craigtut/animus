@@ -299,8 +299,19 @@ export interface CompactionResult {
   turnsPreserved: number;
   /** Token count of the generated summary. */
   summaryTokens: number;
-  /** ISO timestamp of the oldest preserved turn. */
-  oldestPreservedTimestamp: string;
+  /**
+   * ISO timestamp of the oldest preserved turn, or null if no timestamp
+   * could be determined. The consumer (backend) should use
+   * `oldestPreservedIndex` to map back to a database timestamp when
+   * this is null.
+   */
+  oldestPreservedTimestamp: string | null;
+  /**
+   * Index of the oldest preserved turn in the original (pre-compaction)
+   * conversation history. The consumer can map this index back to a
+   * database timestamp via messages.db. Always present and accurate.
+   */
+  oldestPreservedIndex: number;
   /** The generated summary text. */
   summary: string;
 }
@@ -327,8 +338,8 @@ export interface CortexEvents {
   onLoopComplete: () => void;
   /** Fired before compaction starts. Awaited. Consumer should flush state. */
   onBeforeCompaction: (target: CompactionTarget) => Promise<void>;
-  /** Fired when context compaction completes successfully. */
-  onCompaction: (result: CompactionResult) => void;
+  /** Fired after compaction completes. Consumer can re-seed messages, update state. */
+  onPostCompaction: (result: CompactionResult) => void;
   /** Fired when context compaction fails. */
   onCompactionError: (error: Error) => void;
   /** Fired when an error is classified during the agentic loop. */

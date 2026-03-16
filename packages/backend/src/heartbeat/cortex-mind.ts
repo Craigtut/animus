@@ -446,6 +446,9 @@ function wireEventHandlers(
         recoverable: false,
         suggestedAction: classified.suggestedAction ?? 'Check your API key in Settings.',
       });
+      eventBus.emit('cortex:auth-failed', {
+        message: classified.originalMessage,
+      });
     } else if (classified.category === 'rate_limit') {
       eventBus.emit('system:error', {
         category: 'provider',
@@ -511,10 +514,23 @@ function wireProviderChangeListeners(
     cortexAgent.setThinkingLevel(level);
   });
 
-  eventBus.on('cortex:provider-removed', () => {
-    log.warn('Provider removed, CortexAgent will fail on next LLM call');
-    // The heartbeat should detect the credential failure and pause.
-    // We don't destroy the agent here since the user may reconfigure.
+  eventBus.on('cortex:provider-removed', async () => {
+    log.warn('Provider removed, aborting any in-progress loop and marking agent unavailable');
+
+    // Abort any running agentic loop
+    try {
+      await cortexAgent.abort();
+    } catch (err) {
+      log.warn('Failed to abort CortexAgent on provider removal:', err);
+    }
+
+    // Null out the agent so hasCortexMind() returns false.
+    // The heartbeat will fall back to the legacy path or skip mind queries
+    // until a new provider is configured and createCortexMind is called again.
+    state.agent = null;
+    state.model = null;
+
+    log.info('Heartbeat mind paused until a new provider is configured');
   });
 }
 

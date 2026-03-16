@@ -110,7 +110,7 @@ export const systemSettingsSchema = z.object({
   // Cortex settings (provider/model for the cortex migration)
   cortexProvider: z.string().nullable().default(null),
   cortexModel: z.string().nullable().default(null),
-  cortexThinkingLevel: z.enum(['off', 'low', 'medium', 'high']).default('off'),
+  cortexThinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']).default('off'),
   utilityModel: z.string().default('default'),
 });
 

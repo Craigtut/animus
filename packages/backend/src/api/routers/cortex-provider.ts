@@ -394,7 +394,7 @@ export const cortexProviderRouter = router({
 
   setThinkingLevel: protectedProcedure
     .input(z.object({
-      level: z.enum(['off', 'low', 'medium', 'high']),
+      level: z.enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']),
     }))
     .mutation(({ input }) => {
       const db = getSystemDb();

@@ -26,7 +26,7 @@ import {
   type CortexModel,
 } from '@animus-labs/cortex';
 import * as credentialStore from '../db/stores/credential-store.js';
-import { encrypt, decrypt, isConfigured as isVaultUnsealed } from '../lib/encryption-service.js';
+import { isConfigured as isVaultUnsealed } from '../lib/encryption-service.js';
 import { getSystemDb } from '../db/index.js';
 import { createLogger } from '../lib/logger.js';
 
@@ -129,13 +129,12 @@ export class CortexCredentialService {
 
     const result = await this.providerManager.initiateOAuth(provider, callbacks);
 
-    // Encrypt and store the credential blob
-    const encrypted = encrypt(result.credentials);
+    // Store the credential blob (the store handles encryption internally)
     credentialStore.upsertCredential(
       this.db,
       'cortex_oauth',
       provider,
-      encrypted,
+      result.credentials,
       result.meta as unknown as Record<string, unknown>,
     );
 
@@ -151,12 +150,12 @@ export class CortexCredentialService {
 
   saveApiKey(provider: string, apiKey: string): void {
     this.ensureUnsealed('saveApiKey');
-    const encrypted = encrypt(apiKey);
+    // Pass plaintext; the store handles encryption internally
     credentialStore.upsertCredential(
       this.db,
       'cortex_api_key',
       provider,
-      encrypted,
+      apiKey,
     );
     log.info(`API key stored for provider "${provider}"`);
   }
@@ -169,12 +168,12 @@ export class CortexCredentialService {
 
   saveCustomEndpoint(config: CustomModelConfig): void {
     this.ensureUnsealed('saveCustomEndpoint');
-    const encrypted = encrypt(config.apiKey ?? '');
+    // Pass plaintext; the store handles encryption internally
     credentialStore.upsertCredential(
       this.db,
       'cortex_custom',
       'custom',
-      encrypted,
+      config.apiKey ?? '',
       {
         baseUrl: config.baseUrl,
         modelId: config.modelId,
@@ -251,13 +250,12 @@ export class CortexCredentialService {
         );
 
         if (result.changed) {
-          // Persist refreshed credentials
-          const reEncrypted = encrypt(result.credentials);
+          // Persist refreshed credentials (store handles encryption internally)
           credentialStore.updateCredentialData(
             this.db,
             'cortex_oauth',
             provider,
-            reEncrypted,
+            result.credentials,
             result.meta as unknown as Record<string, unknown>,
           );
           log.debug(`OAuth credentials refreshed for provider "${provider}"`);

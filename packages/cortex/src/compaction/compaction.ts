@@ -245,7 +245,11 @@ export async function runCompaction(
   );
   const summaryTokens = estimateTokens(summary);
 
-  // Find oldest preserved timestamp (look for ISO date patterns in content)
+  // The oldest preserved turn's index in the original history.
+  // target.length is the split point: all turns before it were compacted.
+  const oldestPreservedIndex = target.length;
+
+  // Attempt to find a timestamp in the preserved messages; null if not found.
   const oldestPreservedTimestamp = findOldestTimestamp(preserved);
 
   const result: CompactionResult = {
@@ -255,6 +259,7 @@ export async function runCompaction(
     turnsPreserved: preserved.length,
     summaryTokens,
     oldestPreservedTimestamp,
+    oldestPreservedIndex,
     summary,
   };
 
@@ -273,11 +278,14 @@ export async function runCompaction(
 }
 
 /**
- * Find the oldest timestamp in a set of messages.
- * Looks for ISO date patterns or returns the current time as fallback.
+ * Attempt to find the oldest timestamp in a set of messages.
+ *
+ * Scans message content for ISO date patterns. Returns the first match
+ * or null if none found. This is a best-effort heuristic; the consumer
+ * should prefer `oldestPreservedIndex` from CompactionResult for
+ * reliable timestamp resolution via their own database.
  */
-function findOldestTimestamp(messages: AgentMessage[]): string {
-  // Look for ISO date patterns in message content
+function findOldestTimestamp(messages: AgentMessage[]): string | null {
   const isoPattern = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 
   for (const msg of messages) {
@@ -288,8 +296,10 @@ function findOldestTimestamp(messages: AgentMessage[]): string {
     }
   }
 
-  // Fallback: current time (consumer can override via re-seeding logic)
-  return new Date().toISOString();
+  // No ISO timestamp found in preserved messages. Return null rather
+  // than Date.now() so the consumer knows no timestamp was found and
+  // can fall back to oldestPreservedIndex for database-level resolution.
+  return null;
 }
 
 /**

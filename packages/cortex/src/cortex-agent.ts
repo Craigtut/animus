@@ -66,6 +66,24 @@ export interface PiAgent extends AgentStateAccessor, PiEventSource {
    * Only effective while a run() call is in progress.
    */
   steer(message: { role: string; content: string }): void;
+
+  /**
+   * Hot-swap the model without restarting the agent.
+   * Optional: only available if the underlying agent supports it.
+   */
+  setModel?(model: unknown): void;
+
+  /**
+   * Change the thinking/reasoning level.
+   * Optional: only available if the underlying agent supports it.
+   */
+  setThinkingLevel?(level: string): void;
+
+  /**
+   * Replace the agent's tool set at runtime.
+   * Optional: only available if the underlying agent supports it.
+   */
+  setTools?(tools: Array<{ name: string; description: string; parameters: unknown; execute: (args: unknown) => Promise<unknown> }>): void;
 }
 
 /**
@@ -197,8 +215,11 @@ export class CortexAgent {
   private currentSystemPrompt: string = '';
 
   // Resolved models
-  private readonly primaryModel: PiModel;
+  private primaryModel: PiModel;
   private readonly resolvedUtilityModel: PiModel;
+
+  // Built-in tools registered at construction (distinct from MCP-discovered tools)
+  private readonly registeredTools: Array<{ name: string; description: string; parameters: unknown; execute: (args: unknown) => Promise<unknown> }>;
 
   // Compaction Manager
   private readonly compactionManager: CompactionManager;
@@ -207,7 +228,6 @@ export class CortexAgent {
   private loopCompleteHandlers: Array<() => void> = [];
   private errorHandlers: Array<(error: ClassifiedError) => void> = [];
   private beforeCompactionHandlers: Array<(target: CompactionTarget) => Promise<void>> = [];
-  private compactionHandlers: Array<(result: CompactionResult) => void> = [];
   private compactionErrorHandlers: Array<(error: Error) => void> = [];
   private turnCompleteHandlers: Array<(output: AgentTextOutput) => void> = [];
   private subAgentSpawnedHandlers: Array<(taskId: string, instructions: string) => void> = [];
@@ -236,11 +256,12 @@ export class CortexAgent {
    * @param config - CortexAgent configuration
    * @throws Error if the utility model violates the same-provider constraint
    */
-  constructor(agent: PiAgent, config: CortexAgentConfig) {
+  constructor(agent: PiAgent, config: CortexAgentConfig, tools?: Array<{ name: string; description: string; parameters: unknown; execute: (args: unknown) => Promise<unknown> }>) {
     this.agent = agent;
     this.config = config;
     this.workingTagsEnabled = config.workingTags?.enabled ?? true;
     this.workingDirectory = config.workingDirectory;
+    this.registeredTools = tools ?? [];
 
     // Resolve models
     this.primaryModel = config.model as PiModel;
@@ -294,16 +315,12 @@ export class CortexAgent {
       return this.directComplete(context);
     });
 
-    // Wire compaction result -> onCompaction event
-    this.compactionManager.onCompactionResult((result) => {
-      for (const handler of this.compactionHandlers) {
-        try {
-          handler(result);
-        } catch {
-          // Swallow handler errors
-        }
-      }
-    });
+    // Wire compaction result -> onPostCompaction handlers on the manager.
+    // The CompactionManager also calls postCompactionHandlers registered
+    // directly via onPostCompaction(); the onCompactionResult handler here
+    // is the bridge for results that come through the manager's internal
+    // checkAndRunCompaction() path (which already calls its own handlers).
+    // No additional bridging needed; consumers register via onPostCompaction().
 
     // Set up process exit safety net for orphaned subprocesses
     this.setupExitHandler();
@@ -476,7 +493,7 @@ export class CortexAgent {
 
     const piAgent = new AgentClass(agentConfig);
 
-    return new CortexAgent(piAgent, config);
+    return new CortexAgent(piAgent, config, config.tools);
   }
 
   // -----------------------------------------------------------------------
@@ -605,6 +622,48 @@ export class CortexAgent {
   }
 
   /**
+   * Hot-swap the primary model without restarting the agent.
+   * Used when the user changes their provider/model in settings.
+   *
+   * @param model - The new PiModel to use
+   */
+  setModel(model: PiModel): void {
+    this.primaryModel = model;
+    // Update context window for compaction if the new model provides it
+    if (model.contextWindow) {
+      this.compactionManager.setContextWindow(model.contextWindow);
+    }
+    // Update the pi-agent-core agent's model if it exposes setModel
+    if (typeof this.agent.setModel === 'function') {
+      this.agent.setModel(model);
+    }
+  }
+
+  /**
+   * Change the thinking/reasoning level.
+   *
+   * @param level - The new thinking level (e.g., 'low', 'medium', 'high')
+   */
+  setThinkingLevel(level: string): void {
+    if (typeof this.agent.setThinkingLevel === 'function') {
+      this.agent.setThinkingLevel(level);
+    }
+  }
+
+  /**
+   * Update the agent's tool set. Merges built-in tools (registered at
+   * construction) with MCP-discovered tools from connected servers.
+   * Called after MCP server connections change (plugin install/uninstall).
+   */
+  refreshTools(): void {
+    const mcpTools = this.mcpClientManager.getTools();
+    const allTools = [...this.registeredTools, ...mcpTools];
+    if (typeof this.agent.setTools === 'function') {
+      this.agent.setTools(allTools);
+    }
+  }
+
+  /**
    * Make a utility completion call using the utility model.
    * Convenience wrapper for internal operations (WebFetch, classifier, etc.).
    *
@@ -728,16 +787,9 @@ export class CortexAgent {
   }
 
   /**
-   * Register a handler for successful compaction events.
-   * Emitted after Layer 2 (summarization) completes.
-   */
-  onCompaction(handler: (result: CompactionResult) => void): void {
-    this.compactionHandlers.push(handler);
-  }
-
-  /**
    * Register a handler called after compaction completes.
-   * The consumer can re-seed messages from messages.db here.
+   * The consumer uses this to re-seed messages from messages.db,
+   * update internal state, or perform other post-compaction work.
    */
   onPostCompaction(handler: (result: CompactionResult) => void): void {
     this.compactionManager.onPostCompaction(handler);
@@ -1239,7 +1291,6 @@ export class CortexAgent {
     this.loopCompleteHandlers = [];
     this.errorHandlers = [];
     this.beforeCompactionHandlers = [];
-    this.compactionHandlers = [];
     this.compactionErrorHandlers = [];
     this.turnCompleteHandlers = [];
     this.subAgentSpawnedHandlers = [];
