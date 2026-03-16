@@ -218,7 +218,7 @@ Do NOT add a commit body or footer. No `Co-Authored-By`, no bullet lists, no ext
 **Types:** `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `style`
 
 **Scopes** (use the most specific applicable):
-`heartbeat`, `memory`, `agents`, `channels`, `plugins`, `contacts`, `goals`, `tasks`, `persona`, `frontend`, `backend`, `shared`, `tauri`, `api`, `db`, `auth`, `ci`, `release`
+`heartbeat`, `memory`, `agents`, `cortex`, `channels`, `plugins`, `contacts`, `goals`, `tasks`, `persona`, `frontend`, `backend`, `shared`, `tauri`, `api`, `db`, `auth`, `ci`, `release`
 
 **Rules:**
 - Commit early and often. Small, focused commits are preferred over large batches.
