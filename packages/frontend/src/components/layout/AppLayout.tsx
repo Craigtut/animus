@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 import { NavigationPill } from './NavigationPill';
 import { CommandPalette } from './CommandPalette';
 import { TauriDragRegion } from './TauriDragRegion';
+import { BudgetBanner } from '../BudgetBanner';
 import { useSubscriptionManager } from '../../hooks/useSubscriptionManager';
 
 /** Mounts all tRPC WebSocket subscriptions for the main app. */
@@ -23,6 +24,7 @@ export function AppLayout() {
     if (path.startsWith('/mind')) return 'mind';
     if (path.startsWith('/people')) return 'people';
     if (path.startsWith('/persona')) return 'persona';
+    if (path.startsWith('/usage')) return 'usage';
     if (path.startsWith('/settings')) return 'settings';
     return 'presence';
   };
@@ -35,6 +37,7 @@ export function AppLayout() {
       `}
     >
       <TauriDragRegion />
+      <BudgetBanner />
       <NavigationPill />
       <CommandPalette />
       {/* WS auth token is set by AuthGuard, which wraps all authed routes */}
