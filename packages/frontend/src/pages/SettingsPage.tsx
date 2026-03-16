@@ -50,12 +50,13 @@ import type { Theme } from '../styles/theme';
 import { SavesSection } from '../components/settings/SavesSection';
 import { ToolsSection } from '../components/settings/ToolsSection';
 import { PackageConsentDialog } from '../components/settings/PackageConsentDialog';
-import { Upload, ArrowCounterClockwise } from '@phosphor-icons/react';
+import { Upload, ArrowCounterClockwise, ArrowsClockwise } from '@phosphor-icons/react';
 import { AnpkDropZone } from '../components/settings/AnpkDropZone';
 import { AboutInline } from '../components/settings/AboutSection';
 import { TelemetryInline } from '../components/settings/TelemetrySection';
 import { PasswordsSection } from '../components/settings/PasswordsSection';
 import { toast } from '../store/toast-store';
+import { useHeartbeatStore } from '../store/heartbeat-store';
 import DOMPurify from 'dompurify';
 
 // ============================================================================
@@ -569,11 +570,54 @@ function SleepEnergySettings() {
 // Section: AI Provider (Cortex)
 // ============================================================================
 
+// ── Helpers for Cortex Provider Section ──
+
+/** Format a time-until-expiry string from a Unix timestamp (ms). */
+function formatTimeUntilExpiry(expiresAtMs: number): string {
+  const now = Date.now();
+  const diff = expiresAtMs - now;
+  if (diff <= 0) return 'Expired';
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
+
+/** Three breathing dots animation for OAuth waiting states. */
+function BreathingDots({ color }: { color: string }) {
+  const breathe = keyframes`
+    0%, 100% { opacity: 0.3; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1); }
+  `;
+  return (
+    <span css={css`display: inline-flex; gap: 4px; align-items: center;`}>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          css={css`
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: ${color};
+            animation: ${breathe} 1.8s ease-in-out infinite;
+            animation-delay: ${i * 0.25}s;
+          `}
+        />
+      ))}
+    </span>
+  );
+}
+
 function CortexProviderSection() {
   const theme = useTheme();
   const utils = trpc.useUtils();
 
-  const { data: statusData, isLoading: statusLoading } = trpc.cortexProvider.getStatus.useQuery();
+  const { data: statusData, isLoading: statusLoading } = trpc.cortexProvider.getStatus.useQuery(
+    undefined,
+    { refetchInterval: 60_000 } // Refresh every 60s to keep expiry display current
+  );
   const { data: allProviders } = trpc.cortexProvider.listConfiguredProviders.useQuery();
 
   const removeCredentialMutation = trpc.cortexProvider.removeCredential.useMutation({
@@ -594,6 +638,10 @@ function CortexProviderSection() {
     },
   });
 
+  // OAuth flow mutations (for Reconnect)
+  const initiateOAuthMutation = trpc.cortexProvider.initiateOAuth.useMutation();
+  const cancelOAuthMutation = trpc.cortexProvider.cancelOAuth.useMutation();
+
   const thinkingSave = useSaveFlash();
   const modelSave = useSaveFlash();
 
@@ -605,9 +653,51 @@ function CortexProviderSection() {
   );
 
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
+  const [switchModalOpen, setSwitchModalOpen] = useState(false);
+
+  // Reconnect OAuth state
+  const [reconnectState, setReconnectState] = useState<'idle' | 'authenticating'>('idle');
+
+  // Subscribe to OAuth status when reconnecting
+  trpc.cortexProvider.oauthStatus.useSubscription(undefined, {
+    enabled: reconnectState === 'authenticating',
+    onData: (event) => {
+      if (event.type === 'success') {
+        setReconnectState('idle');
+        utils.cortexProvider.getStatus.invalidate();
+        utils.cortexProvider.listConfiguredProviders.invalidate();
+        // Dismiss any auth errors from the store
+        const errors = useHeartbeatStore.getState().systemErrors;
+        errors
+          .filter((e) => e.category === 'authentication')
+          .forEach((e) => useHeartbeatStore.getState().dismissSystemError(e.id));
+      } else if (event.type === 'error') {
+        setReconnectState('idle');
+      }
+    },
+  });
+
+  // System errors from the heartbeat store (auth failures)
+  const authErrors = useHeartbeatStore((s) =>
+    s.systemErrors.filter((e) => e.category === 'authentication')
+  );
+  const hasAuthFailure = authErrors.length > 0;
+  const latestAuthError = authErrors[authErrors.length - 1] ?? null;
 
   const isConnected = statusData?.connected ?? false;
   const providerName = allProviders?.find(p => p.id === activeProvider)?.name ?? activeProvider ?? '';
+
+  // Determine which card state to show:
+  // - If we have auth errors AND we were previously connected, show disconnected state
+  // - If connected normally, show connected state
+  // - If not connected (no provider configured), show not-connected state
+  const showDisconnected = hasAuthFailure && activeProvider;
+  const showConnected = isConnected && !showDisconnected;
+  const showNotConnected = !isConnected && !showDisconnected;
+
+  // Derive credential type badge and expiry info
+  const meta = statusData?.meta as Record<string, unknown> | null;
+  const method = statusData?.method;
 
   const handleModelChange = (modelId: string) => {
     if (!activeProvider) return;
@@ -624,6 +714,29 @@ function CortexProviderSection() {
     );
   };
 
+  const handleReconnect = useCallback(() => {
+    if (!activeProvider) return;
+    setReconnectState('authenticating');
+    initiateOAuthMutation.mutate(
+      { provider: activeProvider },
+      {
+        onError: () => setReconnectState('idle'),
+      }
+    );
+  }, [activeProvider, initiateOAuthMutation]);
+
+  const handleCancelReconnect = useCallback(() => {
+    cancelOAuthMutation.mutate();
+    setReconnectState('idle');
+  }, [cancelOAuthMutation]);
+
+  const handleSwitchModalClose = useCallback(() => {
+    setSwitchModalOpen(false);
+    // Refresh status after modal closes (user may have connected a new provider)
+    utils.cortexProvider.getStatus.invalidate();
+    utils.cortexProvider.listConfiguredProviders.invalidate();
+  }, [utils.cortexProvider.getStatus, utils.cortexProvider.listConfiguredProviders]);
+
   if (statusLoading) {
     return (
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
@@ -637,26 +750,139 @@ function CortexProviderSection() {
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
       <Typography.Title3 as="h2">AI Provider</Typography.Title3>
 
-      {/* Connected state */}
-      {isConnected && (
-        <Card css={css`padding: ${theme.spacing[5]};`}>
+      {/* ── Disconnected / Auth Failure State ── */}
+      {showDisconnected && (
+        <Card css={css`
+          padding: ${theme.spacing[5]};
+          border: 1px solid ${theme.colors.warning.main}33;
+          background: ${theme.colors.warning.main}08;
+          &::before { background: linear-gradient(180deg, ${theme.colors.warning.main}18 0%, transparent 100%); }
+        `}>
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
             {/* Status header */}
-            <div css={css`display: flex; align-items: center; justify-content: space-between;`}>
+            <div css={css`display: flex; align-items: flex-start; justify-content: space-between; gap: ${theme.spacing[3]};`}>
               <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-                <CheckCircle size={20} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+                <Warning size={20} weight="fill" css={css`color: ${theme.colors.warning.main}; flex-shrink: 0;`} />
                 <div>
-                  <Typography.SmallBodyAlt>{providerName}</Typography.SmallBodyAlt>
-                  <Typography.Caption color="hint">
-                    {statusData?.method === 'oauth' ? 'OAuth' :
-                     statusData?.method === 'api_key' ? 'API Key' :
-                     statusData?.method === 'env_var' ? 'Environment Variable' :
-                     statusData?.method === 'custom' ? 'Custom Endpoint' : ''}
-                    {statusData?.meta?.displayName ? ` \u00b7 ${statusData.meta.displayName}` : ''}
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                    <Typography.SmallBodyAlt>{providerName}</Typography.SmallBodyAlt>
+                    <Badge variant="warning">Disconnected</Badge>
+                  </div>
+                  <Typography.Caption color="hint" css={css`margin-top: ${theme.spacing[0.5]};`}>
+                    {latestAuthError?.message
+                      ? latestAuthError.message.length > 120
+                        ? `${latestAuthError.message.slice(0, 120)}...`
+                        : latestAuthError.message
+                      : method === 'api_key'
+                        ? 'API key is invalid or has been revoked.'
+                        : 'Authentication expired or revoked.'}
                   </Typography.Caption>
                 </div>
               </div>
-              <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
+            </div>
+
+            {/* Reconnect actions */}
+            {reconnectState === 'authenticating' ? (
+              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+                <BreathingDots color={theme.colors.warning.main} />
+                <Typography.Caption color="secondary">Waiting for authorization...</Typography.Caption>
+                <Button variant="ghost" size="sm" onClick={handleCancelReconnect}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
+                {method === 'oauth' && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleReconnect}
+                    loading={initiateOAuthMutation.isPending}
+                  >
+                    <ArrowsClockwise size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+                    Reconnect
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setSwitchModalOpen(true)}
+                >
+                  Switch Provider
+                </Button>
+              </div>
+            )}
+
+            {/* Suggested action from the error */}
+            {latestAuthError?.suggestedAction && (
+              <Typography.Tiny color="hint">
+                {latestAuthError.suggestedAction}
+              </Typography.Tiny>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {/* ── Connected State ── */}
+      {showConnected && (
+        <Card css={css`padding: ${theme.spacing[5]};`}>
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+            {/* Status header */}
+            <div css={css`display: flex; align-items: flex-start; justify-content: space-between; gap: ${theme.spacing[3]};`}>
+              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+                <CheckCircle size={20} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]};`}>
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                    <Typography.SmallBodyAlt>{providerName}</Typography.SmallBodyAlt>
+                    <Badge variant="success">Connected</Badge>
+                  </div>
+
+                  {/* Display name */}
+                  {meta?.['displayName'] ? (
+                    <Typography.Caption color="hint">
+                      {`${meta['displayName']}`}
+                    </Typography.Caption>
+                  ) : null}
+
+                  {/* Fix 2: Credential type badge + expiry info */}
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-wrap: wrap; margin-top: ${theme.spacing[0.5]};`}>
+                    {method === 'oauth' && (
+                      <>
+                        {meta?.['refreshable'] && (
+                          <Badge variant="default">
+                            <ArrowsClockwise size={10} css={css`margin-right: ${theme.spacing[0.5]};`} />
+                            Auto-refreshing
+                          </Badge>
+                        )}
+                        {meta?.['expiresAt'] && typeof meta['expiresAt'] === 'number' && (
+                          <Typography.Tiny color="hint">
+                            Expires in {formatTimeUntilExpiry(meta['expiresAt'] as number)}
+                          </Typography.Tiny>
+                        )}
+                      </>
+                    )}
+                    {method === 'api_key' && (
+                      <Badge variant="default">API Key</Badge>
+                    )}
+                    {method === 'env_var' && (
+                      <Badge variant="default">Environment Variable</Badge>
+                    )}
+                    {method === 'custom' && (
+                      <>
+                        <Badge variant="default">Custom Endpoint</Badge>
+                        {meta?.['baseUrl'] && (
+                          <Typography.Tiny color="hint">
+                            {String(meta['baseUrl'])}
+                          </Typography.Tiny>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Action buttons: Sign Out + Switch Provider */}
+              <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-shrink: 0;`}>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -665,6 +891,13 @@ function CortexProviderSection() {
                 >
                   <SignOut size={14} css={css`margin-right: ${theme.spacing[1]};`} />
                   Sign Out
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setSwitchModalOpen(true)}
+                >
+                  Switch Provider
                 </Button>
               </div>
             </div>
@@ -705,14 +938,21 @@ function CortexProviderSection() {
         </Card>
       )}
 
-      {/* Not connected state */}
-      {!isConnected && (
+      {/* ── Not Connected State ── */}
+      {showNotConnected && (
         <Card css={css`padding: ${theme.spacing[5]};`}>
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]}; align-items: center; text-align: center; padding: ${theme.spacing[4]} 0;`}>
             <Typography.Body color="secondary">No AI provider configured.</Typography.Body>
             <Typography.Caption color="hint">
-              Set up a provider in the onboarding flow or use the options below.
+              Connect a provider to start using Animus.
             </Typography.Caption>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setSwitchModalOpen(true)}
+            >
+              Set Up Provider
+            </Button>
           </div>
         </Card>
       )}
@@ -831,6 +1071,518 @@ function CortexProviderSection() {
                     </div>
                   </div>
                 )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* ── Switch Provider Modal ── */}
+      <Modal open={switchModalOpen} onClose={handleSwitchModalClose} maxWidth="560px">
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
+          <div css={css`display: flex; align-items: center; justify-content: space-between;`}>
+            <Typography.Title3 as="h2" css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
+              Switch Provider
+            </Typography.Title3>
+            <button
+              onClick={handleSwitchModalClose}
+              css={css`
+                display: flex; align-items: center; justify-content: center;
+                width: 28px; height: 28px; border-radius: ${theme.borderRadius.sm};
+                background: none; border: none; cursor: pointer;
+                color: ${theme.colors.text.hint};
+                &:hover { color: ${theme.colors.text.primary}; background: ${theme.colors.background.elevated}; }
+              `}
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <SwitchProviderModalContent onClose={handleSwitchModalClose} />
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+/**
+ * Inner content for the Switch Provider modal.
+ * Reuses the same three-layer progressive disclosure from onboarding,
+ * adapted for modal use (no onboarding navigation, auto-closes on success).
+ */
+function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
+  const theme = useTheme();
+  const utils = trpc.useUtils();
+
+  const { data: statusData } = trpc.cortexProvider.getStatus.useQuery();
+  const { data: allProviders } = trpc.cortexProvider.listProviders.useQuery();
+
+  // OAuth state
+  const [oauthProvider, setOauthProvider] = useState<string | null>(null);
+  const [oauthState, setOauthState] = useState<'idle' | 'authenticating' | 'success' | 'error'>('idle');
+  const [oauthAuthUrl, setOauthAuthUrl] = useState<string | null>(null);
+  const [oauthDeviceCode, setOauthDeviceCode] = useState<string | null>(null);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+
+  // API key state
+  const [apiKeyExpanded, setApiKeyExpanded] = useState(false);
+  const [apiKeyProvider, setApiKeyProvider] = useState('anthropic');
+  const [apiKeyValue, setApiKeyValue] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [apiKeyValidation, setApiKeyValidation] = useState<'idle' | 'validating' | 'success' | 'error'>('idle');
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+
+  // Custom endpoint state
+  const [customExpanded, setCustomExpanded] = useState(false);
+  const [customBaseUrl, setCustomBaseUrl] = useState('');
+  const [customModelId, setCustomModelId] = useState('');
+  const [customApiKey, setCustomApiKey] = useState('');
+  const [customValidation, setCustomValidation] = useState<'idle' | 'validating' | 'success' | 'error'>('idle');
+
+  // Mutations
+  const initiateOAuthMutation = trpc.cortexProvider.initiateOAuth.useMutation();
+  const cancelOAuthMutation = trpc.cortexProvider.cancelOAuth.useMutation();
+  const validateApiKeyMutation = trpc.cortexProvider.validateApiKey.useMutation();
+  const saveApiKeyMutation = trpc.cortexProvider.saveApiKey.useMutation();
+  const saveCustomMutation = trpc.cortexProvider.saveCustomEndpoint.useMutation();
+  const testCustomMutation = trpc.cortexProvider.testCustomEndpoint.useMutation();
+
+  // OAuth cards (same as onboarding)
+  const OAUTH_CARDS = [
+    { id: 'anthropic', name: 'Anthropic (Claude)', description: 'Use your Claude Pro or Max subscription' },
+    { id: 'openai-codex', name: 'OpenAI (ChatGPT)', description: 'Use your ChatGPT Plus or Pro subscription' },
+    { id: 'google-gemini-cli', name: 'Google (Gemini)', description: 'Sign in with your Google account' },
+    { id: 'github-copilot', name: 'GitHub Copilot', description: 'Use your GitHub Copilot subscription' },
+  ];
+
+  // OAuth subscription
+  trpc.cortexProvider.oauthStatus.useSubscription(undefined, {
+    enabled: oauthState === 'authenticating',
+    onData: (event) => {
+      if (event.type === 'auth_url') {
+        setOauthAuthUrl(event.url);
+        if (event.deviceCode) setOauthDeviceCode(event.deviceCode);
+      } else if (event.type === 'success') {
+        setOauthState('success');
+        utils.cortexProvider.getStatus.invalidate();
+        utils.cortexProvider.listConfiguredProviders.invalidate();
+        // Auto-close modal after a brief delay so the user sees the success state
+        setTimeout(() => onClose(), 600);
+      } else if (event.type === 'error') {
+        setOauthState('error');
+        setOauthError(event.message);
+      }
+    },
+  });
+
+  const apiKeyProviders = (allProviders ?? []).filter(
+    (p) => p.authMethods.includes('api_key')
+  );
+  const selectedApiProvider = apiKeyProviders.find((p) => p.id === apiKeyProvider);
+
+  const handleOAuthStart = useCallback((providerId: string) => {
+    setOauthProvider(providerId);
+    setOauthState('authenticating');
+    setOauthError(null);
+    setOauthAuthUrl(null);
+    setOauthDeviceCode(null);
+    initiateOAuthMutation.mutate(
+      { provider: providerId },
+      {
+        onError: (err) => {
+          setOauthState('error');
+          setOauthError(err.message ?? 'Authentication failed');
+        },
+      }
+    );
+  }, [initiateOAuthMutation]);
+
+  const handleOAuthCancel = useCallback(() => {
+    cancelOAuthMutation.mutate();
+    setOauthState('idle');
+    setOauthProvider(null);
+  }, [cancelOAuthMutation]);
+
+  const handleValidateApiKey = useCallback(() => {
+    if (!apiKeyValue.trim()) return;
+    setApiKeyValidation('validating');
+    setApiKeyError(null);
+    validateApiKeyMutation.mutate(
+      { provider: apiKeyProvider, apiKey: apiKeyValue },
+      {
+        onSuccess: (result) => {
+          if (result.valid) {
+            saveApiKeyMutation.mutate(
+              { provider: apiKeyProvider, apiKey: apiKeyValue },
+              {
+                onSuccess: () => {
+                  setApiKeyValidation('success');
+                  utils.cortexProvider.getStatus.invalidate();
+                  utils.cortexProvider.listConfiguredProviders.invalidate();
+                  setTimeout(() => onClose(), 600);
+                },
+                onError: (err) => {
+                  setApiKeyValidation('error');
+                  setApiKeyError(err.message ?? 'Failed to save key');
+                },
+              }
+            );
+          } else {
+            setApiKeyValidation('error');
+            setApiKeyError('Invalid API key. Check that you copied the full key.');
+          }
+        },
+        onError: (err) => {
+          setApiKeyValidation('error');
+          setApiKeyError(err.message ?? 'Validation failed');
+        },
+      }
+    );
+  }, [apiKeyProvider, apiKeyValue, validateApiKeyMutation, saveApiKeyMutation, utils, onClose]);
+
+  const handleTestCustom = useCallback(() => {
+    if (!customBaseUrl || !customModelId) return;
+    setCustomValidation('validating');
+    testCustomMutation.mutate(
+      { baseUrl: customBaseUrl, modelId: customModelId, apiKey: customApiKey || undefined },
+      {
+        onSuccess: (result) => {
+          if (result.valid) {
+            saveCustomMutation.mutate(
+              { baseUrl: customBaseUrl, modelId: customModelId, apiKey: customApiKey || undefined },
+              {
+                onSuccess: () => {
+                  setCustomValidation('success');
+                  utils.cortexProvider.getStatus.invalidate();
+                  utils.cortexProvider.listConfiguredProviders.invalidate();
+                  setTimeout(() => onClose(), 600);
+                },
+                onError: () => setCustomValidation('error'),
+              }
+            );
+          } else {
+            setCustomValidation('error');
+          }
+        },
+        onError: () => setCustomValidation('error'),
+      }
+    );
+  }, [customBaseUrl, customModelId, customApiKey, testCustomMutation, saveCustomMutation, utils, onClose]);
+
+  return (
+    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+      <Typography.Caption color="secondary">
+        Connect to a different AI provider. Your existing configuration will be replaced.
+      </Typography.Caption>
+
+      {/* OAuth Provider Cards */}
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+        {OAUTH_CARDS.map((card) => {
+          const isAuthenticating = oauthProvider === card.id && oauthState === 'authenticating';
+          const isError = oauthProvider === card.id && oauthState === 'error';
+          const isCurrent = statusData?.provider === card.id && statusData.connected;
+
+          return (
+            <div
+              key={card.id}
+              css={css`
+                padding: ${theme.spacing[3]};
+                border-radius: ${theme.borderRadius.md};
+                border: 1px solid ${isCurrent ? theme.colors.success.main + '55' : theme.colors.border.default};
+                background: ${isCurrent ? theme.colors.success.main + '08' : theme.colors.background.paper};
+                transition: border-color ${theme.transitions.fast}, background ${theme.transitions.fast};
+              `}
+            >
+              {isAuthenticating ? (
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                  <Typography.SmallBodyAlt>{card.name}</Typography.SmallBodyAlt>
+                  {oauthAuthUrl && oauthDeviceCode ? (
+                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+                      <Typography.Caption color="secondary">Open the browser and enter code:</Typography.Caption>
+                      <Typography.SmallBodyAlt as="code" css={css`letter-spacing: 0.15em;`}>
+                        {oauthDeviceCode}
+                      </Typography.SmallBodyAlt>
+                    </div>
+                  ) : (
+                    <Typography.Caption color="secondary">
+                      {oauthAuthUrl ? 'Complete sign-in in your browser.' : 'Starting authentication...'}
+                    </Typography.Caption>
+                  )}
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                    <BreathingDots color={theme.colors.text.hint} />
+                    <Typography.Tiny color="hint">Waiting for authorization...</Typography.Tiny>
+                    <Button variant="ghost" size="sm" onClick={handleOAuthCancel}>Cancel</Button>
+                  </div>
+                </div>
+              ) : isError ? (
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                    <XCircle size={16} weight="fill" css={css`color: ${theme.colors.error.main}; flex-shrink: 0;`} />
+                    <Typography.SmallBody css={css`color: ${theme.colors.error.main};`}>
+                      {oauthError || 'Authentication failed'}
+                    </Typography.SmallBody>
+                  </div>
+                  <Button variant="secondary" size="sm" onClick={() => handleOAuthStart(card.id)} css={css`align-self: flex-start;`}>
+                    Try again
+                  </Button>
+                </div>
+              ) : (
+                <div css={css`display: flex; align-items: center; justify-content: space-between;`}>
+                  <div>
+                    <Typography.SmallBodyAlt>{card.name}</Typography.SmallBodyAlt>
+                    <Typography.Tiny color="hint">{card.description}</Typography.Tiny>
+                  </div>
+                  {isCurrent ? (
+                    <Badge variant="success">Current</Badge>
+                  ) : (
+                    <Button variant="secondary" size="sm" onClick={() => handleOAuthStart(card.id)}>
+                      Sign In
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* API Key Layer */}
+      <div>
+        <button
+          onClick={() => setApiKeyExpanded(!apiKeyExpanded)}
+          css={css`
+            display: flex; align-items: center; gap: ${theme.spacing[1]};
+            padding: 0; background: none; border: none; cursor: pointer;
+            font-size: ${theme.typography.fontSize.sm}; font-family: inherit;
+            color: ${theme.colors.text.hint};
+            &:hover { color: ${theme.colors.text.secondary}; }
+          `}
+        >
+          <CaretRight size={12} css={css`
+            transition: transform 150ms ease;
+            transform: rotate(${apiKeyExpanded ? '90deg' : '0deg'});
+          `} />
+          Use an API key instead
+        </button>
+        <AnimatePresence>
+          {apiKeyExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              css={css`overflow: hidden;`}
+            >
+              <div css={css`
+                display: flex; flex-direction: column; gap: ${theme.spacing[3]};
+                padding: ${theme.spacing[3]};
+                margin-top: ${theme.spacing[2]};
+                border-radius: ${theme.borderRadius.md};
+                border: 1px solid ${theme.colors.border.default};
+                background: ${theme.colors.background.elevated};
+              `}>
+                <select
+                  value={apiKeyProvider}
+                  onChange={(e) => {
+                    setApiKeyProvider(e.target.value);
+                    setApiKeyValidation('idle');
+                    setApiKeyError(null);
+                    setApiKeyValue('');
+                  }}
+                  css={css`
+                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                    background: ${theme.colors.background.paper};
+                    border: 1px solid ${theme.colors.border.default};
+                    border-radius: ${theme.borderRadius.default};
+                    color: ${theme.colors.text.primary};
+                    font-size: ${theme.typography.fontSize.sm};
+                    font-family: inherit; cursor: pointer; outline: none;
+                    &:focus { border-color: ${theme.colors.border.focus}; }
+                  `}
+                >
+                  {apiKeyProviders.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
+                  <div css={css`flex: 1; position: relative;`}>
+                    <input
+                      type={showKey ? 'text' : 'password'}
+                      value={apiKeyValue}
+                      onChange={(e) => { setApiKeyValue(e.target.value); setApiKeyValidation('idle'); setApiKeyError(null); }}
+                      placeholder={selectedApiProvider?.keyPrefix ? `${selectedApiProvider.keyPrefix}...` : 'Enter API key'}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && apiKeyValue.trim()) handleValidateApiKey(); }}
+                      css={css`
+                        width: 100%; padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                        padding-right: ${theme.spacing[8]};
+                        background: ${theme.colors.background.paper};
+                        border: 1px solid ${apiKeyValidation === 'error' ? theme.colors.error.main : theme.colors.border.default};
+                        border-radius: ${theme.borderRadius.default};
+                        color: ${theme.colors.text.primary}; font-size: ${theme.typography.fontSize.sm};
+                        outline: none;
+                        &:focus { border-color: ${apiKeyValidation === 'error' ? theme.colors.error.main : theme.colors.border.focus}; }
+                        &::placeholder { color: ${theme.colors.text.hint}; }
+                      `}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowKey(!showKey)}
+                      css={css`
+                        position: absolute; right: ${theme.spacing[2]}; top: 50%; transform: translateY(-50%);
+                        color: ${theme.colors.text.hint}; display: flex; padding: 0; background: none; border: none; cursor: pointer;
+                        &:hover { color: ${theme.colors.text.primary}; }
+                      `}
+                    >
+                      {showKey ? <EyeSlash size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                  <Button
+                    variant={apiKeyValidation === 'success' ? 'secondary' : 'primary'}
+                    size="sm"
+                    onClick={handleValidateApiKey}
+                    loading={apiKeyValidation === 'validating'}
+                    disabled={!apiKeyValue.trim()}
+                    css={css`flex-shrink: 0; min-width: 100px;`}
+                  >
+                    {apiKeyValidation === 'success' ? (
+                      <span css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                        <CheckCircle size={14} weight="fill" /> Saved
+                      </span>
+                    ) : 'Validate'}
+                  </Button>
+                </div>
+                {apiKeyValidation === 'error' && (
+                  <Typography.Caption css={css`color: ${theme.colors.error.main}; display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                    <XCircle size={12} weight="fill" /> {apiKeyError || 'Invalid API key'}
+                  </Typography.Caption>
+                )}
+                {selectedApiProvider?.keyUrl && (
+                  <Typography.Tiny
+                    as="a"
+                    href={`https://${selectedApiProvider.keyUrl}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    color="hint"
+                    css={css`
+                      display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
+                      text-decoration: none;
+                      &:hover { text-decoration: underline; color: ${theme.colors.text.secondary}; }
+                    `}
+                  >
+                    Get your key at {selectedApiProvider.keyUrl} <ArrowSquareOut size={10} />
+                  </Typography.Tiny>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Custom Endpoint Layer */}
+      <div>
+        <button
+          onClick={() => setCustomExpanded(!customExpanded)}
+          css={css`
+            display: flex; align-items: center; gap: ${theme.spacing[1]};
+            padding: 0; background: none; border: none; cursor: pointer;
+            font-size: ${theme.typography.fontSize.sm}; font-family: inherit;
+            color: ${theme.colors.text.hint};
+            &:hover { color: ${theme.colors.text.secondary}; }
+          `}
+        >
+          <CaretRight size={12} css={css`
+            transition: transform 150ms ease;
+            transform: rotate(${customExpanded ? '90deg' : '0deg'});
+          `} />
+          Configure a custom endpoint
+        </button>
+        <AnimatePresence>
+          {customExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              css={css`overflow: hidden;`}
+            >
+              <div css={css`
+                display: flex; flex-direction: column; gap: ${theme.spacing[3]};
+                padding: ${theme.spacing[3]};
+                margin-top: ${theme.spacing[2]};
+                border-radius: ${theme.borderRadius.md};
+                border: 1px solid ${theme.colors.border.default};
+                background: ${theme.colors.background.elevated};
+              `}>
+                <Typography.Tiny color="hint">
+                  For self-hosted models (Ollama, vLLM, LM Studio) or custom OpenAI-compatible APIs
+                </Typography.Tiny>
+                <input
+                  type="text"
+                  value={customBaseUrl}
+                  onChange={(e) => { setCustomBaseUrl(e.target.value); setCustomValidation('idle'); }}
+                  placeholder="http://localhost:11434/v1"
+                  css={css`
+                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                    background: ${theme.colors.background.paper};
+                    border: 1px solid ${theme.colors.border.default};
+                    border-radius: ${theme.borderRadius.default};
+                    color: ${theme.colors.text.primary}; font-size: ${theme.typography.fontSize.sm};
+                    outline: none;
+                    &:focus { border-color: ${theme.colors.border.focus}; }
+                    &::placeholder { color: ${theme.colors.text.hint}; }
+                  `}
+                />
+                <input
+                  type="text"
+                  value={customModelId}
+                  onChange={(e) => { setCustomModelId(e.target.value); setCustomValidation('idle'); }}
+                  placeholder="Model ID (e.g. llama-3.3-70b)"
+                  css={css`
+                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                    background: ${theme.colors.background.paper};
+                    border: 1px solid ${theme.colors.border.default};
+                    border-radius: ${theme.borderRadius.default};
+                    color: ${theme.colors.text.primary}; font-size: ${theme.typography.fontSize.sm};
+                    outline: none;
+                    &:focus { border-color: ${theme.colors.border.focus}; }
+                    &::placeholder { color: ${theme.colors.text.hint}; }
+                  `}
+                />
+                <input
+                  type="password"
+                  value={customApiKey}
+                  onChange={(e) => setCustomApiKey(e.target.value)}
+                  placeholder="API Key (optional)"
+                  css={css`
+                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                    background: ${theme.colors.background.paper};
+                    border: 1px solid ${theme.colors.border.default};
+                    border-radius: ${theme.borderRadius.default};
+                    color: ${theme.colors.text.primary}; font-size: ${theme.typography.fontSize.sm};
+                    outline: none;
+                    &:focus { border-color: ${theme.colors.border.focus}; }
+                    &::placeholder { color: ${theme.colors.text.hint}; }
+                  `}
+                />
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleTestCustom}
+                    loading={customValidation === 'validating'}
+                    disabled={!customBaseUrl || !customModelId}
+                  >
+                    {customValidation === 'success' ? (
+                      <span css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                        <CheckCircle size={14} weight="fill" /> Connected
+                      </span>
+                    ) : 'Test Connection'}
+                  </Button>
+                  {customValidation === 'error' && (
+                    <Typography.Tiny css={css`color: ${theme.colors.error.main}; display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                      <XCircle size={12} weight="fill" /> Connection failed
+                    </Typography.Tiny>
+                  )}
+                </div>
               </div>
             </motion.div>
           )}
