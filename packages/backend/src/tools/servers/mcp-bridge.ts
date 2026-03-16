@@ -26,12 +26,8 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod/v3';
 import { executeTool } from '../registry.js';
 import type { ToolHandlerContext, ToolResult } from '../types.js';
-import {
-  handleRecordThought,
-  handleRecordCognitiveState,
-  recordThoughtSchema,
-  recordCognitiveStateSchema,
-} from '../../heartbeat/cognitive-tools.js';
+// DEPRECATED (Phase 2A): Cognitive tool imports removed.
+// THOUGHT and REFLECT are now programmatic phases, not MCP tool calls.
 import { createLogger } from '../../lib/logger.js';
 import { logProcessSpawn } from '../../lib/process-diagnostics.js';
 
@@ -123,25 +119,11 @@ function convertZodToJsonSchema(schema: ZodTypeAny): Record<string, unknown> {
  * Get tool definitions for a given tool set, with permission filtering applied.
  */
 export function getToolDefs(toolSet: ToolSet): BridgeToolDef[] {
+  // DEPRECATED (Phase 2A): Cognitive tools replaced by programmatic THOUGHT/REFLECT phases.
+  // Return empty array; the cognitive MCP server is no longer registered with agent sessions.
   if (toolSet === 'cognitive') {
-    return [
-      {
-        name: 'record_thought',
-        description:
-          'Your first action every time you respond. Call this once before writing any reply ' +
-          'or calling any other tool. It is critical that this is the very first thing you do.',
-        inputSchema: convertZodToJsonSchema(recordThoughtSchema),
-      },
-      {
-        name: 'record_cognitive_state',
-        description:
-          'MANDATORY — call this exactly once after your reply. Your response is not complete ' +
-          'until you call this tool. record_thought bookends the start of your turn; this ' +
-          'bookends the end. Without it, your thoughts, emotions, and experiences are lost. ' +
-          'Call it after your final reply text, then you are done.',
-        inputSchema: convertZodToJsonSchema(recordCognitiveStateSchema),
-      },
-    ];
+    log.debug('Deprecated cognitive tool set requested; returning empty list');
+    return [];
   }
 
   if (toolSet === 'mind') {
@@ -256,37 +238,19 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
 
-    // POST /cognitive/thought — records a thought
+    // POST /cognitive/thought — DEPRECATED (Phase 2A: replaced by programmatic THOUGHT phase)
+    // Kept as a stub for backward compatibility during migration.
     if (req.method === 'POST' && path === '/cognitive/thought') {
-      const body = JSON.parse(await readBody(req));
-      const parsed = recordThoughtSchema.safeParse(body);
-      if (!parsed.success) {
-        log.warn('Invalid record_thought input:', parsed.error.message);
-        jsonResponse(res, 200, { content: [{ type: 'text', text: `Invalid input: ${parsed.error.message}` }], isError: true });
-        return;
-      }
-      const result = handleRecordThought(parsed.data);
-      jsonResponse(res, 200, result);
+      log.warn('Deprecated cognitive/thought endpoint called. THOUGHT is now a programmatic phase.');
+      jsonResponse(res, 410, { content: [{ type: 'text', text: 'Endpoint deprecated. THOUGHT phase is now programmatic.' }], isError: true });
       return;
     }
 
-    // POST /cognitive/state — records cognitive state
+    // POST /cognitive/state — DEPRECATED (Phase 2A: replaced by programmatic REFLECT phase)
+    // Kept as a stub for backward compatibility during migration.
     if (req.method === 'POST' && path === '/cognitive/state') {
-      const body = JSON.parse(await readBody(req));
-      // Coerce string "null" to actual null — LLMs frequently emit "null" as a string
-      for (const key of ['energyDelta', 'coreSelfUpdate', 'workingMemoryUpdate'] as const) {
-        if ((body as Record<string, unknown>)[key] === 'null') {
-          (body as Record<string, unknown>)[key] = null;
-        }
-      }
-      const parsed = recordCognitiveStateSchema.safeParse(body);
-      if (!parsed.success) {
-        log.warn('Invalid record_cognitive_state input:', parsed.error.message);
-        jsonResponse(res, 200, { content: [{ type: 'text', text: `Invalid input: ${parsed.error.message}` }], isError: true });
-        return;
-      }
-      const result = handleRecordCognitiveState(parsed.data);
-      jsonResponse(res, 200, result);
+      log.warn('Deprecated cognitive/state endpoint called. REFLECT is now a programmatic phase.');
+      jsonResponse(res, 410, { content: [{ type: 'text', text: 'Endpoint deprecated. REFLECT phase is now programmatic.' }], isError: true });
       return;
     }
 
