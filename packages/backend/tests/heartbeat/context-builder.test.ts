@@ -79,7 +79,6 @@ function makeParams(overrides: Partial<MindContextParams> = {}): MindContextPara
   return {
     trigger: { type: 'interval', elapsedMs: 300000 },
     contact: null,
-    sessionState: 'cold',
     currentEmotions: [makeEmotion('joy', 0.5), makeEmotion('curiosity', 0.3)],
     tickIntervalMs: 300000,
     recentThoughts: [],
@@ -103,26 +102,21 @@ describe('context-builder', () => {
       expect(prompt).toContain('YOUR EMOTIONS');
       expect(prompt).toContain('DECISIONS');
       expect(prompt).toContain('YOUR MEMORY');
-      expect(prompt).toContain('SESSION AWARENESS');
+      expect(prompt).toContain('LOG AWARENESS');
     });
   });
 
   describe('buildMindContext', () => {
-    it('includes systemPrompt for cold sessions', () => {
-      const ctx = buildMindContext(makeParams({ sessionState: 'cold' }));
+    it('always includes systemPrompt', () => {
+      const ctx = buildMindContext(makeParams());
       expect(ctx.systemPrompt).toBeTruthy();
-      expect(ctx.userMessage).toBeTruthy();
-    });
-
-    it('excludes systemPrompt for warm sessions', () => {
-      const ctx = buildMindContext(makeParams({ sessionState: 'warm' }));
-      expect(ctx.systemPrompt).toBeNull();
       expect(ctx.userMessage).toBeTruthy();
     });
 
     it('includes token breakdown', () => {
       const ctx = buildMindContext(makeParams());
       expect(ctx.tokenBreakdown.userMessage).toBeGreaterThan(0);
+      expect(ctx.tokenBreakdown.systemPrompt).toBeGreaterThan(0);
     });
   });
 
@@ -603,9 +597,8 @@ describe('context-builder', () => {
       expect(msg).not.toContain('Trigger payload');
     });
 
-    it('plugin decision descriptions flow through buildMindContext for cold sessions', () => {
+    it('plugin decision descriptions flow through buildMindContext', () => {
       const ctx = buildMindContext(makeParams({
-        sessionState: 'cold',
         pluginDecisionDescriptions: '- send_notification: Send a push notification',
       }));
 

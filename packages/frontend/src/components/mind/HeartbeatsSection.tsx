@@ -24,10 +24,6 @@ function triggerColor(triggerType: string, theme: ReturnType<typeof useTheme>): 
   }
 }
 
-function sessionBadgeColor(state: string, theme: ReturnType<typeof useTheme>): string {
-  return state === 'cold' ? '#5B8DEF' : '#E8A838';
-}
-
 // ============================================================================
 // Collapsible Section
 // ============================================================================
@@ -282,9 +278,6 @@ function TickList({ onSelect }: { onSelect: (tickNumber: number) => void }) {
             {/* Trigger badge */}
             <Badge label={tick.triggerType} color={triggerColor(tick.triggerType, theme)} />
 
-            {/* Session state badge */}
-            <Badge label={tick.sessionState} color={sessionBadgeColor(tick.sessionState, theme)} />
-
             {/* Thought preview */}
             <Typography.SmallBody
               color="secondary"
@@ -424,7 +417,6 @@ function TickDetail({ tickNumber, onBack }: { tickNumber: number; onBack: () => 
       `}>
         <Typography.Subtitle color="primary">Tick #{data.tickNumber}</Typography.Subtitle>
         <Badge label={data.triggerType} color={triggerColor(data.triggerType, theme)} />
-        <Badge label={data.sessionState} color={sessionBadgeColor(data.sessionState, theme)} />
         {data.durationMs != null && (
           <Typography.Caption color="hint" css={css`font-family: ${theme.typography.fontFamily.mono};`}>
             {formatDuration(data.durationMs)}

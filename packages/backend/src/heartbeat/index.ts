@@ -124,7 +124,6 @@ function logTickInput(params: {
   tickNumber: number;
   triggerType: string;
   triggerContext: unknown;
-  sessionState: string;
   compiledContext: CompiledContext;
 }): void {
   const agentLogsDb = getAgentLogsDb();
@@ -135,7 +134,6 @@ function logTickInput(params: {
       tickNumber: params.tickNumber,
       triggerType: params.triggerType,
       triggerContext: params.triggerContext,
-      sessionState: params.sessionState,
       systemPrompt: params.compiledContext.systemPrompt,
       userMessage: params.compiledContext.userMessage,
       systemPromptManifest: params.compiledContext.systemPromptManifest,
@@ -154,7 +152,6 @@ function logTickInput(params: {
   eventBus.emit('tick:input_stored', {
     tickNumber: params.tickNumber,
     triggerType: params.triggerType,
-    sessionState: params.sessionState,
   });
 }
 
@@ -202,7 +199,6 @@ async function mindQuery(
   const context = buildMindContext({
     trigger: gathered.trigger,
     contact: gathered.contact,
-    sessionState: gathered.sessionState,
     currentEmotions: gathered.emotions,
     tickIntervalMs: gathered.tickIntervalMs,
     recentThoughts: gathered.recentThoughts,
@@ -257,27 +253,13 @@ async function mindQuery(
   }
 
   try {
-    // If session state is "warm" but no active session exists, we need to rebuild
-    // the system prompt that was skipped during context building
-    let effectiveSystemPrompt = context.systemPrompt;
-    if (!effectiveSystemPrompt && (!ctx.mindSession.session || !ctx.mindSession.session.isActive)) {
-      log.info('Rebuilding system prompt for dead warm session');
-      effectiveSystemPrompt = buildSystemPrompt(ctx.compiledPersona!, {
-        energySystemEnabled: gathered.energySystemEnabled ?? false,
-        tickIntervalMs: gathered.tickIntervalMs,
-        ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
-        ...(gathered.aiTimezone ? { timezone: gathered.aiTimezone } : {}),
-      });
-    }
-
-    // Get or create the mind session
+    // Get or create the mind session (always provides system prompt)
     const mindStart = Date.now();
-    log.info(`Mind query: session=${gathered.sessionState}, provider=${ctx.agents!.agentManager!.getConfiguredProviders()[0] ?? 'none'}`);
+    log.info(`Mind query: provider=${ctx.agents!.agentManager!.getConfiguredProviders()[0] ?? 'none'}`);
 
     const session = await getOrCreateMindSession(
       ctx.mindSession,
-      gathered.sessionState,
-      effectiveSystemPrompt,
+      context.systemPrompt,
       ctx.agents!.agentManager!,
       ctx.agents!.agentLogStoreAdapter,
     );
@@ -301,7 +283,6 @@ async function mindQuery(
           tickNumber,
           triggerType: gathered.trigger.type,
           triggerContext: gathered.trigger,
-          sessionState: gathered.sessionState,
           compiledContext: context,
         });
         tickInputLogged = true;
@@ -604,7 +585,6 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     heartbeatStore.updateHeartbeatState(hbDb, {
       tickNumber,
       currentStage: 'gather',
-      sessionState: 'active',
       triggerType: queuedTick.trigger.type,
       triggerContext: JSON.stringify(queuedTick.trigger),
       lastTickAt: now(),
@@ -621,14 +601,19 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     });
 
     // Stage 1: GATHER CONTEXT
+    // If session was invalidated by plugin/settings change, reset it
+    if (ctx.mindSession.invalidated) {
+      ctx.mindSession.invalidated = false;
+      log.info('Session invalidated, will create new session for this tick');
+      await resetMindSession(ctx.mindSession, ctx.agents?.agentManager ?? null);
+    }
+
     const gathered = await gatherContext(effectiveTrigger, {
       tickQueue,
       memoryManager: ctx.memory?.memoryManager ?? null,
       seedManager: ctx.goals?.seedManager ?? null,
       goalManager: ctx.goals?.goalManager ?? null,
       agentOrchestrator: ctx.agents?.agentOrchestrator ?? null,
-      sessionInvalidated: ctx.mindSession.invalidated,
-      clearSessionInvalidation: () => { ctx.mindSession.invalidated = false; },
       pluginManager: getPluginManager(),
       channelManager: getChannelManager(),
       deferredQueue: getDeferredQueue(),
@@ -673,7 +658,6 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
           tickNumber,
           triggerType: queuedTick.trigger.type,
           triggerContext: queuedTick.trigger,
-          sessionState: gathered.sessionState,
           compiledContext,
         });
       } catch (err) {
@@ -745,26 +729,16 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     eventBus.emit('tick:context_stored', {
       tickNumber,
       triggerType: queuedTick.trigger.type,
-      sessionState: gathered.sessionState,
       durationMs,
       createdAt: now(),
     });
 
-    // Return to idle, set session warm
-    // Only reset warmth timer for interactive triggers (message, agent_complete, scheduled_task)
-    // Interval ticks should NOT extend the warmth window
-    const isInteractiveTrigger = queuedTick.trigger.type !== 'interval';
+    // Return to idle
     heartbeatStore.updateHeartbeatState(hbDb, {
       currentStage: 'idle',
-      sessionState: 'warm',
       triggerType: null,
       triggerContext: null,
-      ...(isInteractiveTrigger ? { sessionWarmSince: now() } : {}),
     });
-
-    if (isInteractiveTrigger) {
-      ctx.mindSession.warmSince = Date.now();
-    }
 
     log.info(`Completed tick #${tickNumber}`);
   } catch (err) {
@@ -838,7 +812,6 @@ export async function initializeHeartbeat(subsystems: {
   if (state.currentStage !== 'idle') {
     heartbeatStore.updateHeartbeatState(hbDb, {
       currentStage: 'idle',
-      sessionState: 'cold',
       triggerType: null,
       triggerContext: null,
     });
@@ -873,18 +846,18 @@ export async function initializeHeartbeat(subsystems: {
     }
 
     ctx.mindSession.invalidated = true;
-    log.info('Plugin changed -- next tick will force cold session');
+    log.info('Plugin changed -- next tick will recreate session');
   });
 
   // Listen for tool permission changes to invalidate the session.
-  // This ensures permission updates (e.g. off → always_allow) take effect
-  // on the next tick by forcing a cold session rebuild with updated tool lists.
+  // This ensures permission updates (e.g. off -> always_allow) take effect
+  // on the next tick by recreating the session with updated tool lists.
   getEventBus().on('tool:permission_changed', () => {
     ctx.mindSession.invalidated = true;
-    log.info('Tool permission changed -- next tick will force cold session');
+    log.info('Tool permission changed -- next tick will recreate session');
   });
 
-  // Listen for provider/model setting changes to force a cold session rebuild.
+  // Listen for provider/model setting changes to force a session rebuild.
   // Nulling mcpServer and cognitiveServer ensures the MCP build guards in
   // mind-session.ts re-create them for the new provider on the next tick.
   getEventBus().on('system:settings_updated', (payload) => {
@@ -892,7 +865,7 @@ export async function initializeHeartbeat(subsystems: {
       ctx.mindSession.invalidated = true;
       ctx.mindSession.mcpServer = null;
       ctx.mindSession.cognitiveServer = null;
-      log.info('Provider/model settings changed -- next tick will force cold session');
+      log.info('Provider/model settings changed -- next tick will recreate session');
     }
   });
 

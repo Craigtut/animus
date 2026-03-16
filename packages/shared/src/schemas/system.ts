@@ -102,6 +102,11 @@ export const systemSettingsSchema = z.object({
   autosaveFrequency: z.enum(['1h', '6h', '12h', '24h', '3d', '7d']).default('24h'),
   autosaveTimeOfDay: z.number().int().min(0).max(23).default(3),
   lastAutosaveAt: z.string().nullable().default(null), // ISO 8601, persisted for restart recovery
+  // Cortex settings (provider/model for the cortex migration)
+  cortexProvider: z.string().nullable().default(null),
+  cortexModel: z.string().nullable().default(null),
+  cortexThinkingLevel: z.enum(['off', 'low', 'medium', 'high']).default('off'),
+  utilityModel: z.string().default('default'),
 });
 
 export const updateSystemSettingsInputSchema = systemSettingsSchema.partial();

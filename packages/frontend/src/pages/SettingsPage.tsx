@@ -158,7 +158,6 @@ function HeartbeatSection() {
   const [showPauseConfirm, setShowPauseConfirm] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
   const intervalSave = useSaveFlash();
-  const warmthSave = useSaveFlash();
   const budgetSave = useSaveFlash();
 
   const isRunning = hbState?.isRunning ?? false;
@@ -169,16 +168,13 @@ function HeartbeatSection() {
   }, [isRunning, isResuming]);
   const tickNumber = hbState?.tickNumber ?? 0;
   const currentStage = hbState?.currentStage ?? 'idle';
-  const sessionState = hbState?.sessionState ?? 'cold';
   const lastTickAt = hbState?.lastTickAt ?? null;
 
   // Local state for immediate slider feedback (avoids waiting for API round-trip)
   const [localIntervalMs, setLocalIntervalMs] = useState<number | null>(null);
-  const [localWarmthMs, setLocalWarmthMs] = useState<number | null>(null);
   const [localBudget, setLocalBudget] = useState<number | null>(null);
 
   const intervalMs = localIntervalMs ?? systemSettings?.heartbeatIntervalMs ?? 300000;
-  const warmthMs = localWarmthMs ?? systemSettings?.sessionWarmthMs ?? 900000;
   const contextBudget = localBudget ?? systemSettings?.sessionContextBudget ?? 0.7;
 
   // Sync local state when server data arrives (and local isn't overriding)
@@ -186,15 +182,11 @@ function HeartbeatSection() {
     if (systemSettings && localIntervalMs === null) setLocalIntervalMs(null);
   }, [systemSettings?.heartbeatIntervalMs]);
   useEffect(() => {
-    if (systemSettings && localWarmthMs === null) setLocalWarmthMs(null);
-  }, [systemSettings?.sessionWarmthMs]);
-  useEffect(() => {
     if (systemSettings && localBudget === null) setLocalBudget(null);
   }, [systemSettings?.sessionContextBudget]);
 
   // Debounced API persistence
   const intervalTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const warmthTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const budgetTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const formatInterval = (ms: number) => {
@@ -237,15 +229,6 @@ function HeartbeatSection() {
     intervalTimerRef.current = setTimeout(() => {
       updateIntervalMutation.mutate({ intervalMs: ms }, { onSuccess: () => intervalSave.flash() });
       updateSettingsMutation.mutate({ heartbeatIntervalMs: ms });
-    }, 300);
-  };
-
-  const handleWarmthChange = (mins: number) => {
-    const ms = mins * 60000;
-    setLocalWarmthMs(ms);
-    clearTimeout(warmthTimerRef.current);
-    warmthTimerRef.current = setTimeout(() => {
-      updateSettingsMutation.mutate({ sessionWarmthMs: ms }, { onSuccess: () => warmthSave.flash() });
     }, 300);
   };
 
@@ -391,31 +374,6 @@ function HeartbeatSection() {
         <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
           Session
         </Typography.Subtitle>
-        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-          <Typography.SmallBody as="span" color="secondary">State:</Typography.SmallBody>
-          <Badge variant={sessionState === 'active' ? 'success' : sessionState === 'warm' ? 'warning' : 'default'}>
-            {sessionState.charAt(0).toUpperCase() + sessionState.slice(1)}
-          </Badge>
-        </div>
-
-        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-            <Typography.SmallBody as="label" color="secondary">
-              Warmth window: {Math.round(warmthMs / 60000)} min
-            </Typography.SmallBody>
-            <SaveIndicator show={warmthSave.show} />
-          </div>
-          <Slider
-            value={warmthMs / 60000}
-            onChange={handleWarmthChange}
-            min={5}
-            max={60}
-            step={5}
-            leftLabel="5 min"
-            rightLabel="60 min"
-            showNeutral={false}
-          />
-        </div>
 
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
           <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>

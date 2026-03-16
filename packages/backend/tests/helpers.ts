@@ -29,6 +29,7 @@ export function createTestSystemDb(): Database.Database {
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '019_telemetry.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '020_plugin_status.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '021_vault_created_by.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '023_cortex_settings.sql'));
   return db;
 }
 
@@ -38,6 +39,7 @@ export function createTestHeartbeatDb(): Database.Database {
   applySql(db, path.join(MIGRATIONS_DIR, 'heartbeat', '001_initial.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'heartbeat', '003_tool_approvals.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'heartbeat', '004_goal_planning_prompts.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'heartbeat', '006_add_conversation_history.sql'));
   return db;
 }
 

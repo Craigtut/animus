@@ -68,7 +68,6 @@ export interface GatherResult {
   recentMessages: ReturnType<typeof messageStore.getRecentMessages>;
   previousDecisions: ReturnType<typeof heartbeatStore.getTickDecisions>;
   tickIntervalMs: number;
-  sessionState: 'cold' | 'warm';
   memoryContext: MemoryContext | null;
   goalContext: GoalContext | null;
   spawnBudgetNote: string | null;
@@ -107,40 +106,9 @@ export interface GatherDeps {
   seedManager: SeedManager | null;
   goalManager: GoalManager | null;
   agentOrchestrator: AgentOrchestrator | null;
-  sessionInvalidated: boolean;
-  /** Callback to clear the invalidation flag after reading it */
-  clearSessionInvalidation: () => void;
   pluginManager: PluginManager;
   channelManager: ChannelManager;
   deferredQueue: DeferredQueue;
-}
-
-// ============================================================================
-// Session State Determination
-// ============================================================================
-
-function determineSessionState(
-  state: HeartbeatState,
-  warmthMs: number,
-  deps: GatherDeps,
-): 'cold' | 'warm' {
-  // Plugin change forces cold session on next tick
-  if (deps.sessionInvalidated) {
-    deps.clearSessionInvalidation();
-    log.info('Session invalidated by plugin change — forcing cold start');
-    return 'cold';
-  }
-
-  if (state.sessionState === 'cold') return 'cold';
-
-  // Check if warmth window has expired
-  if (state.sessionWarmSince) {
-    const warmSince = new Date(state.sessionWarmSince).getTime();
-    const elapsed = Date.now() - warmSince;
-    if (elapsed > warmthMs) return 'cold';
-  }
-
-  return 'warm';
 }
 
 // ============================================================================
@@ -158,10 +126,8 @@ export async function gatherContext(
   const settings = systemStore.getSystemSettings(sysDb);
   const state = heartbeatStore.getHeartbeatState(hbDb);
 
-  // Determine session state
   const gatherStart = Date.now();
-  const sessionState = determineSessionState(state, settings.sessionWarmthMs, deps);
-  log.info(`Gather: session=${sessionState}, trigger=${trigger.type}${trigger.contactName ? `, contact=${trigger.contactName}` : ''}`);
+  log.info(`Gather: trigger=${trigger.type}${trigger.contactName ? `, contact=${trigger.contactName}` : ''}`);
 
   // Compute energy state (before emotion decay — sleep affects decay rate)
   let energyLevel: number | null = null;
@@ -508,7 +474,6 @@ export async function gatherContext(
     recentMessages,
     previousDecisions,
     tickIntervalMs: energyBand === 'sleeping' ? settings.sleepTickIntervalMs : settings.heartbeatIntervalMs,
-    sessionState,
     memoryContext: memCtx,
     goalContext: goalCtx,
     spawnBudgetNote,
