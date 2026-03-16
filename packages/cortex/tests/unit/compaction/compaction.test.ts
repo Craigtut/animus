@@ -175,6 +175,10 @@ describe('runCompaction', () => {
     expect(result.tokensBefore).toBeGreaterThan(0);
     expect(result.tokensAfter).toBeGreaterThan(0);
     expect(result.tokensAfter).toBeLessThan(result.tokensBefore);
+    // oldestPreservedIndex should be the split point (target.length)
+    expect(result.oldestPreservedIndex).toBe(16);
+    // No ISO timestamps in test messages, so timestamp should be null
+    expect(result.oldestPreservedTimestamp).toBeNull();
   });
 
   it('calls the LLM complete function with the summarization prompt', async () => {
@@ -287,5 +291,33 @@ describe('runCompaction', () => {
     // Last 4 messages should be preserved verbatim
     const preserved = newHistory.slice(1); // skip summary
     expect(preserved).toEqual(history.slice(-4));
+  });
+
+  it('oldestPreservedTimestamp returns ISO date when present in preserved messages', async () => {
+    const history = [
+      makeUserMsg('Early message'),
+      makeAssistantMsg('Early response'),
+      makeUserMsg('Middle message'),
+      makeAssistantMsg('Middle response'),
+      makeUserMsg('Message with timestamp 2026-03-15T10:30:00Z'),
+      makeAssistantMsg('Final response'),
+    ];
+    const config = { ...COMPACTION_DEFAULTS, preserveRecentTurns: 2 };
+
+    const { result } = await runCompaction(history, config, complete);
+
+    expect(result.oldestPreservedTimestamp).toBe('2026-03-15T10:30:00');
+    expect(result.oldestPreservedIndex).toBe(4);
+  });
+
+  it('oldestPreservedTimestamp is null when no ISO date in preserved messages', async () => {
+    const history = buildHistory(5);
+    const config = { ...COMPACTION_DEFAULTS, preserveRecentTurns: 2 };
+
+    const { result } = await runCompaction(history, config, complete);
+
+    expect(result.oldestPreservedTimestamp).toBeNull();
+    // Index should be total messages - preserved turns
+    expect(result.oldestPreservedIndex).toBe(8);
   });
 });

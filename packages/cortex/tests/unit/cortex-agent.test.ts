@@ -747,6 +747,85 @@ You have 12 emotions.`;
   });
 
   // -----------------------------------------------------------------------
+  // setModel / setThinkingLevel / refreshTools
+  // -----------------------------------------------------------------------
+
+  describe('setModel', () => {
+    it('updates the primary model', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const newModel = { provider: 'openai', name: 'gpt-4o', contextWindow: 128_000 } as PiModel;
+
+      agent.setModel(newModel);
+
+      expect(agent.getModel()).toBe(newModel);
+    });
+
+    it('delegates to agent.setModel when available', () => {
+      const setModelFn = vi.fn();
+      (piAgent as unknown as Record<string, unknown>).setModel = setModelFn;
+
+      const agent = new CortexAgent(piAgent, config);
+      const newModel = { provider: 'openai', name: 'gpt-4o' } as PiModel;
+
+      agent.setModel(newModel);
+
+      expect(setModelFn).toHaveBeenCalledWith(newModel);
+    });
+
+    it('does not throw when agent lacks setModel', () => {
+      const agent = new CortexAgent(piAgent, config);
+      const newModel = { provider: 'openai', name: 'gpt-4o' } as PiModel;
+
+      // Should not throw even though piAgent has no setModel
+      expect(() => agent.setModel(newModel)).not.toThrow();
+    });
+  });
+
+  describe('setThinkingLevel', () => {
+    it('delegates to agent.setThinkingLevel when available', () => {
+      const setThinkingFn = vi.fn();
+      (piAgent as unknown as Record<string, unknown>).setThinkingLevel = setThinkingFn;
+
+      const agent = new CortexAgent(piAgent, config);
+      agent.setThinkingLevel('high');
+
+      expect(setThinkingFn).toHaveBeenCalledWith('high');
+    });
+
+    it('does not throw when agent lacks setThinkingLevel', () => {
+      const agent = new CortexAgent(piAgent, config);
+
+      expect(() => agent.setThinkingLevel('medium')).not.toThrow();
+    });
+  });
+
+  describe('refreshTools', () => {
+    it('calls agent.setTools with registered + MCP tools', () => {
+      const setToolsFn = vi.fn();
+      (piAgent as unknown as Record<string, unknown>).setTools = setToolsFn;
+
+      const builtInTools = [
+        { name: 'Read', description: 'read', parameters: {}, execute: async () => 'ok' },
+      ];
+      const agent = new CortexAgent(piAgent, config, builtInTools);
+
+      // refreshTools merges built-in with MCP tools (empty in this test)
+      agent.refreshTools();
+
+      expect(setToolsFn).toHaveBeenCalledOnce();
+      const allTools = setToolsFn.mock.calls[0]![0];
+      expect(allTools.length).toBe(1);
+      expect(allTools[0].name).toBe('Read');
+    });
+
+    it('does not throw when agent lacks setTools', () => {
+      const agent = new CortexAgent(piAgent, config);
+
+      expect(() => agent.refreshTools()).not.toThrow();
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Event bridge access
   // -----------------------------------------------------------------------
 

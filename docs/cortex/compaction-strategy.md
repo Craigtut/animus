@@ -429,16 +429,17 @@ The check runs after EXECUTE completes. If the session token count exceeds the c
 
 The agentic loop can run for many turns: complex tasks with 20+ tool calls, large file reads, extensive reasoning chains. A single agentic loop can easily blow past any threshold set at the tick boundary.
 
-Compaction runs inside the `transformContext` hook, which fires before every LLM call, including each turn within the agentic loop. If the estimated token count exceeds the failsafe threshold (default: 90%) during the loop, microcompaction and summarization fire immediately.
+Compaction runs inside the `transformContext` hook, which fires before every LLM call, including each turn within the agentic loop. If the estimated token count exceeds the failsafe threshold (default: 90%) during the loop, only microcompaction and emergency truncation fire.
 
 **What happens mid-loop:**
 1. Layer 1 (microcompaction) clears old tool results from earlier in the loop
-2. If still over threshold, Layer 2 summarizes older conversation turns (including earlier parts of the current loop)
-3. The agentic loop continues from the summary + recent turns
+2. If still over threshold, Layer 3 (emergency truncation) drops the oldest conversation turns to get below the 90% threshold
+3. The agentic loop continues from the truncated history
 4. The agent retains enough context to finish its current task
 
 **What does NOT fire mid-loop:**
-- The `onBeforeCompaction` event is NOT emitted for mid-loop compaction. Observational memory processing is a backend concern that should only run at tick boundaries, not in the middle of tool-call chains. Mid-loop compaction is purely a conversation history operation.
+- Layer 2 (summarization) does NOT fire mid-loop. It requires an LLM call and consumer hooks (onBeforeCompaction/onPostCompaction for observational memory flush and message re-seeding), which are unsafe to run in the middle of tool-call chains. Layer 2 only fires at end-of-tick when the pipeline phase is `idle`.
+- The `onBeforeCompaction` event is NOT emitted mid-loop. Observational memory processing is a backend concern that should only run at tick boundaries.
 
 ### Between Phases
 

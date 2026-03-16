@@ -566,6 +566,9 @@ async function connectPluginMcpServers(cortexAgent: CortexAgent): Promise<void> 
       log.warn(`Failed to connect plugin MCP server "${namespacedKey}": ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+
+  // Merge MCP-discovered tools with built-in tools on the agent
+  cortexAgent.refreshTools();
 }
 
 /**
@@ -642,17 +645,23 @@ function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
     } else if (action === 'uninstalled' || action === 'disabled') {
       // Disconnect all MCP servers belonging to this plugin
       const states = mcpManager.getConnectionStates();
-      for (const state of states) {
-        if (state.serverName.startsWith(`${pluginName}__`)) {
+      for (const connState of states) {
+        if (connState.serverName.startsWith(`${pluginName}__`)) {
           try {
-            log.info(`Disconnecting plugin MCP server: ${state.serverName}`);
-            await mcpManager.disconnect(state.serverName);
+            log.info(`Disconnecting plugin MCP server: ${connState.serverName}`);
+            await mcpManager.disconnect(connState.serverName);
           } catch (err) {
-            log.warn(`Failed to disconnect plugin MCP server "${state.serverName}" on ${action}: ${err instanceof Error ? err.message : String(err)}`);
+            log.warn(`Failed to disconnect plugin MCP server "${connState.serverName}" on ${action}: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
       }
     }
+
+    // Re-merge tools after MCP connections changed
+    cortexAgent.refreshTools();
+
+    // Rebuild system prompt so the LLM sees updated tool/plugin context
+    rebuildSystemPromptForPluginChange(cortexAgent);
   });
 
   // Plugin config updated: reconnect MCP servers (config may have changed credentials)
@@ -688,7 +697,55 @@ function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
         log.warn(`Failed to reconnect plugin MCP server "${namespacedKey}" after config update: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+
+    // Re-merge tools after MCP reconnection
+    cortexAgent.refreshTools();
+
+    // Rebuild system prompt so the LLM sees updated tool/plugin context
+    rebuildSystemPromptForPluginChange(cortexAgent);
   });
+}
+
+/**
+ * Rebuild the system prompt after plugin changes.
+ *
+ * Plugin install/uninstall/config changes may affect the tool list
+ * visible to the LLM. The system prompt includes tool descriptions,
+ * so it must be rebuilt when the available tools change.
+ *
+ * Uses the current system prompt's consumer content (everything before
+ * the Cortex operational sections) to rebuild without losing persona
+ * or domain context.
+ */
+function rebuildSystemPromptForPluginChange(cortexAgent: CortexAgent): void {
+  try {
+    // The current system prompt starts with consumer content followed by
+    // Cortex operational sections. rebuildSystemPrompt extracts the consumer
+    // portion. Since we don't have direct access to the original consumer
+    // prompt, we trigger a rebuild with the existing content. The consumer
+    // (pipeline) sets the system prompt during GATHER; between ticks, we
+    // re-trigger buildSystemPrompt with the last known consumer prompt.
+    // For now, we use the fact that rebuildSystemPrompt will re-append the
+    // operational sections (which include tool listings).
+    const currentPrompt = cortexAgent.getCurrentSystemPrompt();
+    if (currentPrompt) {
+      // Find the first Cortex operational section marker
+      const sectionMarker = '# Response Delivery';
+      const systemRulesMarker = '# System Rules';
+      let splitIdx = currentPrompt.indexOf(sectionMarker);
+      if (splitIdx < 0) {
+        splitIdx = currentPrompt.indexOf(systemRulesMarker);
+      }
+      if (splitIdx > 0) {
+        // Extract consumer content (everything before the first Cortex section)
+        const consumerPrompt = currentPrompt.substring(0, splitIdx).trimEnd();
+        cortexAgent.rebuildSystemPrompt(consumerPrompt);
+        log.debug('System prompt rebuilt after plugin change');
+      }
+    }
+  } catch (err) {
+    log.warn('Failed to rebuild system prompt after plugin change:', err);
+  }
 }
 
 // ============================================================================
