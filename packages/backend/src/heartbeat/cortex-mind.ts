@@ -17,16 +17,11 @@
 
 import {
   CortexAgent,
-  ContextManager,
   ProviderManager,
   zodToTypebox,
-  classifyError,
   unwrapModel,
-  type CortexAgentConfig,
   type AgentTextOutput,
   type ClassifiedError,
-  type PiAgent,
-  type PiModel,
   type CortexModel,
 } from '@animus-labs/cortex';
 
@@ -369,28 +364,11 @@ export async function createCortexMind(
   // Build permission resolver
   const permissionResolver = buildPermissionResolver(state.toolContext);
 
-  // ABSTRACTION VIOLATION: The backend should only import from @animus-labs/cortex,
-  // never from @mariozechner/pi-agent-core directly. CortexAgent's constructor
-  // currently accepts a pre-built PiAgent, forcing consumers to construct it.
-  //
-  // TODO(cortex): CortexAgent should expose a static factory method or accept
-  // tools/systemPrompt/getApiKey in CortexAgentConfig so it can create the
-  // pi-agent-core Agent internally. This would eliminate the backend's need to
-  // import pi-agent-core at all. Until CortexAgent provides this, we use a
-  // dynamic import of pi-agent-core here as a contained violation.
+  // Use CortexAgent.create() factory to construct the pi-agent-core Agent
+  // internally, eliminating the need to import pi-agent-core in the backend.
   const piModel = unwrapModel(model);
-  const piAgentCore = await import('@mariozechner/pi-agent-core');
 
-  const agentConfig: Record<string, unknown> = {
-    model: piModel,
-    tools: animusTools,
-    systemPrompt: '', // Set later via buildSystemPrompt
-    getApiKey,
-  };
-  const piAgent = new piAgentCore.Agent(agentConfig) as unknown as PiAgent;
-
-  // Create CortexAgent wrapping the pi-agent-core Agent
-  const cortexConfig: CortexAgentConfig = {
+  const cortexAgent = await CortexAgent.create({
     model: piModel,
     workingDirectory: join(DATA_DIR, 'workspace'),
     getApiKey,
@@ -401,9 +379,9 @@ export async function createCortexMind(
       maxCost: (settingsAny['cortexMaxCostPerTick'] as number | undefined) ?? 1.0,
     },
     resolvePermission: permissionResolver,
-  };
-
-  const cortexAgent = new CortexAgent(piAgent, cortexConfig);
+    tools: animusTools,
+    systemPrompt: '', // Set later via buildSystemPrompt
+  });
 
   // Wire event handlers
   wireEventHandlers(cortexAgent, state);

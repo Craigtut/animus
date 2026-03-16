@@ -103,18 +103,26 @@ async function executeThought(
     // Build THOUGHT-specific context (user message with structured output schema)
     const thoughtPrompt = buildThoughtPrompt(gathered);
 
-    // TODO(cortex): Call cortexAgent.utilityComplete() once implemented.
-    // CortexAgent.utilityComplete() is currently a Phase 1B stub that throws.
-    // When it is wired to pi-ai's complete(), replace this placeholder with:
-    //
-    //   const response = await cortexAgent.utilityComplete({
-    //     systemPrompt: thoughtSystemPrompt,
-    //     prompt: thoughtPrompt,
-    //   });
-    //
-    // For now, produce a context-aware placeholder thought derived from
-    // the gathered trigger so that downstream phases receive varied input.
-    const thought = generatePlaceholderThought(gathered);
+    // THOUGHT uses the primary model (same as agentic loop), not the utility model.
+    // directComplete() makes a one-shot pi-ai call without the agentic tool-use loop.
+    const response = await cortexAgent.directComplete({
+      systemPrompt: thoughtSystemPrompt,
+      messages: [{ role: 'user', content: thoughtPrompt }],
+    });
+
+    // Parse structured JSON response
+    let thought: ThoughtResult;
+    try {
+      const parsed = JSON.parse(response);
+      thought = {
+        content: typeof parsed.content === 'string' ? parsed.content : response,
+        importance: typeof parsed.importance === 'number' ? Math.max(0, Math.min(1, parsed.importance)) : 0.3,
+      };
+    } catch {
+      // If JSON parsing fails, use the raw response as the thought content
+      log.warn('THOUGHT response was not valid JSON, using raw text');
+      thought = { content: response.trim() || 'A quiet moment passes.', importance: 0.2 };
+    }
 
     log.info(`THOUGHT complete: "${thought.content.substring(0, 80)}${thought.content.length > 80 ? '...' : ''}" (importance=${thought.importance})`);
 
@@ -304,17 +312,15 @@ async function executeAgenticLoop(
     });
   });
 
-  // Flush any messages queued during THOUGHT phase
+  // Flush any messages queued during THOUGHT phase via steer()
   if (pendingInjections.length > 0) {
-    log.info(`Flushing ${pendingInjections.length} queued injection(s) from THOUGHT phase`);
-    // TODO: agent.steer() not yet available in CortexAgent Phase 1B
-    // For now, inject via ephemeral context
+    log.info(`Flushing ${pendingInjections.length} queued injection(s) from THOUGHT phase via steer()`);
     const injectionText = pendingInjections.map(msg =>
       `[ADDITIONAL MESSAGE received]\nFrom: ${gathered.contact?.fullName ?? 'User'} via ${msg.channel}\n"${msg.content}"`
     ).join('\n\n');
 
-    const currentEphemeral = cortexAgent.getContextManager().getEphemeral() ?? '';
-    cortexAgent.getContextManager().setEphemeral(currentEphemeral + '\n\n' + injectionText);
+    // Steer injects the message into the running loop, triggering a new LLM turn
+    cortexAgent.steer(injectionText);
   }
 
   try {
@@ -409,17 +415,37 @@ async function executeReflect(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      // TODO(cortex): Call cortexAgent.utilityComplete() once implemented.
-      // CortexAgent.utilityComplete() is currently a Phase 1B stub that throws.
-      // When it is wired to pi-ai's complete(), replace this placeholder with:
-      //
-      //   const response = await cortexAgent.utilityComplete({
-      //     systemPrompt: reflectSystemPrompt,
-      //     prompt: buildReflectPrompt(thought, loopResult),
-      //   });
-      //
-      // For now, produce a context-aware placeholder reflection from gathered state.
-      const result = generatePlaceholderReflection(gathered, thought, loopResult);
+      // REFLECT uses the primary model (same as agentic loop), not the utility model.
+      // directComplete() makes a one-shot pi-ai call without the agentic tool-use loop.
+      const reflectPrompt = buildReflectPrompt(thought, loopResult);
+      const response = await cortexAgent.directComplete({
+        systemPrompt: reflectSystemPrompt,
+        messages: [{ role: 'user', content: reflectPrompt }],
+      });
+
+      // Parse structured JSON response
+      let result: ReflectResult;
+      try {
+        const parsed = JSON.parse(response);
+        result = {
+          experience: {
+            content: parsed.experience?.content ?? 'A tick passed without notable experience.',
+            importance: typeof parsed.experience?.importance === 'number'
+              ? Math.max(0, Math.min(1, parsed.experience.importance))
+              : 0.2,
+          },
+          emotionDeltas: Array.isArray(parsed.emotionDeltas) ? parsed.emotionDeltas : [],
+          energyDelta: parsed.energyDelta ?? null,
+          decisions: Array.isArray(parsed.decisions) ? parsed.decisions : [],
+          workingMemoryUpdate: parsed.workingMemoryUpdate ?? null,
+          coreSelfUpdate: parsed.coreSelfUpdate ?? null,
+          memoryCandidate: Array.isArray(parsed.memoryCandidate) ? parsed.memoryCandidate : [],
+        };
+      } catch {
+        // If JSON parsing fails, produce a minimal reflection
+        log.warn('REFLECT response was not valid JSON, using minimal reflection');
+        result = generatePlaceholderReflection(gathered, thought, loopResult);
+      }
 
       log.info(`REFLECT complete (tick #${tickNumber}): ${result.emotionDeltas.length} emotion(s), ${result.decisions.length} decision(s), ${result.memoryCandidate.length} memory candidate(s)`);
 
@@ -719,6 +745,39 @@ function buildThoughtPrompt(gathered: GatherResult): string {
   } else if (gathered.trigger.type === 'agent_complete') {
     lines.push(`\nA sub-agent completed: ${gathered.trigger.taskDescription ?? 'unknown'}`);
   }
+
+  return lines.join('\n');
+}
+
+/**
+ * Build the REFLECT prompt (user message summarizing what happened this tick).
+ * Provides the thought and agentic loop outcome as context for reflection.
+ */
+function buildReflectPrompt(
+  thought: ThoughtResult | null,
+  loopResult: AgenticLoopResult,
+): string {
+  const lines: string[] = [];
+
+  lines.push('Reflect on what happened during this tick and produce your cognitive state update.');
+
+  if (thought) {
+    lines.push(`\nYour thought this tick: "${thought.content}" (importance: ${thought.importance.toFixed(1)})`);
+  } else {
+    lines.push('\nThought generation was skipped this tick.');
+  }
+
+  if (loopResult.hadTurns) {
+    lines.push(`\nThe agentic loop produced a response (${loopResult.replyText.length} characters).`);
+    if (loopResult.replyTurnsSent > 0) {
+      lines.push(`${loopResult.replyTurnsSent} reply turn(s) were sent to the user.`);
+    }
+  } else {
+    lines.push('\nThe agentic loop did not produce any response this tick.');
+  }
+
+  lines.push('\nReview the full conversation history above for details of tool calls, reasoning, and interactions.');
+  lines.push('Produce your reflection as the JSON structure described in the system prompt.');
 
   return lines.join('\n');
 }

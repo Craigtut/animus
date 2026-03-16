@@ -52,6 +52,14 @@ export interface PiAgent extends AgentStateAccessor, PiEventSource {
   abort(): void;
   waitForIdle(): Promise<void>;
   reset(): void;
+
+  /**
+   * Inject a steering message into the running agentic loop.
+   * Interrupts the current tool execution, skips remaining tools,
+   * and triggers a new LLM turn with the injected context.
+   * Only effective while a run() call is in progress.
+   */
+  steer(message: { role: string; content: string }): void;
 }
 
 /**
@@ -298,6 +306,117 @@ export class CortexAgent {
     } finally {
       this._isPrompting = false;
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Steering
+  // -----------------------------------------------------------------------
+
+  /**
+   * Inject a steering message into the running agentic loop.
+   * Interrupts the current tool execution, skips remaining tools,
+   * and triggers a new LLM turn with the injected context.
+   * Only effective while a prompt() call is in progress.
+   *
+   * No-op if the agent is not currently running a prompt.
+   *
+   * @param message - The message content to inject
+   */
+  steer(message: string): void {
+    if (!this._isPrompting) return; // no-op if not running
+    this.agent.steer({ role: 'user', content: message });
+  }
+
+  // -----------------------------------------------------------------------
+  // Direct Completion (non-agentic)
+  // -----------------------------------------------------------------------
+
+  /**
+   * Make a direct LLM completion call using the primary model.
+   * NOT an agentic tool-use loop. Used for structured output phases
+   * like THOUGHT and REFLECT where a single LLM response is needed
+   * without tool execution.
+   *
+   * Dynamically imports pi-ai's complete() function. If pi-ai is not
+   * installed, throws a clear error.
+   *
+   * @param context - System prompt and messages for the completion
+   * @returns The response text from the LLM
+   * @throws Error if pi-ai is not installed or the call fails
+   */
+  async directComplete(context: {
+    systemPrompt: string;
+    messages: Array<{ role: string; content: string }>;
+  }): Promise<string> {
+    // Dynamically import pi-ai's complete() function
+    let complete: (model: unknown, context: unknown) => Promise<unknown>;
+    try {
+      const piAi = await import('@mariozechner/pi-ai');
+      complete = piAi.complete;
+    } catch {
+      throw new Error(
+        'directComplete() requires @mariozechner/pi-ai to be installed. ' +
+        'Install it as a dependency or peer dependency.',
+      );
+    }
+
+    const result = await complete(this.primaryModel, {
+      systemPrompt: context.systemPrompt,
+      messages: context.messages.map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      })),
+    });
+
+    // Extract text from the AssistantMessage response
+    return this.extractTextFromAssistantMessage(result);
+  }
+
+  // -----------------------------------------------------------------------
+  // Static Factory
+  // -----------------------------------------------------------------------
+
+  /**
+   * Create a CortexAgent with a pi-agent-core Agent constructed internally.
+   *
+   * This eliminates the consumer's need to import pi-agent-core directly.
+   * The factory dynamically imports pi-agent-core and pi-ai, resolves the
+   * model, creates the internal Agent, and returns a fully configured
+   * CortexAgent.
+   *
+   * @param config - CortexAgent configuration (model, tools, options)
+   * @returns A new CortexAgent wrapping an internally-created pi-agent-core Agent
+   * @throws Error if pi-agent-core or pi-ai is not installed
+   */
+  static async create(config: CortexAgentConfig & {
+    /** Tools to register with the agent. Each must have name, description, parameters, execute. */
+    tools?: Array<{ name: string; description: string; parameters: unknown; execute: (args: unknown) => Promise<unknown> }>;
+    /** Initial system prompt. Can be rebuilt later via rebuildSystemPrompt(). */
+    systemPrompt?: string;
+  }): Promise<CortexAgent> {
+    // Dynamically import pi-agent-core
+    let AgentClass: new (config: Record<string, unknown>) => PiAgent;
+    try {
+      const piAgentCore = await import('@mariozechner/pi-agent-core');
+      AgentClass = piAgentCore.Agent as unknown as new (config: Record<string, unknown>) => PiAgent;
+    } catch {
+      throw new Error(
+        'CortexAgent.create() requires @mariozechner/pi-agent-core to be installed. ' +
+        'Install it as a dependency or peer dependency.',
+      );
+    }
+
+    // Build the pi-agent-core Agent config
+    const agentConfig: Record<string, unknown> = {
+      model: config.model,
+      tools: config.tools ?? [],
+      systemPrompt: config.systemPrompt ?? '',
+      getApiKey: config.getApiKey,
+    };
+
+    const piAgent = new AgentClass(agentConfig);
+
+    return new CortexAgent(piAgent, config);
   }
 
   // -----------------------------------------------------------------------
@@ -826,6 +945,41 @@ export class CortexAgent {
    */
   private isIdle(): boolean {
     return !this._isPrompting;
+  }
+
+  /**
+   * Extract text content from a pi-ai AssistantMessage response.
+   *
+   * Pi-ai's complete() returns an AssistantMessage with either:
+   * - A string `content` field
+   * - A `content` array with typed parts (text, thinking, toolCall)
+   */
+  private extractTextFromAssistantMessage(result: unknown): string {
+    if (!result || typeof result !== 'object') {
+      return '';
+    }
+
+    const msg = result as Record<string, unknown>;
+
+    // Direct string content
+    if (typeof msg.content === 'string') {
+      return msg.content;
+    }
+
+    // Content array: extract text parts
+    if (Array.isArray(msg.content)) {
+      return (msg.content as Array<Record<string, unknown>>)
+        .filter(part => part.type === 'text' && typeof part.text === 'string')
+        .map(part => part.text as string)
+        .join('');
+    }
+
+    // Fallback: try .text field directly
+    if (typeof msg.text === 'string') {
+      return msg.text;
+    }
+
+    return '';
   }
 
   /**

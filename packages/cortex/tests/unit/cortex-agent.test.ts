@@ -763,4 +763,96 @@ You have 12 emotions.`;
       expect(guard).toBeDefined();
     });
   });
+
+  // -----------------------------------------------------------------------
+  // steer()
+  // -----------------------------------------------------------------------
+
+  describe('steer', () => {
+    it('calls agent.steer() with user role message when prompting', async () => {
+      const steerCalls: Array<{ role: string; content: string }> = [];
+      piAgent.steer = (msg: { role: string; content: string }) => {
+        steerCalls.push(msg);
+      };
+
+      const agent = new CortexAgent(piAgent, config);
+
+      // Override run to hold open the prompting state so we can steer
+      const originalRun = piAgent.run.bind(piAgent);
+      piAgent.run = async (input: string): Promise<unknown> => {
+        // Agent is now "prompting". Steer during this window.
+        agent.steer('New context from user');
+        return originalRun(input);
+      };
+
+      await agent.prompt('Hello');
+
+      expect(steerCalls.length).toBe(1);
+      expect(steerCalls[0]!.role).toBe('user');
+      expect(steerCalls[0]!.content).toBe('New context from user');
+    });
+
+    it('is a no-op when not prompting', () => {
+      const steerCalls: Array<{ role: string; content: string }> = [];
+      piAgent.steer = (msg: { role: string; content: string }) => {
+        steerCalls.push(msg);
+      };
+
+      const agent = new CortexAgent(piAgent, config);
+
+      // Not prompting, should be a no-op
+      agent.steer('This should be ignored');
+
+      expect(steerCalls.length).toBe(0);
+    });
+
+    it('is a no-op after prompt completes', async () => {
+      const steerCalls: Array<{ role: string; content: string }> = [];
+      piAgent.steer = (msg: { role: string; content: string }) => {
+        steerCalls.push(msg);
+      };
+
+      const agent = new CortexAgent(piAgent, config);
+      await agent.prompt('Hello');
+
+      // Prompt is done, should be a no-op
+      agent.steer('Late message');
+
+      expect(steerCalls.length).toBe(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // directComplete()
+  // -----------------------------------------------------------------------
+
+  describe('directComplete', () => {
+    it('throws when pi-ai is not available', async () => {
+      const agent = new CortexAgent(piAgent, config);
+
+      // pi-ai is not installed in test environment, so this should throw
+      await expect(
+        agent.directComplete({
+          systemPrompt: 'You are helpful.',
+          messages: [{ role: 'user', content: 'Hello' }],
+        }),
+      ).rejects.toThrow('requires @mariozechner/pi-ai');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // CortexAgent.create() factory
+  // -----------------------------------------------------------------------
+
+  describe('create factory', () => {
+    it('throws when pi-agent-core is not available', async () => {
+      // pi-agent-core is not installed in test environment
+      await expect(
+        CortexAgent.create({
+          model: { provider: 'anthropic', name: 'claude-sonnet-4' },
+          workingDirectory: '/tmp/test',
+        }),
+      ).rejects.toThrow('requires @mariozechner/pi-agent-core');
+    });
+  });
 });
