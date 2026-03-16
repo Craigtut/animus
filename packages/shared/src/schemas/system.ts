@@ -102,6 +102,11 @@ export const systemSettingsSchema = z.object({
   autosaveFrequency: z.enum(['1h', '6h', '12h', '24h', '3d', '7d']).default('24h'),
   autosaveTimeOfDay: z.number().int().min(0).max(23).default(3),
   lastAutosaveAt: z.string().nullable().default(null), // ISO 8601, persisted for restart recovery
+  // Budget system
+  budgetWeeklyUsd: z.number().min(0).default(0),
+  budgetStartDate: z.string().nullable().default(null),
+  budgetThrottleEnabled: z.boolean().default(true),
+  budgetLastAlertedThreshold: z.number().min(0).default(0),
 });
 
 export const updateSystemSettingsInputSchema = systemSettingsSchema.partial();

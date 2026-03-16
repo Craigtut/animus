@@ -71,8 +71,14 @@ export const agentEventSchema = z.object({
 
 export const agentUsageSchema = z.object({
   sessionId: uuidSchema,
+  tickNumber: z.number().int().nonnegative().nullable().optional(),
+  tickType: z.string().nullable().optional(),
+  pipelinePhase: z.string().nullable().optional(),
+  contactId: uuidSchema.nullable().optional(),
   inputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),
+  cacheReadTokens: z.number().int().nonnegative().default(0),
+  cacheWriteTokens: z.number().int().nonnegative().default(0),
   totalTokens: z.number().int().nonnegative(),
   costUsd: z.number().nonnegative().nullable(),
   model: z.string(),

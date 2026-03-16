@@ -101,6 +101,20 @@ import type {
   DecisionTypeSchema,
   TriggerDefinitionSchema,
   PluginMcpServerSchema,
+  // Usage & Budget
+  tickTypeSchema,
+  pipelinePhaseSchema,
+  timeWindowSchema,
+  breakdownDimensionSchema,
+  usageRecordSchema,
+  usageTimeSeriesBucketSchema,
+  usageTotalsSchema,
+  usageTimeSeriesSchema,
+  usageBreakdownRowSchema,
+  cacheStatsSchema,
+  budgetConfigSchema,
+  budgetStatusSchema,
+  budgetAlertSchema,
   // Observational Memory
   streamTypeSchema,
   observationSchema,
@@ -229,6 +243,24 @@ export type AgentSession = z.infer<typeof agentSessionSchema>;
 export type AgentEventType = z.infer<typeof agentEventTypeSchema>;
 export type AgentEvent = z.infer<typeof agentEventSchema>;
 export type AgentUsage = z.infer<typeof agentUsageSchema>;
+
+// ============================================================================
+// Usage & Budget
+// ============================================================================
+
+export type TickType = z.infer<typeof tickTypeSchema>;
+export type PipelinePhase = z.infer<typeof pipelinePhaseSchema>;
+export type TimeWindow = z.infer<typeof timeWindowSchema>;
+export type BreakdownDimension = z.infer<typeof breakdownDimensionSchema>;
+export type UsageRecord = z.infer<typeof usageRecordSchema>;
+export type UsageTimeSeriesBucket = z.infer<typeof usageTimeSeriesBucketSchema>;
+export type UsageTotals = z.infer<typeof usageTotalsSchema>;
+export type UsageTimeSeries = z.infer<typeof usageTimeSeriesSchema>;
+export type UsageBreakdownRow = z.infer<typeof usageBreakdownRowSchema>;
+export type CacheStats = z.infer<typeof cacheStatsSchema>;
+export type BudgetConfig = z.infer<typeof budgetConfigSchema>;
+export type BudgetStatus = z.infer<typeof budgetStatusSchema>;
+export type BudgetAlert = z.infer<typeof budgetAlertSchema>;
 
 // ============================================================================
 // Channels (runtime)

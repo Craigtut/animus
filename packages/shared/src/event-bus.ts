@@ -141,6 +141,12 @@ export interface AnimusEventMap {
     error?: string;
   };
 
+  // Budget
+  'budget:alert': { threshold: number; spentUsd: number; limitUsd: number; percentUsed: number };
+  'budget:hard_stop': { spentUsd: number; limitUsd: number };
+  'budget:reset': { newWindowStart: string; newWindowEnd: string };
+  'budget:tick_blocked': { reason: string; triggerType: string };
+
   // System
   'system:settings_updated': Record<string, unknown>;
   'system:shutdown': void;
