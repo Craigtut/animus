@@ -63,6 +63,8 @@ export interface TriggerContext {
   userTimezone?: string;
   /** Channel adapter metadata (e.g., Discord channelId for reply routing) */
   metadata?: Record<string, unknown>;
+  /** True when budget is exceeded but this message is allowed as a grace response */
+  isBudgetGraceMessage?: boolean;
 }
 
 export interface MindContextParams {
@@ -130,6 +132,23 @@ export interface MindContextParams {
   }>> | null;
   /** Outbound messages that failed delivery after retry attempts */
   deliveryFailures?: Message[];
+
+  /** Current budget status for context injection */
+  budgetStatus?: {
+    percentUsed: number;
+    remainingUsd: number;
+    isThrottled: boolean;
+    isHardStopped: boolean;
+  } | null;
+
+  /** Budget alert if a threshold was crossed this tick */
+  budgetAlert?: {
+    threshold: number;
+    spentUsd: number;
+    limitUsd: number;
+    percentUsed: number;
+    message: string;
+  } | null;
 }
 
 export interface CompiledContext {
@@ -960,6 +979,35 @@ export function buildSystemPrompt(
 }
 
 /**
+ * Format budget status and optional alert into a context section string.
+ */
+function formatBudgetContext(
+  status: NonNullable<MindContextParams['budgetStatus']>,
+  alert: MindContextParams['budgetAlert'],
+): string {
+  let text = `── BUDGET STATUS ──\n`;
+  text += `Weekly budget: ${status.percentUsed.toFixed(0)}% used ($${status.remainingUsd.toFixed(2)} remaining)\n`;
+
+  if (status.isThrottled) {
+    text += `Note: Interval ticks are being throttled to conserve budget.\n`;
+  }
+
+  if (status.isHardStopped) {
+    text += `IMPORTANT: Budget is exceeded. This is a grace response to the user's message. ` +
+      `Let the user know their budget has been reached and the agent will pause ` +
+      `until the budget resets or is increased.\n`;
+  }
+
+  if (alert) {
+    text += `\nBUDGET ALERT: You have reached ${Math.round(alert.threshold * 100)}% of your ` +
+      `weekly budget ($${alert.spentUsd.toFixed(2)} / $${alert.limitUsd.toFixed(2)}). ` +
+      `Naturally inform the user about this.\n`;
+  }
+
+  return text;
+}
+
+/**
  * Build the user message manifest for a tick.
  */
 function buildUserMessageManifest(params: MindContextParams): ContextSection[] {
@@ -1200,6 +1248,15 @@ Usage: run_with_credentials({ command, credentialRef, envVar })`,
       'plugins'));
   } else {
     manifest.push(excluded('credential_manifest', 'Available Credentials', 'no credentials stored', 'plugins'));
+  }
+
+  // 10c. Budget status
+  if (params.budgetStatus && params.budgetStatus.percentUsed > 0) {
+    manifest.push(included('budget_status', 'Budget Status',
+      formatBudgetContext(params.budgetStatus, params.budgetAlert ?? null), 'system'));
+  } else {
+    manifest.push(excluded('budget_status', 'Budget Status',
+      params.budgetStatus ? 'no budget usage yet' : 'budget system not active', 'system'));
   }
 
   // 11. Spawn budget note

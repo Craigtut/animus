@@ -678,8 +678,14 @@ export class AgentOrchestrator {
       if (this.settledTasks.has(taskId)) return;
       this.settledTasks.add(taskId);
 
-      // Log usage
-      logging.logUsage(response.usage, response.cost ?? null, response.model);
+      // Log usage with tick metadata for the usage & budget system.
+      // The logUsage signature already accepts a TickContext parameter.
+      const taskRecord = this.taskStore.getAgentTask(taskId);
+      logging.logUsage(response.usage, response.cost ?? null, response.model, {
+        tickNumber: taskRecord?.tickNumber ?? null,
+        tickType: 'agent_complete',
+        contactId: taskRecord?.contactId ?? null,
+      });
 
       // Clear timeout
       const timer = this.timeoutTimers.get(taskId);

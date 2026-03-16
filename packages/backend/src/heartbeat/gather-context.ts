@@ -52,6 +52,9 @@ import {
 import type { TickQueue } from './tick-queue.js';
 import type { PluginManager } from '../plugins/index.js';
 import { createLogger } from '../lib/logger.js';
+import { getEventBus } from '../lib/event-bus.js';
+import { getAgentLogsDb } from '../db/index.js';
+import { getBudgetService } from '../services/budget-service.js';
 
 const log = createLogger('GatherContext', 'heartbeat');
 
@@ -99,6 +102,23 @@ export interface GatherResult {
   }>> | null;
   /** Outbound messages that failed delivery and haven't been shown to the mind yet */
   deliveryFailures: Message[];
+
+  /** Current budget status for ephemeral context injection */
+  budgetStatus: {
+    percentUsed: number;
+    remainingUsd: number;
+    isThrottled: boolean;
+    isHardStopped: boolean;
+  } | null;
+
+  /** Budget alert if a new threshold was crossed this tick */
+  budgetAlert: {
+    threshold: number;
+    spentUsd: number;
+    limitUsd: number;
+    percentUsed: number;
+    message: string;
+  } | null;
 }
 
 export interface GatherDeps {
@@ -496,6 +516,38 @@ export async function gatherContext(
     log.warn('Failed to load delivery failures:', err);
   }
 
+  // Budget context for ephemeral injection
+  let budgetStatus: GatherResult['budgetStatus'] = null;
+  let budgetAlert: GatherResult['budgetAlert'] = null;
+  try {
+    const budgetService = getBudgetService({ getSystemDb, getAgentLogsDb });
+    const budgetConfig = budgetService.getBudgetConfig();
+
+    if (budgetConfig.weeklyBudgetUsd > 0) {
+      const status = budgetService.getBudgetStatus(settings.heartbeatIntervalMs);
+      budgetStatus = {
+        percentUsed: status.percentUsed,
+        remainingUsd: status.remainingUsd,
+        isThrottled: status.throttleFactor > 0,
+        isHardStopped: status.isHardStopped,
+      };
+
+      budgetAlert = budgetService.checkAlerts();
+      if (budgetAlert) {
+        budgetService.recordAlertSent(budgetAlert.threshold);
+        getEventBus().emit('budget:alert', { ...budgetAlert });
+        if (status.isHardStopped) {
+          getEventBus().emit('budget:hard_stop', {
+            spentUsd: status.currentSpendUsd,
+            limitUsd: budgetConfig.weeklyBudgetUsd,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    log.warn('Budget context gathering failed:', err);
+  }
+
   const gatherMs = Date.now() - gatherStart;
   log.info(`Gather complete (${gatherMs}ms): ${recentMessages.length} messages, ${recentThoughts.length} recent thoughts, ${emotions.filter(e => e.intensity > 0.1).length} active emotions${energyBand ? `, energy=${energyBand}` : ''}${memCtx ? ', memory=yes' : ''}${goalCtx ? ', goals=yes' : ''}${deliveryFailures.length > 0 ? `, deliveryFailures=${deliveryFailures.length}` : ''}`);
 
@@ -529,5 +581,7 @@ export async function gatherContext(
     trustRampContext,
     externalHistory,
     deliveryFailures,
+    budgetStatus,
+    budgetAlert,
   };
 }

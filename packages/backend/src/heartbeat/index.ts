@@ -23,6 +23,7 @@ import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
 import { isUnsealed } from '../lib/vault-manager.js';
 import { getTelemetryService } from '../services/telemetry-service.js';
+import { getBudgetService } from '../services/budget-service.js';
 import { now } from '@animus-labs/shared';
 import type { HeartbeatState, MindOutput } from '@animus-labs/shared';
 
@@ -55,6 +56,29 @@ import { getDeferredQueue, getTaskScheduler, getTaskRunner } from '../tasks/inde
 import { interceptApprovalPhrase } from '../tools/approval-interceptor.js';
 
 const log = createLogger('Heartbeat', 'heartbeat');
+
+// ============================================================================
+// Budget Gate — checks whether a tick should proceed based on budget limits
+// ============================================================================
+
+interface BudgetGateResult {
+  allowed: boolean;
+  reason?: string;
+  /** True when budget is exceeded but we allow one grace reply to a message */
+  isGraceMessage?: boolean;
+}
+
+/**
+ * Check whether the current tick is allowed to proceed given budget constraints.
+ *
+ *   - If hard stopped and trigger is 'message': allow with grace flag
+ *   - If hard stopped and trigger is not 'message': block tick
+ *   - Otherwise: allow
+ */
+function checkBudgetGate(triggerType: string): BudgetGateResult {
+  const budgetService = getBudgetService({ getSystemDb, getAgentLogsDb });
+  return budgetService.shouldAllowTick(triggerType);
+}
 
 // ============================================================================
 // HeartbeatContext — encapsulates all module-level state
@@ -241,6 +265,8 @@ async function mindQuery(
     ...(gathered.trustRampContext ? { trustRampContext: gathered.trustRampContext } : {}),
     ...(gathered.externalHistory ? { externalHistory: gathered.externalHistory } : {}),
     ...(gathered.deliveryFailures.length > 0 ? { deliveryFailures: gathered.deliveryFailures } : {}),
+    ...(gathered.budgetStatus ? { budgetStatus: gathered.budgetStatus } : {}),
+    ...(gathered.budgetAlert ? { budgetAlert: gathered.budgetAlert } : {}),
   });
 
   const triggerInfo = {
@@ -584,7 +610,23 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     return;
   }
 
-  log.info(`Starting tick #${tickNumber} (${queuedTick.trigger.type})`);
+  // Budget gate: check if the tick is allowed to proceed
+  const budgetGate = checkBudgetGate(queuedTick.trigger.type);
+  if (!budgetGate.allowed) {
+    log.warn(`Tick #${tickNumber} blocked by budget: ${budgetGate.reason}`);
+    heartbeatStore.updateHeartbeatState(hbDb, {
+      tickNumber,
+      lastTickAt: now(),
+    });
+    eventBus.emit('budget:tick_blocked', {
+      reason: budgetGate.reason ?? 'budget exceeded',
+      triggerType: queuedTick.trigger.type,
+    });
+    eventBus.emit('heartbeat:state_change', heartbeatStore.getHeartbeatState(hbDb));
+    return;
+  }
+
+  log.info(`Starting tick #${tickNumber} (${queuedTick.trigger.type})${budgetGate.isGraceMessage ? ' [budget grace message]' : ''}`);
 
   // Daily active telemetry (deduped per-day, never blocks the pipeline)
   try {
@@ -619,6 +661,11 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
       heartbeatDb: hbDb,
       eventBus,
     });
+
+    // Annotate trigger with budget grace flag if applicable
+    if (budgetGate.isGraceMessage) {
+      effectiveTrigger.isBudgetGraceMessage = true;
+    }
 
     // Stage 1: GATHER CONTEXT
     const gathered = await gatherContext(effectiveTrigger, {
@@ -794,21 +841,36 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
 // ============================================================================
 
 /**
- * Determine the correct tick interval based on current energy state.
- * If the energy system is enabled and the AI is in the sleeping band,
- * returns the sleep tick interval; otherwise the regular heartbeat interval.
+ * Determine the correct tick interval based on current energy state and budget.
+ *
+ * Layers:
+ *   1. Energy system: sleeping band uses sleepTickIntervalMs
+ *   2. Budget throttle: scales interval by (1 + throttleFactor * 5)
+ *
+ * The budget throttle is layered on top of the energy-based interval,
+ * so a sleeping AI with budget pressure gets an even longer interval.
  */
 function resolveTickInterval(settings: import('@animus-labs/shared').SystemSettings): number {
+  let interval = settings.heartbeatIntervalMs;
+
+  // Layer 1: Energy system
   if (settings.energySystemEnabled) {
     const hbDb = getHeartbeatDb();
     const { energyLevel } = heartbeatStore.getEnergyLevel(hbDb);
     const band = getEnergyBand(energyLevel);
     if (band === 'sleeping') {
       log.info(`Energy band is sleeping (${energyLevel.toFixed(4)}), using sleep interval ${settings.sleepTickIntervalMs}ms`);
-      return settings.sleepTickIntervalMs;
+      interval = settings.sleepTickIntervalMs;
     }
   }
-  return settings.heartbeatIntervalMs;
+
+  // Layer 2: Budget throttle (layered on top of energy interval)
+  // Formula: interval * (1 + throttleFactor * 5)
+  // throttleFactor: 0 at <80% budget, linear 0-1 from 80-95%, 1 at >95%
+  const budgetService = getBudgetService({ getSystemDb, getAgentLogsDb });
+  interval = budgetService.getEffectiveInterval(interval);
+
+  return interval;
 }
 
 // ============================================================================
