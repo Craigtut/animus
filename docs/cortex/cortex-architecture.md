@@ -14,14 +14,30 @@ packages/cortex/
     index.ts                    # Public API
     cortex-agent.ts             # Wraps pi-agent-core Agent with production concerns
     context-manager.ts          # Slot-based context management
-    mcp-client.ts               # Unified MCP client (connects to all tool sources)
-    built-in-tools.ts           # Native AgentTool registrations (Bash, Read, Write)
-    tool-permission-gate.ts     # Permission system (off/ask/always_allow)
-    compaction.ts               # Context compaction strategy
+    provider-manager.ts         # Provider discovery, OAuth login/refresh, API key validation
+    provider-registry.ts        # Static provider metadata and utility model defaults
+    model-wrapper.ts            # Model resolution and CortexModel opaque type
+    error-classifier.ts         # Regex-based error classification
     budget-guard.ts             # Turn count, cost, and wall-clock limits
     event-bridge.ts             # Pi events -> normalized events for logging
     schema-converter.ts         # Zod -> JSON Schema -> TypeBox conversion
+    token-estimator.ts          # Heuristic token estimation for compaction triggers
+    working-tags.ts             # Working tag parsing and response delivery
     types.ts                    # Package-specific types
+    tools/
+      index.ts                  # Tool registration entry point
+      bash.ts                   # Bash shell execution
+      bash-safety.ts            # 7-layer safety checks for shell commands
+      cwd-tracker.ts            # Working directory tracking across bash calls
+      read.ts                   # Read file contents
+      read-registry.ts          # Tracks which files have been read (read-before-write)
+      write.ts                  # Write/create files (atomic writes)
+      edit.ts                   # String replacement edits
+      glob.ts                   # File pattern matching
+      grep.ts                   # Regex content search
+      web-fetch.ts              # URL content fetching
+      web-fetch-cache.ts        # Cache for web fetch results
+      task-output.ts            # Background task output polling
   package.json
 ```
 

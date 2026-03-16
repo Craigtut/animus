@@ -6,9 +6,10 @@ Read the contents of a file from the local filesystem.
 
 | Parameter | Type | Required | Description |
 |-----------|------|:--------:|-------------|
-| `path` | string | Yes | Absolute path to the file to read |
-| `offset` | number | No | Line number to start reading from (1-based) |
-| `limit` | number | No | Maximum number of lines to read. Default: 2000. |
+| `file_path` | string | Yes | Absolute path to the file to read |
+| `offset` | number | No | Line number to start reading from (1-based). Only provide if the file is too large to read at once. |
+| `limit` | number | No | Maximum number of lines to read. Default: 2000. Only provide if the file is too large to read at once. |
+| `pages` | string | No | Page range for PDF files (e.g., "1-5", "3", "10-20"). Only applicable to PDF files. Max 20 pages per request. |
 
 ## Returns
 

@@ -36,7 +36,7 @@ Find files by name pattern matching.
 
 ### .gitignore Behavior
 - If a `.gitignore` exists in the search path (or any parent), its rules are respected.
-- If there is no `.gitignore` (not a git repo), common defaults are still applied: skip `node_modules`, `.git`, `dist`, `build`, `__pycache__`, `.DS_Store`.
+- If there is no `.gitignore` (not a git repo), common defaults are still applied: skip `node_modules`, `.git`, `dist`, `build`, `__pycache__`, `.DS_Store`, `.next`, `.nuxt`, `coverage`, `.cache`, `.parcel-cache`, `.vite`.
 - Configurable via a flag to disable gitignore filtering if the consumer needs to search everything.
 
 ### Error Handling

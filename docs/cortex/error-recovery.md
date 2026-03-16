@@ -93,7 +93,14 @@ interface ClassifiedError {
   suggestedAction?: string;
 }
 
-function classifyError(error: Error | string, contextWindow?: number): ClassifiedError;
+function classifyError(error: Error | string, options?: ClassifyErrorOptions): ClassifiedError;
+
+interface ClassifyErrorOptions {
+  /** Context window size in tokens. Used for context overflow detection. */
+  contextWindow?: number;
+  /** Whether the agent was aborted (user or system cancellation). When true, the error is immediately classified as 'cancelled'. */
+  wasAborted?: boolean;
+}
 ```
 
 The classifier is a pure function. It does not throw, does not modify state. It takes an error (or error string) and returns a classification.

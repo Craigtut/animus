@@ -171,7 +171,7 @@ Classify commands by their impact to inform the permission gate.
 
 | Classification | Commands |
 |---------------|----------|
-| `read` | `cd`, `ls`, `find`, `cat`, `head`, `tail`, `sort`, `wc`, `diff`, `grep`, `git status/log/diff`, `echo`, `pwd`, `env`, `which`, `file`, `stat`, `strings`, `hexdump` |
+| `read` | `cd`, `ls`, `find`, `cat`, `head`, `tail`, `sort`, `wc`, `diff`, `grep`, `echo`, `pwd`, `env`, `which`, `file`, `stat`, `strings`, `hexdump`, `less`, `more`, `tree`, `git status/log/diff/show/branch/tag/remote/stash/blame/shortlog/describe/rev-parse/ls-files/ls-tree` |
 | `write` | `rm`, `rmdir`, `mv`, `cp`, `sed` (with `-i`), `chmod`, `chown` |
 | `create` | `mkdir`, `touch`, `tee` |
 | `network` | `curl`, `wget`, `ssh`, `scp`, `rsync`, `nc`, `nmap` |

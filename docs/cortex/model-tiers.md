@@ -45,15 +45,15 @@ const agent = new CortexAgent({
 
 Cortex maintains a small mapping of recommended utility models per provider. This is updated as providers release new models.
 
-| Provider | Default Utility Model | Notes |
-|----------|----------------------|-------|
-| Anthropic | Claude Haiku (latest) | Cheapest Anthropic model, strong for summarization |
-| OpenAI | GPT-4o Mini | Cheapest capable OpenAI model |
-| Google | Gemini Flash (latest) | Cheapest Google model, very fast |
-| Groq | Cheapest available | Fast inference, low cost |
-| Cerebras | Cheapest available | Fast inference, low cost |
-| Mistral | Mistral Small | Cheapest Mistral model |
-| *Others* | Same as primary | No known cheaper option; utility calls still work, just at full price |
+| Provider | Default Utility Model | Model ID | Notes |
+|----------|----------------------|----------|-------|
+| Anthropic | Claude Haiku 4.5 | `claude-haiku-4-5-20251001` | $1.00/$5.00 per 1M tokens |
+| OpenAI | GPT-4.1 Nano | `gpt-4.1-nano` | $0.10/$0.40 per 1M tokens |
+| Google | Gemini 2.5 Flash Lite | `gemini-2.5-flash-lite` | $0.10/$0.40 per 1M tokens |
+| Groq | Llama 3.1 8B Instant | `llama-3.1-8b-instant` | ~$0.05/$0.08 per 1M tokens |
+| Cerebras | Llama 3.1 8B | `llama3.1-8b` | ~$0.10/$0.10 per 1M tokens |
+| Mistral | Mistral Small 2506 | `mistral-small-2506` | $0.06/$0.18 per 1M tokens |
+| *Others* | Same as primary | n/a | No known cheaper option; utility calls still work, just at full price |
 
 For providers without a mapping (Ollama, OpenRouter, custom endpoints, etc.), the primary model is used as the utility model. This means utility calls cost the same as primary calls, but everything still works.
 

@@ -6,7 +6,7 @@ Create a new file or overwrite an existing file.
 
 | Parameter | Type | Required | Description |
 |-----------|------|:--------:|-------------|
-| `path` | string | Yes | Absolute path to the file to write |
+| `file_path` | string | Yes | Absolute path to the file to write (must be absolute, not relative) |
 | `content` | string | Yes | The full content to write to the file |
 
 ## Returns
