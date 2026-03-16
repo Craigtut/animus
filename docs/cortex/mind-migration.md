@@ -58,6 +58,74 @@ The REFLECT response is NOT added to `agent.state.messages`. It is processed ext
 - **No phase gate**: The `pre-thought` → `replying` phase gate is eliminated. Reply streaming can begin as soon as the agentic loop starts.
 - **Simpler agentic system prompt**: The cognitive procedure instructions (`COGNITIVE_PROCEDURE` in `context-builder.ts`) are removed. The agent no longer needs to know about `record_thought` or `record_cognitive_state`.
 
+### Phase Failure Handling
+
+Each of the three LLM phases (THOUGHT, AGENTIC LOOP, REFLECT) can fail independently. The pipeline should be resilient: a failure in one phase should not necessarily abort subsequent phases if they can still produce value.
+
+**Design principle:** Continue forward unless there is truly nothing to work with. Err on the side of running REFLECT, since losing emotion/memory/energy updates degrades the agent's inner life over time.
+
+#### THOUGHT Failure
+
+If the THOUGHT pi-ai call fails (API error, timeout, rate limit):
+
+- **Do not retry.** THOUGHT sits on the critical path before the agentic loop. Retrying introduces latency before the user sees a first reply.
+- **Continue to AGENTIC LOOP.** The thought is a framing input, not a hard dependency. The agentic loop can operate without it; the agent just has slightly less context about its own cognitive state.
+- **Inject a null thought into ephemeral context.** The agentic loop's ephemeral section normally contains the thought. If THOUGHT failed, inject a brief note like "Thought generation was skipped this tick" so the agent does not hallucinate a thought it never had.
+- **Log the failure** as a `thought_failed` event in agent_logs.db. Surface via `system:warning` (not `system:error`, since the tick continues).
+- **EXECUTE receives null thought.** No thought is persisted to heartbeat.db for this tick.
+
+#### AGENTIC LOOP Failure
+
+The agentic loop can fail at different points, and the failure's impact depends on how far the loop progressed:
+
+- **Early failure (no turns completed):** The agent never responded. `agent.state.messages` contains no new turns from this tick. This is the worst case: no reply, no tool calls, no reasoning.
+- **Partial failure (some turns completed):** The agent completed one or more turns (potentially including tool calls and partial replies sent to the user via per-turn early sending), then the loop errored on a subsequent turn. Conversation history contains the completed turns.
+- **Late failure (most work done, error on final tool call):** Most work is complete. The reply may have been fully sent already via per-turn delivery.
+
+**Signal for deciding whether to REFLECT:** Inspect `agent.state.messages` for new assistant turns added during this tick. If there are any new assistant messages (even partial ones), the REFLECT phase has meaningful content to reflect on. If there are zero new assistant turns, REFLECT has nothing to work with.
+
+```typescript
+const newTurnsFromLoop = countNewAssistantTurns(agent.state.messages, loopStartIndex);
+
+if (newTurnsFromLoop === 0 && thoughtFailed) {
+  // Both THOUGHT and AGENTIC LOOP produced nothing. Skip REFLECT.
+  log.warn('Skipping REFLECT: no content from THOUGHT or AGENTIC LOOP');
+  return safeMindOutput(triggerInfo);
+}
+
+// At least one phase produced content. Run REFLECT.
+```
+
+**Reply handling on partial failure:** If per-turn early sending already delivered text to the user, those messages are in `messages.db` regardless of the loop failure. The user received them. EXECUTE should not re-send. The `replySentEarly` flag (or equivalent) tracks this.
+
+**Do not retry the agentic loop.** The loop may have had side effects (tool calls, messages sent, files modified). Retrying could cause duplicate actions.
+
+#### REFLECT Failure
+
+If the REFLECT pi-ai call fails:
+
+- **Retry up to 3 times with exponential backoff** (1s, 2s, 4s). REFLECT is the last LLM call in the tick, so retry latency does not block user-facing output. The data it produces (emotions, energy, memories, experience narration) is valuable for the agent's long-term inner life.
+- **If all retries fail:** The tick loses emotion deltas, energy deltas, memory candidates, experience narration, working memory updates, and core self updates for this tick. This is acceptable for a single tick but would degrade the agent if it happened consistently.
+- **Log the failure** as a `reflect_failed` event. Surface via `system:warning`.
+- **EXECUTE receives null reflection.** No emotion/energy/memory updates are applied. Thoughts from THOUGHT (if it succeeded) are still persisted. Reply from AGENTIC LOOP (if it succeeded) is still sent.
+
+#### Summary Table
+
+| Phase | On Failure | Retry? | Continue Pipeline? | What's Lost |
+|-------|-----------|--------|-------------------|-------------|
+| THOUGHT | Log warning, inject null thought | No (latency-sensitive) | Yes, always | Thought text for UI and ephemeral framing |
+| AGENTIC LOOP | Log error, check for turns | No (side effects) | REFLECT if any turns exist | Reply (if early failure), tool results |
+| REFLECT | Retry 3x with backoff | Yes (not user-facing) | EXECUTE with null reflection if all retries fail | Emotions, energy, memories, experience |
+
+#### The `safeMindOutput()` Equivalent
+
+The current `safeMindOutput()` produces a minimal `MindOutput` when the entire mind query fails. In the 5-phase pipeline, this becomes more granular:
+
+- **All phases failed (THOUGHT + AGENTIC LOOP with 0 turns):** Return a minimal `MindOutput` with a fallback thought ("I experienced difficulty this tick") and no reply, emotions, or memories.
+- **THOUGHT failed, AGENTIC LOOP succeeded:** `MindOutput` has null thought but full agentic output. If REFLECT also succeeded, full inner life updates.
+- **THOUGHT succeeded, AGENTIC LOOP failed with 0 turns:** `MindOutput` has the thought but no reply. REFLECT is skipped. Thought is still persisted.
+- **Everything succeeded except REFLECT:** `MindOutput` has thought and reply but null reflection. No emotion/memory/energy updates.
+
 ### Prefix Caching Across Phases
 
 Each phase has its own tailored system prompt and maintains its own independent cache. Anthropic and OpenAI both support multiple concurrent cached prefixes per API key with no stated limit. Each cache entry has a 5-minute TTL that refreshes on use, which aligns with the default tick interval.
@@ -317,7 +385,51 @@ If the process crashes mid-tick (before `onLoopComplete` fires), the last checkp
 | `heartbeat/agent-orchestrator.ts` | Spawns Claude SDK sessions | Eventually spawns Pi Agent instances |
 | `heartbeat/agent-subsystem.ts` | Creates AgentManager | Creates `CortexAgent`, optionally keeps AgentManager for sub-agents |
 | Streaming | Phase-gated: text only streams after `record_thought` tool call | Direct: text streams as soon as the agentic loop starts. No phase gate. Phase gate module (`cognitive-tools.ts` phase variable) eliminated. Raw text chunks stream with zero latency; at each turn boundary, Cortex emits a structured `AgentTextOutput` with `userFacing`, `working`, and `raw` properties (see `working-tags.md`). |
-| Mid-tick message injection | `session.injectMessage()` pushes new messages into the active session | `agent.steer()` injects messages, only active during the AGENTIC LOOP phase |
+| Mid-tick message injection | `session.injectMessage()` pushes new messages into the active session | Phase-aware queueing with `agent.steer()`. See Mid-Tick Message Handling below. |
+
+## Mid-Tick Message Handling
+
+When a message arrives from the same contact while a tick is already running, the behavior depends on which phase is active. The `message:received` event handler checks the current phase and routes accordingly.
+
+### During THOUGHT Phase
+
+The THOUGHT phase is a direct pi-ai call (not the agentic loop). `agent.steer()` is not available here. The message is **queued** in a `pendingInjections` array. When the AGENTIC LOOP starts, all queued messages are injected immediately via `agent.steer()` before the agent's first turn begins. This means the agent sees the additional messages right away and can react to them.
+
+```typescript
+const pendingInjections: IncomingMessage[] = [];
+
+eventBus.on('message:received', (msg) => {
+  if (msg.contactId !== currentContactId) return;
+
+  if (currentPhase === 'thought') {
+    pendingInjections.push(msg);
+  } else if (currentPhase === 'agentic-loop') {
+    agent.steer(formatInjection(msg));
+  } else if (currentPhase === 'reflect' || currentPhase === 'execute') {
+    // Too late for this tick. Let the tick queue handle it naturally.
+    // The message debounce in TickQueue will create a new tick for it.
+  }
+});
+
+// At the start of the agentic loop, flush queued messages
+if (pendingInjections.length > 0) {
+  const combined = pendingInjections.map(formatInjection).join('\n\n');
+  agent.steer(combined);
+  pendingInjections.length = 0;
+}
+```
+
+### During AGENTIC LOOP Phase
+
+This is the active phase. `agent.steer()` injects the message directly into the running loop, just like `session.injectMessage()` does today. The agent sees the new message as part of its ongoing conversation and can respond naturally.
+
+### During REFLECT or EXECUTE Phase
+
+The agentic loop has already completed. The agent has already replied. Injecting now would be pointless since REFLECT is a structured-output call (not conversational) and EXECUTE is database writes. The message is **not queued or injected**. Instead, the normal `TickQueue` debounce mechanism handles it: the message will trigger a new tick after the current tick completes. This is functionally equivalent to a message arriving between ticks.
+
+### Semantic Difference: `steer()` vs `injectMessage()`
+
+The current `session.injectMessage()` appends to an `AsyncIterable` stream that the model sees as a new user turn. `agent.steer()` in pi-agent-core interrupts the current tool execution and injects a new user message, then triggers a new LLM turn. The semantic effect is similar for the "additional message received" use case: the agent sees the new content and incorporates it. The key difference is that `steer()` may cause the agent to abandon in-progress tool work, while `injectMessage()` was a gentler append. In practice, both result in the agent seeing and responding to the new message.
 
 ## What Stays the Same
 

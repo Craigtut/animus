@@ -94,7 +94,7 @@ The consumer decides when to enable or disable. A common pattern: enable for tex
 
 ## System Prompt Guidance
 
-When `workingTags.enabled` is true, Cortex appends a "Response Delivery" section to its operational rules. This section is placed after "System Rules" and before "Taking Action" so the agent internalizes it as a core operating principle.
+When `workingTags.enabled` is true, Cortex appends a "Response Delivery" section to its operational rules. This section is placed first in the operational rules (before "System Rules") so the agent internalizes it as a core operating principle.
 
 ```
 # Response Delivery
@@ -326,4 +326,4 @@ The parsing utilities are pure functions with no dependencies. The system prompt
 - [System Prompt](./system-prompt.md): Where the Response Delivery section is placed in the operational rules
 - [Mind Migration](./mind-migration.md): How working tags integrate with the 5-phase pipeline
 - [Compaction Strategy](./compaction-strategy.md): How working tag content is handled during compaction
-- [Research: Working Tags Response Delivery](./research/working-tags-response-delivery.md): Original exploration and problem analysis
+- [Compaction Strategy](./compaction-strategy.md): Three-layer compaction design and how working tags interact with it

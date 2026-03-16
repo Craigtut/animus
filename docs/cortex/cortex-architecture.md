@@ -223,18 +223,11 @@ Pi-agent-core emits 10 events across 4 scopes. Cortex normalizes these into a co
 - The event bridge uses the same `AgentLogStoreAdapter` pattern as the current system.
 - Backend continues emitting its own pipeline events (`tick_input`, `tick_output`, `execute_*`) directly, independent of the event bridge. These are Animus pipeline events that the backend logs during GATHER/EXECUTE, not pi-agent-core events.
 
-### Error Handling
+### Error Recovery
 
-Pi-agent-core and pi-ai surface all errors as plain `Error` objects with string messages. There are no error codes, no structured error types, and no HTTP status code preservation. The error information available at each layer:
+Pi-ai surfaces errors as plain `Error` objects with string messages. Cortex implements a regex-based error classifier that maps error strings to actionable categories (`authentication`, `rate_limit`, `context_overflow`, `server_error`, `network`, `cancelled`, `unknown`). Classified errors are emitted via the `onError` event for the consumer to route (logging, UI notifications, backoff).
 
-- **LLM errors**: `AssistantMessage` with `stopReason: "error"` and `errorMessage: string`. The original provider SDK error message is preserved but HTTP status codes are not.
-- **Tool execution errors**: Caught and converted to `ToolResultMessage` with `isError: true` and the error message as content. These do not crash the loop; the agent sees the error and can retry or adjust.
-- **Agent-level errors**: Caught by the `Agent` class, stored in `agent.state.error: string`, an error message appended to conversation, `agent_end` event emitted.
-- **Context overflow**: Pi-ai provides `isContextOverflow(message, contextWindow?)` which checks 14+ provider-specific regex patterns against error messages. This is the only structured error detection pi-ai offers.
-
-Cortex exposes these as-is. Robust error classification (rate limit detection, auth failure detection, retry-with-backoff) would require either upstream changes to pi-ai or regex matching against provider-specific error strings, which is fragile. For now, cortex surfaces the raw error information and lets the consumer decide how to handle it.
-
-The `isContextOverflow()` utility from pi-ai is used by the compaction system to detect when compaction should have been triggered sooner (reactive compaction fallback).
+See **`error-recovery.md`** for the full design: classification patterns per category, error event flow, auth failure detection (pre-call and post-call), rate limit backoff mechanism, and integration with the 5-phase pipeline.
 
 ### Token Tracking
 
@@ -246,6 +239,108 @@ Cortex tracks tokens through two complementary mechanisms:
 - **Heuristic estimation**: A built-in `estimateTokens(text)` function (word-count * 1.3 multiplier) for estimating context size before the first LLM call and between calls. This is critical for compaction: if the heuristic estimate of the current message array is approaching `model.contextWindow`, cortex can trigger compaction proactively rather than waiting for the next post-hoc usage report.
 
 The heuristic is a duplicate of the same utility in `@animus-labs/shared` (4 lines), kept inline to avoid a dependency.
+
+## Lifecycle
+
+Pi-agent-core's `Agent` class has no `destroy()` or `dispose()` method. It provides `abort()` (cancels the running loop via AbortController), `waitForIdle()` (resolves when the loop finishes), and `reset()` (clears message history and queues). But there is no instance-level cleanup: event listeners are never auto-removed, and the Agent holds references to callbacks and message arrays indefinitely.
+
+Cortex wraps this with explicit lifecycle management.
+
+### `CortexAgent.destroy()`
+
+Ordered cleanup of all resources. Called by the consumer when the agent is no longer needed (e.g., `stopHeartbeat()` in the Animus backend).
+
+```typescript
+async destroy(): Promise<void> {
+  // 1. Abort any in-progress agentic loop
+  this.agent.abort();
+  await this.agent.waitForIdle();
+
+  // 2. Cancel all background sub-agents
+  for (const subAgent of this.activeSubAgents) {
+    subAgent.abort();
+    await subAgent.waitForIdle();
+    this.emit('onSubAgentFailed', subAgent.taskId, 'Parent agent destroyed');
+  }
+
+  // 3. Checkpoint conversation history (best-effort)
+  try {
+    this.emit('onLoopComplete');  // gives consumer a chance to save
+  } catch { /* ignore checkpoint failures during shutdown */ }
+
+  // 4. Close all MCP client connections
+  await this.mcpClientManager.closeAll();
+  //    - Stdio subprocesses are killed
+  //    - HTTP connections are closed
+  //    - Bridge context registry entry is unregistered
+
+  // 5. Clear skill buffer
+  this.skillRegistry.clear();
+
+  // 6. Unsubscribe from pi-agent-core events
+  for (const unsub of this.eventUnsubscribers) {
+    unsub();
+  }
+
+  // 7. Clear agent state
+  this.agent.reset();
+
+  // 8. Mark as destroyed
+  this.destroyed = true;
+  // All subsequent prompt() calls throw: "Agent has been destroyed"
+}
+```
+
+### `CortexAgent.abort()`
+
+Cancel the current agentic loop without destroying the agent. The agent remains usable for subsequent prompts.
+
+```typescript
+async abort(): Promise<void> {
+  this.agent.abort();
+  await this.agent.waitForIdle();
+}
+```
+
+**Tool abort is cooperative.** Pi-agent-core passes the `AbortSignal` to each `tool.execute()` call, but if a tool doesn't check the signal, it runs to completion. For Bash commands, the process tree is killed independently via the process cleanup mechanism (see `bash.md`). For MCP tool calls, the MCP client can close the pending request.
+
+### Backend Integration (Animus-specific)
+
+The backend's `stopHeartbeat()` calls `destroy()` instead of the current `session.end()`:
+
+```typescript
+export async function stopHeartbeat(options): Promise<void> {
+  tickQueue.stopInterval();
+  tickQueue.clear();              // prevent new ticks during shutdown
+  await cortexAgent?.destroy();   // ordered cleanup
+  cortexAgent = null;
+}
+```
+
+The `TickQueue.clear()` call happens before `destroy()` to prevent a race where a new tick starts while shutdown is in progress.
+
+### Process Signal Handling
+
+On `SIGTERM`/`SIGINT`, the backend calls `stopHeartbeat()` which calls `destroy()`. The key concern is **orphaned MCP subprocesses**, especially on Windows where there are no process groups by default.
+
+Mitigations:
+- **Unix**: MCP stdio subprocesses are spawned with `detached: true` in their own process group. On destroy, `kill(-pid, SIGKILL)` kills the entire group.
+- **Windows**: MCP stdio subprocesses are tracked by PID. On destroy, `taskkill /F /T /PID` kills each one. As a safety net, cortex registers a `process.on('exit')` handler that runs synchronous cleanup for any processes still alive.
+- **All platforms**: Cortex stores spawned subprocess PIDs in a set. The `process.on('exit')` handler iterates and kills any remaining. This is a last-resort fallback for unclean exits (SIGKILL, crash).
+
+### Lifecycle States
+
+```
+CREATED → ACTIVE → DESTROYED
+                ↑
+                └── abort() returns to ACTIVE (agent still usable)
+```
+
+- **CREATED**: After `new CortexAgent(config)`. Slots can be set, but no loops have run.
+- **ACTIVE**: After the first `prompt()` call. The agent is running or idle between prompts.
+- **DESTROYED**: After `destroy()`. All resources released. Any `prompt()` call throws.
+
+There is no IDLE vs RUNNING sub-state. The consumer can check `agent.isRunning` (delegates to pi-agent-core's internal streaming state) if needed.
 
 ## References
 

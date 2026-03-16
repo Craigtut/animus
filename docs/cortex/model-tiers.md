@@ -21,7 +21,8 @@ The consumer chooses this model based on their quality/cost preferences.
 A cheap, fast model for internal operations. Used for:
 - WebFetch page summarization (the secondary LLM call)
 - Auto-mode safety classifier (bash command classification)
-- Compaction summarization (summarizing old conversation turns)
+
+Note: Compaction summarization uses the **primary model**, not the utility model. Conversation history summaries are the only record of what happened during agentic loops (tool calls, decisions, reasoning chains). Quality matters significantly here. See `compaction-strategy.md` for the rationale.
 
 The user never sees utility model output directly. It powers behind-the-scenes operations where speed and cost matter more than peak quality.
 

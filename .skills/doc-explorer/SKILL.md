@@ -105,7 +105,6 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/cortex/backend-auth-integration.md` | Backend auth integration: CortexCredentialService, credential storage (system.db), AES-256-GCM encryption, cortex-provider.ts tRPC router, getApiKey callback wiring, OAuth flow coordination, headless/Docker detection, system_settings schema, event bus events, legacy auth coexistence |
 | `docs/cortex/frontend-auth-ux.md` | Frontend auth UX: progressive disclosure (OAuth > API key > custom endpoint), CortexProviderStep onboarding component, provider card states, headless device-code variant, settings page AI Provider section, model picker, thinking level, legacy SDK demotion, visual design notes |
 | `docs/cortex/working-tags.md` | Working tags response delivery architecture: `<working>` XML tags for separating internal reasoning from user-facing text during agentic loops, configuration (`workingTags.enabled`), system prompt guidance (Response Delivery section), `AgentTextOutput` type (`userFacing`/`working`/`raw`), dual event model (raw streaming + structured turn completion), parsing utilities, channel-aware delivery (strip for SMS, dim for frontend, disable for voice), compaction interaction, sub-agent behavior, four-layer response delivery framework |
-| `docs/cortex/research/working-tags-response-delivery.md` | Original exploration and problem analysis for working tags. Superseded by `docs/cortex/working-tags.md` as the authoritative spec. **STATUS: PROPOSAL** |
 
 ### Research (Planned/Exploratory)
 
