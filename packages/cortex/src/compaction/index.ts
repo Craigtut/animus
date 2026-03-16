@@ -17,6 +17,7 @@
 import type { AgentMessage, AgentContext } from '../context-manager.js';
 import type {
   CortexCompactionConfig,
+  AdaptiveThresholdConfig,
   CompactionResult,
   CompactionTarget,
   PipelinePhase,
@@ -45,15 +46,26 @@ export { runCompaction, shouldCompact, partitionHistory, buildSummaryMessage } f
 export type { CompleteFn } from './compaction.js';
 export { emergencyTruncate, shouldTruncate, isContextOverflow } from './failsafe.js';
 export type { FailsafeTruncationResult } from './failsafe.js';
+// computeAdaptiveThreshold is defined below in this file and exported at the declaration site
 
 // ---------------------------------------------------------------------------
 // Default config
 // ---------------------------------------------------------------------------
 
+export const ADAPTIVE_DEFAULTS: AdaptiveThresholdConfig = {
+  enabled: true,
+  recentWindowMs: 300_000,     // 5 minutes
+  idleWindowMs: 1_800_000,     // 30 minutes
+  recentReduction: 0.0,        // no change when recent
+  moderateReduction: 0.10,     // lower threshold by 0.10 when moderately idle
+  idleReduction: 0.20,         // lower threshold by 0.20 when fully idle
+};
+
 export const DEFAULT_COMPACTION_CONFIG: CortexCompactionConfig = {
   microcompaction: MICROCOMPACTION_DEFAULTS,
   compaction: COMPACTION_DEFAULTS,
   failsafe: FAILSAFE_DEFAULTS,
+  adaptive: ADAPTIVE_DEFAULTS,
 };
 
 /**
@@ -77,7 +89,57 @@ export function buildCompactionConfig(
       ...FAILSAFE_DEFAULTS,
       ...partial.failsafe,
     },
+    adaptive: {
+      ...ADAPTIVE_DEFAULTS,
+      ...partial.adaptive,
+    },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Adaptive threshold calculation
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the effective Layer 2 compaction threshold adjusted by interaction
+ * recency. When the user has not interacted recently, the threshold is lowered
+ * (i.e., compaction fires sooner), reducing token costs for idle sessions.
+ *
+ * @param baseThreshold - The configured Layer 2 threshold (e.g., 0.70)
+ * @param adaptiveConfig - Adaptive threshold configuration
+ * @param lastInteractionTime - Timestamp (ms) of the last user interaction, or null if never
+ * @param now - Current timestamp (ms), injectable for testing
+ * @returns The adjusted threshold (always >= 0)
+ */
+export function computeAdaptiveThreshold(
+  baseThreshold: number,
+  adaptiveConfig: AdaptiveThresholdConfig,
+  lastInteractionTime: number | null,
+  now: number = Date.now(),
+): number {
+  if (!adaptiveConfig.enabled) {
+    return baseThreshold;
+  }
+
+  // No interaction recorded yet: treat as fully idle
+  if (lastInteractionTime === null) {
+    return Math.max(0, baseThreshold - adaptiveConfig.idleReduction);
+  }
+
+  const elapsed = now - lastInteractionTime;
+
+  if (elapsed < adaptiveConfig.recentWindowMs) {
+    // Recent interaction: apply recentReduction (default 0, no change)
+    return Math.max(0, baseThreshold - adaptiveConfig.recentReduction);
+  }
+
+  if (elapsed < adaptiveConfig.idleWindowMs) {
+    // Moderate idle: apply moderateReduction
+    return Math.max(0, baseThreshold - adaptiveConfig.moderateReduction);
+  }
+
+  // Fully idle: apply idleReduction
+  return Math.max(0, baseThreshold - adaptiveConfig.idleReduction);
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +166,14 @@ export class CompactionManager {
 
   /** Context window size from the model. */
   private _contextWindow = 0;
+
+  /**
+   * Timestamp (ms) of the last user interaction. Used by the adaptive
+   * threshold system to decide how aggressively to compact. Updated by
+   * the consumer (backend) when a message-triggered tick fires.
+   * Null means no interaction has been recorded yet.
+   */
+  private _lastInteractionTime: number | null = null;
 
   /** Consumer handlers for compaction lifecycle events. */
   private beforeCompactionHandlers: BeforeCompactionHandler[] = [];
@@ -153,6 +223,38 @@ export class CompactionManager {
    */
   get pipelinePhase(): PipelinePhase {
     return this._pipelinePhase;
+  }
+
+  /**
+   * Signal when the user last interacted with the system.
+   * The consumer (backend) calls this during GATHER when a message-triggered
+   * tick fires. For interval ticks, it is not called, so the timestamp
+   * naturally ages.
+   */
+  setLastInteractionTime(timestamp: number): void {
+    this._lastInteractionTime = timestamp;
+  }
+
+  /**
+   * Get the timestamp of the last user interaction, or null if none recorded.
+   */
+  get lastInteractionTime(): number | null {
+    return this._lastInteractionTime;
+  }
+
+  /**
+   * Compute the effective Layer 2 compaction threshold, adjusted for
+   * interaction recency when adaptive thresholds are enabled.
+   *
+   * @param now - Current timestamp (ms), injectable for testing
+   */
+  getEffectiveThreshold(now?: number): number {
+    return computeAdaptiveThreshold(
+      this.config.compaction.threshold,
+      this.config.adaptive,
+      this._lastInteractionTime,
+      now,
+    );
   }
 
   // -----------------------------------------------------------------------
@@ -320,10 +422,13 @@ export class CompactionManager {
 
     const estimatedTokens = this.estimateHistoryTokens(history);
 
+    // Use adaptive threshold (adjusts based on interaction recency)
+    const effectiveThreshold = this.getEffectiveThreshold();
+
     // Check Layer 2 threshold
-    if (!shouldCompact(this._sessionTokenCount, this._contextWindow, this.config.compaction.threshold)) {
+    if (!shouldCompact(this._sessionTokenCount, this._contextWindow, effectiveThreshold)) {
       // Also check using heuristic estimation as fallback
-      if (!shouldCompact(estimatedTokens, this._contextWindow, this.config.compaction.threshold)) {
+      if (!shouldCompact(estimatedTokens, this._contextWindow, effectiveThreshold)) {
         return null;
       }
     }
@@ -429,6 +534,7 @@ export class CompactionManager {
     this.compactionResultHandlers = [];
     this.completeFn = null;
     this._sessionTokenCount = 0;
+    this._lastInteractionTime = null;
   }
 
   // -----------------------------------------------------------------------

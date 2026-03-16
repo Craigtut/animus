@@ -920,6 +920,20 @@ export class CortexAgent {
   }
 
   /**
+   * Signal how recently the user last interacted.
+   * Used by the compaction system to adjust thresholds:
+   * - Recent interaction: use normal thresholds
+   * - No interaction for a while: compact more aggressively
+   *
+   * The backend calls this during GATHER when a message-triggered tick fires
+   * (set to Date.now()). For interval ticks, it is not called, so the
+   * timestamp ages naturally.
+   */
+  setLastInteractionTime(timestamp: number): void {
+    this.compactionManager.setLastInteractionTime(timestamp);
+  }
+
+  /**
    * Cap a tool result at insertion time. If the result exceeds
    * maxResultTokens, truncates to head+tail bookend format.
    * Call this when tool results enter conversation history.

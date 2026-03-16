@@ -27,16 +27,17 @@ import {
   type McpHttpConfig,
 } from '@animus-labs/cortex';
 
-import { getSystemDb, getHeartbeatDb, getContactsDb, getMessagesDb, getMemoryDb } from '../db/index.js';
+import { getSystemDb, getHeartbeatDb, getContactsDb, getMessagesDb, getMemoryDb, getPersonaDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
 import * as contactStore from '../db/stores/contact-store.js';
 import * as messageStore from '../db/stores/message-store.js';
+import * as personaStore from '../db/stores/persona-store.js';
 import * as memoryDbStore from '../db/stores/memory-store.js';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import * as vaultStore from '../db/stores/vault-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
-import { PROJECT_ROOT, DATA_DIR } from '../utils/env.js';
+import { PROJECT_ROOT, DATA_DIR, APP_VERSION } from '../utils/env.js';
 import { isBlockedPath, isBlockedCommand } from '../lib/file-deny-list.js';
 import { resolveToolGate } from '../tools/tool-gate.js';
 import { getToolPermission, getToolPermissions } from '../db/stores/system-store.js';
@@ -391,13 +392,16 @@ export async function createCortexMind(
   // Wire EventBus listeners for provider changes from settings UI
   wireProviderChangeListeners(cortexAgent, state);
 
-  // Wire plugin lifecycle listeners for dynamic MCP connections
+  // Wire plugin lifecycle listeners for dynamic MCP connections and skills
   wirePluginLifecycleListeners(cortexAgent);
 
   // Connect to plugin MCP servers (non-blocking; failures logged but don't prevent startup)
   connectPluginMcpServers(cortexAgent).catch(err => {
     log.warn('Error connecting initial plugin MCP servers:', err);
   });
+
+  // Load existing plugin skills into the SkillRegistry at startup
+  loadPluginSkillsAtStartup(cortexAgent);
 
   state.agent = cortexAgent;
   log.info('CortexAgent created and configured for mind session');
@@ -607,11 +611,13 @@ function convertPluginMcpConfig(
 
 /**
  * Wire EventBus listeners for plugin lifecycle events.
- * Dynamically connects/disconnects MCP servers as plugins are installed/removed.
+ * Dynamically connects/disconnects MCP servers and skills as plugins
+ * are installed/removed/enabled/disabled.
  */
 function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
   const eventBus = getEventBus();
   const mcpManager = cortexAgent.getMcpClientManager();
+  const skillRegistry = cortexAgent.getSkillRegistry();
 
   // Set up logging on the MCP manager
   mcpManager.log = {
@@ -642,6 +648,19 @@ function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
           log.warn(`Failed to connect plugin MCP server "${namespacedKey}" on ${action}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
+
+      // Register plugin skills with the SkillRegistry
+      const loaded = pluginManager.getPlugin(pluginName);
+      if (loaded && loaded.skills.length > 0) {
+        for (const skill of loaded.skills) {
+          const skillMdPath = join(skill.absolutePath, 'SKILL.md');
+          skillRegistry.addSkill({
+            path: skillMdPath,
+            source: `plugin:${pluginName}`,
+          });
+          log.info(`Registered plugin skill: ${skill.name} (source: plugin:${pluginName})`);
+        }
+      }
     } else if (action === 'uninstalled' || action === 'disabled') {
       // Disconnect all MCP servers belonging to this plugin
       const states = mcpManager.getConnectionStates();
@@ -655,12 +674,23 @@ function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
           }
         }
       }
+
+      // Remove plugin skills from the SkillRegistry
+      const loaded = pluginManager.getPlugin(pluginName);
+      if (loaded && loaded.skills.length > 0) {
+        for (const skill of loaded.skills) {
+          skillRegistry.removeSkill(skill.name);
+          log.info(`Removed plugin skill: ${skill.name} (plugin: ${pluginName})`);
+        }
+      }
     }
 
     // Re-merge tools after MCP connections changed
     cortexAgent.refreshTools();
 
-    // Rebuild system prompt so the LLM sees updated tool/plugin context
+    // Rebuild system prompt so the LLM sees updated tool/plugin/skill context.
+    // Skill registry changes affect the load_skill tool description, which is
+    // part of the system prompt.
     rebuildSystemPromptForPluginChange(cortexAgent);
   });
 
@@ -746,6 +776,98 @@ function rebuildSystemPromptForPluginChange(cortexAgent: CortexAgent): void {
   } catch (err) {
     log.warn('Failed to rebuild system prompt after plugin change:', err);
   }
+}
+
+// ============================================================================
+// Plugin Skill Startup Loader
+// ============================================================================
+
+/**
+ * Load all existing plugin skills into the SkillRegistry at startup.
+ *
+ * Iterates over all loaded and enabled plugins, registering each plugin's
+ * skills with the cortex SkillRegistry. This ensures skills from
+ * already-installed plugins are available when the CortexAgent is first
+ * created, without waiting for a plugin:changed event.
+ */
+function loadPluginSkillsAtStartup(cortexAgent: CortexAgent): void {
+  const pluginManager = getPluginManager();
+  if (!pluginManager) {
+    log.debug('PluginManager not available; skipping plugin skill loading');
+    return;
+  }
+
+  const skillRegistry = cortexAgent.getSkillRegistry();
+  let skillCount = 0;
+
+  const allPlugins = pluginManager.getAllPlugins();
+  for (const pluginInfo of allPlugins) {
+    if (!pluginInfo.enabled) continue;
+
+    const loaded = pluginManager.getPlugin(pluginInfo.name);
+    if (!loaded || loaded.skills.length === 0) continue;
+
+    for (const skill of loaded.skills) {
+      const skillMdPath = join(skill.absolutePath, 'SKILL.md');
+      skillRegistry.addSkill({
+        path: skillMdPath,
+        source: `plugin:${pluginInfo.name}`,
+      });
+      skillCount++;
+    }
+  }
+
+  if (skillCount > 0) {
+    log.info(`Loaded ${skillCount} plugin skills into SkillRegistry at startup`);
+    // Rebuild system prompt so the load_skill tool description includes all skills
+    rebuildSystemPromptForPluginChange(cortexAgent);
+  }
+}
+
+// ============================================================================
+// Preprocessor Variables
+// ============================================================================
+
+/**
+ * Update the skill preprocessor variables for the current tick.
+ *
+ * Called during GATHER phase in cortexMindQuery. These variables are
+ * available for ${VAR} substitution in SKILL.md files when skills are
+ * loaded via the load_skill tool.
+ *
+ * See docs/cortex/skill-system.md, "Consumer Integration Example".
+ */
+export function updatePreprocessorVariables(
+  cortexAgent: CortexAgent,
+  gathered: GatherResult,
+): void {
+  const personaDb = getPersonaDb();
+  const persona = personaStore.getPersona(personaDb);
+
+  // Resolve the primary contact (the user running this instance)
+  const cDb = getContactsDb();
+  const primaryContact = contactStore.getPrimaryContact(cDb);
+
+  cortexAgent.setPreprocessorVariables({
+    AGENT_NAME: persona.name || 'Animus',
+    USER_NAME: primaryContact?.fullName ?? '',
+    USER_ID: primaryContact?.id ?? '',
+    CONTACT_NAME: gathered.contact?.fullName ?? '',
+    CHANNEL_TYPE: gathered.trigger.channel ?? '',
+    DATA_DIR: DATA_DIR,
+    PLATFORM: process.platform,
+    ENGINE_VERSION: APP_VERSION,
+  });
+
+  // Rich context object for script executions
+  cortexAgent.setScriptContext({
+    contact: gathered.contact
+      ? { id: gathered.contact.id, name: gathered.contact.fullName, tier: gathered.contact.permissionTier }
+      : null,
+    channelType: gathered.trigger.channel ?? null,
+    dataDir: DATA_DIR,
+    persona: { name: persona.name || 'Animus' },
+  });
 }
 
 // ============================================================================

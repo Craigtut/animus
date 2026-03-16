@@ -266,6 +266,36 @@ export interface FailsafeConfig {
 }
 
 /**
+ * Adaptive threshold configuration for Layer 2 compaction.
+ *
+ * Adjusts the compaction trigger point based on how recently the user last
+ * interacted. When the user is idle (no messages for a while), the threshold
+ * is lowered so compaction fires earlier, reducing token costs during interval
+ * ticks where the agent is thinking to itself.
+ *
+ * Three windows:
+ * - Recent (< recentWindowMs): no threshold reduction
+ * - Moderate (recentWindowMs .. idleWindowMs): moderateReduction applied
+ * - Idle (> idleWindowMs): idleReduction applied
+ *
+ * The effective threshold is: config.compaction.threshold - reduction
+ */
+export interface AdaptiveThresholdConfig {
+  /** Whether adaptive thresholds are enabled. Default: true. */
+  enabled: boolean;
+  /** Milliseconds within which interaction is considered "recent". Default: 300000 (5 min). */
+  recentWindowMs: number;
+  /** Milliseconds beyond which interaction is considered "idle". Default: 1800000 (30 min). */
+  idleWindowMs: number;
+  /** Threshold reduction when interaction is recent. Default: 0.0. */
+  recentReduction: number;
+  /** Threshold reduction when interaction is moderate. Default: 0.10. */
+  moderateReduction: number;
+  /** Threshold reduction when interaction is idle. Default: 0.20. */
+  idleReduction: number;
+}
+
+/**
  * Full compaction configuration for CortexAgent.
  * All three layers are always active; there are no enabled toggles.
  */
@@ -273,6 +303,8 @@ export interface CortexCompactionConfig {
   microcompaction: MicrocompactionConfig;
   compaction: CompactionConfig;
   failsafe: FailsafeConfig;
+  /** Adaptive threshold configuration. Adjusts Layer 2 trigger based on interaction recency. */
+  adaptive: AdaptiveThresholdConfig;
 }
 
 /**

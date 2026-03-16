@@ -62,6 +62,7 @@ import {
   populateContextSlots,
   restoreConversationHistory,
   buildMindToolContext as buildCortexToolContext,
+  updatePreprocessorVariables,
 } from './cortex-mind.js';
 
 const log = createLogger('Heartbeat', 'heartbeat');
@@ -609,11 +610,22 @@ async function cortexMindQuery(
   const cortexMind = ctx.agents!.cortexMind;
   const cortexAgent = cortexMind.agent!;
 
+  // Signal interaction recency for adaptive compaction thresholds.
+  // Message-triggered ticks set the timestamp to now; interval/scheduled/agent_complete
+  // ticks do not call this, so the timestamp ages naturally, causing the
+  // compaction system to lower its threshold for idle sessions.
+  if (gathered.trigger.type === 'message') {
+    cortexAgent.setLastInteractionTime(Date.now());
+  }
+
   // Update the mutable tool context for this tick
   cortexMind.toolContext.current = buildCortexToolContext(gathered, ctx.memory?.memoryManager ?? null);
 
   // Populate context slots with gathered data
   populateContextSlots(cortexAgent, gathered);
+
+  // Update preprocessor variables for ${VAR} substitution in SKILL.md files
+  updatePreprocessorVariables(cortexAgent, gathered);
 
   // Build and set the system prompt (persona + cortex operational sections)
   const consumerPrompt = buildSystemPrompt(ctx.compiledPersona, {
@@ -1097,6 +1109,13 @@ export async function initializeHeartbeat(subsystems: {
       // fully updated on the first tick via gatherContext().
       log.info('CortexAgent initialized and context restored at startup');
 
+      // Wire the AgentOrchestrator to use cortex for sub-agent spawning.
+      // When set, spawnAgent/updateAgent/cancelAgent route through cortex
+      // SubAgent infrastructure instead of the legacy SDK sessions.
+      if (subsystems.agents.agentOrchestrator) {
+        subsystems.agents.agentOrchestrator.setCortexAgent(cortexAgent);
+      }
+
       // Wire rate-limit backoff: when the cortex agent reports a rate_limit
       // error, compute exponential backoff and delay the next tick.
       cortexAgent.onError((classified: { category: string; severity: string; originalMessage: string }) => {
@@ -1115,6 +1134,15 @@ export async function initializeHeartbeat(subsystems: {
       log.warn('CortexAgent initialization failed (will fall back to legacy mind):', err);
     }
   }
+
+  // When the cortex provider is removed, disconnect the orchestrator so it
+  // falls back to the legacy @animus-labs/agents path for sub-agents.
+  getEventBus().on('cortex:provider-removed', () => {
+    if (subsystems.agents.agentOrchestrator) {
+      subsystems.agents.agentOrchestrator.setCortexAgent(null);
+      log.info('AgentOrchestrator disconnected from cortex (provider removed)');
+    }
+  });
 
   // Listen for plugin changes to invalidate the session
   getEventBus().on('plugin:changed', async (payload) => {
