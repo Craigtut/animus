@@ -548,7 +548,7 @@ function formatTimestamp(isoString: string, timezone?: string): string {
 // Context Section Builders
 // ============================================================================
 
-function buildTriggerSection(trigger: TriggerContext): string {
+export function buildTriggerSection(trigger: TriggerContext): string {
   switch (trigger.type) {
     case 'message': {
       const lines = [

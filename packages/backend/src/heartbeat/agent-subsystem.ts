@@ -1,8 +1,14 @@
 /**
  * Agent Subsystem
  *
- * Wraps the initialization of agent-related infrastructure (AgentManager,
- * AgentLogStore adapter, AgentOrchestrator) into a SubsystemLifecycle.
+ * Wraps the initialization of agent-related infrastructure into a
+ * SubsystemLifecycle. During the cortex migration, this manages both:
+ *
+ * - CortexMindState: The cortex-based mind session (new, Phase 2A)
+ * - AgentManager: The @animus-labs/agents abstraction (retained for sub-agents)
+ * - AgentOrchestrator: Sub-agent lifecycle management
+ *
+ * The AgentManager stays for sub-agents; only the mind switches to cortex.
  */
 
 import { join } from 'node:path';
@@ -17,14 +23,22 @@ import { getEventBus } from '../lib/event-bus.js';
 import { createAgentManager, type AgentManager, type AgentLogStore } from '@animus-labs/agents';
 import { createAgentLogStoreAdapter } from './agent-log-adapter.js';
 import { AgentOrchestrator, type AgentTaskStore, type AgentTaskRecord } from './agent-orchestrator.js';
+import {
+  createCortexMindState,
+  destroyCortexMind,
+  type CortexMindState,
+} from './cortex-mind.js';
 
 const log = createLogger('AgentSubsystem', 'heartbeat');
 
 export class AgentSubsystem implements SubsystemLifecycle {
   readonly name = 'agents';
+  /** AgentManager retained for sub-agents (observational memory, delegated tasks) */
   agentManager: AgentManager | null = null;
   agentLogStoreAdapter: AgentLogStore | null = null;
   agentOrchestrator: AgentOrchestrator | null = null;
+  /** CortexAgent state for the mind session (Phase 2A) */
+  cortexMind: CortexMindState = createCortexMindState();
 
   constructor(private onAgentComplete: (params: {
     agentId: string;
@@ -102,6 +116,10 @@ export class AgentSubsystem implements SubsystemLifecycle {
   }
 
   async stop(): Promise<void> {
+    // Destroy the cortex mind session first (Phase 2A)
+    await destroyCortexMind(this.cortexMind);
+    this.cortexMind = createCortexMindState();
+
     if (this.agentOrchestrator) {
       await this.agentOrchestrator.cleanup();
       this.agentOrchestrator = null;

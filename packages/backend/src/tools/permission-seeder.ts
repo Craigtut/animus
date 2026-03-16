@@ -57,6 +57,21 @@ const ALL_SDK_TOOLS: Record<string, SdkToolDef> = {
   CollabAgent: { displayName: 'Collab Agent', description: 'Multi-agent collaboration tool calls', riskTier: 'acts' },
 };
 
+// ---------------------------------------------------------------------------
+// Cortex built-in tools (in-process, from @animus-labs/cortex)
+// These are registered as AgentTool objects, not MCP tools.
+// ---------------------------------------------------------------------------
+
+const CORTEX_BUILTIN_TOOLS: Record<string, SdkToolDef> = {
+  Bash: { displayName: 'Bash Shell', description: 'Execute shell commands', riskTier: 'acts' },
+  Read: { displayName: 'Read File', description: 'Read contents of a file', riskTier: 'safe' },
+  Write: { displayName: 'Write File', description: 'Write contents to a file', riskTier: 'acts' },
+  Edit: { displayName: 'Edit File', description: 'Edit sections of a file', riskTier: 'acts' },
+  Glob: { displayName: 'Glob Search', description: 'Find files matching a glob pattern', riskTier: 'safe' },
+  Grep: { displayName: 'Grep Search', description: 'Search file contents with regex', riskTier: 'safe' },
+  WebFetch: { displayName: 'Web Fetch', description: 'Fetch content from a URL', riskTier: 'communicates' },
+};
+
 // Per-provider tool sets. Keys must exist in ALL_SDK_TOOLS.
 // Claude: Has discrete tools for read, search, write, etc.
 // Codex: Uses commandExecution (Bash), fileChange (Write/Edit), webSearch, collabAgentToolCall.
@@ -160,7 +175,21 @@ export function seedToolPermissions(
     seeded++;
   }
 
-  // 3. Plugin tools
+  // 3. Cortex built-in tools (in-process tools from @animus-labs/cortex)
+  for (const [name, tool] of Object.entries(CORTEX_BUILTIN_TOOLS)) {
+    upsertToolPermission(systemDb, {
+      toolName: name,
+      toolSource: 'cortex:builtin',
+      displayName: tool.displayName,
+      description: tool.description,
+      riskTier: tool.riskTier,
+      mode: defaultModeForTier(tool.riskTier),
+      isDefault: true,
+    });
+    seeded++;
+  }
+
+  // 4. Plugin tools
   if (plugins) {
     for (const plugin of plugins) {
       const pluginSource = `plugin:${plugin.name}`;
