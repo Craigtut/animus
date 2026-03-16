@@ -11,19 +11,17 @@
  * See docs/cortex/mind-migration.md for the full design.
  */
 
-import type { CortexAgent, AgentTextOutput } from '@animus-labs/cortex';
-import type { MindOutput, ChannelType, IEventBus } from '@animus-labs/shared';
+import type { CortexAgent, AgentTextOutput, CortexEvent } from '@animus-labs/cortex';
+import type { MindOutput } from '@animus-labs/shared';
 
 import { createLogger } from '../lib/logger.js';
 import { getEventBus } from '../lib/event-bus.js';
-import { getHeartbeatDb, getAgentLogsDb } from '../db/index.js';
-import * as heartbeatStore from '../db/stores/heartbeat-store.js';
+import { getAgentLogsDb } from '../db/index.js';
 import * as agentLogStore from '../db/stores/agent-log-store.js';
 
 import type { GatherResult } from './gather-context.js';
 import type { CompiledPersona } from './persona-compiler.js';
 import { isNonResponse, type CognitiveSnapshot, createEmptySnapshot, snapshotToMindOutput, safeMindOutput } from './cognitive-tools.js';
-import { buildTriggerSection } from './context-builder.js';
 import { buildTriggerSection } from './context-builder.js';
 
 const log = createLogger('CortexPipeline', 'heartbeat');
@@ -184,7 +182,7 @@ async function executeAgenticLoop(
   let replyTurnsSent = 0;
 
   // Wire turn_end handler for per-turn reply delivery
-  const turnEndUnsub = cortexAgent.getEventBridge().on('turn_end', (event) => {
+  const turnEndUnsub = cortexAgent.getEventBridge().on('turn_end', (event: CortexEvent) => {
     if (!event.textOutput?.userFacing) return;
 
     const turnText = event.textOutput.userFacing;
@@ -233,12 +231,12 @@ async function executeAgenticLoop(
   });
 
   // Wire response_chunk handler for real-time streaming to frontend
-  const chunkUnsub = cortexAgent.getEventBridge().on('response_chunk', (event) => {
+  const chunkUnsub = cortexAgent.getEventBridge().on('response_chunk', (event: CortexEvent) => {
     if (!isMessageTrigger) return;
 
     // Extract text chunk from the event
     const data = event.data as Record<string, unknown> | undefined;
-    const chunk = data?.text as string | undefined;
+    const chunk = data?.['text'] as string | undefined;
     if (!chunk) return;
 
     eventBus.emit('reply:chunk', {

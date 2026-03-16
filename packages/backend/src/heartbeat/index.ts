@@ -55,6 +55,15 @@ import { getChannelManager } from '../channels/channel-manager.js';
 import { getDeferredQueue, getTaskScheduler, getTaskRunner } from '../tasks/index.js';
 import { interceptApprovalPhrase } from '../tools/approval-interceptor.js';
 
+// Cortex pipeline (Phase 2A)
+import { executeCortexPipeline, type PipelinePhase } from './cortex-pipeline.js';
+import {
+  createCortexMind,
+  populateContextSlots,
+  restoreConversationHistory,
+  buildMindToolContext as buildCortexToolContext,
+} from './cortex-mind.js';
+
 const log = createLogger('Heartbeat', 'heartbeat');
 
 // ============================================================================
@@ -93,6 +102,13 @@ class HeartbeatContext {
   // HeartbeatContext-owned state (NOT part of subsystems)
   compiledPersona: CompiledPersona | null = null;
   mindSession: MindSessionState;
+
+  // Cortex rate-limit backoff state
+  consecutiveRateLimits: number = 0;
+  rateLimitBackoffMs: number = 0;
+
+  // Cortex pipeline phase tracking (for mid-tick injection routing)
+  currentPhase: { value: PipelinePhase } = { value: 'gather' };
 
   constructor() {
     this.mindSession = createMindSessionState();
@@ -571,6 +587,190 @@ async function mindQuery(
 }
 
 // ============================================================================
+// Pipeline: Stage 2 (Cortex) -- CORTEX MIND QUERY
+// ============================================================================
+
+/**
+ * Execute the cortex 5-phase pipeline as an alternative to the legacy mindQuery.
+ * Used when a CortexAgent is configured (Phase 2A).
+ *
+ * Returns a result compatible with MindQueryResult so executeTick can
+ * handle cortex and legacy outputs uniformly.
+ */
+async function cortexMindQuery(
+  gathered: GatherResult,
+  tickNumber: number,
+): Promise<MindQueryResult> {
+  const fullPersona = personaStore.getPersona(getPersonaDb());
+  if (!ctx.compiledPersona) {
+    ctx.compiledPersona = compilePersona(buildPersonaConfig(fullPersona));
+  }
+
+  const cortexMind = ctx.agents!.cortexMind;
+  const cortexAgent = cortexMind.agent!;
+
+  // Update the mutable tool context for this tick
+  cortexMind.toolContext.current = buildCortexToolContext(gathered, ctx.memory?.memoryManager ?? null);
+
+  // Populate context slots with gathered data
+  populateContextSlots(cortexAgent, gathered);
+
+  // Build and set the system prompt (persona + cortex operational sections)
+  const consumerPrompt = buildSystemPrompt(ctx.compiledPersona, {
+    ...(gathered.aiTimezone ? { timezone: gathered.aiTimezone } : {}),
+  });
+  const systemPrompt = cortexAgent.buildSystemPrompt(consumerPrompt);
+
+  // Build the compiled context for logging (reuse the legacy builder for now)
+  const context = buildMindContext({
+    trigger: gathered.trigger,
+    contact: gathered.contact,
+    currentEmotions: gathered.emotions,
+    tickIntervalMs: gathered.tickIntervalMs,
+    recentThoughts: gathered.recentThoughts,
+    recentExperiences: gathered.recentExperiences,
+    recentMessages: gathered.recentMessages,
+    previousDecisions: gathered.previousDecisions,
+    compiledPersona: ctx.compiledPersona,
+    workingMemory: gathered.memoryContext?.workingMemorySection ?? null,
+    coreSelf: gathered.memoryContext?.coreSelfSection ?? null,
+    longTermMemories: gathered.memoryContext?.longTermMemorySection ?? null,
+    goalContext: gathered.goalContext?.goalSection ?? null,
+    graduatingSeedsContext: gathered.goalContext?.graduatingSeedsSection ?? null,
+    proposedGoalsContext: gathered.goalContext?.proposedGoalsSection ?? null,
+    planningPromptsContext: gathered.goalContext?.planningPromptsSection ?? null,
+    memoryFlushPending: false,
+    spawnBudgetNote: gathered.spawnBudgetNote,
+    contacts: gathered.contacts,
+    tickNumber,
+    existenceParadigm: fullPersona.existenceParadigm ?? 'digital_consciousness',
+    existenceLocation: fullPersona.existenceParadigm === 'simulated_life'
+      ? fullPersona.location
+      : fullPersona.worldDescription,
+    ...(gathered.aiTimezone ? { timezone: gathered.aiTimezone } : {}),
+    energyLevel: gathered.energyLevel,
+    energyBand: gathered.energyBand,
+    circadianBaseline: gathered.circadianBaseline,
+    wakeUpContext: gathered.wakeUpContext,
+    energySystemEnabled: gathered.energySystemEnabled,
+    ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
+    ...(gathered.pluginContextSources ? { pluginContextSources: gathered.pluginContextSources } : {}),
+    ...(gathered.credentialManifest ? { credentialManifest: gathered.credentialManifest } : {}),
+    deferredTasks: gathered.deferredTasks,
+    thoughtContext: gathered.thoughtContext,
+    experienceContext: gathered.experienceContext,
+    ...(gathered.messageContext ? { messageContext: gathered.messageContext } : {}),
+    ...(gathered.trustRampContext ? { trustRampContext: gathered.trustRampContext } : {}),
+    ...(gathered.externalHistory ? { externalHistory: gathered.externalHistory } : {}),
+    ...(gathered.deliveryFailures.length > 0 ? { deliveryFailures: gathered.deliveryFailures } : {}),
+    ...(gathered.budgetStatus ? { budgetStatus: gathered.budgetStatus } : {}),
+    ...(gathered.budgetAlert ? { budgetAlert: gathered.budgetAlert } : {}),
+  });
+
+  const triggerInfo = {
+    type: gathered.trigger.type,
+    contactId: gathered.trigger.contactId,
+    channel: gathered.trigger.channel,
+    messageId: gathered.trigger.messageId,
+  };
+
+  // Log tick input
+  let tickInputLogged = false;
+  const logSessionId = ctx.mindSession.logSessionId?.() ?? null;
+  if (logSessionId) {
+    try {
+      logTickInput({
+        logSessionId,
+        tickNumber,
+        triggerType: gathered.trigger.type,
+        triggerContext: gathered.trigger,
+        compiledContext: context,
+      });
+      tickInputLogged = true;
+    } catch (err) {
+      log.warn('Failed to log early tick_input event:', err);
+    }
+  }
+
+  // Prepare mid-tick injection queue
+  const pendingInjections: Array<{ content: string; contactId: string; channel: string }> = [];
+  const eventBus = getEventBus();
+
+  // Listen for mid-tick messages and route based on pipeline phase
+  const messageInjectionHandler = (msg: { id: string; contactId: string; direction: string; content: string; channel: string }) => {
+    if (msg.direction !== 'inbound' || msg.contactId !== gathered.contact?.id) return;
+
+    const phase = ctx.currentPhase.value;
+    if (phase === 'thought') {
+      // Queue for injection at the start of the agentic loop
+      pendingInjections.push({ content: msg.content, contactId: msg.contactId, channel: msg.channel });
+      log.info(`Queued mid-tick message during THOUGHT phase: "${msg.content.substring(0, 60)}..."`);
+    } else if (phase === 'agentic-loop') {
+      // TODO: Use cortexAgent.steer() when available. For now, inject via ephemeral.
+      log.info(`Mid-tick message during AGENTIC LOOP (injection deferred): "${msg.content.substring(0, 60)}..."`);
+    }
+    // During reflect/execute, let TickQueue handle it as a new tick
+  };
+  eventBus.on('message:received', messageInjectionHandler);
+
+  try {
+    // Run the 5-phase cortex pipeline (THOUGHT, AGENTIC LOOP, REFLECT)
+    ctx.currentPhase.value = 'gather';
+    const pipelineResult = await executeCortexPipeline(
+      {
+        cortexAgent,
+        gathered,
+        compiledPersona: ctx.compiledPersona,
+        tickNumber,
+        systemPrompt,
+        logSessionId,
+      },
+      ctx.currentPhase,
+      pendingInjections,
+    );
+
+    // Clean up mid-tick injection listener
+    eventBus.off('message:received', messageInjectionHandler);
+
+    // Reset rate-limit backoff on success
+    ctx.consecutiveRateLimits = 0;
+    ctx.rateLimitBackoffMs = 0;
+
+    return {
+      output: pipelineResult.output,
+      compiledContext: context,
+      replySentEarly: pipelineResult.replySentEarly,
+      earlyReplyContent: pipelineResult.earlyReplyContent,
+      tickInputLogged,
+      allThoughts: pipelineResult.allThoughts,
+      replyTurnsSent: pipelineResult.replyTurnsSent,
+    };
+  } catch (err) {
+    eventBus.off('message:received', messageInjectionHandler);
+
+    log.error('Cortex pipeline failed:', err);
+    cortexMind.toolContext.current = null;
+
+    return {
+      output: safeMindOutput(triggerInfo),
+      compiledContext: context,
+      replySentEarly: false,
+      earlyReplyContent: '',
+      tickInputLogged,
+      allThoughts: [],
+      replyTurnsSent: 0,
+    };
+  }
+}
+
+/**
+ * Check if a CortexAgent is available and should be used for the mind query.
+ */
+function hasCortexMind(): boolean {
+  return ctx.agents?.cortexMind?.agent != null;
+}
+
+// ============================================================================
 // Full Tick Execution
 // ============================================================================
 
@@ -690,8 +890,10 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     eventBus.emit('heartbeat:stage_change', { stage: 'mind' });
     eventBus.emit('heartbeat:state_change', heartbeatStore.getHeartbeatState(hbDb));
 
-    // Stage 2: MIND QUERY
-    const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged, allThoughts, replyTurnsSent } = await mindQuery(gathered, tickNumber);
+    // Stage 2: MIND QUERY (cortex pipeline or legacy path)
+    const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged, allThoughts, replyTurnsSent } = hasCortexMind()
+      ? await cortexMindQuery(gathered, tickNumber)
+      : await mindQuery(gathered, tickNumber);
 
     // Clear typing indicator now that mind query is done
     if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
@@ -878,6 +1080,38 @@ export async function initializeHeartbeat(subsystems: {
       triggerContext: null,
     });
     log.info('Recovered from interrupted tick');
+  }
+
+  // Cortex startup: initialize the CortexAgent and restore context
+  if (subsystems.agents.cortexMind.agent == null) {
+    try {
+      const cortexAgent = await createCortexMind(subsystems.agents.cortexMind);
+
+      // Restore conversation history from the last checkpoint
+      restoreConversationHistory(cortexAgent);
+
+      // Populate context slots with initial data from databases.
+      // Use a minimal GatherResult for startup; slots will be
+      // fully updated on the first tick via gatherContext().
+      log.info('CortexAgent initialized and context restored at startup');
+
+      // Wire rate-limit backoff: when the cortex agent reports a rate_limit
+      // error, compute exponential backoff and delay the next tick.
+      cortexAgent.onError((classified: { category: string; severity: string; originalMessage: string }) => {
+        if (classified.category === 'rate_limit') {
+          ctx.consecutiveRateLimits++;
+          // Backoff: 30s * 2^(n-1), max 5 min
+          ctx.rateLimitBackoffMs = Math.min(
+            30_000 * Math.pow(2, ctx.consecutiveRateLimits - 1),
+            300_000,
+          );
+          log.warn(`Rate limit #${ctx.consecutiveRateLimits}: delaying next tick by ${ctx.rateLimitBackoffMs}ms`);
+          tickQueue.delayNext(ctx.rateLimitBackoffMs);
+        }
+      });
+    } catch (err) {
+      log.warn('CortexAgent initialization failed (will fall back to legacy mind):', err);
+    }
   }
 
   // Listen for plugin changes to invalidate the session

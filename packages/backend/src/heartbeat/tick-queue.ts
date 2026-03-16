@@ -215,6 +215,29 @@ export class TickQueue {
   }
 
   /**
+   * Delay the next tick by the specified duration.
+   * Stops the current interval, waits, then restarts it.
+   * Used for rate-limit backoff.
+   */
+  delayNext(ms: number): void {
+    if (ms <= 0) return;
+    log.info(`Delaying next tick by ${ms}ms (rate-limit backoff)`);
+
+    // Stop the interval temporarily
+    const wasRunning = this.intervalTimer !== null;
+    this.stopInterval();
+
+    // After the delay, restart the interval
+    setTimeout(() => {
+      if (wasRunning) {
+        this.startInterval(this.intervalMs);
+        // Fire an interval tick immediately after the delay
+        this.enqueueInterval();
+      }
+    }, ms);
+  }
+
+  /**
    * Clear all queued ticks and timers.
    */
   clear(): void {

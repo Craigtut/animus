@@ -220,10 +220,7 @@ describe('Cortex Pipeline', () => {
 
   describe('Pipeline Phase Type', () => {
     it('should define all pipeline phases', async () => {
-      // Import types to verify they compile
-      const { type PipelinePhase } = await import('../../src/heartbeat/cortex-pipeline.js');
-
-      // The type should cover all phases
+      // Verify the PipelinePhase type covers all expected phases
       const phases: Array<import('../../src/heartbeat/cortex-pipeline.js').PipelinePhase> = [
         'gather', 'thought', 'agentic-loop', 'reflect', 'execute',
       ];

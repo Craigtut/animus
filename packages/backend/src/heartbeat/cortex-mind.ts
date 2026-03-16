@@ -282,7 +282,7 @@ function buildAnimusTools(
     const tool: AgentTool = {
       name: toolName,
       description: def.description,
-      parameters: zodToTypebox(def.inputSchema),
+      parameters: zodToTypebox(def.inputSchema as never),
       execute: async (args: unknown): Promise<unknown> => {
         const ctx = toolContextRef.current;
         if (!ctx) {
@@ -340,8 +340,11 @@ export async function createCortexMind(
   const settings = systemStore.getSystemSettings(sysDb);
 
   // Determine provider and model
-  const provider = settings.cortexProvider ?? settings.defaultAgentProvider ?? 'anthropic';
-  const modelId = settings.cortexModel ?? settings.defaultModel ?? 'claude-sonnet-4-20250514';
+  // Use cortex-specific settings if available, fall back to legacy settings.
+  // The cortex fields will be added to SystemSettings in a future migration.
+  const settingsAny = settings as Record<string, unknown>;
+  const provider = (settingsAny['cortexProvider'] as string | undefined) ?? settings.defaultAgentProvider ?? 'anthropic';
+  const modelId = (settingsAny['cortexModel'] as string | undefined) ?? settings.defaultModel ?? 'claude-sonnet-4-20250514';
 
   log.info(`Creating CortexAgent: provider=${provider}, model=${modelId}`);
 
@@ -391,8 +394,8 @@ export async function createCortexMind(
     slots: [...MIND_SLOT_NAMES],
     workingTags: { enabled: true },
     budgetGuard: {
-      maxTurns: settings.cortexMaxTurns ?? 50,
-      maxCost: settings.cortexMaxCostPerTick ?? 1.0,
+      maxTurns: (settingsAny['cortexMaxTurns'] as number | undefined) ?? 50,
+      maxCost: (settingsAny['cortexMaxCostPerTick'] as number | undefined) ?? 1.0,
     },
     resolvePermission: permissionResolver,
   };
@@ -430,9 +433,7 @@ function wireEventHandlers(
       const history = cortexAgent.getConversationHistory();
       const serialized = JSON.stringify(history);
       const hbDb = getHeartbeatDb();
-      heartbeatStore.updateHeartbeatState(hbDb, {
-        conversationHistory: serialized,
-      });
+      heartbeatStore.updateConversationHistory(hbDb, serialized);
       state.conversationHistoryCheckpoint = serialized;
       log.info(`Conversation history checkpointed (${history.length} messages)`);
     } catch (err) {
@@ -448,15 +449,13 @@ function wireEventHandlers(
       eventBus.emit('system:error', {
         category: 'authentication',
         message: classified.originalMessage,
-        provider: null,
         recoverable: false,
         suggestedAction: classified.suggestedAction ?? 'Check your API key in Settings.',
       });
     } else if (classified.category === 'rate_limit') {
       eventBus.emit('system:error', {
-        category: 'rate_limit',
-        message: classified.originalMessage,
-        provider: null,
+        category: 'provider',
+        message: `Rate limit: ${classified.originalMessage}`,
         recoverable: true,
         suggestedAction: classified.suggestedAction ?? 'Rate limit hit. Next tick delayed.',
       });
@@ -556,8 +555,7 @@ export function restoreConversationHistory(
 ): boolean {
   try {
     const hbDb = getHeartbeatDb();
-    const state = heartbeatStore.getHeartbeatState(hbDb);
-    const checkpoint = (state as Record<string, unknown>)['conversationHistory'] as string | null;
+    const checkpoint = heartbeatStore.getConversationHistory(hbDb);
 
     if (checkpoint) {
       const messages = JSON.parse(checkpoint);
