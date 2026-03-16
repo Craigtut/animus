@@ -330,9 +330,10 @@ export function createBashTool(config: BashToolConfig): {
 
       // Append CWD capture suffix
       const isWindows = process.platform === 'win32';
+      // Capture exit code before CWD suffix so pwd/Get-Location don't mask it
       const cwdSuffix = isWindows
-        ? `; Write-Host "${CWD_MARKER}"; Get-Location`
-        : `; echo "${CWD_MARKER}"; pwd`;
+        ? `; $__ec=$LASTEXITCODE; Write-Host "${CWD_MARKER}"; Get-Location; exit $__ec`
+        : `; __ec=$?; echo "${CWD_MARKER}"; pwd; exit $__ec`;
 
       // UTF-8 prefix for Windows PowerShell
       const utf8Prefix = isWindows
