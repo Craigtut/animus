@@ -70,6 +70,7 @@ const CORTEX_BUILTIN_TOOLS: Record<string, SdkToolDef> = {
   Glob: { displayName: 'Glob Search', description: 'Find files matching a glob pattern', riskTier: 'safe' },
   Grep: { displayName: 'Grep Search', description: 'Search file contents with regex', riskTier: 'safe' },
   WebFetch: { displayName: 'Web Fetch', description: 'Fetch content from a URL', riskTier: 'communicates' },
+  SubAgent: { displayName: 'Sub Agent', description: 'Spawn a sub-agent for delegated work', riskTier: 'acts' },
 };
 
 // Per-provider tool sets. Keys must exist in ALL_SDK_TOOLS.
