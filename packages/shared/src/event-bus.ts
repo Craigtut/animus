@@ -145,6 +145,11 @@ export interface AnimusEventMap {
   'budget:reset': { newWindowStart: string; newWindowEnd: string };
   'budget:tick_blocked': { reason: string; triggerType: string };
 
+  // Cortex Provider
+  'cortex:provider-changed': { provider: string; model: string };
+  'cortex:thinking-level-changed': { level: string };
+  'cortex:provider-removed': Record<string, never>;
+
   // System
   'system:settings_updated': Record<string, unknown>;
   'system:shutdown': void;

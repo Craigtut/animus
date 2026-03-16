@@ -36,6 +36,7 @@ import { vaultRouter } from './routers/vault.js';
 import { sealRouter } from './routers/seal.js';
 import { sdkRouter } from './routers/sdk.js';
 import { usageRouter } from './routers/usage.js';
+import { cortexProviderRouter } from './routers/cortex-provider.js';
 
 // ============================================================================
 // App Router
@@ -73,6 +74,7 @@ export const appRouter = router({
   seal: sealRouter,
   sdk: sdkRouter,
   usage: usageRouter,
+  cortexProvider: cortexProviderRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -168,6 +168,62 @@ export function getByProviderPrefix(
 }
 
 /**
+ * Find the first credential for a provider whose credential_type starts
+ * with a given prefix. Returns null if none found.
+ * Decrypts the data field (requires unsealed vault).
+ */
+export function getByProviderAndPrefix(
+  db: Database.Database,
+  provider: string,
+  prefix: string
+): Credential | null {
+  const row = db
+    .prepare('SELECT * FROM credentials WHERE provider = ? AND credential_type LIKE ? LIMIT 1')
+    .get(provider, `${prefix}%`) as CredentialRow | undefined;
+  if (!row) return null;
+  return {
+    id: row.id,
+    provider: row.provider,
+    credentialType: row.credential_type,
+    data: decrypt(row.encrypted_data),
+    metadata: row.metadata ? JSON.parse(row.metadata) as Record<string, unknown> : null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Find the first credential for a provider whose credential_type starts
+ * with a given prefix. Returns metadata only (no decryption).
+ * Works regardless of vault sealed state.
+ */
+export function getMetadataByProviderAndPrefix(
+  db: Database.Database,
+  provider: string,
+  prefix: string
+): CredentialMetadata | null {
+  const row = db
+    .prepare(
+      'SELECT provider, credential_type, metadata, created_at, updated_at FROM credentials WHERE provider = ? AND credential_type LIKE ? LIMIT 1'
+    )
+    .get(provider, `${prefix}%`) as {
+      provider: string;
+      credential_type: string;
+      metadata: string | null;
+      created_at: string;
+      updated_at: string;
+    } | undefined;
+  if (!row) return null;
+  return {
+    provider: row.provider,
+    credentialType: row.credential_type,
+    metadata: row.metadata ? JSON.parse(row.metadata) as Record<string, unknown> : null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
  * Insert or update a credential by provider + credential_type composite key.
  * If a matching row exists, update its data and metadata. Otherwise insert.
  */
@@ -198,21 +254,32 @@ export function upsertCredential(
 }
 
 /**
- * Update only the encrypted data blob for an existing credential.
+ * Update the encrypted data blob (and optionally metadata) for an existing credential.
  * Returns true if a row was updated, false if no matching credential exists.
  */
 export function updateCredentialData(
   db: Database.Database,
   credentialType: string,
   provider: string,
-  newData: string
+  newData: string,
+  metadata?: Record<string, unknown>
 ): boolean {
   const encrypted = encrypt(newData);
+  const timestamp = now();
+  if (metadata !== undefined) {
+    const metaJson = metadata ? JSON.stringify(metadata) : null;
+    const result = db
+      .prepare(
+        'UPDATE credentials SET encrypted_data = ?, metadata = ?, updated_at = ? WHERE provider = ? AND credential_type = ?'
+      )
+      .run(encrypted, metaJson, timestamp, provider, credentialType);
+    return result.changes > 0;
+  }
   const result = db
     .prepare(
       'UPDATE credentials SET encrypted_data = ?, updated_at = ? WHERE provider = ? AND credential_type = ?'
     )
-    .run(encrypted, now(), provider, credentialType);
+    .run(encrypted, timestamp, provider, credentialType);
   return result.changes > 0;
 }
 

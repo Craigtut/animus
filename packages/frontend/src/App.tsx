@@ -29,7 +29,7 @@ import { MigrationPage } from './pages/MigrationPage';
 // Onboarding
 import { OnboardingLayout } from './pages/onboarding/OnboardingLayout';
 import { WelcomeStep } from './pages/onboarding/WelcomeStep';
-import { AgentProviderStep } from './pages/onboarding/AgentProviderStep';
+import { CortexProviderStep } from './pages/onboarding/CortexProviderStep';
 import { IdentityStep } from './pages/onboarding/IdentityStep';
 import { AboutYouStep } from './pages/onboarding/AboutYouStep';
 import { ExistenceStep } from './pages/onboarding/persona/ExistenceStep';
@@ -183,7 +183,7 @@ export function App() {
                 <Route index element={<Navigate to="welcome" replace />} />
                 <Route path="welcome" element={<WelcomeStep />} />
                 <Route path="restore" element={<RestoreStep />} />
-                <Route path="agent" element={<AgentProviderStep />} />
+                <Route path="agent" element={<CortexProviderStep />} />
                 <Route path="identity" element={<IdentityStep />} />
                 <Route path="about-you" element={<AboutYouStep />} />
                 <Route path="persona" element={<Navigate to="existence" replace />} />

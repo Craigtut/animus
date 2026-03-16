@@ -1,0 +1,781 @@
+/** @jsxImportSource @emotion/react */
+import { css, useTheme } from '@emotion/react';
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'motion/react';
+import {
+  CheckCircle,
+  XCircle,
+  CircleNotch,
+  Copy,
+  ArrowSquareOut,
+  Eye,
+  EyeSlash,
+  CaretRight,
+  ShieldCheck,
+  SignOut,
+} from '@phosphor-icons/react';
+import { Button, Typography, Tooltip } from '../../components/ui';
+import { useOnboardingStore } from '../../store';
+import { OnboardingNav } from './OnboardingNav';
+import { trpc } from '../../utils/trpc';
+
+// ============================================================================
+// Types
+// ============================================================================
+
+interface ProviderCardInfo {
+  id: string;
+  name: string;
+  description: string;
+}
+
+/** OAuth providers shown as cards in Layer 1. */
+const OAUTH_CARDS: ProviderCardInfo[] = [
+  { id: 'anthropic', name: 'Anthropic (Claude)', description: 'Use your Claude Pro or Max subscription' },
+  { id: 'openai-codex', name: 'OpenAI (ChatGPT)', description: 'Use your ChatGPT Plus or Pro subscription' },
+  { id: 'google-gemini-cli', name: 'Google (Gemini)', description: 'Sign in with your Google account' },
+  { id: 'github-copilot', name: 'GitHub Copilot', description: 'Use your GitHub Copilot subscription' },
+];
+
+// ============================================================================
+// Component
+// ============================================================================
+
+export function CortexProviderStep() {
+  const theme = useTheme();
+  const navigate = useNavigate();
+  const { markStepComplete, setCurrentStep } = useOnboardingStore();
+
+  // Status query
+  const { data: statusData } = trpc.cortexProvider.getStatus.useQuery();
+  const { data: allProviders } = trpc.cortexProvider.listProviders.useQuery();
+
+  // OAuth state
+  const [oauthProvider, setOauthProvider] = useState<string | null>(null);
+  const [oauthState, setOauthState] = useState<'idle' | 'authenticating' | 'success' | 'error'>('idle');
+  const [oauthAuthUrl, setOauthAuthUrl] = useState<string | null>(null);
+  const [oauthDeviceCode, setOauthDeviceCode] = useState<string | null>(null);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  // API key state
+  const [apiKeyExpanded, setApiKeyExpanded] = useState(false);
+  const [apiKeyProvider, setApiKeyProvider] = useState('anthropic');
+  const [apiKeyValue, setApiKeyValue] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [apiKeyValidation, setApiKeyValidation] = useState<'idle' | 'validating' | 'success' | 'error'>('idle');
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+
+  // Custom endpoint state
+  const [customExpanded, setCustomExpanded] = useState(false);
+  const [customBaseUrl, setCustomBaseUrl] = useState('');
+  const [customModelId, setCustomModelId] = useState('');
+  const [customApiKey, setCustomApiKey] = useState('');
+  const [customValidation, setCustomValidation] = useState<'idle' | 'validating' | 'success' | 'error'>('idle');
+
+  // Connected provider info
+  const [connectedProvider, setConnectedProvider] = useState<string | null>(null);
+  const [connectedMethod, setConnectedMethod] = useState<string | null>(null);
+
+  // Mutations
+  const initiateOAuthMutation = trpc.cortexProvider.initiateOAuth.useMutation();
+  const cancelOAuthMutation = trpc.cortexProvider.cancelOAuth.useMutation();
+  const validateApiKeyMutation = trpc.cortexProvider.validateApiKey.useMutation();
+  const saveApiKeyMutation = trpc.cortexProvider.saveApiKey.useMutation();
+  const saveCustomMutation = trpc.cortexProvider.saveCustomEndpoint.useMutation();
+  const testCustomMutation = trpc.cortexProvider.testCustomEndpoint.useMutation();
+  const setActiveProviderMutation = trpc.cortexProvider.setActiveProvider.useMutation();
+  const removeCredentialMutation = trpc.cortexProvider.removeCredential.useMutation();
+
+  const utils = trpc.useUtils();
+
+  const { data: persona } = trpc.persona.get.useQuery();
+
+  // OAuth status subscription
+  trpc.cortexProvider.oauthStatus.useSubscription(undefined, {
+    enabled: oauthState === 'authenticating',
+    onData: (event) => {
+      if (event.type === 'auth_url') {
+        setOauthAuthUrl(event.url);
+        if (event.deviceCode) setOauthDeviceCode(event.deviceCode);
+      } else if (event.type === 'success') {
+        setOauthState('success');
+        setConnectedProvider(oauthProvider);
+        setConnectedMethod('oauth');
+        setOauthAuthUrl(null);
+        setOauthDeviceCode(null);
+        utils.cortexProvider.getStatus.invalidate();
+      } else if (event.type === 'error') {
+        setOauthState('error');
+        setOauthError(event.message);
+      }
+    },
+  });
+
+  // Initialize from existing status
+  useEffect(() => {
+    if (statusData?.connected) {
+      setConnectedProvider(statusData.provider ?? null);
+      setConnectedMethod(statusData.method ?? null);
+    }
+  }, [statusData]);
+
+  const canContinue = connectedProvider !== null || (statusData?.connected ?? false);
+
+  // Providers that support API keys
+  const apiKeyProviders = (allProviders ?? []).filter(
+    (p) => p.authMethods.includes('api_key')
+  );
+  const selectedApiProvider = apiKeyProviders.find((p) => p.id === apiKeyProvider);
+
+  // ── Handlers ──
+
+  const handleOAuthStart = useCallback((providerId: string) => {
+    setOauthProvider(providerId);
+    setOauthState('authenticating');
+    setOauthError(null);
+    setOauthAuthUrl(null);
+    setOauthDeviceCode(null);
+
+    initiateOAuthMutation.mutate(
+      { provider: providerId },
+      {
+        onSuccess: () => {
+          // Success is handled by the subscription
+        },
+        onError: (err) => {
+          setOauthState('error');
+          setOauthError(err.message ?? 'Authentication failed');
+        },
+      }
+    );
+  }, [initiateOAuthMutation]);
+
+  const handleOAuthCancel = useCallback(() => {
+    cancelOAuthMutation.mutate();
+    setOauthState('idle');
+    setOauthProvider(null);
+    setOauthAuthUrl(null);
+    setOauthDeviceCode(null);
+  }, [cancelOAuthMutation]);
+
+  const handleSignOut = useCallback((providerId: string) => {
+    removeCredentialMutation.mutate(
+      { provider: providerId },
+      {
+        onSuccess: () => {
+          if (connectedProvider === providerId) {
+            setConnectedProvider(null);
+            setConnectedMethod(null);
+          }
+          utils.cortexProvider.getStatus.invalidate();
+        },
+      }
+    );
+  }, [removeCredentialMutation, connectedProvider, utils.cortexProvider.getStatus]);
+
+  const handleValidateApiKey = useCallback(async () => {
+    if (!apiKeyValue.trim()) return;
+    setApiKeyValidation('validating');
+    setApiKeyError(null);
+
+    validateApiKeyMutation.mutate(
+      { provider: apiKeyProvider, apiKey: apiKeyValue },
+      {
+        onSuccess: (result) => {
+          if (result.valid) {
+            saveApiKeyMutation.mutate(
+              { provider: apiKeyProvider, apiKey: apiKeyValue },
+              {
+                onSuccess: () => {
+                  setApiKeyValidation('success');
+                  setConnectedProvider(apiKeyProvider);
+                  setConnectedMethod('api_key');
+                  utils.cortexProvider.getStatus.invalidate();
+                },
+                onError: (err) => {
+                  setApiKeyValidation('error');
+                  setApiKeyError(err.message ?? 'Failed to save key');
+                },
+              }
+            );
+          } else {
+            setApiKeyValidation('error');
+            setApiKeyError('Invalid API key. Check that you copied the full key.');
+          }
+        },
+        onError: (err) => {
+          setApiKeyValidation('error');
+          setApiKeyError(err.message ?? 'Validation failed');
+        },
+      }
+    );
+  }, [apiKeyProvider, apiKeyValue, validateApiKeyMutation, saveApiKeyMutation, utils.cortexProvider.getStatus]);
+
+  const handleTestCustom = useCallback(async () => {
+    if (!customBaseUrl || !customModelId) return;
+    setCustomValidation('validating');
+
+    testCustomMutation.mutate(
+      {
+        baseUrl: customBaseUrl,
+        modelId: customModelId,
+        apiKey: customApiKey || undefined,
+      },
+      {
+        onSuccess: (result) => {
+          if (result.valid) {
+            saveCustomMutation.mutate(
+              {
+                baseUrl: customBaseUrl,
+                modelId: customModelId,
+                apiKey: customApiKey || undefined,
+              },
+              {
+                onSuccess: () => {
+                  setCustomValidation('success');
+                  setConnectedProvider('custom');
+                  setConnectedMethod('custom');
+                  utils.cortexProvider.getStatus.invalidate();
+                },
+                onError: () => setCustomValidation('error'),
+              }
+            );
+          } else {
+            setCustomValidation('error');
+          }
+        },
+        onError: () => setCustomValidation('error'),
+      }
+    );
+  }, [customBaseUrl, customModelId, customApiKey, testCustomMutation, saveCustomMutation, utils.cortexProvider.getStatus]);
+
+  const handleCopyCode = useCallback(async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 2000);
+    } catch {
+      // Fallback
+    }
+  }, []);
+
+  const handleContinue = useCallback(() => {
+    markStepComplete('agent_provider');
+
+    // If persona is already finalized (restored from save), skip to main app
+    if (persona?.isFinalized) {
+      setCurrentStep('complete');
+      navigate('/');
+      return;
+    }
+
+    setCurrentStep('identity');
+    navigate('/onboarding/identity');
+  }, [markStepComplete, setCurrentStep, navigate, persona?.isFinalized]);
+
+  const handleBack = () => navigate('/onboarding/welcome');
+
+  // ── Render ──
+
+  return (
+    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
+      {/* Header */}
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+        <Typography.Body color="secondary" serif css={css`font-style: italic;`}>
+          The mind behind the curtain
+        </Typography.Body>
+        <Typography.Title3 as="h2" css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
+          Connect your AI
+        </Typography.Title3>
+        <Typography.Caption color="hint">
+          Sign in with your existing subscription. No API keys needed.
+        </Typography.Caption>
+      </div>
+
+      {/* Layer 1: OAuth Provider Cards */}
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+        {OAUTH_CARDS.map((card) => {
+          const isConnected = connectedProvider === card.id && connectedMethod === 'oauth';
+          const isAuthenticating = oauthProvider === card.id && oauthState === 'authenticating';
+          const isError = oauthProvider === card.id && oauthState === 'error';
+
+          return (
+            <div
+              key={card.id}
+              css={css`
+                padding: ${theme.spacing[4]};
+                border-radius: ${theme.borderRadius.md};
+                border: 1px solid ${isConnected ? theme.colors.success.main + '55' : theme.colors.border.default};
+                background: ${isConnected ? theme.colors.success.main + '08' : theme.colors.background.paper};
+                transition: border-color ${theme.transitions.fast}, background ${theme.transitions.fast};
+              `}
+            >
+              {/* Connected state */}
+              {isConnected && (
+                <div css={css`display: flex; align-items: center; justify-content: space-between;`}>
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+                    <CheckCircle size={20} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+                    <div>
+                      <Typography.SmallBodyAlt>{card.name}</Typography.SmallBodyAlt>
+                      <Typography.Caption color="hint">Connected</Typography.Caption>
+                    </div>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => handleSignOut(card.id)}>
+                    <SignOut size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+                    Sign out
+                  </Button>
+                </div>
+              )}
+
+              {/* Authenticating state */}
+              {isAuthenticating && (
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+                  <Typography.SmallBodyAlt>{card.name}</Typography.SmallBodyAlt>
+
+                  {oauthAuthUrl ? (
+                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                      {oauthDeviceCode ? (
+                        <>
+                          <Typography.Caption color="secondary">
+                            Open this URL on any device:
+                          </Typography.Caption>
+                          <Typography.SmallBody
+                            as="a"
+                            href={oauthAuthUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            css={css`
+                              display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
+                              color: ${theme.colors.text.primary}; word-break: break-all;
+                              text-decoration: none; &:hover { text-decoration: underline; }
+                            `}
+                          >
+                            {oauthAuthUrl} <ArrowSquareOut size={12} />
+                          </Typography.SmallBody>
+                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                            <Typography.Caption color="secondary">Enter code:</Typography.Caption>
+                            <Typography.SmallBodyAlt as="code" css={css`
+                              letter-spacing: 0.15em;
+                              background: ${theme.colors.background.elevated};
+                              padding: ${theme.spacing[1]} ${theme.spacing[2]};
+                              border-radius: ${theme.borderRadius.sm};
+                              border: 1px solid ${theme.colors.border.default};
+                            `}>
+                              {oauthDeviceCode}
+                            </Typography.SmallBodyAlt>
+                            <button
+                              onClick={() => handleCopyCode(oauthDeviceCode!)}
+                              css={css`
+                                display: flex; align-items: center; gap: 4px; padding: ${theme.spacing[0.5]} ${theme.spacing[1]};
+                                border-radius: ${theme.borderRadius.sm}; cursor: pointer;
+                                background: none; border: none;
+                                color: ${codeCopied ? theme.colors.success.main : theme.colors.text.hint};
+                                &:hover { color: ${codeCopied ? theme.colors.success.main : theme.colors.text.primary}; }
+                              `}
+                            >
+                              {codeCopied ? <><CheckCircle size={12} /> <Typography.Tiny>Copied</Typography.Tiny></> : <><Copy size={12} /> <Typography.Tiny>Copy</Typography.Tiny></>}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <Typography.Caption color="secondary">
+                          A browser window has opened. Complete the sign-in there.
+                        </Typography.Caption>
+                      )}
+                    </div>
+                  ) : (
+                    <Typography.Caption color="secondary">
+                      Starting authentication...
+                    </Typography.Caption>
+                  )}
+
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                    <CircleNotch size={14} css={css`
+                      color: ${theme.colors.text.hint};
+                      animation: spin 1s linear infinite;
+                      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                    `} />
+                    <Typography.Caption color="secondary">Waiting for authorization...</Typography.Caption>
+                  </div>
+
+                  <Button variant="ghost" size="sm" onClick={handleOAuthCancel} css={css`align-self: flex-start;`}>
+                    Cancel
+                  </Button>
+                </div>
+              )}
+
+              {/* Error state */}
+              {isError && (
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                    <XCircle size={18} weight="fill" css={css`color: ${theme.colors.error.main}; flex-shrink: 0;`} />
+                    <Typography.SmallBody color={theme.colors.error.main}>
+                      {oauthError || 'Authentication failed'}
+                    </Typography.SmallBody>
+                  </div>
+                  <Button variant="secondary" size="sm" onClick={() => handleOAuthStart(card.id)} css={css`align-self: flex-start;`}>
+                    Try again
+                  </Button>
+                </div>
+              )}
+
+              {/* Default state */}
+              {!isConnected && !isAuthenticating && !isError && (
+                <div css={css`display: flex; align-items: center; justify-content: space-between;`}>
+                  <div>
+                    <Typography.SmallBodyAlt>{card.name}</Typography.SmallBodyAlt>
+                    <Typography.Caption color="hint">{card.description}</Typography.Caption>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => handleOAuthStart(card.id)}
+                    loading={initiateOAuthMutation.isPending && oauthProvider === card.id}
+                    css={css`flex-shrink: 0;`}
+                  >
+                    Sign In
+                  </Button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Env var detection */}
+      {statusData?.connected && statusData.method === 'env_var' && (
+        <div css={css`
+          padding: ${theme.spacing[4]};
+          border-radius: ${theme.borderRadius.md};
+          border: 1px solid ${theme.colors.success.main}33;
+          background: ${theme.colors.success.main}08;
+          display: flex; align-items: center; gap: ${theme.spacing[3]};
+        `}>
+          <CheckCircle size={20} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+          <div>
+            <Typography.SmallBodyAlt>Connected via environment variable</Typography.SmallBodyAlt>
+            <Typography.Caption color="hint">Detected from your .env configuration</Typography.Caption>
+          </div>
+        </div>
+      )}
+
+      {/* Layer 2: API Key (collapsed) */}
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+        <button
+          onClick={() => setApiKeyExpanded(!apiKeyExpanded)}
+          css={css`
+            display: flex; align-items: center; gap: ${theme.spacing[1]};
+            padding: 0; background: none; border: none; cursor: pointer;
+            font-size: ${theme.typography.fontSize.sm}; font-family: inherit;
+            color: ${theme.colors.text.hint};
+            &:hover { color: ${theme.colors.text.secondary}; }
+          `}
+        >
+          <CaretRight size={12} css={css`
+            transition: transform 150ms ease;
+            transform: rotate(${apiKeyExpanded ? '90deg' : '0deg'});
+          `} />
+          Use an API key instead
+        </button>
+
+        <AnimatePresence>
+          {apiKeyExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              css={css`overflow: hidden;`}
+            >
+              <div css={css`
+                display: flex; flex-direction: column; gap: ${theme.spacing[3]};
+                padding: ${theme.spacing[4]};
+                border-radius: ${theme.borderRadius.md};
+                border: 1px solid ${theme.colors.border.default};
+                background: ${theme.colors.background.elevated};
+              `}>
+                {/* Provider dropdown */}
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                  <label css={css`
+                    font-size: ${theme.typography.fontSize.sm};
+                    font-weight: ${theme.typography.fontWeight.medium};
+                    color: ${theme.colors.text.secondary};
+                  `}>
+                    Provider
+                  </label>
+                  <select
+                    value={apiKeyProvider}
+                    onChange={(e) => {
+                      setApiKeyProvider(e.target.value);
+                      setApiKeyValidation('idle');
+                      setApiKeyError(null);
+                      setApiKeyValue('');
+                    }}
+                    css={css`
+                      padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                      background: ${theme.colors.background.paper};
+                      border: 1px solid ${theme.colors.border.default};
+                      border-radius: ${theme.borderRadius.default};
+                      color: ${theme.colors.text.primary};
+                      font-size: ${theme.typography.fontSize.sm};
+                      font-family: inherit;
+                      cursor: pointer;
+                      outline: none;
+                      &:focus { border-color: ${theme.colors.border.focus}; }
+                    `}
+                  >
+                    {apiKeyProviders.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* API Key input */}
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[1.5]};`}>
+                    <label css={css`
+                      font-size: ${theme.typography.fontSize.sm};
+                      font-weight: ${theme.typography.fontWeight.medium};
+                      color: ${theme.colors.text.secondary};
+                    `}>
+                      API Key
+                    </label>
+                    <Tooltip content="Stored locally, encrypted at rest. Never leaves your instance." position="top">
+                      <ShieldCheck size={14} css={css`color: ${theme.colors.text.disabled}; cursor: help;`} />
+                    </Tooltip>
+                  </div>
+
+                  <div css={css`display: flex; gap: ${theme.spacing[2]}; align-items: stretch;`}>
+                    <div css={css`flex: 1; position: relative;`}>
+                      <input
+                        type={showKey ? 'text' : 'password'}
+                        value={apiKeyValue}
+                        onChange={(e) => {
+                          setApiKeyValue(e.target.value);
+                          setApiKeyValidation('idle');
+                          setApiKeyError(null);
+                        }}
+                        placeholder={selectedApiProvider?.keyPrefix ? `${selectedApiProvider.keyPrefix}...` : 'Enter your API key'}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && apiKeyValue.trim()) handleValidateApiKey();
+                        }}
+                        css={css`
+                          width: 100%;
+                          padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                          padding-right: ${theme.spacing[8]};
+                          background: ${theme.colors.background.paper};
+                          border: 1px solid ${apiKeyValidation === 'error' ? theme.colors.error.main : apiKeyValidation === 'success' ? theme.colors.success.main : theme.colors.border.default};
+                          border-radius: ${theme.borderRadius.default};
+                          color: ${theme.colors.text.primary};
+                          font-size: ${theme.typography.fontSize.sm};
+                          outline: none;
+                          &:focus { border-color: ${apiKeyValidation === 'error' ? theme.colors.error.main : theme.colors.border.focus}; }
+                          &::placeholder { color: ${theme.colors.text.hint}; }
+                        `}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowKey(!showKey)}
+                        css={css`
+                          position: absolute; right: ${theme.spacing[2]}; top: 50%; transform: translateY(-50%);
+                          color: ${theme.colors.text.hint}; display: flex; padding: 0; background: none; border: none; cursor: pointer;
+                          &:hover { color: ${theme.colors.text.primary}; }
+                        `}
+                      >
+                        {showKey ? <EyeSlash size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                    <Button
+                      variant={apiKeyValidation === 'success' ? 'secondary' : 'primary'}
+                      size="sm"
+                      onClick={handleValidateApiKey}
+                      loading={apiKeyValidation === 'validating'}
+                      disabled={!apiKeyValue.trim()}
+                      css={css`flex-shrink: 0; min-width: 110px;`}
+                    >
+                      {apiKeyValidation === 'success' ? (
+                        <span css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                          <CheckCircle size={14} weight="fill" /> Saved
+                        </span>
+                      ) : 'Validate & Save'}
+                    </Button>
+                  </div>
+
+                  {apiKeyValidation === 'error' && (
+                    <Typography.Caption as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                      <XCircle size={12} weight="fill" /> {apiKeyError || 'Invalid API key'}
+                    </Typography.Caption>
+                  )}
+
+                  {selectedApiProvider?.keyUrl && (
+                    <Typography.Caption
+                      as="a"
+                      href={`https://${selectedApiProvider.keyUrl}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      color="hint"
+                      css={css`
+                        display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
+                        text-decoration: none;
+                        &:hover { color: ${theme.colors.text.secondary}; text-decoration: underline; }
+                      `}
+                    >
+                      Get your API key at {selectedApiProvider.keyUrl} <ArrowSquareOut size={12} />
+                    </Typography.Caption>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Layer 3: Custom Endpoint (collapsed) */}
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+        <button
+          onClick={() => setCustomExpanded(!customExpanded)}
+          css={css`
+            display: flex; align-items: center; gap: ${theme.spacing[1]};
+            padding: 0; background: none; border: none; cursor: pointer;
+            font-size: ${theme.typography.fontSize.sm}; font-family: inherit;
+            color: ${theme.colors.text.hint};
+            &:hover { color: ${theme.colors.text.secondary}; }
+          `}
+        >
+          <CaretRight size={12} css={css`
+            transition: transform 150ms ease;
+            transform: rotate(${customExpanded ? '90deg' : '0deg'});
+          `} />
+          Configure a custom endpoint
+        </button>
+
+        <AnimatePresence>
+          {customExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              css={css`overflow: hidden;`}
+            >
+              <div css={css`
+                display: flex; flex-direction: column; gap: ${theme.spacing[3]};
+                padding: ${theme.spacing[4]};
+                border-radius: ${theme.borderRadius.md};
+                border: 1px solid ${theme.colors.border.default};
+                background: ${theme.colors.background.elevated};
+              `}>
+                <Typography.Caption color="secondary">
+                  For self-hosted models (Ollama, vLLM, LM Studio) or custom OpenAI-compatible APIs
+                </Typography.Caption>
+
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                  <label css={css`font-size: ${theme.typography.fontSize.sm}; font-weight: ${theme.typography.fontWeight.medium}; color: ${theme.colors.text.secondary};`}>
+                    Base URL
+                  </label>
+                  <input
+                    type="text"
+                    value={customBaseUrl}
+                    onChange={(e) => { setCustomBaseUrl(e.target.value); setCustomValidation('idle'); }}
+                    placeholder="http://localhost:11434/v1"
+                    css={css`
+                      padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                      background: ${theme.colors.background.paper};
+                      border: 1px solid ${theme.colors.border.default};
+                      border-radius: ${theme.borderRadius.default};
+                      color: ${theme.colors.text.primary};
+                      font-size: ${theme.typography.fontSize.sm};
+                      outline: none;
+                      &:focus { border-color: ${theme.colors.border.focus}; }
+                      &::placeholder { color: ${theme.colors.text.hint}; }
+                    `}
+                  />
+                  <Typography.Tiny color="disabled">
+                    Running in Docker? Use http://host.docker.internal:PORT instead of localhost.
+                  </Typography.Tiny>
+                </div>
+
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                  <label css={css`font-size: ${theme.typography.fontSize.sm}; font-weight: ${theme.typography.fontWeight.medium}; color: ${theme.colors.text.secondary};`}>
+                    Model ID
+                  </label>
+                  <input
+                    type="text"
+                    value={customModelId}
+                    onChange={(e) => { setCustomModelId(e.target.value); setCustomValidation('idle'); }}
+                    placeholder="llama-3.3-70b"
+                    css={css`
+                      padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                      background: ${theme.colors.background.paper};
+                      border: 1px solid ${theme.colors.border.default};
+                      border-radius: ${theme.borderRadius.default};
+                      color: ${theme.colors.text.primary};
+                      font-size: ${theme.typography.fontSize.sm};
+                      outline: none;
+                      &:focus { border-color: ${theme.colors.border.focus}; }
+                      &::placeholder { color: ${theme.colors.text.hint}; }
+                    `}
+                  />
+                </div>
+
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                  <label css={css`font-size: ${theme.typography.fontSize.sm}; font-weight: ${theme.typography.fontWeight.medium}; color: ${theme.colors.text.secondary};`}>
+                    API Key (optional)
+                  </label>
+                  <input
+                    type="password"
+                    value={customApiKey}
+                    onChange={(e) => setCustomApiKey(e.target.value)}
+                    placeholder="Optional"
+                    css={css`
+                      padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                      background: ${theme.colors.background.paper};
+                      border: 1px solid ${theme.colors.border.default};
+                      border-radius: ${theme.borderRadius.default};
+                      color: ${theme.colors.text.primary};
+                      font-size: ${theme.typography.fontSize.sm};
+                      outline: none;
+                      &:focus { border-color: ${theme.colors.border.focus}; }
+                      &::placeholder { color: ${theme.colors.text.hint}; }
+                    `}
+                  />
+                </div>
+
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleTestCustom}
+                    loading={customValidation === 'validating'}
+                    disabled={!customBaseUrl || !customModelId}
+                  >
+                    {customValidation === 'success' ? (
+                      <span css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                        <CheckCircle size={14} weight="fill" /> Connected
+                      </span>
+                    ) : 'Test Connection'}
+                  </Button>
+                  {customValidation === 'error' && (
+                    <Typography.Caption color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                      <XCircle size={12} weight="fill" /> Connection failed
+                    </Typography.Caption>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Navigation */}
+      <OnboardingNav
+        onBack={handleBack}
+        onContinue={handleContinue}
+        continueDisabled={!canContinue}
+        continueTooltip={!canContinue ? 'Connect an AI provider to continue' : undefined}
+      />
+    </div>
+  );
+}

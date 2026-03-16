@@ -38,6 +38,7 @@ import {
   SignOut,
   MagnifyingGlass,
   Key,
+  Brain,
   type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
 import { Card, SelectionCard, Button, Input, Select, Modal, Badge, Toggle, Slider, Typography, Tooltip } from '../components/ui';
@@ -61,7 +62,7 @@ import DOMPurify from 'dompurify';
 // Types
 // ============================================================================
 
-type SettingsSection = 'heartbeat' | 'provider' | 'channels' | 'plugins' | 'passwords' | 'tools' | 'goals' | 'saves' | 'system';
+type SettingsSection = 'heartbeat' | 'cortex_provider' | 'provider' | 'channels' | 'plugins' | 'passwords' | 'tools' | 'goals' | 'saves' | 'system';
 
 interface ModelData {
   id: string;
@@ -86,7 +87,8 @@ interface SidebarItem {
 
 const sections: SidebarItem[] = [
   { id: 'heartbeat', label: 'Heartbeat', icon: HeartbeatIcon },
-  { id: 'provider', label: 'Agent Provider', icon: Robot },
+  { id: 'cortex_provider', label: 'AI Provider', icon: Brain },
+  { id: 'provider', label: 'Legacy SDKs', icon: Robot },
   { id: 'channels', label: 'Channels', icon: ChatCircle },
   { id: 'plugins', label: 'Plugins', icon: PuzzlePiece },
   { id: 'passwords', label: 'Passwords', icon: Key },
@@ -564,7 +566,280 @@ function SleepEnergySettings() {
 }
 
 // ============================================================================
-// Section: Agent Provider
+// Section: AI Provider (Cortex)
+// ============================================================================
+
+function CortexProviderSection() {
+  const theme = useTheme();
+  const utils = trpc.useUtils();
+
+  const { data: statusData, isLoading: statusLoading } = trpc.cortexProvider.getStatus.useQuery();
+  const { data: allProviders } = trpc.cortexProvider.listConfiguredProviders.useQuery();
+
+  const removeCredentialMutation = trpc.cortexProvider.removeCredential.useMutation({
+    onSuccess: () => {
+      utils.cortexProvider.getStatus.invalidate();
+      utils.cortexProvider.listConfiguredProviders.invalidate();
+    },
+  });
+
+  const setThinkingMutation = trpc.cortexProvider.setThinkingLevel.useMutation({
+    onSuccess: () => utils.cortexProvider.getStatus.invalidate(),
+  });
+
+  const setActiveMutation = trpc.cortexProvider.setActiveProvider.useMutation({
+    onSuccess: () => {
+      utils.cortexProvider.getStatus.invalidate();
+      utils.cortexProvider.listConfiguredProviders.invalidate();
+    },
+  });
+
+  const thinkingSave = useSaveFlash();
+  const modelSave = useSaveFlash();
+
+  // Model list for the active provider
+  const activeProvider = statusData?.provider ?? null;
+  const { data: models } = trpc.cortexProvider.listModels.useQuery(
+    { provider: activeProvider! },
+    { enabled: !!activeProvider }
+  );
+
+  const [advancedExpanded, setAdvancedExpanded] = useState(false);
+
+  const isConnected = statusData?.connected ?? false;
+  const providerName = allProviders?.find(p => p.id === activeProvider)?.name ?? activeProvider ?? '';
+
+  const handleModelChange = (modelId: string) => {
+    if (!activeProvider) return;
+    setActiveMutation.mutate(
+      { provider: activeProvider, model: modelId },
+      { onSuccess: () => modelSave.flash() }
+    );
+  };
+
+  const handleThinkingChange = (level: string) => {
+    setThinkingMutation.mutate(
+      { level: level as 'off' | 'low' | 'medium' | 'high' },
+      { onSuccess: () => thinkingSave.flash() }
+    );
+  };
+
+  if (statusLoading) {
+    return (
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+        <Typography.Title3 as="h2">AI Provider</Typography.Title3>
+        <Typography.Caption color="hint">Loading...</Typography.Caption>
+      </div>
+    );
+  }
+
+  return (
+    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
+      <Typography.Title3 as="h2">AI Provider</Typography.Title3>
+
+      {/* Connected state */}
+      {isConnected && (
+        <Card css={css`padding: ${theme.spacing[5]};`}>
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+            {/* Status header */}
+            <div css={css`display: flex; align-items: center; justify-content: space-between;`}>
+              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+                <CheckCircle size={20} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+                <div>
+                  <Typography.SmallBodyAlt>{providerName}</Typography.SmallBodyAlt>
+                  <Typography.Caption color="hint">
+                    {statusData?.method === 'oauth' ? 'OAuth' :
+                     statusData?.method === 'api_key' ? 'API Key' :
+                     statusData?.method === 'env_var' ? 'Environment Variable' :
+                     statusData?.method === 'custom' ? 'Custom Endpoint' : ''}
+                    {statusData?.meta?.displayName ? ` \u00b7 ${statusData.meta.displayName}` : ''}
+                  </Typography.Caption>
+                </div>
+              </div>
+              <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => removeCredentialMutation.mutate({ provider: activeProvider! })}
+                  loading={removeCredentialMutation.isPending}
+                >
+                  <SignOut size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+                  Sign Out
+                </Button>
+              </div>
+            </div>
+
+            {/* Model picker */}
+            {models && models.length > 0 && (
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                  <Typography.SmallBodyAlt>Model</Typography.SmallBodyAlt>
+                  <SaveIndicator show={modelSave.show} />
+                </div>
+                <select
+                  value={statusData?.model ?? ''}
+                  onChange={(e) => handleModelChange(e.target.value)}
+                  css={css`
+                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                    background: ${theme.colors.background.paper};
+                    border: 1px solid ${theme.colors.border.default};
+                    border-radius: ${theme.borderRadius.default};
+                    color: ${theme.colors.text.primary};
+                    font-size: ${theme.typography.fontSize.sm};
+                    font-family: inherit;
+                    cursor: pointer;
+                    outline: none;
+                    width: 100%;
+                    &:focus { border-color: ${theme.colors.border.focus}; }
+                  `}
+                >
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name} ({Math.round(m.contextWindow / 1000)}K context)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {/* Not connected state */}
+      {!isConnected && (
+        <Card css={css`padding: ${theme.spacing[5]};`}>
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]}; align-items: center; text-align: center; padding: ${theme.spacing[4]} 0;`}>
+            <Typography.Body color="secondary">No AI provider configured.</Typography.Body>
+            <Typography.Caption color="hint">
+              Set up a provider in the onboarding flow or use the options below.
+            </Typography.Caption>
+          </div>
+        </Card>
+      )}
+
+      {/* Advanced section */}
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+        <button
+          onClick={() => setAdvancedExpanded(!advancedExpanded)}
+          css={css`
+            display: flex; align-items: center; gap: ${theme.spacing[1]};
+            padding: 0; background: none; border: none; cursor: pointer;
+            font-size: ${theme.typography.fontSize.sm}; font-family: inherit;
+            color: ${theme.colors.text.hint};
+            &:hover { color: ${theme.colors.text.secondary}; }
+          `}
+        >
+          <CaretRight size={12} css={css`
+            transition: transform 150ms ease;
+            transform: rotate(${advancedExpanded ? '90deg' : '0deg'});
+          `} />
+          Advanced
+        </button>
+
+        <AnimatePresence>
+          {advancedExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              css={css`overflow: hidden;`}
+            >
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
+                {/* Thinking level */}
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                    <Typography.SmallBodyAlt>Thinking Level</Typography.SmallBodyAlt>
+                    <SaveIndicator show={thinkingSave.show} />
+                  </div>
+                  <select
+                    value={statusData?.thinkingLevel ?? 'off'}
+                    onChange={(e) => handleThinkingChange(e.target.value)}
+                    css={css`
+                      padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                      background: ${theme.colors.background.paper};
+                      border: 1px solid ${theme.colors.border.default};
+                      border-radius: ${theme.borderRadius.default};
+                      color: ${theme.colors.text.primary};
+                      font-size: ${theme.typography.fontSize.sm};
+                      font-family: inherit;
+                      cursor: pointer;
+                      outline: none;
+                      max-width: 200px;
+                      &:focus { border-color: ${theme.colors.border.focus}; }
+                    `}
+                  >
+                    <option value="off">Off</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                  <Typography.Caption color="hint">
+                    Controls how much the model reasons before responding. Higher levels use more tokens.
+                  </Typography.Caption>
+                </div>
+
+                {/* Additional providers list */}
+                {allProviders && allProviders.some(p => p.status.connected) && (
+                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                    <Typography.SmallBodyAlt>Configured Providers</Typography.SmallBodyAlt>
+                    <Typography.Caption color="hint">
+                      You can configure multiple providers and switch between them.
+                    </Typography.Caption>
+                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+                      {allProviders.filter(p => p.status.connected).map((p) => (
+                        <div
+                          key={p.id}
+                          css={css`
+                            display: flex; align-items: center; justify-content: space-between;
+                            padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                            border-radius: ${theme.borderRadius.sm};
+                            background: ${theme.colors.background.elevated};
+                          `}
+                        >
+                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                            <CheckCircle size={14} weight="fill" css={css`color: ${theme.colors.success.main};`} />
+                            <Typography.SmallBody>{p.name}</Typography.SmallBody>
+                            <Typography.Tiny color="hint">
+                              {p.status.method === 'oauth' ? 'OAuth' :
+                               p.status.method === 'api_key' ? 'API Key' :
+                               p.status.method === 'env_var' ? 'Env Var' :
+                               p.status.method === 'custom' ? 'Custom' : ''}
+                            </Typography.Tiny>
+                          </div>
+                          {activeProvider !== p.id && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                // Switch to this provider with its first model
+                                utils.cortexProvider.listModels.fetch({ provider: p.id }).then((m) => {
+                                  const model = m[0]?.id ?? '';
+                                  if (model) {
+                                    setActiveMutation.mutate({ provider: p.id, model });
+                                  }
+                                });
+                              }}
+                            >
+                              Switch
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Section: Legacy Agent SDKs
 // ============================================================================
 
 function ProviderSection() {
@@ -4818,6 +5093,7 @@ export function SettingsPage() {
   const renderSection = () => {
     switch (activeSection) {
       case 'heartbeat': return <HeartbeatSection />;
+      case 'cortex_provider': return <CortexProviderSection />;
       case 'provider': return <ProviderSection />;
       case 'channels': return <ChannelsSection />;
       case 'plugins': return <PluginsSection />;
