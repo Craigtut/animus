@@ -13,7 +13,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 import { Type, type Static } from '@sinclair/typebox';
-import type { ReadRegistry } from './read-registry.js';
+import type { ReadRegistry } from './shared/read-registry.js';
 import type { ToolContentDetails } from '../types.js';
 
 // ---------------------------------------------------------------------------

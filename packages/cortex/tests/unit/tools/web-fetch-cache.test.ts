@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { WebFetchCache } from '../../../src/tools/web-fetch-cache.js';
+import { WebFetchCache } from '../../../src/tools/web-fetch/cache.js';
 
 describe('WebFetchCache', () => {
   let cache: WebFetchCache;

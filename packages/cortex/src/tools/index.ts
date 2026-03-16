@@ -7,8 +7,8 @@
  */
 
 // Shared infrastructure
-export { ReadRegistry } from './read-registry.js';
-export { CwdTracker } from './cwd-tracker.js';
+export { ReadRegistry } from './shared/read-registry.js';
+export { CwdTracker } from './shared/cwd-tracker.js';
 
 // Tool factories
 export { createReadTool } from './read.js';
@@ -31,20 +31,20 @@ export { createGrepTool } from './grep.js';
 export type { GrepToolConfig, GrepDetails, GrepParamsType } from './grep.js';
 export { GrepParams } from './grep.js';
 
-export { createBashTool, getBackgroundTask, getAllBackgroundTasks } from './bash.js';
-export type { BashToolConfig, BashDetails, BashParamsType, BackgroundTask } from './bash.js';
-export { BashParams } from './bash.js';
+export { createBashTool, getBackgroundTask, getAllBackgroundTasks } from './bash/index.js';
+export type { BashToolConfig, BashDetails, BashParamsType, BackgroundTask } from './bash/index.js';
+export { BashParams } from './bash/index.js';
 
 export { createTaskOutputTool } from './task-output.js';
 export type { TaskOutputDetails, TaskOutputParamsType } from './task-output.js';
 export { TaskOutputParams } from './task-output.js';
 
-export { createWebFetchTool } from './web-fetch.js';
-export type { WebFetchToolConfig, WebFetchDetails, WebFetchParamsType } from './web-fetch.js';
-export { WebFetchParams } from './web-fetch.js';
+export { createWebFetchTool } from './web-fetch/index.js';
+export type { WebFetchToolConfig, WebFetchDetails, WebFetchParamsType } from './web-fetch/index.js';
+export { WebFetchParams } from './web-fetch/index.js';
 
-export { WebFetchCache } from './web-fetch-cache.js';
-export type { CacheEntry } from './web-fetch-cache.js';
+export { WebFetchCache } from './web-fetch/cache.js';
+export type { CacheEntry } from './web-fetch/cache.js';
 
 // Safety layers
 export {
@@ -58,8 +58,8 @@ export {
   runSafetyChecks,
   validateWritePaths,
   extractWritePaths,
-} from './bash-safety.js';
-export type { CommandClassification, SafetyCheckResult } from './bash-safety.js';
+} from './bash/safety.js';
+export type { CommandClassification, SafetyCheckResult } from './bash/safety.js';
 
 // ---------------------------------------------------------------------------
 // Tool name constants

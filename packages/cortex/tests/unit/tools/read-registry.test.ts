@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ReadRegistry } from '../../../src/tools/read-registry.js';
+import { ReadRegistry } from '../../../src/tools/shared/read-registry.js';
 
 describe('ReadRegistry', () => {
   let registry: ReadRegistry;

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as path from 'node:path';
-import { CwdTracker } from '../../../src/tools/cwd-tracker.js';
+import { CwdTracker } from '../../../src/tools/shared/cwd-tracker.js';
 
 describe('CwdTracker', () => {
   let tracker: CwdTracker;

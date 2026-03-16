@@ -12,7 +12,7 @@ import {
   validateWritePaths,
   checkScriptPreflight,
   checkAutoModeClassifier,
-} from '../../../src/tools/bash-safety.js';
+} from '../../../src/tools/bash/safety.js';
 
 describe('Bash safety layers', () => {
   // -----------------------------------------------------------------------

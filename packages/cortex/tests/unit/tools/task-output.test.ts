@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
-import { CwdTracker } from '../../../src/tools/cwd-tracker.js';
-import { createBashTool, getBackgroundTask } from '../../../src/tools/bash.js';
+import { CwdTracker } from '../../../src/tools/shared/cwd-tracker.js';
+import { createBashTool, getBackgroundTask } from '../../../src/tools/bash/index.js';
 import { createTaskOutputTool } from '../../../src/tools/task-output.js';
 
 describe('TaskOutput tool', () => {

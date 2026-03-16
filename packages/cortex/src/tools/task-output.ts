@@ -11,7 +11,7 @@
 
 import { Type, type Static } from '@sinclair/typebox';
 import type { ToolContentDetails } from '../types.js';
-import { getBackgroundTask } from './bash.js';
+import { getBackgroundTask } from './bash/index.js';
 
 // ---------------------------------------------------------------------------
 // Schema

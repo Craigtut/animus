@@ -12,8 +12,8 @@
  */
 
 import { Type, type Static } from '@sinclair/typebox';
-import type { ToolContentDetails } from '../types.js';
-import { WebFetchCache } from './web-fetch-cache.js';
+import type { ToolContentDetails } from '../../types.js';
+import { WebFetchCache } from './cache.js';
 
 // ---------------------------------------------------------------------------
 // Schema

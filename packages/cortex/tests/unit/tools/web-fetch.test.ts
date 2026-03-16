@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createWebFetchTool } from '../../../src/tools/web-fetch.js';
+import { createWebFetchTool } from '../../../src/tools/web-fetch/index.js';
 
 describe('WebFetch tool', () => {
   let webFetchTool: ReturnType<typeof createWebFetchTool>;

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { ReadRegistry } from '../../../src/tools/read-registry.js';
+import { ReadRegistry } from '../../../src/tools/shared/read-registry.js';
 import { createReadTool } from '../../../src/tools/read.js';
 
 describe('Read tool', () => {

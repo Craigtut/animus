@@ -12,9 +12,9 @@ import * as child_process from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Type, type Static } from '@sinclair/typebox';
-import type { CwdTracker } from './cwd-tracker.js';
-import type { ToolContentDetails } from '../types.js';
-import { buildSafeEnv, runSafetyChecks } from './bash-safety.js';
+import type { CwdTracker } from '../shared/cwd-tracker.js';
+import type { ToolContentDetails } from '../../types.js';
+import { buildSafeEnv, runSafetyChecks } from './safety.js';
 
 // ---------------------------------------------------------------------------
 // Schema
