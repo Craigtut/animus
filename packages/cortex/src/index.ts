@@ -36,6 +36,13 @@ export type {
   McpStdioConfig,
   McpHttpConfig,
   McpConnectionState,
+  SkillConfig,
+  SkillEntry,
+  LoadedSkill,
+  CortexScriptContext,
+  SubAgentSpawnConfig,
+  SubAgentResult,
+  TrackedSubAgent,
 } from './types.js';
 
 // Schema Converter
@@ -142,7 +149,21 @@ export type {
   CommandClassification,
   SafetyCheckResult,
   BuiltInToolName,
+  SubAgentToolConfig,
+  SubAgentDetails,
+  SubAgentParamsType,
 } from './tools/index.js';
+
+// Skill System (Phase 4)
+export { SkillRegistry, parseFrontmatter } from './skill-registry.js';
+export { preprocessSkillBody, substituteVariables, executeShellCommand, executeScript } from './skill-preprocessor.js';
+export { createLoadSkillTool, buildLoadSkillDescription, LOAD_SKILL_TOOL_NAME } from './skill-tool.js';
+export type { LoadSkillToolConfig, LoadSkillParamsType } from './skill-tool.js';
+export { LoadSkillParams } from './skill-tool.js';
+
+// Sub-Agent Manager (Phase 4)
+export { SubAgentManager } from './sub-agent-manager.js';
+export type { SubAgentManagerConfig, SubAgentLifecycleHooks } from './sub-agent-manager.js';
 
 // Compaction (Phase 5)
 export {

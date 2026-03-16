@@ -46,6 +46,10 @@ export { WebFetchParams } from './web-fetch/index.js';
 export { WebFetchCache } from './web-fetch/cache.js';
 export type { CacheEntry } from './web-fetch/cache.js';
 
+export { createSubAgentTool, SUB_AGENT_TOOL_NAME } from './sub-agent.js';
+export type { SubAgentToolConfig, SubAgentDetails, SubAgentParamsType } from './sub-agent.js';
+export { SubAgentParams } from './sub-agent.js';
+
 // Safety layers
 export {
   buildSafeEnv,
@@ -74,6 +78,7 @@ export const TOOL_NAMES = {
   Bash: 'Bash',
   TaskOutput: 'TaskOutput',
   WebFetch: 'WebFetch',
+  SubAgent: 'SubAgent',
 } as const;
 
 export type BuiltInToolName = keyof typeof TOOL_NAMES;

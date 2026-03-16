@@ -30,6 +30,10 @@ import { UTILITY_MODEL_DEFAULTS } from './provider-registry.js';
 import { McpClientManager } from './mcp-client.js';
 import { CompactionManager, buildCompactionConfig } from './compaction/index.js';
 import { isContextOverflow } from './compaction/failsafe.js';
+import { SubAgentManager } from './sub-agent-manager.js';
+import { SkillRegistry } from './skill-registry.js';
+import { createLoadSkillTool, buildLoadSkillDescription, LOAD_SKILL_TOOL_NAME } from './skill-tool.js';
+import { createSubAgentTool, SUB_AGENT_TOOL_NAME } from './tools/sub-agent.js';
 import type {
   CortexAgentConfig,
   CortexLifecycleState,
@@ -39,6 +43,10 @@ import type {
   CompactionTarget,
   PipelinePhase,
   McpTransportConfig,
+  SkillConfig,
+  LoadedSkill,
+  SubAgentResult,
+  TrackedSubAgent,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -249,6 +257,15 @@ export class CortexAgent {
   // MCP Client Manager for tool server connections
   private readonly mcpClientManager: McpClientManager;
 
+  // Sub-Agent Manager for tracking active sub-agents
+  private readonly subAgentManager: SubAgentManager;
+
+  // Skill Registry for managing available skills
+  private readonly skillRegistry: SkillRegistry;
+
+  // Skill buffer: loaded skill content for ephemeral injection
+  private skillBuffer: LoadedSkill[] = [];
+
   /**
    * Create a CortexAgent.
    *
@@ -297,6 +314,18 @@ export class CortexAgent {
     this.mcpClientManager.onSubprocessExited = (pid) => {
       this.trackedPids.delete(pid);
     };
+
+    // Set up Sub-Agent Manager (must be before wireSubAgentHooks)
+    this.subAgentManager = new SubAgentManager({
+      maxConcurrent: config.maxConcurrentSubAgents ?? 4,
+    });
+
+    // Set up Skill Registry
+    this.skillRegistry = new SkillRegistry();
+
+    // Wire sub-agent manager hooks to CortexAgent event handlers
+    // (must be after subAgentManager is initialized)
+    this.wireSubAgentHooks();
 
     // Set up CompactionManager
     const compactionConfig = buildCompactionConfig(config.compaction);
@@ -993,8 +1022,8 @@ export class CortexAgent {
         }),
       );
 
-      // Step 3: Skill buffer (stub - no-op until Phase 4)
-      result = this.skillBufferStub(result);
+      // Step 3: Skill buffer injection
+      result = this.injectSkillBuffer(result);
 
       return result;
     };
@@ -1251,8 +1280,16 @@ export class CortexAgent {
       // Ignore errors during wait (agent may already be idle)
     }
 
-    // 2. Cancel all sub-agents (stub: Phase 4)
-    // No-op in Phase 1B
+    // 2. Cancel all sub-agents
+    try {
+      await this.subAgentManager.cancelAll(async (agent) => {
+        const cortexAgent = agent as CortexAgent;
+        cortexAgent.agent.abort();
+        await cortexAgent.agent.waitForIdle();
+      });
+    } catch {
+      // Best-effort sub-agent cleanup
+    }
 
     // 3. Emit onLoopComplete for final checkpoint (best-effort)
     for (const handler of this.loopCompleteHandlers) {
@@ -1270,8 +1307,10 @@ export class CortexAgent {
       // Best-effort MCP cleanup
     }
 
-    // 5. Clear skill buffer (stub: Phase 4)
-    // No-op in Phase 1B
+    // 5. Clear skill buffer and registry
+    this.skillBuffer = [];
+    this.skillRegistry.clear();
+    this.subAgentManager.destroy();
 
     // 6. Unsubscribe all event listeners
     this.budgetGuard.destroy();
@@ -1331,14 +1370,453 @@ export class CortexAgent {
   }
 
   // -----------------------------------------------------------------------
-  // Private: transformContext stubs (later phases)
+  // Skill System
   // -----------------------------------------------------------------------
 
   /**
-   * Skill buffer injection in transformContext. No-op until Phase 4.
-   * Will inject loaded skill content in Phase 4.
+   * Get the SkillRegistry for add/remove/query operations.
    */
-  private skillBufferStub(context: AgentContext): AgentContext {
-    return context;
+  getSkillRegistry(): SkillRegistry {
+    return this.skillRegistry;
+  }
+
+  /**
+   * Pre-load a skill into the ephemeral context for the current loop.
+   * Same path as the load_skill tool, but triggered by the consumer.
+   * No LLM turn is consumed.
+   */
+  async loadSkill(name: string, args?: string): Promise<void> {
+    const callArgs = {
+      args: args ? args.split(/\s+/) : [],
+      rawArgs: args ?? '',
+    };
+
+    const body = await this.skillRegistry.getSkillBody(name, callArgs);
+    this.pushToSkillBuffer({ name, content: body });
+  }
+
+  /**
+   * Clear the skill buffer. Called automatically at the start of each
+   * new agentic loop. The consumer can also call this manually.
+   */
+  clearSkillBuffer(): void {
+    this.skillBuffer = [];
+  }
+
+  /**
+   * Get the current skill buffer contents.
+   */
+  getSkillBuffer(): LoadedSkill[] {
+    return [...this.skillBuffer];
+  }
+
+  /**
+   * Set consumer-provided variables for ${VAR} substitution in skills.
+   * Merged with Cortex built-ins (SKILL_DIR, ARGUMENTS).
+   * Consumer variables take precedence on collision.
+   * Call this each tick during GATHER to update runtime values.
+   */
+  setPreprocessorVariables(variables: Record<string, string>): void {
+    this.skillRegistry.setPreprocessorVariables(variables);
+  }
+
+  /**
+   * Set consumer-provided context that will be passed to skill scripts.
+   * Merged with Cortex built-in fields (skillDir, args, scriptArgs).
+   * Consumer fields take precedence on collision.
+   * Call this each tick during GATHER to update runtime values.
+   */
+  setScriptContext(context: Record<string, unknown>): void {
+    this.skillRegistry.setScriptContext(context);
+  }
+
+  // -----------------------------------------------------------------------
+  // Sub-Agent System
+  // -----------------------------------------------------------------------
+
+  /**
+   * Get the SubAgentManager for direct sub-agent tracking.
+   */
+  getSubAgentManager(): SubAgentManager {
+    return this.subAgentManager;
+  }
+
+  // -----------------------------------------------------------------------
+  // Private: Skill buffer
+  // -----------------------------------------------------------------------
+
+  /**
+   * Push a loaded skill to the buffer with deduplication.
+   * If the same skill is loaded twice, the second replaces the first.
+   */
+  private pushToSkillBuffer(skill: LoadedSkill): void {
+    const existingIdx = this.skillBuffer.findIndex(s => s.name === skill.name);
+    if (existingIdx >= 0) {
+      this.skillBuffer[existingIdx] = skill;
+    } else {
+      this.skillBuffer.push(skill);
+    }
+  }
+
+  /**
+   * Inject loaded skill content into the context during transformContext.
+   * Replaces the Phase 1B stub.
+   */
+  private injectSkillBuffer(context: AgentContext): AgentContext {
+    if (this.skillBuffer.length === 0) {
+      return context;
+    }
+
+    const formatted = this.skillBuffer.map(s =>
+      `<skill-instructions name="${s.name}">\n${s.content}\n</skill-instructions>`,
+    ).join('\n\n');
+
+    return {
+      ...context,
+      messages: [
+        ...context.messages,
+        { role: 'user', content: formatted },
+      ],
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // Private: Sub-agent hooks
+  // -----------------------------------------------------------------------
+
+  /**
+   * Wire the sub-agent manager's lifecycle hooks to CortexAgent event handlers.
+   */
+  private wireSubAgentHooks(): void {
+    this.subAgentManager.setHooks({
+      onSpawned: (taskId, instructions) => {
+        for (const handler of this.subAgentSpawnedHandlers) {
+          try {
+            handler(taskId, instructions);
+          } catch {
+            // Swallow handler errors
+          }
+        }
+      },
+      onCompleted: (taskId, result, status, usage) => {
+        for (const handler of this.subAgentCompletedHandlers) {
+          try {
+            handler(taskId, result, status, usage);
+          } catch {
+            // Swallow handler errors
+          }
+        }
+      },
+      onFailed: (taskId, error) => {
+        for (const handler of this.subAgentFailedHandlers) {
+          try {
+            handler(taskId, error);
+          } catch {
+            // Swallow handler errors
+          }
+        }
+      },
+    });
+  }
+
+  /**
+   * Spawn a foreground sub-agent and block until completion.
+   * Used by the SubAgent tool.
+   */
+  private async spawnForegroundSubAgent(params: {
+    instructions: string;
+    tools?: string[];
+    systemPrompt?: string;
+    maxTurns?: number;
+    maxCost?: number;
+  }): Promise<{ taskId: string; output: string; status: string; usage: { turns: number; cost: number; durationMs: number } }> {
+    const taskId = this.generateTaskId();
+    const startTime = Date.now();
+
+    // Create a completion promise
+    let resolveCompletion!: (result: SubAgentResult) => void;
+    const completion = new Promise<SubAgentResult>((resolve) => {
+      resolveCompletion = resolve;
+    });
+
+    // Create child agent config
+    const childConfig = this.buildChildAgentConfig(params);
+
+    try {
+      // Create the sub-agent CortexAgent
+      const childCortexConfig: CortexAgentConfig = {
+        model: this.primaryModel,
+        workingDirectory: this.workingDirectory,
+        workingTags: { enabled: this.workingTagsEnabled },
+        budgetGuard: {
+          maxTurns: childConfig.maxTurns,
+          maxCost: childConfig.maxCost,
+        },
+      };
+      if (this.config.getApiKey) childCortexConfig.getApiKey = this.config.getApiKey;
+      if (this.config.resolvePermission) childCortexConfig.resolvePermission = this.config.resolvePermission;
+
+      const childAgent = new CortexAgent(
+        await this.createChildPiAgent(childConfig),
+        childCortexConfig,
+        this.buildChildToolSet(params.tools),
+      );
+
+      // Set system prompt
+      childAgent.buildSystemPrompt(params.systemPrompt ?? this.currentSystemPrompt);
+
+      // Track the sub-agent
+      const tracked: TrackedSubAgent = {
+        taskId,
+        agent: childAgent,
+        instructions: params.instructions,
+        background: false,
+        spawnedAt: startTime,
+        completion,
+        resolve: resolveCompletion,
+      };
+
+      if (!this.subAgentManager.track(tracked)) {
+        const info = this.subAgentManager;
+        return {
+          taskId,
+          output: '',
+          status: 'failed',
+          usage: { turns: 0, cost: 0, durationMs: 0 },
+        };
+      }
+
+      // Run the sub-agent (foreground: wait for result)
+      const result = await this.runSubAgent(childAgent, params.instructions, taskId, startTime);
+
+      return {
+        taskId,
+        output: result.output,
+        status: result.status,
+        usage: result.usage,
+      };
+    } catch (err) {
+      this.subAgentManager.fail(taskId, err instanceof Error ? err.message : String(err));
+      return {
+        taskId,
+        output: '',
+        status: 'failed',
+        usage: { turns: 0, cost: 0, durationMs: Date.now() - startTime },
+      };
+    }
+  }
+
+  /**
+   * Spawn a background sub-agent and return the task ID immediately.
+   */
+  private async spawnBackgroundSubAgent(params: {
+    instructions: string;
+    tools?: string[];
+    systemPrompt?: string;
+    maxTurns?: number;
+    maxCost?: number;
+  }): Promise<{ taskId: string }> {
+    const taskId = this.generateTaskId();
+    const startTime = Date.now();
+
+    // Create a completion promise
+    let resolveCompletion!: (result: SubAgentResult) => void;
+    const completion = new Promise<SubAgentResult>((resolve) => {
+      resolveCompletion = resolve;
+    });
+
+    // Create child agent config
+    const childConfig = this.buildChildAgentConfig(params);
+
+    const bgChildCortexConfig: CortexAgentConfig = {
+      model: this.primaryModel,
+      workingDirectory: this.workingDirectory,
+      workingTags: { enabled: this.workingTagsEnabled },
+      budgetGuard: {
+        maxTurns: childConfig.maxTurns,
+        maxCost: childConfig.maxCost,
+      },
+    };
+    if (this.config.getApiKey) bgChildCortexConfig.getApiKey = this.config.getApiKey;
+    if (this.config.resolvePermission) bgChildCortexConfig.resolvePermission = this.config.resolvePermission;
+
+    const childAgent = new CortexAgent(
+      await this.createChildPiAgent(childConfig),
+      bgChildCortexConfig,
+      this.buildChildToolSet(params.tools),
+    );
+
+    // Set system prompt
+    childAgent.buildSystemPrompt(params.systemPrompt ?? this.currentSystemPrompt);
+
+    // Track the sub-agent
+    const tracked: TrackedSubAgent = {
+      taskId,
+      agent: childAgent,
+      instructions: params.instructions,
+      background: true,
+      spawnedAt: startTime,
+      completion,
+      resolve: resolveCompletion,
+    };
+
+    if (!this.subAgentManager.track(tracked)) {
+      throw new Error('Concurrency limit reached');
+    }
+
+    // Run the sub-agent in the background (fire-and-forget)
+    this.runSubAgent(childAgent, params.instructions, taskId, startTime).catch((err) => {
+      this.subAgentManager.fail(taskId, err instanceof Error ? err.message : String(err));
+    });
+
+    return { taskId };
+  }
+
+  /**
+   * Run a sub-agent to completion. Handles result delivery to the manager.
+   */
+  private async runSubAgent(
+    childAgent: CortexAgent,
+    instructions: string,
+    taskId: string,
+    startTime: number,
+  ): Promise<SubAgentResult> {
+    try {
+      const response = await childAgent.prompt(instructions);
+
+      // Extract text from response
+      const output = this.extractTextFromAssistantMessage(response);
+
+      const result: SubAgentResult = {
+        output,
+        status: 'completed',
+        usage: {
+          turns: childAgent.getBudgetGuard().getTurnCount(),
+          cost: childAgent.getBudgetGuard().getTotalCost(),
+          durationMs: Date.now() - startTime,
+        },
+      };
+
+      this.subAgentManager.complete(taskId, result);
+
+      // Clean up child agent
+      try {
+        await childAgent.destroy();
+      } catch {
+        // Best-effort cleanup
+      }
+
+      return result;
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+
+      const result: SubAgentResult = {
+        output: '',
+        status: 'failed',
+        usage: {
+          turns: childAgent.getBudgetGuard().getTurnCount(),
+          cost: childAgent.getBudgetGuard().getTotalCost(),
+          durationMs: Date.now() - startTime,
+        },
+      };
+
+      this.subAgentManager.fail(taskId, errorMsg);
+
+      // Clean up child agent
+      try {
+        await childAgent.destroy();
+      } catch {
+        // Best-effort cleanup
+      }
+
+      return result;
+    }
+  }
+
+  /**
+   * Build child agent config from parent config and spawn params.
+   * Budget guards can be tightened, not loosened.
+   */
+  private buildChildAgentConfig(params: {
+    maxTurns?: number;
+    maxCost?: number;
+  }): { maxTurns: number; maxCost: number } {
+    const parentMaxTurns = this.config.budgetGuard?.maxTurns ?? Infinity;
+    const parentMaxCost = this.config.budgetGuard?.maxCost ?? Infinity;
+
+    return {
+      maxTurns: params.maxTurns
+        ? Math.min(params.maxTurns, parentMaxTurns)
+        : parentMaxTurns,
+      maxCost: params.maxCost
+        ? Math.min(params.maxCost, parentMaxCost)
+        : parentMaxCost,
+    };
+  }
+
+  /**
+   * Build the tool set for a child agent.
+   * SubAgent and load_skill are always excluded from child agents.
+   */
+  private buildChildToolSet(
+    requestedTools?: string[],
+  ): Array<{ name: string; description: string; parameters: unknown; execute: (args: unknown) => Promise<unknown> }> {
+    const parentTools = this.registeredTools;
+    const excludedNames = new Set([SUB_AGENT_TOOL_NAME, LOAD_SKILL_TOOL_NAME]);
+
+    let filteredTools: typeof parentTools;
+
+    if (requestedTools && requestedTools.length > 0) {
+      // Filter to only requested tools (minus excluded)
+      const requested = new Set(requestedTools);
+      filteredTools = parentTools.filter(
+        t => requested.has(t.name) && !excludedNames.has(t.name),
+      );
+    } else {
+      // Inherit all parent tools minus excluded
+      filteredTools = parentTools.filter(t => !excludedNames.has(t.name));
+    }
+
+    return filteredTools;
+  }
+
+  /**
+   * Create a child pi-agent-core Agent instance for a sub-agent.
+   */
+  private async createChildPiAgent(
+    config: { maxTurns: number; maxCost: number },
+  ): Promise<PiAgent> {
+    // Dynamically import pi-agent-core
+    let AgentClass: new (config: Record<string, unknown>) => PiAgent;
+    try {
+      const piAgentCore = await import('@mariozechner/pi-agent-core');
+      AgentClass = piAgentCore.Agent as unknown as new (config: Record<string, unknown>) => PiAgent;
+    } catch {
+      throw new Error(
+        'Sub-agent spawning requires @mariozechner/pi-agent-core to be installed.',
+      );
+    }
+
+    const agentConfig: Record<string, unknown> = {
+      model: this.primaryModel,
+      tools: [],
+      systemPrompt: '',
+      getApiKey: this.config.getApiKey,
+    };
+
+    return new AgentClass(agentConfig);
+  }
+
+  /**
+   * Generate a unique task ID for sub-agents.
+   */
+  private generateTaskId(): string {
+    // Simple UUID-like ID
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
 }

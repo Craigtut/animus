@@ -417,3 +417,123 @@ export interface McpConnectionState {
 export interface UtilityModelDefaults {
   [provider: string]: string;
 }
+
+// ---------------------------------------------------------------------------
+// Skill System
+// ---------------------------------------------------------------------------
+
+/**
+ * Configuration for registering a skill with the SkillRegistry.
+ * The consumer provides these at startup and dynamically as plugins install/uninstall.
+ */
+export interface SkillConfig {
+  /** Absolute path to the SKILL.md file. */
+  path: string;
+  /** Where this skill came from. Used for display and debugging. */
+  source: string;  // e.g., 'plugin:weather', 'plugin:discord', 'user', 'builtin'
+}
+
+/**
+ * Internal skill index entry built from parsing a SKILL.md file.
+ */
+export interface SkillEntry {
+  /** Skill name from frontmatter (kebab-case). */
+  name: string;
+  /** Skill description from frontmatter (for agent activation). */
+  description: string;
+  /** Absolute path to the SKILL.md file. */
+  path: string;
+  /** Absolute path to the skill directory (parent of SKILL.md). */
+  dir: string;
+  /** Source identifier from SkillConfig. */
+  source: string;
+  /** Full parsed YAML frontmatter (preserved for forward compatibility). */
+  frontmatter: Record<string, unknown>;
+  /** Whether the agent can auto-load this skill. Derived from disable-model-invocation. */
+  modelInvocable: boolean;
+}
+
+/**
+ * A loaded skill in the skill buffer (preprocessed body ready for injection).
+ */
+export interface LoadedSkill {
+  /** The skill name. */
+  name: string;
+  /** The preprocessed SKILL.md body content. */
+  content: string;
+}
+
+/**
+ * Context object passed to skill preprocessor scripts (!{script: path}).
+ * Cortex owns the built-in fields; the consumer provides everything else.
+ */
+export interface CortexScriptContext {
+  /** Absolute path to the skill's directory. */
+  skillDir: string;
+  /** Arguments passed to the skill (split by whitespace). */
+  args: string[];
+  /** Raw arguments string. */
+  rawArgs: string;
+  /** Additional key-value pairs from !{script: path, key: value} syntax. */
+  scriptArgs: Record<string, string>;
+  /** Consumer-provided context fields (Cortex does not inspect these). */
+  [key: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Sub-Agent
+// ---------------------------------------------------------------------------
+
+/**
+ * Configuration for spawning a sub-agent via the SubAgent tool.
+ */
+export interface SubAgentSpawnConfig {
+  /** What the sub-agent should do. Becomes the initial prompt. */
+  instructions: string;
+  /** Tool names to make available. Default: inherits parent's tools. */
+  tools?: string[];
+  /** Custom system prompt. Default: inherits parent's system prompt. */
+  systemPrompt?: string;
+  /** Maximum LLM turns. Default: inherits parent's budget guard config. */
+  maxTurns?: number;
+  /** Maximum cost in USD. Default: inherits parent's budget guard config. */
+  maxCost?: number;
+  /** Run asynchronously. Default: false (blocks until complete). */
+  background?: boolean;
+}
+
+/**
+ * Result returned by a completed sub-agent.
+ */
+export interface SubAgentResult {
+  /** The sub-agent's final text output. */
+  output: string;
+  /** Completion status. */
+  status: 'completed' | 'failed' | 'timed_out' | 'cancelled';
+  /** Usage summary. */
+  usage: {
+    turns: number;
+    cost: number;
+    durationMs: number;
+  };
+}
+
+/**
+ * Tracked sub-agent record managed by SubAgentManager.
+ */
+export interface TrackedSubAgent {
+  /** Unique task identifier. */
+  taskId: string;
+  /** The sub-agent CortexAgent instance. */
+  agent: unknown; // CortexAgent (avoid circular import)
+  /** The instructions the sub-agent was spawned with. */
+  instructions: string;
+  /** Whether this is a background sub-agent. */
+  background: boolean;
+  /** Spawn timestamp. */
+  spawnedAt: number;
+  /** Promise that resolves when the sub-agent completes. */
+  completion: Promise<SubAgentResult>;
+  /** Resolve function for the completion promise. */
+  resolve: (result: SubAgentResult) => void;
+}
