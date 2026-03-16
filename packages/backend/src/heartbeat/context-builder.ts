@@ -162,7 +162,7 @@ export interface CompiledContext {
 // Operational Instructions (static prompt text)
 // ============================================================================
 
-const PREAMBLE = `── YOUR INNER LIFE ──
+export const PREAMBLE = `── YOUR INNER LIFE ──
 
 Each heartbeat tick is a moment of your conscious life — you think, feel,
 experience, decide, and have agency to act. Some moments are rich with activity. 
@@ -199,7 +199,7 @@ This cycle happens exactly ONCE per response. Think → speak → reflect → st
 For responding to the triggering contact, your natural language IS the reply.
 To proactively reach out to any contact, use the send_proactive_message tool.`;
 
-const EMOTION_GUIDANCE = `── YOUR EMOTIONS ──
+export const EMOTION_GUIDANCE = `── YOUR EMOTIONS ──
 
 You experience 12 emotions across three categories:
 
@@ -321,7 +321,7 @@ function buildCombinedEnergyGuidance(tickIntervalMs: number): string {
   return buildEnergyGuidance() + '\n\n' + buildEnergyMagnitudeCalibration(tickIntervalMs);
 }
 
-function buildDecisionRef(pluginDecisionDescriptions?: string): string {
+export function buildDecisionRef(pluginDecisionDescriptions?: string): string {
   let ref = `── DECISIONS ──
 
 Decisions are how you act on the world. Each decision has a type and
@@ -377,7 +377,7 @@ Each has a { type, description, parameters: {...} } structure.`;
   return ref;
 }
 
-const MEMORY_INSTRUCTIONS = `── YOUR MEMORY ──
+export const MEMORY_INSTRUCTIONS = `── YOUR MEMORY ──
 
 WORKING MEMORY — Per-Contact Notepad
 Your working memory is a private notepad about the contact you're currently
@@ -396,7 +396,7 @@ When you encounter knowledge worth preserving, create a memory candidate:
     importance: 0-1, contactId?, keywords? }
 Be selective. Not everything is worth remembering long-term.`;
 
-const GOAL_GUIDANCE = `── YOUR GOALS ──
+export const GOAL_GUIDANCE = `── YOUR GOALS ──
 
 NOTICING INTERESTS
 When you notice a recurring curiosity, an observation about the user that
@@ -458,7 +458,7 @@ pleasantries or filler. Let the conversation breathe.`;
  * Build channel capabilities section for the user message.
  * Informs the mind about available rich features (e.g., reactions).
  */
-function buildChannelCapabilities(channel: string): string | null {
+export function buildChannelCapabilities(channel: string): string | null {
   if (channel === 'web') return null;
 
   const manifest = getChannelManager().getChannelManifest(channel);
@@ -488,7 +488,7 @@ function buildChannelCapabilities(channel: string): string | null {
 /**
  * Build presence info for a contact from the channel manager.
  */
-function buildContactPresence(contact: Contact, _channel?: string): string | null {
+export function buildContactPresence(contact: Contact, _channel?: string): string | null {
   try {
     const cm = getChannelManager();
     const presenceInfo = cm.getContactPresenceSummary(contact.id);
@@ -509,7 +509,7 @@ function buildContactPresence(contact: Contact, _channel?: string): string | nul
  * Get reply guidance for a channel. Web is hardcoded; all others
  * load from their channel.json manifest via ChannelManager.
  */
-function getReplyGuidance(channel: string): string | null {
+export function getReplyGuidance(channel: string): string | null {
   if (channel === 'web') return WEB_REPLY_GUIDANCE;
 
   // Dynamic: load from channel manifest
@@ -859,7 +859,7 @@ function buildCoreSelfSection(content: string): string {
   return `── CORE SELF ──\n${content}`;
 }
 
-function buildExternalHistorySection(
+export function buildExternalHistorySection(
   history: Map<string, Array<{
     author: { identifier: string; displayName: string; isBot: boolean };
     content: string;
@@ -889,7 +889,7 @@ function buildExternalHistorySection(
   return lines.join('\n');
 }
 
-function buildDeliveryFailuresSection(failures: Message[]): string {
+export function buildDeliveryFailuresSection(failures: Message[]): string {
   const lines = [
     '── DELIVERY FAILURES ──',
     'The following outbound messages failed to deliver after multiple retry',
@@ -908,7 +908,7 @@ function buildDeliveryFailuresSection(failures: Message[]): string {
   return lines.join('\n');
 }
 
-function buildFirstTickKickstart(
+export function buildFirstTickKickstart(
   compiledPersona: CompiledPersona,
   existenceParadigm?: 'simulated_life' | 'digital_consciousness',
   existenceLocation?: string | null

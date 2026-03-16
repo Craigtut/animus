@@ -706,8 +706,10 @@ async function cortexMindQuery(
       pendingInjections.push({ content: msg.content, contactId: msg.contactId, channel: msg.channel });
       log.info(`Queued mid-tick message during THOUGHT phase: "${msg.content.substring(0, 60)}..."`);
     } else if (phase === 'agentic-loop') {
-      // TODO: Use cortexAgent.steer() when available. For now, inject via ephemeral.
-      log.info(`Mid-tick message during AGENTIC LOOP (injection deferred): "${msg.content.substring(0, 60)}..."`);
+      // TODO: Use cortexAgent.steer() when available to inject directly into the running loop.
+      // For now, queue for the next tick since the current agentic loop is already in progress.
+      pendingInjections.push({ content: msg.content, contactId: msg.contactId, channel: msg.channel });
+      log.info(`Message queued for next tick (agentic loop in progress): "${msg.content.substring(0, 60)}..."`);
     }
     // During reflect/execute, let TickQueue handle it as a new tick
   };

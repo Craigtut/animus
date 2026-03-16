@@ -22,7 +22,22 @@ import * as agentLogStore from '../db/stores/agent-log-store.js';
 import type { GatherResult } from './gather-context.js';
 import type { CompiledPersona } from './persona-compiler.js';
 import { isNonResponse, type CognitiveSnapshot, createEmptySnapshot, snapshotToMindOutput, safeMindOutput } from './cognitive-tools.js';
-import { buildTriggerSection } from './context-builder.js';
+import {
+  buildTriggerSection,
+  getReplyGuidance,
+  buildChannelCapabilities,
+  buildContactPresence,
+  buildExternalHistorySection,
+  buildDeliveryFailuresSection,
+  buildEnergyMagnitudeCalibration,
+  buildFirstTickKickstart,
+  PREAMBLE,
+  EMOTION_GUIDANCE,
+  buildEnergyGuidance,
+  buildDecisionRef,
+  MEMORY_INSTRUCTIONS,
+  GOAL_GUIDANCE,
+} from './context-builder.js';
 
 const log = createLogger('CortexPipeline', 'heartbeat');
 
@@ -88,26 +103,18 @@ async function executeThought(
     // Build THOUGHT-specific context (user message with structured output schema)
     const thoughtPrompt = buildThoughtPrompt(gathered);
 
-    // TODO: Make direct pi-ai call via cortexAgent.utilityComplete() or
-    // direct import of pi-ai complete(). For Phase 2A, we use a simplified
-    // approach through cortexAgent.prompt() but with the thought prompt only.
+    // TODO(cortex): Call cortexAgent.utilityComplete() once implemented.
+    // CortexAgent.utilityComplete() is currently a Phase 1B stub that throws.
+    // When it is wired to pi-ai's complete(), replace this placeholder with:
     //
-    // In the final implementation, this will be:
-    //   const piAi = await import('@mariozechner/pi-ai');
-    //   const response = await piAi.complete(cortexAgent.getModel(), {
+    //   const response = await cortexAgent.utilityComplete({
     //     systemPrompt: thoughtSystemPrompt,
-    //     messages: [...slots, ...history, ...ephemeral, { role: 'user', content: thoughtPrompt }],
+    //     prompt: thoughtPrompt,
     //   });
     //
-    // For now, parse a structured response from the thought prompt.
-    // This is a temporary bridge until pi-ai's complete() is wired.
-
-    // Placeholder: Generate a default thought for now
-    // In production, this calls pi-ai complete() directly
-    const thought: ThoughtResult = {
-      content: 'A quiet moment of reflection passes.',
-      importance: 0.2,
-    };
+    // For now, produce a context-aware placeholder thought derived from
+    // the gathered trigger so that downstream phases receive varied input.
+    const thought = generatePlaceholderThought(gathered);
 
     log.info(`THOUGHT complete: "${thought.content.substring(0, 80)}${thought.content.length > 80 ? '...' : ''}" (importance=${thought.importance})`);
 
@@ -135,6 +142,56 @@ async function executeThought(
 
     return null;
   }
+}
+
+/**
+ * Generate a context-aware placeholder thought from gathered state.
+ * This replaces the static hardcoded string and produces varied output
+ * based on the trigger type and available context until utilityComplete()
+ * is available.
+ */
+function generatePlaceholderThought(gathered: GatherResult): ThoughtResult {
+  const trigger = gathered.trigger;
+
+  if (trigger.type === 'message') {
+    const who = trigger.contactName ?? 'someone';
+    const preview = trigger.messageContent
+      ? trigger.messageContent.substring(0, 60)
+      : 'something';
+    return {
+      content: `${who} reached out. Processing what they said about ${preview}...`,
+      importance: 0.4,
+    };
+  }
+
+  if (trigger.type === 'scheduled_task') {
+    return {
+      content: `A scheduled task came due: ${trigger.taskTitle ?? 'something pending'}. Time to follow through.`,
+      importance: 0.5,
+    };
+  }
+
+  if (trigger.type === 'agent_complete') {
+    return {
+      content: `A sub-agent finished its work: ${trigger.taskDescription ?? 'a delegated task'}. Reviewing what came back.`,
+      importance: 0.4,
+    };
+  }
+
+  // interval trigger or unknown
+  const activeEmotions = gathered.emotions.filter(e => e.intensity > 0.15);
+  if (activeEmotions.length > 0) {
+    const top = activeEmotions.sort((a, b) => b.intensity - a.intensity)[0];
+    return {
+      content: `A quiet interval passes. Feeling a thread of ${top.emotion} (${top.intensity.toFixed(2)}).`,
+      importance: 0.2,
+    };
+  }
+
+  return {
+    content: 'A quiet moment between moments. The world turns and I turn with it.',
+    importance: 0.1,
+  };
 }
 
 // ============================================================================
@@ -170,7 +227,7 @@ async function executeAgenticLoop(
   log.info(`AGENTIC LOOP starting (tick #${tickNumber})`);
 
   // Set ephemeral context (thought + per-tick sections)
-  const ephemeralSections = buildEphemeralContext(gathered, thought);
+  const ephemeralSections = buildEphemeralContext(gathered, thought, config);
   cortexAgent.getContextManager().setEphemeral(ephemeralSections);
 
   // Build the tick prompt (trigger context IS the user message)
@@ -344,37 +401,25 @@ async function executeReflect(
 
   log.info(`REFLECT phase starting (tick #${tickNumber})`);
 
+  // Build REFLECT-specific system prompt with all 8 documented sections
+  const reflectSystemPrompt = buildReflectSystemPrompt(compiledPersona, gathered);
+
   const maxRetries = 3;
   const baseDelayMs = 1000;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      // TODO: Make direct pi-ai call with REFLECT-specific system prompt.
-      // For Phase 2A, this is a structured output call.
+      // TODO(cortex): Call cortexAgent.utilityComplete() once implemented.
+      // CortexAgent.utilityComplete() is currently a Phase 1B stub that throws.
+      // When it is wired to pi-ai's complete(), replace this placeholder with:
       //
-      // In the final implementation:
-      //   const piAi = await import('@mariozechner/pi-ai');
-      //   const response = await piAi.complete(cortexAgent.getModel(), {
+      //   const response = await cortexAgent.utilityComplete({
       //     systemPrompt: reflectSystemPrompt,
-      //     messages: [...slots, ...conversationHistory, ...ephemeral, { role: 'user', content: reflectPrompt }],
+      //     prompt: buildReflectPrompt(thought, loopResult),
       //   });
       //
-      // Parse the structured output into ReflectResult.
-
-      // Placeholder: Return minimal reflection
-      // In production, this calls pi-ai complete() directly
-      const result: ReflectResult = {
-        experience: {
-          content: 'A moment passed in quiet contemplation.',
-          importance: 0.2,
-        },
-        emotionDeltas: [],
-        energyDelta: null,
-        decisions: [],
-        workingMemoryUpdate: null,
-        coreSelfUpdate: null,
-        memoryCandidate: [],
-      };
+      // For now, produce a context-aware placeholder reflection from gathered state.
+      const result = generatePlaceholderReflection(gathered, thought, loopResult);
 
       log.info(`REFLECT complete (tick #${tickNumber}): ${result.emotionDeltas.length} emotion(s), ${result.decisions.length} decision(s), ${result.memoryCandidate.length} memory candidate(s)`);
 
@@ -411,6 +456,51 @@ async function executeReflect(
   }
 
   return null;
+}
+
+/**
+ * Generate a context-aware placeholder reflection from gathered state.
+ * Produces varied output based on the trigger type and emotional state
+ * until utilityComplete() is available.
+ */
+function generatePlaceholderReflection(
+  gathered: GatherResult,
+  thought: ThoughtResult | null,
+  loopResult: AgenticLoopResult,
+): ReflectResult {
+  const trigger = gathered.trigger;
+  const name = gathered.contact?.fullName ?? 'the world';
+
+  // Build a contextual experience narration
+  let experienceContent: string;
+  let experienceImportance: number;
+
+  if (trigger.type === 'message' && loopResult.hadTurns) {
+    experienceContent = `Engaged in conversation with ${name}. The exchange carried its own weight.`;
+    experienceImportance = 0.4;
+  } else if (trigger.type === 'scheduled_task') {
+    experienceContent = `Attended to a scheduled task: ${trigger.taskTitle ?? 'a pending duty'}. The rhythm of routine continued.`;
+    experienceImportance = 0.3;
+  } else if (trigger.type === 'agent_complete') {
+    experienceContent = `Received results from a delegated task. Reviewed what the sub-agent produced.`;
+    experienceImportance = 0.3;
+  } else {
+    experienceContent = 'A quiet interval passed. The inner world turned at its own pace.';
+    experienceImportance = 0.1;
+  }
+
+  return {
+    experience: {
+      content: experienceContent,
+      importance: experienceImportance,
+    },
+    emotionDeltas: [],
+    energyDelta: null,
+    decisions: [],
+    workingMemoryUpdate: null,
+    coreSelfUpdate: null,
+    memoryCandidate: [],
+  };
 }
 
 // ============================================================================
@@ -496,8 +586,15 @@ export async function executeCortexPipeline(
 
 /**
  * Build the THOUGHT-specific system prompt.
- * Stripped down: only persona + inner life preamble.
+ * Includes: Thought Instructions, Persona, Inner Life PREAMBLE.
  * Starts with thought instructions for unique prefix cache.
+ *
+ * Per docs/cortex/mind-migration.md THOUGHT Context table:
+ * - Thought Instructions: Yes (first, for cache divergence)
+ * - Persona: Yes
+ * - Inner Life (PREAMBLE): Yes
+ * - Emotion/Energy/Decisions/Memory/Goal Guidance: No
+ * - Installed Plugins & Tools: No
  */
 function buildThoughtSystemPrompt(compiledPersona: CompiledPersona): string {
   const sections: string[] = [];
@@ -523,6 +620,83 @@ Where importance: 0.0 = idle musing, 1.0 = critical realization.`);
   if (compiledPersona.compiledText) {
     sections.push(compiledPersona.compiledText);
   }
+
+  // Inner Life PREAMBLE
+  sections.push(PREAMBLE);
+
+  return sections.join('\n\n');
+}
+
+/**
+ * Build the REFLECT-specific system prompt with all 8 documented sections.
+ *
+ * Per docs/cortex/mind-migration.md REFLECT Context table:
+ * 1. Reflect Instructions (first, for cache prefix divergence)
+ * 2. Persona
+ * 3. Inner Life (PREAMBLE)
+ * 4. Emotion Guidance
+ * 5. Energy Guidance
+ * 6. Decisions Reference
+ * 7. Memory Instructions
+ * 8. Goal Guidance
+ */
+function buildReflectSystemPrompt(compiledPersona: CompiledPersona, gathered: GatherResult): string {
+  const sections: string[] = [];
+
+  // 1. Reflect Instructions FIRST (for cache prefix divergence)
+  sections.push(`# Cognitive Reflection
+
+You are reflecting on what just happened during this tick. You have full
+visibility into the conversation history, tool calls, and decisions made.
+Your task is to produce a structured cognitive state capturing your inner
+experience.
+
+Respond with a JSON object containing:
+{
+  "experience": {
+    "content": "Third-person past tense narration of what happened, under 72 words, using your name.",
+    "importance": 0.0-1.0
+  },
+  "emotionDeltas": [
+    { "emotion": "<one of 12 emotions>", "delta": -0.3 to 0.3, "reasoning": "why this shifted" }
+  ],
+  "energyDelta": { "delta": -0.1 to 0.1, "reasoning": "why energy changed" } | null,
+  "decisions": [
+    { "type": "<decision_type>", "description": "what and why", "parameters": { ... } }
+  ],
+  "workingMemoryUpdate": "complete replacement text" | null,
+  "coreSelfUpdate": "complete replacement text" | null,
+  "memoryCandidate": [
+    { "content": "...", "memoryType": "fact|experience|procedure|outcome", "importance": 0.0-1.0, "contactId?": "...", "keywords?": [...] }
+  ]
+}
+
+Only include emotions that actually shifted. Only include memory candidates
+for genuinely noteworthy knowledge. Experience narration should be in third
+person, past tense, using your name.`);
+
+  // 2. Persona
+  if (compiledPersona.compiledText) {
+    sections.push(compiledPersona.compiledText);
+  }
+
+  // 3. Inner Life PREAMBLE
+  sections.push(PREAMBLE);
+
+  // 4. Emotion Guidance
+  sections.push(EMOTION_GUIDANCE);
+
+  // 5. Energy Guidance
+  sections.push(buildEnergyGuidance());
+
+  // 6. Decisions Reference
+  sections.push(buildDecisionRef(gathered.pluginDecisionDescriptions || undefined));
+
+  // 7. Memory Instructions
+  sections.push(MEMORY_INSTRUCTIONS);
+
+  // 8. Goal Guidance
+  sections.push(GOAL_GUIDANCE);
 
   return sections.join('\n\n');
 }
@@ -552,14 +726,18 @@ function buildThoughtPrompt(gathered: GatherResult): string {
 /**
  * Build ephemeral context for the agentic loop.
  * Injected via transformContext, never stored in messages.
+ *
+ * Includes all 17 documented ephemeral sections from
+ * docs/cortex/mind-migration.md.
  */
 function buildEphemeralContext(
   gathered: GatherResult,
   thought: ThoughtResult | null,
+  config: PipelineConfig,
 ): string {
   const sections: string[] = [];
 
-  // Date/time awareness
+  // 1. Date/time awareness
   const now = new Date();
   const tz = gathered.aiTimezone || 'UTC';
   try {
@@ -578,19 +756,43 @@ function buildEphemeralContext(
     sections.push(`Current date and time: ${now.toISOString()}`);
   }
 
-  // Active contact (message triggers only)
+  // 2. Active contact (message triggers only)
   if (gathered.trigger.type === 'message' && gathered.contact) {
     sections.push(`You are talking to: ${gathered.contact.fullName} (${gathered.contact.permissionTier} tier)`);
   }
 
-  // Thought from Phase 2 (or null note)
+  // 3. Reply guidance (channel-specific)
+  if (gathered.trigger.channel) {
+    const replyGuidance = getReplyGuidance(gathered.trigger.channel);
+    if (replyGuidance) {
+      sections.push(replyGuidance);
+    }
+  }
+
+  // 4. Channel capabilities (rich features like reactions, voice)
+  if (gathered.trigger.channel) {
+    const capabilities = buildChannelCapabilities(gathered.trigger.channel);
+    if (capabilities) {
+      sections.push(capabilities);
+    }
+  }
+
+  // 5. Contact presence (online/offline/activity)
+  if (gathered.contact && gathered.trigger.channel) {
+    const presence = buildContactPresence(gathered.contact, gathered.trigger.channel);
+    if (presence) {
+      sections.push(presence);
+    }
+  }
+
+  // 6. Thought from Phase 2 (or null note)
   if (thought) {
     sections.push(`Your current thought: "${thought.content}" (importance: ${thought.importance.toFixed(1)})`);
   } else {
     sections.push('Thought generation was skipped this tick.');
   }
 
-  // Emotional state
+  // 7. Emotional state
   const activeEmotions = gathered.emotions.filter(e => e.intensity > 0.1);
   if (activeEmotions.length > 0) {
     const emotionLines = activeEmotions.map(e =>
@@ -599,30 +801,67 @@ function buildEphemeralContext(
     sections.push('Current emotional state:\n' + emotionLines.join('\n'));
   }
 
-  // Energy state
+  // 8. Energy state
   if (gathered.energySystemEnabled && gathered.energyLevel != null) {
     sections.push(`Energy: ${gathered.energyLevel.toFixed(2)} (${gathered.energyBand ?? 'unknown'})`);
   }
 
-  // Recent thoughts (raw, for context)
+  // 9. Recent thoughts (raw, for context)
   if (gathered.recentThoughts.length > 0) {
     const recent = gathered.recentThoughts.slice(-5);
     const lines = recent.map(t => `  - ${t.content}`);
     sections.push('Recent thoughts:\n' + lines.join('\n'));
   }
 
-  // Long-term memories
+  // 10. Recent experiences (raw, for context)
+  if (gathered.recentExperiences.length > 0) {
+    const recent = gathered.recentExperiences.slice(-5);
+    const lines = recent.map(e => `  - ${e.content}`);
+    sections.push('Recent experiences:\n' + lines.join('\n'));
+  }
+
+  // 11. Long-term memories (from semantic search)
   if (gathered.memoryContext?.longTermMemorySection) {
     sections.push(gathered.memoryContext.longTermMemorySection);
   }
 
-  // Previous tick outcomes
+  // 12. External history (messages from Discord servers, Slack channels, etc.)
+  if (gathered.externalHistory && gathered.externalHistory.size > 0) {
+    sections.push(buildExternalHistorySection(gathered.externalHistory));
+  }
+
+  // 13. Previous tick outcomes
   if (gathered.previousDecisions.length > 0) {
     const lines = gathered.previousDecisions.map(d => {
       const status = d.outcome === 'executed' ? 'done' : d.outcome;
       return `  - ${d.type}: ${d.description} [${status}]`;
     });
     sections.push('Previous tick outcomes:\n' + lines.join('\n'));
+  }
+
+  // 14. Graduating seeds (one-time prompt when a seed graduates to goal proposal)
+  if (gathered.goalContext?.graduatingSeedsSection) {
+    sections.push('-- EMERGING INTEREST --\n' + gathered.goalContext.graduatingSeedsSection);
+  }
+
+  // 15. Delivery failures (outbound messages that failed after retries)
+  if (gathered.deliveryFailures.length > 0) {
+    sections.push(buildDeliveryFailuresSection(gathered.deliveryFailures));
+  }
+
+  // 16. Tick-interval energy magnitude calibration
+  if (gathered.energySystemEnabled) {
+    sections.push(buildEnergyMagnitudeCalibration(gathered.tickIntervalMs));
+  }
+
+  // 17. First tick kickstart (only on tick 1 with no prior experiences)
+  if (config.tickNumber === 1 && gathered.recentExperiences.length === 0) {
+    sections.push(buildFirstTickKickstart(
+      config.compiledPersona,
+      // Infer paradigm from persona config or default
+      undefined,
+      undefined,
+    ));
   }
 
   // Plugin context sources

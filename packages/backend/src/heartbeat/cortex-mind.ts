@@ -21,6 +21,7 @@ import {
   ProviderManager,
   zodToTypebox,
   classifyError,
+  unwrapModel,
   type CortexAgentConfig,
   type AgentTextOutput,
   type ClassifiedError,
@@ -368,23 +369,25 @@ export async function createCortexMind(
   // Build permission resolver
   const permissionResolver = buildPermissionResolver(state.toolContext);
 
-  // Create pi-agent-core Agent (dynamic import to avoid hard dependency)
-  const piAgentCore = await import('@mariozechner/pi-agent-core');
-  const piAi = await import('@mariozechner/pi-ai');
-
-  // Resolve the actual pi-ai model object from our CortexModel
-  const { unwrapModel } = await import('@animus-labs/cortex');
+  // ABSTRACTION VIOLATION: The backend should only import from @animus-labs/cortex,
+  // never from @mariozechner/pi-agent-core directly. CortexAgent's constructor
+  // currently accepts a pre-built PiAgent, forcing consumers to construct it.
+  //
+  // TODO(cortex): CortexAgent should expose a static factory method or accept
+  // tools/systemPrompt/getApiKey in CortexAgentConfig so it can create the
+  // pi-agent-core Agent internally. This would eliminate the backend's need to
+  // import pi-agent-core at all. Until CortexAgent provides this, we use a
+  // dynamic import of pi-agent-core here as a contained violation.
   const piModel = unwrapModel(model);
+  const piAgentCore = await import('@mariozechner/pi-agent-core');
 
-  // Create the Agent instance
   const agentConfig: Record<string, unknown> = {
     model: piModel,
     tools: animusTools,
     systemPrompt: '', // Set later via buildSystemPrompt
     getApiKey,
   };
-
-  const agent = new piAgentCore.Agent(agentConfig) as unknown as PiAgent;
+  const piAgent = new piAgentCore.Agent(agentConfig) as unknown as PiAgent;
 
   // Create CortexAgent wrapping the pi-agent-core Agent
   const cortexConfig: CortexAgentConfig = {
@@ -400,7 +403,7 @@ export async function createCortexMind(
     resolvePermission: permissionResolver,
   };
 
-  const cortexAgent = new CortexAgent(agent, cortexConfig);
+  const cortexAgent = new CortexAgent(piAgent, cortexConfig);
 
   // Wire event handlers
   wireEventHandlers(cortexAgent, state);
@@ -458,6 +461,13 @@ function wireEventHandlers(
         message: `Rate limit: ${classified.originalMessage}`,
         recoverable: true,
         suggestedAction: classified.suggestedAction ?? 'Rate limit hit. Next tick delayed.',
+      });
+    } else if (classified.category === 'server_error') {
+      eventBus.emit('system:error', {
+        category: 'provider',
+        message: `Server error: ${classified.originalMessage}`,
+        recoverable: true,
+        suggestedAction: classified.suggestedAction ?? 'Provider server error. Will retry on next tick.',
       });
     }
   });
