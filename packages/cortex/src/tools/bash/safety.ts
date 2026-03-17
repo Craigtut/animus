@@ -15,6 +15,7 @@
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { buildSafeEnv as buildSafeEnvShared } from '../shared/safe-env.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,54 +40,14 @@ export interface SafetyCheckResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Variables to strip from child process environment.
- */
-const BLOCKED_ENV_PREFIXES = ['LD_', 'DYLD_', 'BASH_FUNC_'];
-
-const BLOCKED_ENV_VARS = new Set([
-  // Runtime loaders
-  'NODE_OPTIONS', 'NODE_PATH',
-  'PYTHONPATH', 'PYTHONHOME',
-  'PERL5LIB', 'PERL5OPT',
-  'RUBYLIB', 'RUBYOPT',
-  // Shell startup injection
-  'BASH_ENV', 'ENV', 'SHELLOPTS', 'PS4', 'IFS', 'PROMPT_COMMAND', 'ZDOTDIR',
-  // Git execution
-  'GIT_EXTERNAL_DIFF', 'GIT_EXEC_PATH', 'GIT_SSH_COMMAND',
-  // Security-sensitive
-  'SSLKEYLOGFILE', 'GCONV_PATH', 'OPENSSL_CONF', 'CURL_HOME', 'WGETRC',
-]);
-
-/**
  * Build a safe environment for child processes by stripping dangerous variables.
  * Adds CORTEX_SHELL=exec as a context marker.
+ *
+ * Delegates to the shared buildSafeEnv utility so that both the Bash tool
+ * and the MCP client use the same blocklist.
  */
 export function buildSafeEnv(parentEnv: NodeJS.ProcessEnv): Record<string, string> {
-  const env: Record<string, string> = {};
-
-  for (const [key, value] of Object.entries(parentEnv)) {
-    if (value === undefined) continue;
-
-    // Check exact match
-    if (BLOCKED_ENV_VARS.has(key)) continue;
-
-    // Check prefix match
-    let blocked = false;
-    for (const prefix of BLOCKED_ENV_PREFIXES) {
-      if (key.startsWith(prefix)) {
-        blocked = true;
-        break;
-      }
-    }
-    if (blocked) continue;
-
-    env[key] = value;
-  }
-
-  // Add context marker
-  env['CORTEX_SHELL'] = 'exec';
-
-  return env;
+  return buildSafeEnvShared(parentEnv, 'exec');
 }
 
 // ---------------------------------------------------------------------------
@@ -213,32 +174,120 @@ const SAFE_STDIN_DENIED_FLAGS: Record<string, Set<string>> = {
 };
 
 /**
- * Extract the first command from a shell command string.
- * Handles pipes, semicolons, and && chains by taking the first token.
+ * Split a command string on shell operators (; && || |) while respecting
+ * quoted strings. Returns the individual sub-commands.
  */
-function extractFirstCommand(command: string): string {
-  const trimmed = command.trim();
+export function splitOnShellOperators(command: string): string[] {
+  const subCommands: string[] = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
+  let escaped = false;
+  let i = 0;
+
+  while (i < command.length) {
+    const ch = command[i]!;
+
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      i++;
+      continue;
+    }
+
+    if (ch === '\\') {
+      escaped = true;
+      current += ch;
+      i++;
+      continue;
+    }
+
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+      current += ch;
+      i++;
+      continue;
+    }
+
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+      current += ch;
+      i++;
+      continue;
+    }
+
+    // Only split when outside quotes
+    if (!inSingle && !inDouble) {
+      // Check for && or ||
+      if ((ch === '&' && command[i + 1] === '&') || (ch === '|' && command[i + 1] === '|')) {
+        if (current.trim()) subCommands.push(current.trim());
+        current = '';
+        i += 2;
+        continue;
+      }
+
+      // Check for single pipe (not ||) or semicolon
+      if (ch === ';' || (ch === '|' && command[i + 1] !== '|')) {
+        if (current.trim()) subCommands.push(current.trim());
+        current = '';
+        i++;
+        continue;
+      }
+    }
+
+    current += ch;
+    i++;
+  }
+
+  if (current.trim()) subCommands.push(current.trim());
+
+  return subCommands;
+}
+
+/**
+ * Extract the command name from a single (non-compound) command string.
+ */
+function extractCommandName(singleCommand: string): string {
+  const trimmed = singleCommand.trim();
   // Handle 'sed -i' specifically
   if (/^sed\s+.*-i/.test(trimmed)) return 'sed-i';
 
-  // Split on pipes, semicolons, &&, ||
-  const parts = trimmed.split(/[;|&]+/);
-  const firstPart = (parts[0] ?? '').trim();
-
   // Get the first token (the command name)
-  const tokens = firstPart.split(/\s+/);
+  const tokens = trimmed.split(/\s+/);
   return (tokens[0] ?? '').toLowerCase();
 }
 
 /**
- * Classify a command by its potential impact.
+ * Risk ordering from lowest to highest. Used to pick the most dangerous
+ * classification when a compound command contains multiple sub-commands.
  */
-export function classifyCommand(command: string): CommandClassification {
-  const firstCmd = extractFirstCommand(command);
+const CLASSIFICATION_RISK_ORDER: readonly CommandClassification[] = [
+  'read',
+  'safe-stdin',
+  'create',
+  'write',
+  'network',
+  'unknown',
+];
+
+/**
+ * Return the higher-risk classification of two values.
+ */
+function higherRisk(a: CommandClassification, b: CommandClassification): CommandClassification {
+  const aIdx = CLASSIFICATION_RISK_ORDER.indexOf(a);
+  const bIdx = CLASSIFICATION_RISK_ORDER.indexOf(b);
+  return aIdx >= bIdx ? a : b;
+}
+
+/**
+ * Classify a single (non-compound) command by its potential impact.
+ */
+function classifySingleCommand(singleCommand: string): CommandClassification {
+  const cmdName = extractCommandName(singleCommand);
   const isWindows = process.platform === 'win32';
 
   if (isWindows) {
-    const psCmd = firstCmd.toLowerCase();
+    const psCmd = cmdName.toLowerCase();
     if (PS_READ_COMMANDS.has(psCmd)) return 'read';
     if (PS_WRITE_COMMANDS.has(psCmd)) return 'write';
     if (PS_CREATE_COMMANDS.has(psCmd)) return 'create';
@@ -250,26 +299,26 @@ export function classifyCommand(command: string): CommandClassification {
 
   // Unix
   // Handle git subcommands
-  if (firstCmd === 'git') {
-    const parts = command.trim().split(/\s+/);
+  if (cmdName === 'git') {
+    const parts = singleCommand.trim().split(/\s+/);
     const subcommand = parts[1]?.toLowerCase();
     if (subcommand && GIT_READ_SUBCOMMANDS.has(subcommand)) return 'read';
     return 'unknown';
   }
 
   // Handle sed -i (write)
-  if (firstCmd === 'sed-i') return 'write';
+  if (cmdName === 'sed-i') return 'write';
 
-  if (UNIX_READ_COMMANDS.has(firstCmd)) return 'read';
-  if (UNIX_WRITE_COMMANDS.has(firstCmd)) return 'write';
-  if (UNIX_CREATE_COMMANDS.has(firstCmd)) return 'create';
-  if (UNIX_NETWORK_COMMANDS.has(firstCmd)) return 'network';
+  if (UNIX_READ_COMMANDS.has(cmdName)) return 'read';
+  if (UNIX_WRITE_COMMANDS.has(cmdName)) return 'write';
+  if (UNIX_CREATE_COMMANDS.has(cmdName)) return 'create';
+  if (UNIX_NETWORK_COMMANDS.has(cmdName)) return 'network';
 
   // Check safe-stdin
-  if (UNIX_SAFE_STDIN_COMMANDS.has(firstCmd)) {
+  if (UNIX_SAFE_STDIN_COMMANDS.has(cmdName)) {
     // Verify no denied flags and no file args
-    const tokens = command.trim().split(/\s+/);
-    const deniedFlags = SAFE_STDIN_DENIED_FLAGS[firstCmd];
+    const tokens = singleCommand.trim().split(/\s+/);
+    const deniedFlags = SAFE_STDIN_DENIED_FLAGS[cmdName];
     if (deniedFlags) {
       for (const token of tokens.slice(1)) {
         if (deniedFlags.has(token)) return 'unknown';
@@ -286,17 +335,32 @@ export function classifyCommand(command: string): CommandClassification {
   return 'unknown';
 }
 
+/**
+ * Classify a command (potentially compound) by its potential impact.
+ * For compound commands, returns the highest-risk classification
+ * among all sub-commands.
+ */
+export function classifyCommand(command: string): CommandClassification {
+  const subCommands = splitOnShellOperators(command);
+  if (subCommands.length === 0) return 'unknown';
+
+  let result: CommandClassification = classifySingleCommand(subCommands[0]!);
+  for (let i = 1; i < subCommands.length; i++) {
+    result = higherRisk(result, classifySingleCommand(subCommands[i]!));
+  }
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Layer 4: Path Validation
 // ---------------------------------------------------------------------------
 
 /**
- * Extract target paths from write/create commands.
- * Returns the paths that would be modified by the command.
+ * Extract target paths from write/create commands in a single sub-command.
  */
-export function extractWritePaths(command: string): string[] {
+function extractWritePathsFromSingle(singleCommand: string): string[] {
   const paths: string[] = [];
-  const tokens = command.trim().split(/\s+/);
+  const tokens = singleCommand.trim().split(/\s+/);
   const cmd = (tokens[0] ?? '').toLowerCase();
 
   if (['rm', 'rmdir', 'mv', 'cp', 'touch', 'mkdir'].includes(cmd)) {
@@ -312,6 +376,20 @@ export function extractWritePaths(command: string): string[] {
     }
   }
 
+  return paths;
+}
+
+/**
+ * Extract target paths from write/create commands.
+ * Returns the paths that would be modified by the command.
+ * Handles compound commands by extracting paths from all sub-commands.
+ */
+export function extractWritePaths(command: string): string[] {
+  const subCommands = splitOnShellOperators(command);
+  const paths: string[] = [];
+  for (const sub of subCommands) {
+    paths.push(...extractWritePathsFromSingle(sub));
+  }
   return paths;
 }
 
@@ -594,23 +672,46 @@ export async function checkScriptPreflight(command: string, cwd: string): Promis
 // ---------------------------------------------------------------------------
 
 /**
- * Placeholder for the auto-mode classifier that uses the utility model
- * to classify whether a command should be blocked in autonomous mode.
+ * Auto-mode classifier that uses the utility model to classify whether
+ * a command should be blocked in autonomous mode.
  *
  * The full implementation will:
  * 1. Fast check (256 max tokens): quick classification
  * 2. Full analysis (4096 max tokens): if fast check is uncertain
  *
- * For now, this always returns allowed (no-op).
- * Will be wired to utilityComplete in a later phase.
+ * Fail-safe behavior: when auto-approve mode is active (isAutoApprove=true)
+ * but no classifier function is available, this layer BLOCKS the command.
+ * When auto-approve is not active, the consumer's permission resolver
+ * (beforeToolCall) has already approved, so this layer passes through.
  */
 export async function checkAutoModeClassifier(
   _command: string,
   _description: string | undefined,
-  _utilityComplete?: (context: unknown) => Promise<unknown>,
+  _utilityComplete?: ((context: unknown) => Promise<unknown>) | undefined,
+  isAutoApprove?: boolean,
 ): Promise<SafetyCheckResult> {
-  // Stub: always allow. Full implementation requires utility model integration.
-  return { allowed: true };
+  // When auto-approve is not active, the consumer's permission system has
+  // already handled approval. Layer 7 is defense-in-depth for auto mode only.
+  if (!isAutoApprove) {
+    return { allowed: true };
+  }
+
+  // Auto-approve is active but no classifier function is available.
+  // Fail-safe: block until the classifier is fully implemented.
+  if (!_utilityComplete) {
+    return {
+      allowed: false,
+      reason: 'Auto-mode classifier not yet implemented. Command requires manual approval.',
+    };
+  }
+
+  // TODO: Full implementation will call utilityComplete for classification.
+  // For now, block in auto-approve mode even with a utility model, since
+  // the classification prompt/logic is not yet built.
+  return {
+    allowed: false,
+    reason: 'Auto-mode classifier not yet implemented. Command requires manual approval.',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -628,27 +729,32 @@ export async function runSafetyChecks(
   options?: {
     utilityComplete?: ((context: unknown) => Promise<unknown>) | undefined;
     description?: string | undefined;
+    /** Whether the consumer is in auto-approve mode. When true and no classifier is available, Layer 7 blocks. */
+    isAutoApprove?: boolean | undefined;
   },
 ): Promise<SafetyCheckResult> {
   // Layer 2: Critical path protection
-  // Quick check for explicit paths in the command
-  const tokens = command.split(/\s+/);
-  for (const token of tokens) {
-    if (token.startsWith('/') || token.startsWith('~') || (process.platform === 'win32' && /^[A-Za-z]:\\/.test(token))) {
-      if (isCriticalPath(token)) {
-        const classification = classifyCommand(command);
-        if (classification === 'write' || classification === 'create' || classification === 'unknown') {
-          return {
-            allowed: false,
-            reason: 'This command would modify a critical system directory. This cannot be auto-allowed.',
-            classification,
-          };
+  // Check each sub-command independently for critical path access
+  const subCommands = splitOnShellOperators(command);
+  for (const sub of subCommands) {
+    const subTokens = sub.split(/\s+/);
+    for (const token of subTokens) {
+      if (token.startsWith('/') || token.startsWith('~') || (process.platform === 'win32' && /^[A-Za-z]:\\/.test(token))) {
+        if (isCriticalPath(token)) {
+          const subClassification = classifySingleCommand(sub);
+          if (subClassification === 'write' || subClassification === 'create' || subClassification === 'unknown') {
+            return {
+              allowed: false,
+              reason: 'This command would modify a critical system directory. This cannot be auto-allowed.',
+              classification: classifyCommand(command),
+            };
+          }
         }
       }
     }
   }
 
-  // Layer 4: Path validation for write commands
+  // Layer 4: Path validation for write commands (handles all sub-commands)
   const pathResult = validateWritePaths(command, workingDirectory, currentCwd);
   if (!pathResult.allowed) return pathResult;
 
@@ -660,11 +766,12 @@ export async function runSafetyChecks(
   const scriptResult = await checkScriptPreflight(command, currentCwd);
   if (!scriptResult.allowed) return scriptResult;
 
-  // Layer 7: Auto-mode classifier (stub)
+  // Layer 7: Auto-mode classifier
   const classifierResult = await checkAutoModeClassifier(
     command,
     options?.description,
     options?.utilityComplete,
+    options?.isAutoApprove,
   );
   if (!classifierResult.allowed) return classifierResult;
 

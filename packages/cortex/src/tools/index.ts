@@ -39,7 +39,7 @@ export { createTaskOutputTool } from './task-output.js';
 export type { TaskOutputDetails, TaskOutputParamsType } from './task-output.js';
 export { TaskOutputParams } from './task-output.js';
 
-export { createWebFetchTool } from './web-fetch/index.js';
+export { createWebFetchTool, isPrivateIp } from './web-fetch/index.js';
 export type { WebFetchToolConfig, WebFetchDetails, WebFetchParamsType } from './web-fetch/index.js';
 export { WebFetchParams } from './web-fetch/index.js';
 
@@ -55,6 +55,7 @@ export {
   buildSafeEnv,
   isCriticalPath,
   classifyCommand,
+  splitOnShellOperators,
   checkObfuscation,
   stripInvisibleChars,
   checkScriptPreflight,

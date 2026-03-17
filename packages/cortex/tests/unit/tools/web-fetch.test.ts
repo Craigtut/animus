@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createWebFetchTool } from '../../../src/tools/web-fetch/index.js';
+import { createWebFetchTool, isPrivateIp } from '../../../src/tools/web-fetch/index.js';
+import { promises as dns } from 'node:dns';
 
 describe('WebFetch tool', () => {
   let webFetchTool: ReturnType<typeof createWebFetchTool>;
@@ -268,6 +269,131 @@ describe('WebFetch tool', () => {
 
     const text = (result.content[0] as { type: 'text'; text: string }).text;
     expect(text).toContain('URL rejected');
+  });
+
+  // S2: DNS rebinding prevention
+  describe('DNS rebinding prevention', () => {
+    it('blocks domains that resolve to private IPs', async () => {
+      // Mock dns.lookup to return a loopback IP
+      vi.spyOn(dns, 'lookup').mockResolvedValue({ address: '127.0.0.1', family: 4 } as never);
+
+      const result = await webFetchTool.execute({
+        url: 'https://evil-rebind.example.com/api',
+        prompt: 'test',
+      });
+
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).toContain('URL rejected');
+      expect(text).toContain('private IP');
+    });
+
+    it('blocks domains that resolve to 10.x.x.x', async () => {
+      vi.spyOn(dns, 'lookup').mockResolvedValue({ address: '10.0.0.1', family: 4 } as never);
+
+      const result = await webFetchTool.execute({
+        url: 'https://attacker.com/ssrf',
+        prompt: 'test',
+      });
+
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).toContain('URL rejected');
+      expect(text).toContain('private IP');
+    });
+
+    it('allows domains that resolve to public IPs', async () => {
+      vi.spyOn(dns, 'lookup').mockResolvedValue({ address: '93.184.216.34', family: 4 } as never);
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response('<html><body>Public content</body></html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        }),
+      );
+
+      const result = await webFetchTool.execute({
+        url: 'https://example.com/page',
+        prompt: 'test',
+      });
+
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).not.toContain('URL rejected');
+    });
+  });
+
+  // S5: Proper IP parsing tests
+  describe('isPrivateIp', () => {
+    // IPv4 private ranges
+    it('detects 127.0.0.1 as private', () => {
+      expect(isPrivateIp('127.0.0.1')).toBe(true);
+    });
+
+    it('detects 127.x.x.x as private', () => {
+      expect(isPrivateIp('127.255.0.1')).toBe(true);
+    });
+
+    it('detects 10.0.0.0/8 as private', () => {
+      expect(isPrivateIp('10.0.0.1')).toBe(true);
+      expect(isPrivateIp('10.255.255.255')).toBe(true);
+    });
+
+    it('detects 172.16.0.0/12 as private', () => {
+      expect(isPrivateIp('172.16.0.1')).toBe(true);
+      expect(isPrivateIp('172.31.255.255')).toBe(true);
+    });
+
+    it('does not flag 172.15.x.x or 172.32.x.x', () => {
+      expect(isPrivateIp('172.15.0.1')).toBe(false);
+      expect(isPrivateIp('172.32.0.1')).toBe(false);
+    });
+
+    it('detects 192.168.0.0/16 as private', () => {
+      expect(isPrivateIp('192.168.0.1')).toBe(true);
+      expect(isPrivateIp('192.168.255.255')).toBe(true);
+    });
+
+    it('detects 169.254.0.0/16 (link-local) as private', () => {
+      expect(isPrivateIp('169.254.169.254')).toBe(true);
+    });
+
+    it('detects 0.0.0.0 as private', () => {
+      expect(isPrivateIp('0.0.0.0')).toBe(true);
+    });
+
+    it('allows public IPs', () => {
+      expect(isPrivateIp('8.8.8.8')).toBe(false);
+      expect(isPrivateIp('93.184.216.34')).toBe(false);
+      expect(isPrivateIp('1.1.1.1')).toBe(false);
+    });
+
+    // IPv4-mapped IPv6
+    it('detects ::ffff:127.0.0.1 as private', () => {
+      expect(isPrivateIp('::ffff:127.0.0.1')).toBe(true);
+    });
+
+    it('detects ::ffff:10.0.0.1 as private', () => {
+      expect(isPrivateIp('::ffff:10.0.0.1')).toBe(true);
+    });
+
+    it('allows ::ffff: with public IP', () => {
+      expect(isPrivateIp('::ffff:8.8.8.8')).toBe(false);
+    });
+
+    // IPv6
+    it('detects ::1 as private', () => {
+      expect(isPrivateIp('::1')).toBe(true);
+    });
+
+    it('detects fe80:: link-local as private', () => {
+      expect(isPrivateIp('fe80::1')).toBe(true);
+    });
+
+    it('detects fc00::/7 unique local as private', () => {
+      expect(isPrivateIp('fc00::1')).toBe(true);
+      expect(isPrivateIp('fd00::1')).toBe(true);
+    });
+
+    it('treats unrecognized format as private (fail-safe)', () => {
+      expect(isPrivateIp('not-an-ip')).toBe(true);
+    });
   });
 
   // Cross-host redirect detection tests

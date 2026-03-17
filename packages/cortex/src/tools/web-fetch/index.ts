@@ -11,6 +11,8 @@
  * Reference: docs/cortex/tools/web-fetch.md
  */
 
+import { promises as dns } from 'node:dns';
+import { isIPv4, isIPv6 } from 'node:net';
 import { Type, type Static } from '@sinclair/typebox';
 import type { ToolContentDetails } from '../../types.js';
 import { WebFetchCache } from './cache.js';
@@ -48,21 +50,85 @@ const MAX_CONTENT_TOKENS = 25_000; // approximate token limit for summarization
 const USER_AGENT = 'AnimusCortex/1.0 (web-fetch tool)';
 
 /**
- * Private IP ranges to reject.
+ * Hostname strings that always resolve to private/local addresses.
+ * Checked before DNS resolution as a fast-path reject.
  */
-const PRIVATE_IP_RANGES = [
-  /^127\./,
-  /^10\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^192\.168\./,
-  /^0\./,
-  /^169\.254\./,
-  /^::1$/,
-  /^fc00:/i,
-  /^fd/i,
-  /^fe80:/i,
+const PRIVATE_HOSTNAME_PATTERNS = [
   /^localhost$/i,
 ];
+
+/**
+ * Check whether an IP address (v4 or v6) belongs to a private, loopback,
+ * link-local, or otherwise non-routable range. Handles IPv4-mapped IPv6
+ * addresses (::ffff:x.x.x.x) and parses octets numerically to catch
+ * alternate encodings (decimal IPs, zero-padded, etc.).
+ */
+export function isPrivateIp(ip: string): boolean {
+  let normalized = ip;
+
+  // Normalize IPv4-mapped IPv6 (::ffff:127.0.0.1 -> 127.0.0.1)
+  if (normalized.toLowerCase().startsWith('::ffff:')) {
+    normalized = normalized.slice(7);
+  }
+
+  if (isIPv4(normalized)) {
+    const octets = normalized.split('.').map(Number);
+    if (octets.length !== 4 || octets.some(o => isNaN(o) || o < 0 || o > 255)) {
+      // Malformed, treat as private (fail-safe)
+      return true;
+    }
+    // 127.0.0.0/8 (loopback)
+    if (octets[0] === 127) return true;
+    // 10.0.0.0/8
+    if (octets[0] === 10) return true;
+    // 172.16.0.0/12
+    if (octets[0] === 172 && octets[1]! >= 16 && octets[1]! <= 31) return true;
+    // 192.168.0.0/16
+    if (octets[0] === 192 && octets[1] === 168) return true;
+    // 169.254.0.0/16 (link-local, cloud metadata)
+    if (octets[0] === 169 && octets[1] === 254) return true;
+    // 0.0.0.0/8
+    if (octets[0] === 0) return true;
+    return false;
+  }
+
+  if (isIPv6(ip)) {
+    const lower = ip.toLowerCase();
+    // ::1 (loopback)
+    if (lower === '::1' || lower === '0:0:0:0:0:0:0:1') return true;
+    // fe80::/10 (link-local)
+    if (lower.startsWith('fe80:')) return true;
+    // fc00::/7 (unique local, includes fd00::/8)
+    const firstSegment = lower.split(':')[0] ?? '';
+    const firstVal = parseInt(firstSegment, 16);
+    if (!isNaN(firstVal) && (firstVal & 0xfe00) === 0xfc00) return true;
+    // :: (unspecified)
+    if (lower === '::' || lower === '0:0:0:0:0:0:0:0') return true;
+    return false;
+  }
+
+  // Unrecognized format, fail-safe: treat as private
+  return true;
+}
+
+/**
+ * Resolve a hostname via DNS and validate that the resolved IP is not private.
+ * Throws if the hostname resolves to a private/loopback/link-local address.
+ */
+async function validateResolvedIp(hostname: string): Promise<void> {
+  // If the hostname is already a literal IP, validate directly
+  if (isIPv4(hostname) || isIPv6(hostname)) {
+    if (isPrivateIp(hostname)) {
+      throw new Error(`URL resolves to private IP ${hostname}`);
+    }
+    return;
+  }
+
+  const { address } = await dns.lookup(hostname);
+  if (isPrivateIp(address)) {
+    throw new Error(`URL resolves to private IP ${address}`);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Config
@@ -80,7 +146,9 @@ export interface WebFetchToolConfig {
 // ---------------------------------------------------------------------------
 
 /**
- * Validate a URL, rejecting dangerous schemes and private IPs.
+ * Validate a URL, rejecting dangerous schemes, private hostnames, and literal private IPs.
+ * This is the first-pass check (hostname/literal IP only). DNS resolution is done
+ * separately before each fetch to catch DNS rebinding attacks.
  */
 function validateUrl(urlStr: string): { valid: boolean; reason?: string | undefined; url?: URL | undefined } {
   let url: URL;
@@ -100,10 +168,18 @@ function validateUrl(urlStr: string): { valid: boolean; reason?: string | undefi
     url = new URL(urlStr.replace(/^http:/, 'https:'));
   }
 
-  // Check for private IP ranges
   const hostname = url.hostname;
-  for (const pattern of PRIVATE_IP_RANGES) {
+
+  // Check hostname-level blocklist (localhost, etc.)
+  for (const pattern of PRIVATE_HOSTNAME_PATTERNS) {
     if (pattern.test(hostname)) {
+      return { valid: false, reason: `URL rejected: private/local network address (${hostname})` };
+    }
+  }
+
+  // If the hostname is a literal IP, validate it structurally
+  if (isIPv4(hostname) || isIPv6(hostname)) {
+    if (isPrivateIp(hostname)) {
       return { valid: false, reason: `URL rejected: private/local network address (${hostname})` };
     }
   }
@@ -285,6 +361,25 @@ export function createWebFetchTool(config: WebFetchToolConfig): {
 
       fetchesThisLoop++;
 
+      // DNS pre-resolution: resolve hostname and validate the IP is not private.
+      // This prevents DNS rebinding attacks where a domain initially resolves to
+      // a public IP during validation but resolves to 127.0.0.1 at fetch time.
+      try {
+        await validateResolvedIp(url.hostname);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: 'text', text: `URL rejected: ${msg}` }],
+          details: {
+            finalUrl: urlStr,
+            statusCode: 0,
+            cacheHit: false,
+            rawSize: 0,
+            markdownSize: 0,
+          },
+        };
+      }
+
       // Fetch the URL (manual redirect to detect cross-host redirects)
       let response: Response;
       let currentUrl = urlStr;
@@ -359,7 +454,17 @@ export function createWebFetchTool(config: WebFetchToolConfig): {
             };
           }
 
-          // Same-host redirect: follow it
+          // Same-host redirect: validate the redirect URL's resolved IP before following
+          try {
+            await validateResolvedIp(redirectHost);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+              content: [{ type: 'text', text: `Redirect URL rejected: ${msg}` }],
+              details: { finalUrl: redirectUrl, statusCode: status, cacheHit: false, rawSize: 0, markdownSize: 0 },
+            };
+          }
+
           redirectCount++;
           if (redirectCount > maxRedirects) {
             return {

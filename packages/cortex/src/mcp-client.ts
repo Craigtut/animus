@@ -21,6 +21,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { Type } from '@sinclair/typebox';
 import type { McpTransportConfig, McpConnectionState, McpStdioConfig, McpHttpConfig } from './types.js';
+import { buildSafeEnv } from './tools/shared/safe-env.js';
 
 // ---------------------------------------------------------------------------
 // AgentTool interface (pi-agent-core minimal contract)
@@ -281,20 +282,26 @@ export class McpClientManager {
   }
 
   private createStdioTransport(config: McpStdioConfig): StdioClientTransport {
+    // Sanitize environment variables for the subprocess.
+    // Strip dangerous vars (LD_PRELOAD, NODE_OPTIONS, etc.) to prevent
+    // injection via environment. Uses the same blocklist as the Bash tool.
+    const baseEnv = config.env ?? process.env;
+    const safeEnv = buildSafeEnv(baseEnv);
+
     // Build params object, only including defined optional fields to satisfy
     // exactOptionalPropertyTypes
     const params: {
       command: string;
       args: string[];
-      env?: Record<string, string>;
+      env: Record<string, string>;
       cwd?: string;
       stderr: 'pipe';
     } = {
       command: config.command,
       args: config.args ?? [],
+      env: safeEnv,
       stderr: 'pipe',
     };
-    if (config.env !== undefined) params.env = config.env;
     if (config.cwd !== undefined) params.cwd = config.cwd;
 
     return new StdioClientTransport(params);
