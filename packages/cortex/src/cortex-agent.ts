@@ -463,7 +463,7 @@ export class CortexAgent {
     messages: Array<{ role: string; content: string }>;
   }): Promise<string> {
     // Dynamically import pi-ai's complete() function
-    let complete: (model: unknown, context: unknown) => Promise<unknown>;
+    let complete: (model: unknown, context: unknown, options?: unknown) => Promise<unknown>;
     try {
       const piAi = await import('@mariozechner/pi-ai');
       complete = piAi.complete;
@@ -474,13 +474,24 @@ export class CortexAgent {
       );
     }
 
+    // Resolve API key for the provider
+    const provider = (this.primaryModel as Record<string, unknown>)['provider'] as string;
+    let apiKey: string | undefined;
+    if (this.config.getApiKey) {
+      try {
+        apiKey = await this.config.getApiKey(provider);
+      } catch {
+        // If key resolution fails, let pi-ai try env vars
+      }
+    }
+
     const result = await complete(this.primaryModel, {
       systemPrompt: context.systemPrompt,
       messages: context.messages.map(m => ({
         role: m.role as 'user' | 'assistant',
         content: m.content,
       })),
-    });
+    }, apiKey ? { apiKey } : undefined);
 
     // Extract text from the AssistantMessage response
     return this.extractTextFromAssistantMessage(result);
@@ -505,7 +516,7 @@ export class CortexAgent {
     systemPrompt: string;
     messages: Array<{ role: string; content: string }>;
   }, schema: unknown, toolName: string = 'structured_output', toolDescription: string = 'Produce structured output'): Promise<Record<string, unknown> | null> {
-    let complete: (model: unknown, context: unknown) => Promise<unknown>;
+    let complete: (model: unknown, context: unknown, options?: unknown) => Promise<unknown>;
     try {
       const piAi = await import('@mariozechner/pi-ai');
       complete = piAi.complete;
@@ -521,6 +532,17 @@ export class CortexAgent {
       parameters: schema,
     };
 
+    // Resolve API key for the provider
+    const provider = (this.primaryModel as Record<string, unknown>)['provider'] as string;
+    let apiKey: string | undefined;
+    if (this.config.getApiKey) {
+      try {
+        apiKey = await this.config.getApiKey(provider);
+      } catch {
+        // If key resolution fails, let pi-ai try env vars
+      }
+    }
+
     const result = await complete(this.primaryModel, {
       systemPrompt: context.systemPrompt,
       messages: context.messages.map(m => ({
@@ -528,7 +550,7 @@ export class CortexAgent {
         content: m.content,
       })),
       tools: [tool],
-    });
+    }, apiKey ? { apiKey } : undefined);
 
     // Extract tool call arguments from the response
     return this.extractToolCallArgs(result, toolName);
@@ -597,11 +619,15 @@ export class CortexAgent {
       );
     }
 
-    // Build the pi-agent-core Agent config
+    // Build the pi-agent-core Agent config.
+    // Pi-agent-core expects { initialState: { systemPrompt, model, tools, messages }, getApiKey, ... }
     const agentConfig: Record<string, unknown> = {
-      model: config.model,
-      tools: config.tools ?? [],
-      systemPrompt: config.systemPrompt ?? '',
+      initialState: {
+        systemPrompt: config.systemPrompt ?? '',
+        model: config.model,
+        tools: config.tools ?? [],
+        messages: [],
+      },
       getApiKey: config.getApiKey,
     };
 
@@ -793,7 +819,7 @@ export class CortexAgent {
     systemPrompt: string;
     messages: Array<{ role: string; content: string }>;
   }): Promise<string> {
-    let complete: (model: unknown, context: unknown) => Promise<unknown>;
+    let complete: (model: unknown, context: unknown, options?: unknown) => Promise<unknown>;
     try {
       const piAi = await import('@mariozechner/pi-ai');
       complete = piAi.complete;
