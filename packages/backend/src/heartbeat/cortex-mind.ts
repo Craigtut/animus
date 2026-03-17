@@ -258,9 +258,9 @@ interface AgentTool {
  * Each tool wraps the existing handler from tools/handlers/ and converts
  * Zod schemas to TypeBox via zodToTypebox().
  */
-function buildAnimusTools(
+async function buildAnimusTools(
   toolContextRef: MutableMindToolContext,
-): AgentTool[] {
+): Promise<AgentTool[]> {
   const tools: AgentTool[] = [];
 
   for (const [name, def] of Object.entries(ANIMUS_TOOL_DEFS)) {
@@ -346,12 +346,17 @@ export async function createCortexMind(
   const sysDb = getSystemDb();
   const settings = systemStore.getSystemSettings(sysDb);
 
-  // Determine provider and model
-  // Use cortex-specific settings if available, fall back to legacy settings.
-  // The cortex fields will be added to SystemSettings in a future migration.
+  // Determine provider and model from cortex-specific settings.
+  // If no cortex provider is configured, skip cortex initialization entirely.
+  // The user must configure a provider via onboarding or settings first.
   const settingsAny = settings as Record<string, unknown>;
-  const provider = (settingsAny['cortexProvider'] as string | undefined) ?? settings.defaultAgentProvider ?? 'anthropic';
-  const modelId = (settingsAny['cortexModel'] as string | undefined) ?? settings.defaultModel ?? 'claude-sonnet-4-20250514';
+  const provider = settingsAny['cortexProvider'] as string | undefined | null;
+  const modelId = settingsAny['cortexModel'] as string | undefined | null;
+
+  if (!provider || !modelId) {
+    log.info('No cortex provider configured. Skipping CortexAgent initialization (legacy mind will be used).');
+    return state;
+  }
 
   log.info(`Creating CortexAgent: provider=${provider}, model=${modelId}`);
 
@@ -370,7 +375,7 @@ export async function createCortexMind(
   };
 
   // Build tools
-  const animusTools = buildAnimusTools(state.toolContext);
+  const animusTools = await buildAnimusTools(state.toolContext);
 
   // Build permission resolver
   const permissionResolver = buildPermissionResolver(state.toolContext);

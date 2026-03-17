@@ -281,6 +281,9 @@ export class CortexAgent {
     this.registeredTools = tools ?? [];
 
     // Resolve models
+    if (!config.model) {
+      throw new Error('CortexAgentConfig.model is required but was undefined. Pass a pi-ai model object.');
+    }
     this.primaryModel = config.model as PiModel;
     this.resolvedUtilityModel = this.resolveUtilityModel(config);
 
