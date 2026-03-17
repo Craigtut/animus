@@ -128,18 +128,21 @@ export const cortexProviderRouter = router({
 
       try {
         const result = await svc.initiateOAuth(input.provider, {
-          onAuth: (url: string, instructions?: string) => {
+          onAuth: (info: { url: string; instructions?: string } | string, legacyInstructions?: string) => {
+            // Pi-ai passes { url, instructions } object; handle both shapes for safety
+            const authUrl = typeof info === 'string' ? info : info.url;
+            const authInstructions = typeof info === 'string' ? legacyInstructions : info.instructions;
             log.info(`OAuth auth URL received for "${input.provider}"`);
 
             // In non-headless environments, try to open browser
             if (!headless) {
-              openUrl(url);
+              openUrl(authUrl);
             }
 
             const event: OAuthStatusEvent = {
               type: 'auth_url',
-              url,
-              ...(instructions !== undefined ? { instructions } : {}),
+              url: authUrl,
+              ...(authInstructions !== undefined ? { instructions: authInstructions } : {}),
             };
             oauthEmitter.emit('status', event);
           },
