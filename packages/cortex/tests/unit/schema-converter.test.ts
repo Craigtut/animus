@@ -3,15 +3,14 @@ import { z } from 'zod';
 import { zodToTypebox } from '../../src/schema-converter.js';
 
 describe('zodToTypebox', () => {
-  it('converts a Zod object schema to a TypeBox schema with correct JSON Schema', () => {
+  it('converts a Zod object schema to a TypeBox schema with correct JSON Schema', async () => {
     const zodSchema = z.object({
       name: z.string(),
       age: z.number(),
     });
 
-    const result = zodToTypebox(zodSchema);
+    const result = await zodToTypebox(zodSchema);
 
-    // The result should be a valid JSON Schema object
     expect(result).toBeDefined();
     expect(result.type).toBe('object');
     expect(result.properties).toBeDefined();
@@ -21,37 +20,34 @@ describe('zodToTypebox', () => {
     expect(result.required).toContain('age');
   });
 
-  it('converts a Zod string schema', () => {
+  it('converts a Zod string schema', async () => {
     const zodSchema = z.string();
-    const result = zodToTypebox(zodSchema);
-
+    const result = await zodToTypebox(zodSchema);
     expect(result.type).toBe('string');
   });
 
-  it('converts a Zod number schema', () => {
+  it('converts a Zod number schema', async () => {
     const zodSchema = z.number();
-    const result = zodToTypebox(zodSchema);
-
+    const result = await zodToTypebox(zodSchema);
     expect(result.type).toBe('number');
   });
 
-  it('converts a Zod schema with optional fields', () => {
+  it('converts a Zod schema with optional fields', async () => {
     const zodSchema = z.object({
       required: z.string(),
       optional: z.string().optional(),
     });
 
-    const result = zodToTypebox(zodSchema);
+    const result = await zodToTypebox(zodSchema);
 
     expect(result.type).toBe('object');
     expect(result.required).toContain('required');
-    // Optional field should not be in required
     if (result.required) {
       expect(result.required).not.toContain('optional');
     }
   });
 
-  it('converts a Zod schema with nested objects', () => {
+  it('converts a Zod schema with nested objects', async () => {
     const zodSchema = z.object({
       user: z.object({
         name: z.string(),
@@ -59,7 +55,7 @@ describe('zodToTypebox', () => {
       }),
     });
 
-    const result = zodToTypebox(zodSchema);
+    const result = await zodToTypebox(zodSchema);
 
     expect(result.type).toBe('object');
     expect(result.properties.user).toBeDefined();
@@ -68,15 +64,15 @@ describe('zodToTypebox', () => {
     expect(result.properties.user.properties.email).toEqual({ type: 'string' });
   });
 
-  it('converts a Zod array schema', () => {
+  it('converts a Zod array schema', async () => {
     const zodSchema = z.array(z.string());
-    const result = zodToTypebox(zodSchema);
+    const result = await zodToTypebox(zodSchema);
 
     expect(result.type).toBe('array');
     expect(result.items).toEqual({ type: 'string' });
   });
 
-  it('produces valid JSON Schema intermediate representation', () => {
+  it('produces valid JSON Schema intermediate representation', async () => {
     const zodSchema = z.object({
       id: z.string(),
       count: z.number(),
@@ -84,9 +80,8 @@ describe('zodToTypebox', () => {
       active: z.boolean(),
     });
 
-    const result = zodToTypebox(zodSchema);
+    const result = await zodToTypebox(zodSchema);
 
-    // Verify the JSON Schema structure is complete
     expect(result.type).toBe('object');
     expect(result.properties.id.type).toBe('string');
     expect(result.properties.count.type).toBe('number');

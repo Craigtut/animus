@@ -280,7 +280,7 @@ function buildAnimusTools(
 
     let parameters;
     try {
-      parameters = zodToTypebox(def.inputSchema as never);
+      parameters = await zodToTypebox(def.inputSchema as never);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`Failed to convert schema for tool '${toolName}': ${msg}`);
