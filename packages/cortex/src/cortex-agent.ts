@@ -486,6 +486,83 @@ export class CortexAgent {
     return this.extractTextFromAssistantMessage(result);
   }
 
+  /**
+   * Make a structured output LLM call using the tool-call-as-structured-output pattern.
+   *
+   * Defines a tool whose input_schema matches the desired output structure,
+   * passes it via pi-ai's complete() with tools, and extracts the tool call
+   * arguments as the structured result. This works across all providers that
+   * support tool use (Anthropic, OpenAI, Google, Mistral, etc.) without
+   * needing provider-specific structured output parameters.
+   *
+   * @param context - System prompt and messages
+   * @param schema - Tool schema defining the structured output shape (TypeBox or JSON Schema)
+   * @param toolName - Name for the virtual tool (default: 'structured_output')
+   * @param toolDescription - Description for the virtual tool
+   * @returns The parsed tool call arguments, or null if the model didn't call the tool
+   */
+  async structuredComplete(context: {
+    systemPrompt: string;
+    messages: Array<{ role: string; content: string }>;
+  }, schema: unknown, toolName: string = 'structured_output', toolDescription: string = 'Produce structured output'): Promise<Record<string, unknown> | null> {
+    let complete: (model: unknown, context: unknown) => Promise<unknown>;
+    try {
+      const piAi = await import('@mariozechner/pi-ai');
+      complete = piAi.complete;
+    } catch {
+      throw new Error(
+        'structuredComplete() requires @mariozechner/pi-ai to be installed.',
+      );
+    }
+
+    const tool = {
+      name: toolName,
+      description: toolDescription,
+      parameters: schema,
+    };
+
+    const result = await complete(this.primaryModel, {
+      systemPrompt: context.systemPrompt,
+      messages: context.messages.map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      })),
+      tools: [tool],
+    });
+
+    // Extract tool call arguments from the response
+    return this.extractToolCallArgs(result, toolName);
+  }
+
+  /**
+   * Extract tool call arguments from a pi-ai AssistantMessage response.
+   */
+  private extractToolCallArgs(result: unknown, toolName: string): Record<string, unknown> | null {
+    if (!result || typeof result !== 'object') return null;
+    const msg = result as Record<string, unknown>;
+
+    // pi-ai AssistantMessage has content: Array<ContentPart>
+    // Tool calls appear as { type: 'toolCall', name, args }
+    const content = msg['content'];
+    if (!Array.isArray(content)) return null;
+
+    for (const part of content) {
+      if (
+        part &&
+        typeof part === 'object' &&
+        (part as Record<string, unknown>)['type'] === 'toolCall' &&
+        (part as Record<string, unknown>)['name'] === toolName
+      ) {
+        const args = (part as Record<string, unknown>)['args'];
+        if (args && typeof args === 'object') {
+          return args as Record<string, unknown>;
+        }
+      }
+    }
+
+    return null;
+  }
+
   // -----------------------------------------------------------------------
   // Static Factory
   // -----------------------------------------------------------------------

@@ -12,7 +12,9 @@
  */
 
 import type { CortexAgent, AgentTextOutput, CortexEvent } from '@animus-labs/cortex';
+import { zodToTypebox } from '@animus-labs/cortex';
 import type { MindOutput } from '@animus-labs/shared';
+import { recordThoughtSchema, recordCognitiveStateSchema } from './cognitive-tools.js';
 
 import { createLogger } from '../lib/logger.js';
 import { getEventBus } from '../lib/event-bus.js';
@@ -104,24 +106,33 @@ async function executeThought(
     const thoughtPrompt = buildThoughtPrompt(gathered);
 
     // THOUGHT uses the primary model (same as agentic loop), not the utility model.
-    // directComplete() makes a one-shot pi-ai call without the agentic tool-use loop.
-    const response = await cortexAgent.directComplete({
-      systemPrompt: thoughtSystemPrompt,
-      messages: [{ role: 'user', content: thoughtPrompt }],
-    });
+    // Uses tool-call-as-structured-output: define a tool matching the desired schema,
+    // the model "calls" it, and we extract the arguments as structured data.
+    const thoughtSchema = await zodToTypebox(recordThoughtSchema);
+    const result = await cortexAgent.structuredComplete(
+      {
+        systemPrompt: thoughtSystemPrompt,
+        messages: [{ role: 'user', content: thoughtPrompt }],
+      },
+      thoughtSchema,
+      'record_thought',
+      'Record your inner thought for this moment.',
+    );
 
-    // Parse structured JSON response
     let thought: ThoughtResult;
-    try {
-      const parsed = JSON.parse(response);
+    if (result) {
       thought = {
-        content: typeof parsed.content === 'string' ? parsed.content : response,
-        importance: typeof parsed.importance === 'number' ? Math.max(0, Math.min(1, parsed.importance)) : 0.3,
+        content: typeof result['content'] === 'string' ? result['content'] : 'A quiet moment passes.',
+        importance: typeof result['importance'] === 'number' ? Math.max(0, Math.min(1, result['importance'])) : 0.3,
       };
-    } catch {
-      // If JSON parsing fails, use the raw response as the thought content
-      log.warn('THOUGHT response was not valid JSON, using raw text');
-      thought = { content: response.trim() || 'A quiet moment passes.', importance: 0.2 };
+    } else {
+      // Model didn't call the tool — fall back to directComplete text
+      log.warn('THOUGHT: model did not produce structured output, using fallback');
+      const textResponse = await cortexAgent.directComplete({
+        systemPrompt: thoughtSystemPrompt,
+        messages: [{ role: 'user', content: thoughtPrompt }],
+      });
+      thought = { content: textResponse.trim() || 'A quiet moment passes.', importance: 0.2 };
     }
 
     log.info(`THOUGHT complete: "${thought.content.substring(0, 80)}${thought.content.length > 80 ? '...' : ''}" (importance=${thought.importance})`);
@@ -434,34 +445,39 @@ async function executeReflect(
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       // REFLECT uses the primary model (same as agentic loop), not the utility model.
-      // directComplete() makes a one-shot pi-ai call without the agentic tool-use loop.
+      // Uses tool-call-as-structured-output with the existing recordCognitiveStateSchema.
       const reflectPrompt = buildReflectPrompt(thought, loopResult);
-      const response = await cortexAgent.directComplete({
-        systemPrompt: reflectSystemPrompt,
-        messages: [{ role: 'user', content: reflectPrompt }],
-      });
+      const reflectSchema = await zodToTypebox(recordCognitiveStateSchema);
+      const parsed = await cortexAgent.structuredComplete(
+        {
+          systemPrompt: reflectSystemPrompt,
+          messages: [{ role: 'user', content: reflectPrompt }],
+        },
+        reflectSchema,
+        'record_cognitive_state',
+        'Record your cognitive state: experience, emotions, decisions, and memories.',
+      );
 
-      // Parse structured JSON response
       let result: ReflectResult;
-      try {
-        const parsed = JSON.parse(response);
+      if (parsed) {
+        const exp = parsed['experience'] as Record<string, unknown> | undefined;
         result = {
           experience: {
-            content: parsed.experience?.content ?? 'A tick passed without notable experience.',
-            importance: typeof parsed.experience?.importance === 'number'
-              ? Math.max(0, Math.min(1, parsed.experience.importance))
+            content: typeof exp?.['content'] === 'string' ? exp['content'] : 'A tick passed without notable experience.',
+            importance: typeof exp?.['importance'] === 'number'
+              ? Math.max(0, Math.min(1, exp['importance']))
               : 0.2,
           },
-          emotionDeltas: Array.isArray(parsed.emotionDeltas) ? parsed.emotionDeltas : [],
-          energyDelta: parsed.energyDelta ?? null,
-          decisions: Array.isArray(parsed.decisions) ? parsed.decisions : [],
-          workingMemoryUpdate: parsed.workingMemoryUpdate ?? null,
-          coreSelfUpdate: parsed.coreSelfUpdate ?? null,
-          memoryCandidate: Array.isArray(parsed.memoryCandidate) ? parsed.memoryCandidate : [],
+          emotionDeltas: Array.isArray(parsed['emotionDeltas']) ? parsed['emotionDeltas'] as ReflectResult['emotionDeltas'] : [],
+          energyDelta: (parsed['energyDelta'] as ReflectResult['energyDelta']) ?? null,
+          decisions: Array.isArray(parsed['decisions']) ? parsed['decisions'] as ReflectResult['decisions'] : [],
+          workingMemoryUpdate: (parsed['workingMemoryUpdate'] as string) ?? null,
+          coreSelfUpdate: (parsed['coreSelfUpdate'] as string) ?? null,
+          memoryCandidate: Array.isArray(parsed['memoryCandidate']) ? parsed['memoryCandidate'] as ReflectResult['memoryCandidate'] : [],
         };
-      } catch {
-        // If JSON parsing fails, produce a minimal reflection
-        log.warn('REFLECT response was not valid JSON, using minimal reflection');
+      } else {
+        // Model didn't call the tool — produce minimal reflection
+        log.warn('REFLECT: model did not produce structured output, using fallback');
         result = generatePlaceholderReflection(gathered, thought, loopResult);
       }
 
@@ -615,6 +631,12 @@ export async function executeCortexPipeline(
 
   const output = snapshotToMindOutput(snapshot, loopResult.replyText, gathered);
 
+  // If the reply was already sent during the agentic loop (per-turn delivery),
+  // clear output.reply so execute doesn't send a duplicate.
+  if (loopResult.replySentEarly && output.reply) {
+    output.reply = undefined;
+  }
+
   return {
     output,
     replySentEarly: loopResult.replySentEarly,
@@ -764,6 +786,8 @@ function buildThoughtPrompt(gathered: GatherResult): string {
     lines.push(`\nA sub-agent completed: ${gathered.trigger.taskDescription ?? 'unknown'}`);
   }
 
+  lines.push('\nUse the record_thought tool to capture your thought.');
+
   return lines.join('\n');
 }
 
@@ -795,7 +819,7 @@ function buildReflectPrompt(
   }
 
   lines.push('\nReview the full conversation history above for details of tool calls, reasoning, and interactions.');
-  lines.push('Produce your reflection as the JSON structure described in the system prompt.');
+  lines.push('\nUse the record_cognitive_state tool to capture your reflection.');
 
   return lines.join('\n');
 }
