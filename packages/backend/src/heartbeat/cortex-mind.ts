@@ -278,10 +278,18 @@ function buildAnimusTools(
       // DB not ready yet; include the tool
     }
 
+    let parameters;
+    try {
+      parameters = zodToTypebox(def.inputSchema as never);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to convert schema for tool '${toolName}': ${msg}`);
+    }
+
     const tool: AgentTool = {
       name: toolName,
       description: def.description,
-      parameters: zodToTypebox(def.inputSchema as never),
+      parameters,
       execute: async (args: unknown): Promise<unknown> => {
         const ctx = toolContextRef.current;
         if (!ctx) {

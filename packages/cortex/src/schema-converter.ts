@@ -5,32 +5,48 @@
  * Consumer code continues using Zod. This module bridges the gap
  * at the tool registration boundary.
  *
- * One-way conversion. Built-in tools (Bash, Read, Write) use TypeBox
- * directly since they are defined within Cortex.
- *
- * Uses zod v4's built-in `toJSONSchema()` for the Zod -> JSON Schema step.
- * The third-party `zod-to-json-schema` library does not work with zod v4
- * schemas (returns empty output), so we use the native converter instead.
+ * Handles BOTH Zod v3 schemas (used by @animus-labs/shared tools)
+ * and Zod v4 schemas. Zod v3 schemas use `zod-to-json-schema`,
+ * Zod v4 schemas use the native `toJSONSchema()`.
  */
 
-import { toJSONSchema, type ZodType } from 'zod';
 import { Type, type TSchema } from '@sinclair/typebox';
 
 /**
- * Convert a Zod schema to a TypeBox TSchema via JSON Schema intermediate.
- *
- * Uses zod v4's built-in `toJSONSchema()` to produce a JSON Schema object,
- * then wraps it with `Type.Unsafe()` so AJV can validate against it.
+ * Check if a schema is a Zod v3 schema (has _def property).
+ */
+function isZodV3(schema: unknown): boolean {
+  if (schema == null || typeof schema !== 'object') return false;
+  // Zod v3 schemas have _def but NOT _zod (which is a v4 marker)
+  const obj = schema as Record<string, unknown>;
+  return '_def' in obj && typeof obj['_def'] === 'object' && !('_zod' in obj);
+}
+
+/**
+ * Convert a Zod schema (v3 or v4) to a TypeBox TSchema via JSON Schema.
  *
  * @param zodSchema - Any Zod schema (z.object, z.string, etc.)
  * @returns A TypeBox TSchema suitable for pi-agent-core AgentTool definitions
  */
-export function zodToTypebox(zodSchema: ZodType): TSchema {
-  const jsonSchema = toJSONSchema(zodSchema);
-  // Type.Unsafe wraps a raw JSON Schema object as a TSchema.
-  // Cast needed because toJSONSchema's return type (JSONSchema) has optional
-  // properties that conflict with exactOptionalPropertyTypes in TypeBox's
-  // UnsafeOptions type.
+export function zodToTypebox(zodSchema: unknown): TSchema {
+  if (!zodSchema || typeof zodSchema !== 'object') {
+    throw new Error(`zodToTypebox: received invalid schema: ${typeof zodSchema}`);
+  }
+
+  let jsonSchema: unknown;
+
+  if (isZodV3(zodSchema)) {
+    // Zod v3: use zod-to-json-schema (works with v3's _def structure)
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { zodToJsonSchema } = require('zod-to-json-schema') as { zodToJsonSchema: (s: unknown) => unknown };
+    jsonSchema = zodToJsonSchema(zodSchema);
+  } else {
+    // Zod v4: use native toJSONSchema
+    const { toJSONSchema } = require('zod') as { toJSONSchema: (s: unknown) => unknown };
+    jsonSchema = toJSONSchema(zodSchema);
+  }
+
+  // Type.Unsafe wraps a raw JSON Schema object as a TSchema
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return Type.Unsafe(jsonSchema as any);
 }
