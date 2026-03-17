@@ -79,6 +79,13 @@ export class McpClientManager {
   onSubprocessExited?: (pid: number) => void;
 
   /**
+   * Consumer-set environment variable overrides that bypass the security blocklist.
+   * Merged ON TOP of the sanitized environment for all stdio subprocesses.
+   * Used for macOS dock icon suppression vars (DYLD_INSERT_LIBRARIES, etc.).
+   */
+  envOverrides?: Record<string, string>;
+
+  /**
    * Optional logging callbacks. If not provided, messages are silently ignored.
    */
   log?: {
@@ -285,8 +292,10 @@ export class McpClientManager {
     // Sanitize environment variables for the subprocess.
     // Strip dangerous vars (LD_PRELOAD, NODE_OPTIONS, etc.) to prevent
     // injection via environment. Uses the same blocklist as the Bash tool.
+    // envOverrides are merged ON TOP, bypassing the blocklist for
+    // consumer-specified variables (e.g., macOS dock icon suppression).
     const baseEnv = config.env ?? process.env;
-    const safeEnv = buildSafeEnv(baseEnv);
+    const safeEnv = buildSafeEnv(baseEnv, undefined, this.envOverrides);
 
     // Build params object, only including defined optional fields to satisfy
     // exactOptionalPropertyTypes

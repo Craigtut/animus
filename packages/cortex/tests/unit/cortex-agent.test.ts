@@ -202,6 +202,48 @@ describe('CortexAgent', () => {
   });
 
   // -----------------------------------------------------------------------
+  // envOverrides
+  // -----------------------------------------------------------------------
+
+  describe('envOverrides', () => {
+    it('stores envOverrides from config', () => {
+      const overrides = {
+        DYLD_INSERT_LIBRARIES: '/app/dock.dylib',
+        ANIMUS_DOCK_SUPPRESS_ADDON: '/app/addon.node',
+      };
+      const agent = new CortexAgent(piAgent, {
+        ...config,
+        envOverrides: overrides,
+      });
+
+      expect(agent.getEnvOverrides()).toBe(overrides);
+    });
+
+    it('returns undefined when no envOverrides configured', () => {
+      const agent = new CortexAgent(piAgent, config);
+      expect(agent.getEnvOverrides()).toBeUndefined();
+    });
+
+    it('passes envOverrides to McpClientManager', () => {
+      const overrides = { DYLD_INSERT_LIBRARIES: '/app/dock.dylib' };
+      const agent = new CortexAgent(piAgent, {
+        ...config,
+        envOverrides: overrides,
+      });
+
+      const mcpManager = agent.getMcpClientManager();
+      expect(mcpManager.envOverrides).toBe(overrides);
+    });
+
+    it('does not set McpClientManager envOverrides when not configured', () => {
+      const agent = new CortexAgent(piAgent, config);
+
+      const mcpManager = agent.getMcpClientManager();
+      expect(mcpManager.envOverrides).toBeUndefined();
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // prompt()
   // -----------------------------------------------------------------------
 

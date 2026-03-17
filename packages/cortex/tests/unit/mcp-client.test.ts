@@ -600,6 +600,39 @@ describe('McpClientManager', () => {
   });
 
   // -----------------------------------------------------------------------
+  // envOverrides
+  // -----------------------------------------------------------------------
+
+  describe('envOverrides', () => {
+    it('accepts envOverrides property', () => {
+      const overrides = {
+        DYLD_INSERT_LIBRARIES: '/app/dock.dylib',
+        ANIMUS_DOCK_SUPPRESS_ADDON: '/app/addon.node',
+      };
+      manager.envOverrides = overrides;
+      expect(manager.envOverrides).toBe(overrides);
+    });
+
+    it('envOverrides is undefined by default', () => {
+      expect(manager.envOverrides).toBeUndefined();
+    });
+
+    it('connects successfully with envOverrides set', async () => {
+      manager.envOverrides = {
+        DYLD_INSERT_LIBRARIES: '/app/dock.dylib',
+      };
+
+      await manager.connect('weather', {
+        transport: 'stdio',
+        command: 'node',
+        args: ['server.js'],
+      });
+
+      expect(manager.isConnected('weather')).toBe(true);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Logging
   // -----------------------------------------------------------------------
 

@@ -45,9 +45,15 @@ export interface SafetyCheckResult {
  *
  * Delegates to the shared buildSafeEnv utility so that both the Bash tool
  * and the MCP client use the same blocklist.
+ *
+ * @param parentEnv - The source environment (typically process.env)
+ * @param overrides - Optional env var overrides that bypass the blocklist
  */
-export function buildSafeEnv(parentEnv: NodeJS.ProcessEnv): Record<string, string> {
-  return buildSafeEnvShared(parentEnv, 'exec');
+export function buildSafeEnv(
+  parentEnv: NodeJS.ProcessEnv,
+  overrides?: Record<string, string>,
+): Record<string, string> {
+  return buildSafeEnvShared(parentEnv, 'exec', overrides);
 }
 
 // ---------------------------------------------------------------------------

@@ -62,4 +62,77 @@ describe('buildSafeEnv (shared)', () => {
     expect(env['DEFINED']).toBe('yes');
     expect('UNDEF' in env).toBe(false);
   });
+
+  // -----------------------------------------------------------------------
+  // envOverrides
+  // -----------------------------------------------------------------------
+
+  describe('envOverrides', () => {
+    it('merges overrides on top of sanitized env', () => {
+      const env = buildSafeEnv(
+        { HOME: '/home/user', PATH: '/usr/bin' },
+        undefined,
+        { CUSTOM_VAR: 'custom_value' },
+      );
+      expect(env['HOME']).toBe('/home/user');
+      expect(env['CUSTOM_VAR']).toBe('custom_value');
+    });
+
+    it('overrides can restore blocked DYLD_ variables', () => {
+      const env = buildSafeEnv(
+        { DYLD_INSERT_LIBRARIES: '/original/path.dylib' },
+        undefined,
+        { DYLD_INSERT_LIBRARIES: '/app/dock-suppress.dylib' },
+      );
+      // The parent env value was stripped, but the override restores it
+      expect(env['DYLD_INSERT_LIBRARIES']).toBe('/app/dock-suppress.dylib');
+    });
+
+    it('overrides can restore blocked LD_ variables', () => {
+      const env = buildSafeEnv(
+        { LD_PRELOAD: '/evil.so' },
+        undefined,
+        { LD_PRELOAD: '/safe/preload.so' },
+      );
+      expect(env['LD_PRELOAD']).toBe('/safe/preload.so');
+    });
+
+    it('overrides can restore blocked exact-match variables', () => {
+      const env = buildSafeEnv(
+        { NODE_OPTIONS: '--original' },
+        undefined,
+        { NODE_OPTIONS: '--override-value' },
+      );
+      expect(env['NODE_OPTIONS']).toBe('--override-value');
+    });
+
+    it('overrides take precedence over safe parent env values', () => {
+      const env = buildSafeEnv(
+        { MY_VAR: 'original' },
+        undefined,
+        { MY_VAR: 'overridden' },
+      );
+      expect(env['MY_VAR']).toBe('overridden');
+    });
+
+    it('overrides are applied after marker', () => {
+      const env = buildSafeEnv(
+        {},
+        'exec',
+        { CORTEX_SHELL: 'override-marker' },
+      );
+      // Override should win over the marker
+      expect(env['CORTEX_SHELL']).toBe('override-marker');
+    });
+
+    it('no-op when overrides is undefined', () => {
+      const env = buildSafeEnv({ HOME: '/home/user' }, undefined, undefined);
+      expect(env['HOME']).toBe('/home/user');
+    });
+
+    it('no-op when overrides is empty', () => {
+      const env = buildSafeEnv({ HOME: '/home/user' }, undefined, {});
+      expect(env['HOME']).toBe('/home/user');
+    });
+  });
 });

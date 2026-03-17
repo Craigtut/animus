@@ -78,6 +78,12 @@ export interface BashToolConfig {
   onProcessExited?: ((pid: number) => void) | undefined;
   /** Utility model completion function for Layer 7 safety classifier. */
   utilityComplete?: ((context: unknown) => Promise<unknown>) | undefined;
+  /**
+   * Consumer-set environment variable overrides that bypass the security blocklist.
+   * Merged ON TOP of the sanitized environment for shell subprocesses.
+   * Used for macOS dock icon suppression vars (DYLD_INSERT_LIBRARIES, etc.).
+   */
+  envOverrides?: Record<string, string> | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -325,8 +331,8 @@ export function createBashTool(config: BashToolConfig): {
         };
       }
 
-      // Build safe environment (Layer 1)
-      const safeEnv = buildSafeEnv(process.env);
+      // Build safe environment (Layer 1), with consumer overrides merged on top
+      const safeEnv = buildSafeEnv(process.env, config.envOverrides);
 
       // Append CWD capture suffix
       const isWindows = process.platform === 'win32';

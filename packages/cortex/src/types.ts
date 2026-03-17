@@ -105,6 +105,18 @@ export interface CortexAgentConfig {
 
   /** Compaction configuration. All layers are always active. */
   compaction?: Partial<CortexCompactionConfig>;
+
+  /**
+   * Consumer-set environment variables that propagate to ALL subprocesses
+   * (Bash tool, MCP stdio servers), bypassing the security blocklist.
+   *
+   * Use case: macOS dock icon suppression requires DYLD_INSERT_LIBRARIES
+   * and ANIMUS_DOCK_SUPPRESS_ADDON to propagate to child processes, but
+   * the safe-env blocklist strips DYLD_ prefixed variables by default.
+   * envOverrides are merged ON TOP of the sanitized environment, restoring
+   * these specific variables.
+   */
+  envOverrides?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------

@@ -34,11 +34,15 @@ const BLOCKED_ENV_VARS = new Set([
  *
  * @param parentEnv - The source environment (typically process.env or a consumer-supplied map)
  * @param marker - Optional context marker added as CORTEX_SHELL. Pass undefined to skip.
- * @returns A new object with dangerous variables removed
+ * @param overrides - Optional key-value pairs merged ON TOP of the sanitized env, bypassing
+ *   the blocklist. Used for consumer-set variables that must propagate (e.g., macOS dock
+ *   icon suppression vars like DYLD_INSERT_LIBRARIES).
+ * @returns A new object with dangerous variables removed and overrides applied
  */
 export function buildSafeEnv(
   parentEnv: NodeJS.ProcessEnv | Record<string, string>,
   marker?: string | undefined,
+  overrides?: Record<string, string> | undefined,
 ): Record<string, string> {
   const env: Record<string, string> = {};
 
@@ -63,6 +67,15 @@ export function buildSafeEnv(
 
   if (marker !== undefined) {
     env['CORTEX_SHELL'] = marker;
+  }
+
+  // Merge overrides ON TOP of the sanitized env, bypassing the blocklist.
+  // This allows consumers to restore specific blocked variables (e.g.,
+  // DYLD_INSERT_LIBRARIES for macOS dock icon suppression).
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      env[key] = value;
+    }
   }
 
   return env;

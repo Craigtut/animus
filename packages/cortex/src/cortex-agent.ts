@@ -218,6 +218,7 @@ export class CortexAgent {
   private readonly config: CortexAgentConfig;
   private readonly workingTagsEnabled: boolean;
   private readonly workingDirectory: string;
+  private readonly envOverrides: Record<string, string> | undefined;
 
   private lifecycleState: CortexLifecycleState = 'created';
   private currentSystemPrompt: string = '';
@@ -278,6 +279,7 @@ export class CortexAgent {
     this.config = config;
     this.workingTagsEnabled = config.workingTags?.enabled ?? true;
     this.workingDirectory = config.workingDirectory;
+    this.envOverrides = config.envOverrides;
     this.registeredTools = tools ?? [];
 
     // Resolve models
@@ -309,7 +311,7 @@ export class CortexAgent {
     );
     this.budgetGuard.wire(this.eventBridge);
 
-    // Set up MCP Client Manager with PID tracking
+    // Set up MCP Client Manager with PID tracking and env overrides
     this.mcpClientManager = new McpClientManager();
     this.mcpClientManager.onSubprocessSpawned = (pid) => {
       this.trackedPids.add(pid);
@@ -317,6 +319,9 @@ export class CortexAgent {
     this.mcpClientManager.onSubprocessExited = (pid) => {
       this.trackedPids.delete(pid);
     };
+    if (this.envOverrides) {
+      this.mcpClientManager.envOverrides = this.envOverrides;
+    }
 
     // Set up Sub-Agent Manager (must be before wireSubAgentHooks)
     this.subAgentManager = new SubAgentManager({
@@ -986,6 +991,15 @@ export class CortexAgent {
    */
   getCompactionManager(): CompactionManager {
     return this.compactionManager;
+  }
+
+  /**
+   * Get the configured environment variable overrides.
+   * Consumers use this when creating built-in tools (e.g., BashToolConfig.envOverrides)
+   * to ensure all subprocess environments include these overrides.
+   */
+  getEnvOverrides(): Record<string, string> | undefined {
+    return this.envOverrides;
   }
 
   /**
