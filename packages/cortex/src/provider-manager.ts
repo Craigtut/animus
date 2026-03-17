@@ -252,11 +252,13 @@ function buildOAuthMeta(
  * Map a raw pi-ai model object to our ModelInfo type.
  */
 function mapRawToModelInfo(raw: Record<string, unknown>): ModelInfo {
-  const rawName = raw['name'];
-  const id = typeof rawName === 'string' ? rawName : String(rawName);
+  // pi-ai models have 'id' (API identifier like "claude-sonnet-4-6") and
+  // 'name' (display name like "Claude Sonnet 4.6"). Use 'id' as our id.
+  const rawId = raw['id'];
+  const id = typeof rawId === 'string' ? rawId : String(rawId ?? raw['name'] ?? 'unknown');
 
-  const rawDisplayName = raw['displayName'];
-  const name = typeof rawDisplayName === 'string' ? rawDisplayName : id;
+  const rawName = raw['name'];
+  const name = typeof rawName === 'string' ? rawName : id;
 
   const rawContextWindow = raw['contextWindow'];
   const contextWindow = typeof rawContextWindow === 'number' ? rawContextWindow : 200_000;

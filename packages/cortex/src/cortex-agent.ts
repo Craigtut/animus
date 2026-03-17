@@ -59,7 +59,7 @@ import type {
  * passed at construction time.
  */
 export interface PiAgent extends AgentStateAccessor, PiEventSource {
-  run(input: string, options?: {
+  prompt(input: string, options?: {
     update?: (event: unknown) => void;
     signal?: AbortSignal;
   }): Promise<unknown>;
@@ -71,7 +71,7 @@ export interface PiAgent extends AgentStateAccessor, PiEventSource {
    * Inject a steering message into the running agentic loop.
    * Interrupts the current tool execution, skips remaining tools,
    * and triggers a new LLM turn with the injected context.
-   * Only effective while a run() call is in progress.
+   * Only effective while a prompt() call is in progress.
    */
   steer(message: { role: string; content: string }): void;
 
@@ -389,7 +389,7 @@ export class CortexAgent {
 
     this._isPrompting = true;
     try {
-      const result = await this.agent.run(input);
+      const result = await this.agent.prompt(input);
       return result;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));

@@ -406,7 +406,7 @@ export async function createCortexMind(
   const piModel = unwrapModel(model);
 
   const cortexAgent = await CortexAgent.create({
-    model: piModel,
+    model: piModel as Record<string, unknown>,
     workingDirectory: join(DATA_DIR, 'workspace'),
     getApiKey,
     slots: [...MIND_SLOT_NAMES],

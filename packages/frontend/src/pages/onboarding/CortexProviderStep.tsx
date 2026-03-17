@@ -15,7 +15,7 @@ import {
   ShieldCheck,
   SignOut,
 } from '@phosphor-icons/react';
-import { Button, Typography, Tooltip } from '../../components/ui';
+import { Button, Typography, Tooltip, Select } from '../../components/ui';
 import { useOnboardingStore } from '../../store';
 import { OnboardingNav } from './OnboardingNav';
 import { trpc } from '../../utils/trpc';
@@ -498,38 +498,20 @@ export function CortexProviderStep() {
               `}>
                 {/* Provider dropdown */}
                 <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
-                  <label css={css`
-                    font-size: ${theme.typography.fontSize.sm};
-                    font-weight: ${theme.typography.fontWeight.medium};
-                    color: ${theme.colors.text.secondary};
-                  `}>
-                    Provider
-                  </label>
-                  <select
+                  <Select
+                    label="Provider"
                     value={apiKeyProvider}
-                    onChange={(e) => {
-                      setApiKeyProvider(e.target.value);
+                    onChange={(value) => {
+                      setApiKeyProvider(value);
                       setApiKeyValidation('idle');
                       setApiKeyError(null);
                       setApiKeyValue('');
                     }}
-                    css={css`
-                      padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                      background: ${theme.colors.background.paper};
-                      border: 1px solid ${theme.colors.border.default};
-                      border-radius: ${theme.borderRadius.default};
-                      color: ${theme.colors.text.primary};
-                      font-size: ${theme.typography.fontSize.sm};
-                      font-family: inherit;
-                      cursor: pointer;
-                      outline: none;
-                      &:focus { border-color: ${theme.colors.border.focus}; }
-                    `}
-                  >
-                    {apiKeyProviders.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
+                    options={apiKeyProviders.map((p) => ({
+                      value: p.id,
+                      label: p.name,
+                    }))}
+                  />
                 </div>
 
                 {/* API Key input */}

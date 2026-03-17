@@ -932,29 +932,14 @@ function CortexProviderSection() {
                   <Typography.SmallBodyAlt>Model</Typography.SmallBodyAlt>
                   <SaveIndicator show={modelSave.show} />
                 </div>
-                <select
+                <Select
                   value={statusData?.model ?? ''}
-                  onChange={(e) => handleModelChange(e.target.value)}
-                  css={css`
-                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                    background: ${theme.colors.background.paper};
-                    border: 1px solid ${theme.colors.border.default};
-                    border-radius: ${theme.borderRadius.default};
-                    color: ${theme.colors.text.primary};
-                    font-size: ${theme.typography.fontSize.sm};
-                    font-family: inherit;
-                    cursor: pointer;
-                    outline: none;
-                    width: 100%;
-                    &:focus { border-color: ${theme.colors.border.focus}; }
-                  `}
-                >
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name} ({Math.round(m.contextWindow / 1000)}K context)
-                    </option>
-                  ))}
-                </select>
+                  onChange={(value) => handleModelChange(value)}
+                  options={models.map((m) => ({
+                    value: m.id,
+                    label: `${m.name} (${Math.round(m.contextWindow / 1000)}K context)`,
+                  }))}
+                />
               </div>
             )}
 
@@ -965,32 +950,19 @@ function CortexProviderSection() {
                   <Typography.SmallBodyAlt>Utility Model</Typography.SmallBodyAlt>
                   <SaveIndicator show={utilityModelSave.show} />
                 </div>
-                <select
+                <Select
                   value={systemSettings?.utilityModel ?? 'default'}
-                  onChange={(e) => handleUtilityModelChange(e.target.value)}
-                  css={css`
-                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                    background: ${theme.colors.background.paper};
-                    border: 1px solid ${theme.colors.border.default};
-                    border-radius: ${theme.borderRadius.default};
-                    color: ${theme.colors.text.primary};
-                    font-size: ${theme.typography.fontSize.sm};
-                    font-family: inherit;
-                    cursor: pointer;
-                    outline: none;
-                    width: 100%;
-                    &:focus { border-color: ${theme.colors.border.focus}; }
-                  `}
-                >
-                  <option value="default">Recommended</option>
-                  {[...models]
-                    .sort((a, b) => (a.pricing?.input ?? Infinity) - (b.pricing?.input ?? Infinity))
-                    .map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}{m.pricing ? ` ($${m.pricing.input.toFixed(2)}/$${m.pricing.output.toFixed(2)} per 1M)` : ''}
-                      </option>
-                    ))}
-                </select>
+                  onChange={(value) => handleUtilityModelChange(value)}
+                  options={[
+                    { value: 'default', label: 'Recommended' },
+                    ...[...models]
+                      .sort((a, b) => (a.pricing?.input ?? Infinity) - (b.pricing?.input ?? Infinity))
+                      .map((m) => ({
+                        value: m.id,
+                        label: `${m.name}${m.pricing ? ` ($${m.pricing.input.toFixed(2)}/$${m.pricing.output.toFixed(2)} per 1M)` : ''}`,
+                      })),
+                  ]}
+                />
                 <Typography.Caption color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
                   A smaller model used for internal operations like web page summarization and safety checks. Does not affect the quality of the agent's main responses.
                 </Typography.Caption>
@@ -1054,30 +1026,19 @@ function CortexProviderSection() {
                     <Typography.SmallBodyAlt>Thinking Level</Typography.SmallBodyAlt>
                     <SaveIndicator show={thinkingSave.show} />
                   </div>
-                  <select
+                  <Select
                     value={statusData?.thinkingLevel ?? 'off'}
-                    onChange={(e) => handleThinkingChange(e.target.value)}
-                    css={css`
-                      padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                      background: ${theme.colors.background.paper};
-                      border: 1px solid ${theme.colors.border.default};
-                      border-radius: ${theme.borderRadius.default};
-                      color: ${theme.colors.text.primary};
-                      font-size: ${theme.typography.fontSize.sm};
-                      font-family: inherit;
-                      cursor: pointer;
-                      outline: none;
-                      max-width: 200px;
-                      &:focus { border-color: ${theme.colors.border.focus}; }
-                    `}
-                  >
-                    <option value="off">Off</option>
-                    <option value="minimal">Minimal</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="xhigh">Extra High</option>
-                  </select>
+                    onChange={(value) => handleThinkingChange(value)}
+                    maxWidth="200px"
+                    options={[
+                      { value: 'off', label: 'Off' },
+                      { value: 'minimal', label: 'Minimal' },
+                      { value: 'low', label: 'Low' },
+                      { value: 'medium', label: 'Medium' },
+                      { value: 'high', label: 'High' },
+                      { value: 'xhigh', label: 'Extra High' },
+                    ]}
+                  />
                   <Typography.Caption color="hint">
                     Controls how much the model reasons before responding. Higher levels use more tokens.
                   </Typography.Caption>
