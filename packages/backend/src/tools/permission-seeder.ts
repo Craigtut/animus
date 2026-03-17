@@ -63,7 +63,7 @@ const ALL_SDK_TOOLS: Record<string, SdkToolDef> = {
 // ---------------------------------------------------------------------------
 
 const CORTEX_BUILTIN_TOOLS: Record<string, SdkToolDef> = {
-  Bash: { displayName: 'Bash Shell', description: 'Execute shell commands', riskTier: 'acts' },
+  Bash: { displayName: 'Bash Shell', description: 'Execute shell commands', riskTier: 'sensitive' },
   Read: { displayName: 'Read File', description: 'Read contents of a file', riskTier: 'safe' },
   Write: { displayName: 'Write File', description: 'Write contents to a file', riskTier: 'acts' },
   Edit: { displayName: 'Edit File', description: 'Edit sections of a file', riskTier: 'acts' },

@@ -312,20 +312,22 @@ async function executeAgenticLoop(
     });
   });
 
-  // Flush any messages queued during THOUGHT phase via steer()
+  // Prepend any messages queued during THOUGHT phase to the tick prompt.
+  // These arrived before the agentic loop started, so steer() cannot be used
+  // (it requires a running loop). Instead, include them in the initial prompt.
+  let effectiveTickPrompt = tickPrompt;
   if (pendingInjections.length > 0) {
-    log.info(`Flushing ${pendingInjections.length} queued injection(s) from THOUGHT phase via steer()`);
+    log.info(`Prepending ${pendingInjections.length} queued injection(s) from THOUGHT phase to tick prompt`);
     const injectionText = pendingInjections.map(msg =>
-      `[ADDITIONAL MESSAGE received]\nFrom: ${gathered.contact?.fullName ?? 'User'} via ${msg.channel}\n"${msg.content}"`
+      `[Message received during thought phase]\nFrom: ${gathered.contact?.fullName ?? 'User'} via ${msg.channel}\n"${msg.content}"`
     ).join('\n\n');
-
-    // Steer injects the message into the running loop, triggering a new LLM turn
-    cortexAgent.steer(injectionText);
+    effectiveTickPrompt = injectionText + '\n\n' + tickPrompt;
+    pendingInjections.length = 0; // clear
   }
 
   try {
     // Run the agentic loop
-    await cortexAgent.prompt(tickPrompt);
+    await cortexAgent.prompt(effectiveTickPrompt);
 
     // Clean up event handlers
     turnEndUnsub();

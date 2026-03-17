@@ -32,7 +32,7 @@ const AUTHENTICATION_PATTERNS: RegExp[] = [
 const RATE_LIMIT_PATTERNS: RegExp[] = [
   /rate.limit/i,
   /too.many.requests/i,
-  /429/,
+  /\b429\b/,
   /rate_limit_exceeded/i,
   /throttl/i,
   /request.limit.reached/i,
@@ -50,10 +50,10 @@ const CONTEXT_OVERFLOW_PATTERNS: RegExp[] = [
 
 const SERVER_ERROR_PATTERNS: RegExp[] = [
   /internal.server.error/i,
-  /500/,
-  /502.*bad.gateway/i,
-  /503.*service.unavailable/i,
-  /504.*gateway.timeout/i,
+  /\b500\b/,
+  /\b502\b.*bad.gateway/i,
+  /\b503\b.*service.unavailable/i,
+  /\b504\b.*gateway.timeout/i,
   /server.*error/i,
   /overloaded/i,
 ];

@@ -750,6 +750,9 @@ async function cortexMindQuery(
     ctx.consecutiveRateLimits = 0;
     ctx.rateLimitBackoffMs = 0;
 
+    // Clear tool context after successful pipeline run (avoid stale context between ticks)
+    cortexMind.toolContext.current = null;
+
     return {
       output: pipelineResult.output,
       compiledContext: context,

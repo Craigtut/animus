@@ -739,10 +739,12 @@ You have 12 emotions.`;
       expect(utility.name).toBeDefined();
     });
 
-    it('utilityComplete throws (stub)', async () => {
+    it('utilityComplete throws when pi-ai is not installed', async () => {
       const agent = new CortexAgent(piAgent, config);
 
-      await expect(agent.utilityComplete({})).rejects.toThrow('not yet implemented');
+      await expect(
+        agent.utilityComplete({ systemPrompt: 'test', messages: [{ role: 'user', content: 'hi' }] }),
+      ).rejects.toThrow('requires @mariozechner/pi-ai');
     });
   });
 

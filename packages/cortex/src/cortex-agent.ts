@@ -694,16 +694,40 @@ export class CortexAgent {
 
   /**
    * Make a utility completion call using the utility model.
-   * Convenience wrapper for internal operations (WebFetch, classifier, etc.).
+   * Convenience wrapper for internal operations (WebFetch summarization,
+   * safety classification, etc.).
    *
-   * Stub in Phase 1B: throws until pi-ai complete() is wired.
+   * Analogous to directComplete() but uses the utility model (smaller, cheaper)
+   * instead of the primary model. Dynamically imports pi-ai's complete() function.
    *
-   * @param _context - The context for the completion call
-   * @returns The assistant message
+   * @param context - System prompt and messages for the completion
+   * @returns The response text from the LLM
+   * @throws Error if pi-ai is not installed or the call fails
    */
-  async utilityComplete(_context: unknown): Promise<unknown> {
-    // Stub: will be wired to pi-ai's complete() in a later phase
-    throw new Error('utilityComplete() not yet implemented (Phase 1B stub)');
+  async utilityComplete(context: {
+    systemPrompt: string;
+    messages: Array<{ role: string; content: string }>;
+  }): Promise<string> {
+    let complete: (model: unknown, context: unknown) => Promise<unknown>;
+    try {
+      const piAi = await import('@mariozechner/pi-ai');
+      complete = piAi.complete;
+    } catch {
+      throw new Error(
+        'utilityComplete() requires @mariozechner/pi-ai to be installed. ' +
+        'Install it as a dependency or peer dependency.',
+      );
+    }
+
+    const result = await complete(this.resolvedUtilityModel, {
+      systemPrompt: context.systemPrompt,
+      messages: context.messages.map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      })),
+    });
+
+    return this.extractTextFromAssistantMessage(result);
   }
 
   // -----------------------------------------------------------------------
