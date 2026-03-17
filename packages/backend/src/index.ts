@@ -343,6 +343,24 @@ async function main() {
     };
   });
 
+  // Graceful shutdown endpoint (used by Tauri on Windows where SIGTERM is not available).
+  // Only accepts requests from localhost to prevent external shutdown triggers.
+  fastify.post('/api/shutdown', async (request, reply) => {
+    const remoteIp = request.ip;
+    if (remoteIp !== '127.0.0.1' && remoteIp !== '::1' && remoteIp !== '::ffff:127.0.0.1') {
+      return reply.status(403).send({ error: 'Shutdown only allowed from localhost' });
+    }
+    log.info('Received shutdown request via /api/shutdown (Tauri IPC)');
+    reply.status(200).send({ status: 'shutting_down' });
+    // Defer shutdown to after the response is sent
+    setImmediate(() => {
+      shutdown('HTTP_SHUTDOWN').catch((err) => {
+        log.error('Shutdown failed:', err);
+        process.exit(1);
+      });
+    });
+  });
+
   // Channel webhook catch-all route — forwards to channel child processes
   // Must be registered before SPA fallback
   fastify.all('/channels/:channelType/*', async (request, reply) => {

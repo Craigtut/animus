@@ -717,6 +717,32 @@ These items can land on the current codebase:
 9. **Onboarding router updates**: Add Cortex provider step state tracking
 10. **Settings router updates**: Cortex provider status in system settings response
 
+## Docker OAuth Compatibility Matrix
+
+Each pi-ai provider uses a different OAuth flow type. This determines whether OAuth login works inside a Docker container where `localhost` refers to the container, not the host machine.
+
+**Source**: Verified by reading `@mariozechner/pi-ai/dist/utils/oauth/*.js` source code.
+
+| Provider | OAuth Function | Flow Type | Callback Port | Docker Compatible | Notes |
+|----------|---------------|-----------|:---:|:---:|-------|
+| Anthropic (Claude) | `loginAnthropic` | Authorization Code + PKCE | `localhost:53692` | No | Spins up `http.createServer` on `127.0.0.1:53692/callback`. Browser redirects to localhost which is unreachable inside Docker. Falls back to manual paste of the redirect URL or authorization code. |
+| OpenAI (ChatGPT/Codex) | `loginOpenAICodex` | Authorization Code + PKCE | `localhost:1455` | No | Spins up `http.createServer` on `127.0.0.1:1455/auth/callback`. Same localhost problem as Anthropic. Falls back to manual paste via `onPrompt`. |
+| GitHub Copilot | `loginGitHubCopilot` | Device Code | None | Yes | Uses device code polling (`/login/device/code` on github.com). No localhost callback server. User visits a URL on any device and enters a code. Fully Docker-compatible. |
+| Google Gemini CLI | `loginGeminiCli` | Authorization Code + PKCE | `localhost:8085` | No | Spins up `http.createServer` on `127.0.0.1:8085/oauth2callback`. Falls back to manual paste. |
+| Google Antigravity | `loginAntigravity` | Authorization Code + PKCE | `localhost:51121` | No | Spins up `http.createServer` on `127.0.0.1:51121/oauth-callback`. Falls back to manual paste. |
+
+### Docker-Specific Guidance
+
+**For providers that use authorization code flow (Anthropic, OpenAI, Gemini CLI, Antigravity):**
+
+All four providers support a manual paste fallback. When the callback server is unreachable (Docker, SSH, headless), pi-ai calls the `onManualCodeInput` or `onPrompt` callback, prompting the user to paste the redirect URL or authorization code from their browser. The Animus frontend relays this prompt via the `oauthStatus` tRPC subscription and the `oauthRespond` mutation.
+
+This means OAuth login technically works in Docker, but requires the user to manually copy-paste the redirect URL. The `isHeadless()` detection in the backend can surface this in the UI: show the authorization URL prominently and add a paste input field for the redirect URL.
+
+**For Docker users who want zero manual steps:** Use API key authentication (Layer 2 in the progressive disclosure) or environment variables. Only GitHub Copilot's device code flow works seamlessly in Docker without any paste step.
+
+**Recommendation:** The `isHeadless()` detection should reorder the auth UI in Docker/headless mode: show API key input prominently, with OAuth as a secondary option that includes "you will need to paste the redirect URL" guidance.
+
 ## Open Questions
 
 1. **Credential rotation/expiry monitoring**: Should the backend proactively check OAuth token expiry (e.g., on a timer) and refresh before it's needed? Or is lazy refresh (on the next `getApiKey` call) sufficient? Lazy refresh is simpler but means the first tick after expiry pays a refresh latency cost.

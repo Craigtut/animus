@@ -63,6 +63,8 @@ import {
   restoreConversationHistory,
   buildMindToolContext as buildCortexToolContext,
   updatePreprocessorVariables,
+  updateCompactionContext,
+  clearCompactionContext,
 } from './cortex-mind.js';
 
 const log = createLogger('Heartbeat', 'heartbeat');
@@ -627,6 +629,15 @@ async function cortexMindQuery(
   // Update preprocessor variables for ${VAR} substitution in SKILL.md files
   updatePreprocessorVariables(cortexAgent, gathered);
 
+  // Update the mutable compaction context so onBeforeCompaction/onPostCompaction
+  // handlers (registered once at agent creation) can access per-tick data.
+  updateCompactionContext(
+    cortexMind,
+    gathered,
+    ctx.agents?.agentManager ?? null,
+    ctx.compiledPersona?.compiledText ?? null,
+  );
+
   // Build and set the system prompt (persona + cortex operational sections)
   const consumerPrompt = buildSystemPrompt(ctx.compiledPersona, {
     ...(gathered.aiTimezone ? { timezone: gathered.aiTimezone } : {}),
@@ -750,8 +761,9 @@ async function cortexMindQuery(
     ctx.consecutiveRateLimits = 0;
     ctx.rateLimitBackoffMs = 0;
 
-    // Clear tool context after successful pipeline run (avoid stale context between ticks)
+    // Clear tool and compaction context after successful pipeline run
     cortexMind.toolContext.current = null;
+    clearCompactionContext(cortexMind);
 
     return {
       output: pipelineResult.output,
@@ -767,6 +779,7 @@ async function cortexMindQuery(
 
     log.error('Cortex pipeline failed:', err);
     cortexMind.toolContext.current = null;
+    clearCompactionContext(cortexMind);
 
     return {
       output: safeMindOutput(triggerInfo),

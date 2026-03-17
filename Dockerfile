@@ -7,6 +7,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/agents/package.json packages/agents/
+COPY packages/cortex/package.json packages/cortex/
 COPY packages/backend/package.json packages/backend/
 COPY packages/frontend/package.json packages/frontend/
 COPY packages/channel-sdk/package.json packages/channel-sdk/
@@ -33,12 +34,13 @@ RUN TTS_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "x64") && \
 # Copy source code
 COPY packages/shared/ packages/shared/
 COPY packages/agents/ packages/agents/
+COPY packages/cortex/ packages/cortex/
 COPY packages/backend/ packages/backend/
 COPY packages/frontend/ packages/frontend/
 COPY packages/channel-sdk/ packages/channel-sdk/
 COPY tsconfig.base.json tsconfig.json ./
 
-# Build in dependency order: shared → agents → frontend → backend
+# Build in dependency order: shared → agents → cortex → frontend → backend
 # .dockerignore excludes **/dist and **/*.tsbuildinfo to prevent stale build
 # artifacts from poisoning the Docker build. Each step also cleans dist/ as
 # defense in depth. The backend tsc may have type errors (noEmitOnError
@@ -46,6 +48,7 @@ COPY tsconfig.base.json tsconfig.json ./
 RUN cd packages/shared && rm -rf dist && npx tsc && \
     test -f dist/index.d.ts && \
     cd ../agents && rm -rf dist && npx tsc && cp src/models.json dist/models.json && \
+    cd ../cortex && rm -rf dist && npx tsc && \
     cd ../frontend && npx vite build && \
     cd ../backend && rm -rf dist && (npx tsc -p tsconfig.build.json || true) && \
     rm -rf dist/db/migrations && cp -r src/db/migrations dist/db/migrations && \
@@ -87,6 +90,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/agents/package.json packages/agents/
+COPY packages/cortex/package.json packages/cortex/
 COPY packages/backend/package.json packages/backend/
 COPY packages/channel-sdk/package.json packages/channel-sdk/
 COPY packages/tts-native/package.json packages/tts-native/
@@ -101,6 +105,7 @@ COPY --from=builder /app/packages/backend/node_modules packages/backend/node_mod
 # Copy built artifacts
 COPY --from=builder /app/packages/shared/dist packages/shared/dist
 COPY --from=builder /app/packages/agents/dist packages/agents/dist
+COPY --from=builder /app/packages/cortex/dist packages/cortex/dist
 COPY --from=builder /app/packages/backend/dist packages/backend/dist
 
 # Copy tts-native package (index.js loader, type definitions, native binary)

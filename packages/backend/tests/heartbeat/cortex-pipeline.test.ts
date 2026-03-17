@@ -41,14 +41,28 @@ vi.mock('../../src/db/index.js', () => ({
   getMessagesDb: vi.fn(() => ({})),
   getMemoryDb: vi.fn(() => ({})),
   getAgentLogsDb: vi.fn(() => ({})),
+  getPersonaDb: vi.fn(() => ({})),
 }));
 
 vi.mock('../../src/db/stores/heartbeat-store.js', () => ({
   getHeartbeatState: vi.fn(() => ({ tickNumber: 1, conversationHistory: null })),
   updateHeartbeatState: vi.fn(),
+  updateConversationHistory: vi.fn(),
+  getConversationHistory: vi.fn(() => null),
   insertThought: vi.fn(),
   insertExperience: vi.fn(),
 }));
+
+vi.mock('../../src/db/stores/persona-store.js', () => ({
+  getPersona: vi.fn(() => ({
+    name: 'Animus',
+    personalityDimensions: {},
+    traits: [],
+    values: [],
+  })),
+}));
+
+vi.mock('../../src/db/stores/vault-store.js', () => ({}));
 
 vi.mock('../../src/db/stores/agent-log-store.js', () => ({
   insertEvent: vi.fn(() => ({ id: 'test-event-id', sessionId: 'test', eventType: 'test', data: {}, createdAt: new Date().toISOString() })),
@@ -74,6 +88,9 @@ vi.mock('../../src/db/stores/contact-store.js', () => ({
 vi.mock('../../src/db/stores/message-store.js', () => ({
   getConversationByContactAndChannel: vi.fn(),
   createMessage: vi.fn(),
+  getMessagesInRange: vi.fn(() => []),
+  getMessagesSince: vi.fn(() => []),
+  getRecentMessages: vi.fn(() => []),
 }));
 
 vi.mock('../../src/db/stores/memory-store.js', () => ({
@@ -104,6 +121,18 @@ vi.mock('../../src/lib/file-deny-list.js', () => ({
 
 vi.mock('../../src/plugins/index.js', () => ({
   getPluginManager: vi.fn(() => ({})),
+}));
+
+vi.mock('../../src/memory/observational-memory/index.js', () => ({
+  processAllStreams: vi.fn(async () => {}),
+}));
+
+vi.mock('../../src/config/observational-memory.config.js', () => ({
+  OBSERVATIONAL_MEMORY_CONFIG: {
+    thoughts: { tokenBudget: 2000, batchThreshold: 5 },
+    experiences: { tokenBudget: 2000, batchThreshold: 5 },
+    messages: { tokenBudget: 4000, batchThreshold: 10 },
+  },
 }));
 
 // ============================================================================
@@ -391,6 +420,10 @@ describe('CortexMindState', () => {
     expect(state.toolContext.current).toBeNull();
     expect(state.initialized).toBe(false);
     expect(state.conversationHistoryCheckpoint).toBeNull();
+    expect(state.compactionContext).toBeDefined();
+    expect(state.compactionContext.gathered).toBeNull();
+    expect(state.compactionContext.agentManager).toBeNull();
+    expect(state.compactionContext.compiledPersona).toBeNull();
   });
 });
 

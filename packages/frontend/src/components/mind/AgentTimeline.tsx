@@ -20,6 +20,7 @@ import {
   Database,
   Gear,
   MagnifyingGlass,
+  ArrowsClockwise,
 } from '@phosphor-icons/react';
 import { trpc } from '../../utils/trpc';
 import { useHeartbeatStore } from '../../store/heartbeat-store';
@@ -87,7 +88,7 @@ interface AgentTimelineProps {
 // Event category mapping
 // ============================================================================
 
-type EventCategory = 'session' | 'input' | 'thinking' | 'tool' | 'response' | 'error' | 'complete' | 'execute';
+type EventCategory = 'session' | 'input' | 'thinking' | 'tool' | 'response' | 'error' | 'complete' | 'execute' | 'compaction';
 
 function getEventCategory(eventType: string): EventCategory {
   switch (eventType) {
@@ -119,6 +120,12 @@ function getEventCategory(eventType: string): EventCategory {
     case 'execute_memory_complete':
     case 'execute_complete':
       return 'execute';
+    case 'compaction_start':
+    case 'compaction_complete':
+    case 'compaction_error':
+    case 'microcompaction':
+    case 'emergency_truncation':
+      return 'compaction';
     default:
       return 'session';
   }
@@ -143,6 +150,8 @@ function getCategoryColor(category: EventCategory, theme: ReturnType<typeof useT
       return theme.colors.accent;
     case 'execute':
       return isLight ? '#2D8A6E' : '#4ECBA0';
+    case 'compaction':
+      return isLight ? '#7A6B94' : '#9B8CB5';
   }
 }
 
@@ -172,6 +181,11 @@ function getEventIcon(eventType: string) {
     case 'execute_decisions_complete':   return Gear;
     case 'execute_memory_complete':      return Brain;
     case 'execute_complete':             return CheckCircle;
+    case 'compaction_start':
+    case 'compaction_complete':          return ArrowsClockwise;
+    case 'compaction_error':             return WarningCircle;
+    case 'microcompaction':              return ArrowsClockwise;
+    case 'emergency_truncation':         return WarningCircle;
     default:              return Play;
   }
 }
@@ -202,6 +216,11 @@ function getEventLabel(eventType: string, data?: Record<string, unknown>): strin
     case 'execute_decisions_complete':   return 'Decisions Complete';
     case 'execute_memory_complete':      return 'Memory Complete';
     case 'execute_complete':             return 'Execute Complete';
+    case 'compaction_start':             return 'Compaction Started';
+    case 'compaction_complete':          return 'Compaction Complete';
+    case 'compaction_error':             return 'Compaction Failed';
+    case 'microcompaction':              return 'Tool Results Trimmed';
+    case 'emergency_truncation':         return 'Emergency Truncation';
     default:               return eventType;
   }
 }
@@ -441,6 +460,40 @@ function getPreviewContent(event: TimelineEvent): string {
     case 'execute_complete': {
       const totalMs = d['totalDurationMs'] as number;
       return totalMs != null ? `completed in ${formatDuration(totalMs)}` : 'completed';
+    }
+    case 'compaction_start': {
+      const turns = d['turnsToCompact'] as number | undefined;
+      const tokens = d['estimatedTokens'] as number | undefined;
+      const parts: string[] = [];
+      if (turns != null) parts.push(`${turns} turns`);
+      if (tokens != null) parts.push(`~${Math.round(tokens / 1000)}K tokens`);
+      return parts.length > 0 ? parts.join(', ') : 'summarizing conversation history';
+    }
+    case 'compaction_complete': {
+      const before = d['tokensBefore'] as number | undefined;
+      const after = d['tokensAfter'] as number | undefined;
+      const turnsCompacted = d['turnsCompacted'] as number | undefined;
+      const parts: string[] = [];
+      if (turnsCompacted != null) parts.push(`${turnsCompacted} turns compacted`);
+      if (before != null && after != null) {
+        const pct = Math.round((1 - after / before) * 100);
+        parts.push(`${pct}% reduction (${Math.round(before / 1000)}K -> ${Math.round(after / 1000)}K tokens)`);
+      }
+      return parts.length > 0 ? parts.join(', ') : 'completed';
+    }
+    case 'compaction_error':
+      return truncate(str(d['error']) || str(d['message']), 80);
+    case 'microcompaction': {
+      const threshold = d['threshold'] as number | undefined;
+      const cleared = d['resultsCleared'] as number | undefined;
+      const parts: string[] = [];
+      if (threshold != null) parts.push(`${Math.round(threshold * 100)}% threshold`);
+      if (cleared != null) parts.push(`${cleared} result${cleared !== 1 ? 's' : ''} trimmed`);
+      return parts.length > 0 ? parts.join(', ') : 'tool results trimmed';
+    }
+    case 'emergency_truncation': {
+      const removed = d['turnsRemoved'] as number | undefined;
+      return removed != null ? `${removed} turn${removed !== 1 ? 's' : ''} dropped` : 'oldest turns removed';
     }
     default:
       return '';
@@ -1275,6 +1328,74 @@ function EventDetail({ event, allEvents, onInspectContext }: { event: TimelineEv
         </div>
       );
     }
+
+    case 'compaction_start':
+      return (
+        <div>
+          {d['turnsToCompact'] != null && <DetailField label="TURNS">{String(d['turnsToCompact'])}</DetailField>}
+          {d['estimatedTokens'] != null && <DetailField label="EST. TOKENS">{Number(d['estimatedTokens']).toLocaleString()}</DetailField>}
+          {d['layer'] != null && <DetailField label="LAYER">{str(d['layer'])}</DetailField>}
+        </div>
+      );
+
+    case 'compaction_complete': {
+      const summary = str(d['summary']);
+      return (
+        <div>
+          {d['turnsCompacted'] != null && <DetailField label="TURNS COMPACTED">{String(d['turnsCompacted'])}</DetailField>}
+          {d['turnsPreserved'] != null && <DetailField label="TURNS PRESERVED">{String(d['turnsPreserved'])}</DetailField>}
+          {d['tokensBefore'] != null && <DetailField label="TOKENS BEFORE">{Number(d['tokensBefore']).toLocaleString()}</DetailField>}
+          {d['tokensAfter'] != null && <DetailField label="TOKENS AFTER">{Number(d['tokensAfter']).toLocaleString()}</DetailField>}
+          {d['summaryTokens'] != null && <DetailField label="SUMMARY SIZE">{Number(d['summaryTokens']).toLocaleString()} tokens</DetailField>}
+          {summary && (
+            <div css={css`margin-top: ${theme.spacing[2]};`}>
+              <DetailField label="SUMMARY">
+                <div css={css`
+                  font-family: ${theme.typography.fontFamily.serif};
+                  font-size: 13px;
+                  line-height: 1.6;
+                  color: ${theme.colors.text.secondary};
+                  white-space: pre-wrap;
+                  max-height: 300px;
+                  overflow-y: auto;
+                `}>
+                  {summary}
+                </div>
+              </DetailField>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    case 'compaction_error':
+      return (
+        <div>
+          <DetailField label="ERROR">
+            <span css={css`color: ${theme.colors.error.main};`}>
+              {str(d['error']) || str(d['message']) || 'Unknown error'}
+            </span>
+          </DetailField>
+        </div>
+      );
+
+    case 'microcompaction':
+      return (
+        <div>
+          {d['threshold'] != null && <DetailField label="THRESHOLD">{Math.round(Number(d['threshold']) * 100)}%</DetailField>}
+          {d['resultsCleared'] != null && <DetailField label="RESULTS TRIMMED">{String(d['resultsCleared'])}</DetailField>}
+          {d['tokensSaved'] != null && <DetailField label="TOKENS SAVED">{Number(d['tokensSaved']).toLocaleString()}</DetailField>}
+        </div>
+      );
+
+    case 'emergency_truncation':
+      return (
+        <div>
+          {d['turnsRemoved'] != null && <DetailField label="TURNS REMOVED">{String(d['turnsRemoved'])}</DetailField>}
+          {d['tokensBefore'] != null && <DetailField label="TOKENS BEFORE">{Number(d['tokensBefore']).toLocaleString()}</DetailField>}
+          {d['tokensAfter'] != null && <DetailField label="TOKENS AFTER">{Number(d['tokensAfter']).toLocaleString()}</DetailField>}
+        </div>
+      );
 
     default:
       return d ? <CodeBlock content={JSON.stringify(d, null, 2)} maxHeight={200} /> : null;

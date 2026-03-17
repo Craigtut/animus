@@ -246,21 +246,32 @@ async function executeAgenticLoop(
   let replySentEarly = false;
   let replyTurnsSent = 0;
 
-  // Wire turn_end handler for per-turn reply delivery
+  // Wire turn_end handler for per-turn reply delivery.
+  //
+  // Channel-aware working tag delivery (see docs/cortex/working-tags.md):
+  // - SMS/Discord (external channels): deliver userFacing only (working tags stripped)
+  //   via the channelContent parameter on sendOutbound.
+  // - Web frontend: DB stores raw text (with working tags) for inline rendering with
+  //   visual differentiation. Real-time streaming via reply:chunk events also uses raw.
+  // - The web channel's sendToChannel is a no-op; the frontend reads from the DB.
   const turnEndUnsub = cortexAgent.getEventBridge().on('turn_end', (event: CortexEvent) => {
     if (!event.textOutput?.userFacing) return;
 
-    const turnText = event.textOutput.userFacing;
-    if (isNonResponse(turnText)) {
-      log.info(`Filtered non-response turn: "${turnText.trim()}"`);
+    const userFacingText = event.textOutput.userFacing;
+    const rawText = event.textOutput.raw;
+    if (isNonResponse(userFacingText)) {
+      log.info(`Filtered non-response turn: "${userFacingText.trim()}"`);
       return;
     }
 
-    replyAccumulated += (replyAccumulated ? '\n' : '') + turnText;
+    replyAccumulated += (replyAccumulated ? '\n' : '') + userFacingText;
 
     // Allow replies for both full contacts and recognized participants
     const turnContactId = gathered.contact?.id ?? gathered.trigger.contactId;
     if (!isMessageTrigger || !turnContactId || !gathered.trigger.channel) return;
+
+    // Determine if this is a non-web channel (external delivery target)
+    const isWebChannel = gathered.trigger.channel === 'web';
 
     // Send per-turn reply
     (async () => {
@@ -273,19 +284,24 @@ async function executeAgenticLoop(
           : undefined;
         const hasReplyMetadata = replyMetadata && Object.keys(replyMetadata).length > 0;
 
+        // For the web channel, store raw text (with working tags) in the DB so the
+        // frontend can render them with visual differentiation. For external channels
+        // (SMS, Discord, API), store raw in the DB for observability but deliver
+        // userFacing via channelContent so the adapter sends clean text.
         await router.sendOutbound({
           contactId: turnContactId,
           channel: gathered.trigger.channel!,
-          content: turnText.trim(),
+          content: isWebChannel ? rawText.trim() : rawText.trim(),
+          ...(!isWebChannel ? { channelContent: userFacingText.trim() } : {}),
           ...(hasReplyMetadata ? { metadata: replyMetadata } : {}),
         });
         replyTurnsSent++;
         replySentEarly = true;
-        log.info(`Turn reply sent on "${gathered.trigger.channel}" for tick #${tickNumber} (${turnText.length} chars)`);
+        log.info(`Turn reply sent on "${gathered.trigger.channel}" for tick #${tickNumber} (${userFacingText.length} chars)`);
 
         eventBus.emit('reply:turn_complete', {
           turnIndex: replyTurnsSent - 1,
-          content: turnText.trim(),
+          content: userFacingText.trim(),
           tickNumber,
           channel: triggerChannel,
         });

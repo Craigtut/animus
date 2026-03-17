@@ -644,6 +644,13 @@ function CortexProviderSection() {
 
   const thinkingSave = useSaveFlash();
   const modelSave = useSaveFlash();
+  const utilityModelSave = useSaveFlash();
+
+  // Utility model
+  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
+  const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation({
+    onSuccess: () => utils.settings.getSystemSettings.invalidate(),
+  });
 
   // Model list for the active provider
   const activeProvider = statusData?.provider ?? null;
@@ -706,7 +713,20 @@ function CortexProviderSection() {
     if (!activeProvider) return;
     setActiveMutation.mutate(
       { provider: activeProvider, model: modelId },
-      { onSuccess: () => modelSave.flash() }
+      {
+        onSuccess: () => {
+          modelSave.flash();
+          // When primary model (and thus provider) changes, reset utility model to recommended
+          updateSettingsMutation.mutate({ utilityModel: 'default' });
+        },
+      }
+    );
+  };
+
+  const handleUtilityModelChange = (value: string) => {
+    updateSettingsMutation.mutate(
+      { utilityModel: value },
+      { onSuccess: () => utilityModelSave.flash() }
     );
   };
 
@@ -935,6 +955,45 @@ function CortexProviderSection() {
                     </option>
                   ))}
                 </select>
+              </div>
+            )}
+
+            {/* Utility model picker */}
+            {models && models.length > 0 && (
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                  <Typography.SmallBodyAlt>Utility Model</Typography.SmallBodyAlt>
+                  <SaveIndicator show={utilityModelSave.show} />
+                </div>
+                <select
+                  value={systemSettings?.utilityModel ?? 'default'}
+                  onChange={(e) => handleUtilityModelChange(e.target.value)}
+                  css={css`
+                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                    background: ${theme.colors.background.paper};
+                    border: 1px solid ${theme.colors.border.default};
+                    border-radius: ${theme.borderRadius.default};
+                    color: ${theme.colors.text.primary};
+                    font-size: ${theme.typography.fontSize.sm};
+                    font-family: inherit;
+                    cursor: pointer;
+                    outline: none;
+                    width: 100%;
+                    &:focus { border-color: ${theme.colors.border.focus}; }
+                  `}
+                >
+                  <option value="default">Recommended</option>
+                  {[...models]
+                    .sort((a, b) => (a.pricing?.input ?? Infinity) - (b.pricing?.input ?? Infinity))
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}{m.pricing ? ` ($${m.pricing.input.toFixed(2)}/$${m.pricing.output.toFixed(2)} per 1M)` : ''}
+                      </option>
+                    ))}
+                </select>
+                <Typography.Caption color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+                  A smaller model used for internal operations like web page summarization and safety checks. Does not affect the quality of the agent's main responses.
+                </Typography.Caption>
               </div>
             )}
           </div>
@@ -1534,6 +1593,9 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
                     &::placeholder { color: ${theme.colors.text.hint}; }
                   `}
                 />
+                <Typography.Tiny color="disabled">
+                  Running in Docker? Use http://host.docker.internal:PORT instead of localhost.
+                </Typography.Tiny>
                 <input
                   type="text"
                   value={customModelId}
@@ -1602,6 +1664,7 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
 function ProviderSection() {
   const theme = useTheme();
   const utils = trpc.useUtils();
+  const [legacyExpanded, setLegacyExpanded] = useState(false);
 
   const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
   const { data: claudeKey } = trpc.provider.hasKey.useQuery({ provider: 'claude' });
@@ -2118,6 +2181,41 @@ function ProviderSection() {
   const activeModelSupportsThinking = activeModelData?.supportsThinking ?? false;
 
   return (
+    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+      {/* Collapsed header */}
+      <button
+        onClick={() => setLegacyExpanded(!legacyExpanded)}
+        css={css`
+          display: flex; align-items: center; gap: ${theme.spacing[2]};
+          padding: ${theme.spacing[3]} 0; background: none; border: none; cursor: pointer;
+          font-family: inherit; text-align: left; width: 100%;
+        `}
+      >
+        <CaretRight size={14} css={css`
+          color: ${theme.colors.text.hint};
+          transition: transform 150ms ease;
+          transform: rotate(${legacyExpanded ? '90deg' : '0deg'});
+          flex-shrink: 0;
+        `} />
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]};`}>
+          <Typography.SmallBodyAlt css={css`color: ${theme.colors.text.secondary};`}>
+            Legacy Agent SDKs (Claude CLI / Codex CLI)
+          </Typography.SmallBodyAlt>
+          <Typography.Caption css={css`color: ${theme.colors.text.hint};`}>
+            Used for sub-agents. Will be deprecated in a future release.
+          </Typography.Caption>
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {legacyExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            css={css`overflow: hidden;`}
+          >
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
 
       {/* ============ Undo Banner ============ */}
@@ -3741,6 +3839,10 @@ function ProviderSection() {
           </AnimatePresence>
         </div>
       </div>
+    </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

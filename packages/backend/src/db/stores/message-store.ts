@@ -276,6 +276,26 @@ export function getMessagesSince(
   return attachMedia(db, rows.map(rowToMessage));
 }
 
+/**
+ * Get messages in a time range (exclusive on both bounds), oldest first.
+ * Used by the compaction re-seeding pipeline to fill the gap between
+ * the observation watermark and the preserved conversation tail.
+ */
+export function getMessagesInRange(
+  db: Database.Database,
+  conversationId: string,
+  after: string,
+  before: string,
+  limit: number = 500
+): Message[] {
+  const rows = db
+    .prepare(
+      'SELECT * FROM messages WHERE conversation_id = ? AND created_at > ? AND created_at < ? ORDER BY created_at ASC LIMIT ?'
+    )
+    .all(conversationId, after, before, limit) as Array<Record<string, unknown>>;
+  return attachMedia(db, rows.map(rowToMessage));
+}
+
 export function getMessagesByContact(
   db: Database.Database,
   contactId: string,
