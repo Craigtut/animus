@@ -209,6 +209,20 @@ export const LOGIN_FUNCTION_NAMES: Record<string, string> = {
  * suitable for internal operations like WebFetch summarization
  * and safety classification.
  */
+/**
+ * Default primary model IDs per provider.
+ * Used when a user first connects a provider and no model is explicitly selected.
+ * These are the best general-purpose models for each provider.
+ */
+export const PRIMARY_MODEL_DEFAULTS: Record<string, string> = {
+  anthropic: 'claude-sonnet-4-6',
+  openai: 'gpt-5.4',
+  google: 'gemini-3.1-pro-preview',
+  groq: 'openai/gpt-oss-120b',
+  cerebras: 'gpt-oss-120b',
+  mistral: 'mistral-large-2512',
+};
+
 export const UTILITY_MODEL_DEFAULTS: Record<string, string> = {
   anthropic: 'claude-haiku-4-5-20251001',     // $1.00/$5.00 per 1M tokens
   openai: 'gpt-4.1-nano',                     // $0.10/$0.40 per 1M tokens

@@ -320,7 +320,24 @@ export class ProviderManager implements IProviderManager {
   async listModels(provider: string): Promise<ModelInfo[]> {
     const piAi = await loadPiAi();
     const rawModels = piAi.getModels(provider);
-    return rawModels.map(mapRawToModelInfo);
+    const models = rawModels.map(mapRawToModelInfo);
+
+    // Filter out "latest" alias entries that duplicate pinned versions.
+    // pi-ai includes both "claude-sonnet-4-6" and "claude-sonnet-4-6-latest"
+    // which creates confusing duplicates in the UI.
+    const seen = new Set<string>();
+    return models.filter(m => {
+      // Strip "-latest" suffix to check for duplicate base names
+      const baseName = m.id.replace(/-latest$/, '');
+      if (m.id.endsWith('-latest')) {
+        // Only include the "-latest" alias if no pinned version exists
+        return !models.some(other => other.id === baseName);
+      }
+      // Skip duplicates with identical names (different IDs but same display name)
+      if (seen.has(m.name)) return false;
+      seen.add(m.name);
+      return true;
+    });
   }
 
   // -----------------------------------------------------------------------

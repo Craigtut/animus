@@ -200,6 +200,7 @@ export {
   OAUTH_PROVIDER_IDS,
   LOGIN_FUNCTION_NAMES,
   UTILITY_MODEL_DEFAULTS,
+  PRIMARY_MODEL_DEFAULTS,
 } from './provider-registry.js';
 export type {
   AuthMethod,

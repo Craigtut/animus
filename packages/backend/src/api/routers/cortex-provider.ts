@@ -177,14 +177,20 @@ export const cortexProviderRouter = router({
         };
         oauthEmitter.emit('status', successEvent);
 
-        // Auto-select as active provider with a default model
+        // Auto-select as active provider with a curated default model
         const db = getSystemDb();
+        const { PRIMARY_MODEL_DEFAULTS } = await import('@animus-labs/cortex');
+        const curatedDefault = PRIMARY_MODEL_DEFAULTS[input.provider];
         const models = await svc.listModels(input.provider);
-        const defaultModel = models[0]?.id ?? null;
+        // Use curated default if available and exists in the model list, otherwise first model
+        const defaultModel = curatedDefault && models.some(m => m.id === curatedDefault)
+          ? curatedDefault
+          : models[0]?.id ?? null;
 
         settingsStore.updateCortexSettings(db, {
           cortexProvider: input.provider,
           cortexModel: defaultModel,
+          cortexThinkingLevel: 'medium',
         });
 
         if (defaultModel) {
@@ -276,14 +282,19 @@ export const cortexProviderRouter = router({
       const svc = getCortexCredentialService();
       svc.saveApiKey(input.provider, input.apiKey);
 
-      // Auto-select as active provider with a default model
+      // Auto-select as active provider with a curated default model
       const db = getSystemDb();
+      const { PRIMARY_MODEL_DEFAULTS } = await import('@animus-labs/cortex');
+      const curatedDefault = PRIMARY_MODEL_DEFAULTS[input.provider];
       const models = await svc.listModels(input.provider);
-      const defaultModel = models[0]?.id ?? null;
+      const defaultModel = curatedDefault && models.some(m => m.id === curatedDefault)
+        ? curatedDefault
+        : models[0]?.id ?? null;
 
       settingsStore.updateCortexSettings(db, {
         cortexProvider: input.provider,
         cortexModel: defaultModel,
+        cortexThinkingLevel: 'medium',
       });
 
       if (defaultModel) {
