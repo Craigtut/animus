@@ -678,8 +678,11 @@ function CortexProviderSection() {
   });
 
   // System errors from the heartbeat store (auth failures)
-  const authErrors = useHeartbeatStore((s) =>
-    s.systemErrors.filter((e) => e.category === 'authentication')
+  // Use a stable selector to avoid infinite re-renders from filter creating new arrays
+  const systemErrors = useHeartbeatStore((s) => s.systemErrors);
+  const authErrors = useMemo(
+    () => systemErrors.filter((e) => e.category === 'authentication'),
+    [systemErrors]
   );
   const hasAuthFailure = authErrors.length > 0;
   const latestAuthError = authErrors[authErrors.length - 1] ?? null;
