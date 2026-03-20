@@ -397,10 +397,10 @@ function TokenChart({
             fontFamily: theme.typography.fontFamily.mono,
           }}
         />
-        <Bar dataKey="inputTokens" name="Input" fill={CHART_COLORS.input} radius={[2, 2, 0, 0]} barSize={12} />
-        <Bar dataKey="outputTokens" name="Output" fill={CHART_COLORS.output} radius={[2, 2, 0, 0]} barSize={12} />
-        <Bar dataKey="cacheReadTokens" name="Cache Read" fill={CHART_COLORS.cacheRead} radius={[2, 2, 0, 0]} barSize={12} />
-        <Bar dataKey="cacheWriteTokens" name="Cache Write" fill={CHART_COLORS.cacheWrite} radius={[2, 2, 0, 0]} barSize={12} />
+        <Bar dataKey="cacheReadTokens" name="Cache Read" fill={CHART_COLORS.cacheRead} radius={[2, 2, 0, 0]} barSize={10} />
+        <Bar dataKey="cacheWriteTokens" name="Cache Write" fill={CHART_COLORS.cacheWrite} radius={[2, 2, 0, 0]} barSize={10} />
+        <Bar dataKey="inputTokens" name="Input (uncached)" fill={CHART_COLORS.input} radius={[2, 2, 0, 0]} barSize={10} />
+        <Bar dataKey="outputTokens" name="Output" fill={CHART_COLORS.output} radius={[2, 2, 0, 0]} barSize={10} />
       </BarChart>
     </ResponsiveContainer>
   );

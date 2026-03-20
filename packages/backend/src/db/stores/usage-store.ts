@@ -130,14 +130,14 @@ export function getUsageTimeSeries(
   // Bucket by dividing unix timestamp
   const bucketQuery = db.prepare(`
     SELECT
-      datetime((CAST(strftime('%s', created_at) AS INTEGER) / ${bucketSeconds}) * ${bucketSeconds}, 'unixepoch') as bucket_ts,
+      datetime((CAST(strftime('%s', created_at) AS INTEGER) / ${bucketSeconds}) * ${bucketSeconds}, 'unixepoch') || 'Z' as bucket_ts,
       COALESCE(SUM(input_tokens), 0) as input_tokens,
       COALESCE(SUM(output_tokens), 0) as output_tokens,
       COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
       COALESCE(SUM(cache_write_tokens), 0) as cache_write_tokens,
       COALESCE(SUM(total_tokens), 0) as total_tokens,
       COALESCE(SUM(cost_usd), 0) as cost_usd,
-      COUNT(*) as tick_count
+      COUNT(DISTINCT tick_number) as tick_count
     FROM agent_usage
     WHERE ${where}
     GROUP BY bucket_ts
@@ -166,7 +166,7 @@ export function getUsageTimeSeries(
       COALESCE(SUM(cache_write_tokens), 0) as cache_write_tokens,
       COALESCE(SUM(total_tokens), 0) as total_tokens,
       COALESCE(SUM(cost_usd), 0) as cost_usd,
-      COUNT(*) as tick_count
+      COUNT(DISTINCT tick_number) as tick_count
     FROM agent_usage
     WHERE ${where}
   `);
@@ -230,7 +230,7 @@ export function getUsageBreakdown(
         COALESCE(SUM(cache_write_tokens), 0) as cache_write_tokens,
         COALESCE(SUM(total_tokens), 0) as total_tokens,
         COALESCE(SUM(cost_usd), 0) as cost_usd,
-        COUNT(*) as tick_count
+        COUNT(DISTINCT tick_number) as tick_count
       FROM agent_usage
       WHERE created_at >= ? AND created_at < ?
       GROUP BY dim_value
@@ -273,7 +273,9 @@ export function getCacheStats(
       `SELECT
         COALESCE(SUM(input_tokens), 0) as total_input_tokens,
         COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
-        COALESCE(SUM(cache_write_tokens), 0) as cache_write_tokens
+        COALESCE(SUM(cache_write_tokens), 0) as cache_write_tokens,
+        COUNT(*) as total_calls,
+        SUM(CASE WHEN cache_read_tokens > 0 THEN 1 ELSE 0 END) as calls_with_cache_hit
       FROM agent_usage
       WHERE created_at >= ? AND created_at < ?`,
     )
@@ -283,10 +285,12 @@ export function getCacheStats(
   const cacheReadTokens = row['cache_read_tokens'] ?? 0;
   const cacheWriteTokens = row['cache_write_tokens'] ?? 0;
 
-  // cacheHitRate = cacheReadTokens / (cacheReadTokens + nonCachedInputTokens)
-  // where nonCachedInputTokens = inputTokens - cacheReadTokens
-  // Simplifies to: cacheReadTokens / inputTokens when inputTokens > 0
-  const cacheHitRate = totalInputTokens > 0 ? cacheReadTokens / totalInputTokens : 0;
+  // Cache hit rate: what fraction of LLM calls got any cache hit.
+  // This is more honest than token-weighted metrics which can be inflated
+  // by a single phase (e.g. agentic loop) that always hits cache.
+  const totalCalls = row['total_calls'] ?? 0;
+  const callsWithHit = row['calls_with_cache_hit'] ?? 0;
+  const cacheHitRate = totalCalls > 0 ? callsWithHit / totalCalls : 0;
 
   // Estimated savings: cache reads cost ~$0.30/1M vs standard input ~$3/1M for Sonnet,
   // so savings = cacheReadTokens * ($3 - $0.30) / 1M = cacheReadTokens * $2.70 / 1M
