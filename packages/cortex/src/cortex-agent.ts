@@ -37,6 +37,7 @@ import { createSubAgentTool, SUB_AGENT_TOOL_NAME } from './tools/sub-agent.js';
 import type {
   CortexAgentConfig,
   CortexLifecycleState,
+  CortexUsage,
   ClassifiedError,
   AgentTextOutput,
   CompactionResult,
@@ -104,6 +105,12 @@ export interface PiModel {
   contextWindow?: number;
   [key: string]: unknown;
 }
+
+/**
+ * Minimum context window floor in tokens.
+ * Below this, the system prompt alone may not fit, breaking the agent.
+ */
+export const MINIMUM_CONTEXT_WINDOW = 16_384;
 
 // ---------------------------------------------------------------------------
 // System prompt sections
@@ -223,6 +230,12 @@ export class CortexAgent {
   private lifecycleState: CortexLifecycleState = 'created';
   private currentSystemPrompt: string = '';
 
+  // Cache retention resolved by the consumer via resolveCacheRetention().
+  // null = not yet resolved (pi-ai uses its own default).
+  // Set at agent creation via setCacheRetention() and updated dynamically
+  // on interval changes (sleep/wake transitions).
+  private _cacheRetention: 'none' | 'short' | 'long' | null = null;
+
   // Resolved models
   private primaryModel: PiModel;
   private readonly resolvedUtilityModel: PiModel;
@@ -232,6 +245,9 @@ export class CortexAgent {
 
   // Compaction Manager
   private readonly compactionManager: CompactionManager;
+
+  // User-configured context window limit (null = no limit, use model's full window)
+  private _contextWindowLimit: number | null = null;
 
   // Event handlers (consumer-registered callbacks)
   private loopCompleteHandlers: Array<() => void> = [];
@@ -264,8 +280,16 @@ export class CortexAgent {
   // Skill Registry for managing available skills
   private readonly skillRegistry: SkillRegistry;
 
+  // The load_skill tool instance (held for description rebuilds)
+  private loadSkillTool!: { name: string; description: string; parameters: unknown; execute: (args: unknown) => Promise<unknown> };
+
   // Skill buffer: loaded skill content for ephemeral injection
   private skillBuffer: LoadedSkill[] = [];
+
+  // Usage from the most recent directComplete() or structuredComplete() call.
+  // Reset to null before each call. Consumers read this after a call to
+  // capture per-phase usage for persistence.
+  private _lastDirectUsage: CortexUsage | null = null;
 
   /**
    * Create a CortexAgent.
@@ -328,12 +352,41 @@ export class CortexAgent {
       maxConcurrent: config.maxConcurrentSubAgents ?? 4,
     });
 
-    // Set up Skill Registry
+    // Set up Skill Registry with auto-rebuild callback
     this.skillRegistry = new SkillRegistry();
+    this.skillRegistry.onChange = () => this.rebuildLoadSkillDescription();
 
     // Wire sub-agent manager hooks to CortexAgent event handlers
     // (must be after subAgentManager is initialized)
     this.wireSubAgentHooks();
+
+    // Create and register the SubAgent tool.
+    // Must be after subAgentManager and wireSubAgentHooks.
+    const subAgentTool = createSubAgentTool({
+      spawnSubAgent: (params) => this.spawnForegroundSubAgent(params),
+      spawnBackgroundSubAgent: (params) => this.spawnBackgroundSubAgent(params),
+      canSpawn: () => this.subAgentManager.activeCount < this.subAgentManager.limit,
+      getConcurrencyInfo: () => ({
+        active: this.subAgentManager.activeCount,
+        limit: this.subAgentManager.limit,
+      }),
+    });
+    this.registeredTools.push(subAgentTool as typeof this.registeredTools[number]);
+
+    // Create and register the load_skill tool.
+    // Must be after skillRegistry is initialized.
+    this.loadSkillTool = createLoadSkillTool({
+      registry: this.skillRegistry,
+      getSkillBuffer: () => this.skillBuffer,
+      pushToSkillBuffer: (skill) => this.pushToSkillBuffer(skill),
+    });
+    this.registeredTools.push(this.loadSkillTool as typeof this.registeredTools[number]);
+
+    // Apply execute signature adapter and sync tools to pi-agent-core.
+    // Tools are initially set via initialState.tools but without the arity
+    // adapter that maps (toolCallId, params) -> (params). This call wraps
+    // all arity-1 tools and pushes the full set to the agent.
+    this.refreshTools();
 
     // Set up CompactionManager
     const compactionConfig = buildCompactionConfig(config.compaction);
@@ -342,10 +395,9 @@ export class CortexAgent {
       (config.slots ?? []).length,
     );
 
-    // Set context window from model if available
-    if (this.primaryModel.contextWindow) {
-      this.compactionManager.setContextWindow(this.primaryModel.contextWindow);
-    }
+    // Apply context window limit from config and model
+    this._contextWindowLimit = config.contextWindowLimit ?? null;
+    this._updateEffectiveContextWindow();
 
     // Wire compaction completion function (uses directComplete)
     this.compactionManager.setCompleteFn(async (context) => {
@@ -460,7 +512,9 @@ export class CortexAgent {
    */
   async directComplete(context: {
     systemPrompt: string;
-    messages: Array<{ role: string; content: string }>;
+    messages: unknown[];
+  }, options?: {
+    cacheRetention?: 'none' | 'short' | 'long';
   }): Promise<string> {
     // Dynamically import pi-ai's complete() function
     let complete: (model: unknown, context: unknown, options?: unknown) => Promise<unknown>;
@@ -485,13 +539,26 @@ export class CortexAgent {
       }
     }
 
+    this._lastDirectUsage = null;
+
+    const completeOptions: Record<string, unknown> = {};
+    if (apiKey) completeOptions['apiKey'] = apiKey;
+    if (options?.cacheRetention) completeOptions['cacheRetention'] = options.cacheRetention;
+
+    // Pass messages through to pi-ai as-is. Pi-ai's transformMessages() and
+    // provider-specific convertMessages() handle all format normalization:
+    // UserMessage (string or content blocks), AssistantMessage (content block
+    // arrays with text/thinking/toolCall), and ToolResultMessage.
     const result = await complete(this.primaryModel, {
       systemPrompt: context.systemPrompt,
-      messages: context.messages.map(m => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-      })),
-    }, apiKey ? { apiKey } : undefined);
+      messages: context.messages,
+    }, Object.keys(completeOptions).length > 0 ? completeOptions : undefined);
+
+    // Check for silent errors: pi-ai resolves with stopReason 'error' instead of throwing
+    this.checkForSilentError(result);
+
+    // Capture usage from the AssistantMessage response
+    this._lastDirectUsage = this.extractUsageFromAssistantMessage(result);
 
     // Extract text from the AssistantMessage response
     return this.extractTextFromAssistantMessage(result);
@@ -506,7 +573,7 @@ export class CortexAgent {
    * support tool use (Anthropic, OpenAI, Google, Mistral, etc.) without
    * needing provider-specific structured output parameters.
    *
-   * @param context - System prompt and messages
+   * @param context - System prompt and messages (accepts pi-ai native message format)
    * @param schema - Tool schema defining the structured output shape (TypeBox or JSON Schema)
    * @param toolName - Name for the virtual tool (default: 'structured_output')
    * @param toolDescription - Description for the virtual tool
@@ -514,8 +581,10 @@ export class CortexAgent {
    */
   async structuredComplete(context: {
     systemPrompt: string;
-    messages: Array<{ role: string; content: string }>;
-  }, schema: unknown, toolName: string = 'structured_output', toolDescription: string = 'Produce structured output'): Promise<Record<string, unknown> | null> {
+    messages: unknown[];
+  }, schema: unknown, toolName: string = 'structured_output', toolDescription: string = 'Produce structured output', options?: {
+    cacheRetention?: 'none' | 'short' | 'long';
+  }): Promise<Record<string, unknown> | null> {
     let complete: (model: unknown, context: unknown, options?: unknown) => Promise<unknown>;
     try {
       const piAi = await import('@mariozechner/pi-ai');
@@ -543,14 +612,29 @@ export class CortexAgent {
       }
     }
 
+    this._lastDirectUsage = null;
+
+    // Pass messages through to pi-ai as-is. Pi-ai's transformMessages() and
+    // provider-specific convertMessages() handle all format normalization:
+    // UserMessage (string or content blocks), AssistantMessage (content block
+    // arrays with text/thinking/toolCall), and ToolResultMessage.
     const result = await complete(this.primaryModel, {
       systemPrompt: context.systemPrompt,
-      messages: context.messages.map(m => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-      })),
+      messages: context.messages,
       tools: [tool],
-    }, apiKey ? { apiKey } : undefined);
+    }, {
+      ...(apiKey ? { apiKey } : {}),
+      // Force the model to call a tool (since we only pass one, it must call ours).
+      // "any" has the widest provider support across Anthropic, Google, Mistral, OpenAI, Bedrock.
+      toolChoice: 'any',
+      ...(options?.cacheRetention ? { cacheRetention: options.cacheRetention } : {}),
+    });
+
+    // Check for silent errors: pi-ai resolves with stopReason 'error' instead of throwing
+    this.checkForSilentError(result);
+
+    // Capture usage from the AssistantMessage response
+    this._lastDirectUsage = this.extractUsageFromAssistantMessage(result);
 
     // Extract tool call arguments from the response
     return this.extractToolCallArgs(result, toolName);
@@ -559,12 +643,32 @@ export class CortexAgent {
   /**
    * Extract tool call arguments from a pi-ai AssistantMessage response.
    */
+  /**
+   * Check if a pi-ai result represents a silent error.
+   *
+   * Pi-ai's stream wrapper catches errors and resolves the promise with an
+   * output object that has stopReason 'error' and errorMessage set, instead
+   * of throwing. This means callers never see the error unless they check.
+   * This method surfaces those silent errors as thrown exceptions so they
+   * propagate properly (e.g., to retry logic).
+   */
+  private checkForSilentError(result: unknown): void {
+    if (!result || typeof result !== 'object') return;
+    const msg = result as Record<string, unknown>;
+    if (msg['stopReason'] === 'error') {
+      const errorMessage = typeof msg['errorMessage'] === 'string'
+        ? msg['errorMessage']
+        : 'Unknown pi-ai error (stopReason=error)';
+      throw new Error(`LLM call failed: ${errorMessage}`);
+    }
+  }
+
   private extractToolCallArgs(result: unknown, toolName: string): Record<string, unknown> | null {
     if (!result || typeof result !== 'object') return null;
     const msg = result as Record<string, unknown>;
 
     // pi-ai AssistantMessage has content: Array<ContentPart>
-    // Tool calls appear as { type: 'toolCall', name, args }
+    // Tool calls appear as { type: 'toolCall', name, arguments }
     const content = msg['content'];
     if (!Array.isArray(content)) return null;
 
@@ -575,7 +679,7 @@ export class CortexAgent {
         (part as Record<string, unknown>)['type'] === 'toolCall' &&
         (part as Record<string, unknown>)['name'] === toolName
       ) {
-        const args = (part as Record<string, unknown>)['args'];
+        const args = (part as Record<string, unknown>)['arguments'];
         if (args && typeof args === 'object') {
           return args as Record<string, unknown>;
         }
@@ -631,9 +735,40 @@ export class CortexAgent {
       getApiKey: config.getApiKey,
     };
 
+    // Wire resolvePermission -> pi-agent-core's beforeToolCall hook.
+    // This is the single enforcement point for the tool permission system.
+    // Without this, cortex built-in tools (Bash, Read, Write, Edit, Glob,
+    // Grep, WebFetch) bypass the permission gate entirely.
+    if (config.resolvePermission) {
+      const resolver = config.resolvePermission;
+      agentConfig['beforeToolCall'] = async (ctx: unknown) => {
+        const { toolCall, args } = ctx as { toolCall: { name: string }; args: unknown };
+        const allowed = await resolver(toolCall.name, args);
+        if (!allowed) {
+          return { block: true, reason: `Tool "${toolCall.name}" requires approval or is disabled.` };
+        }
+        return undefined;
+      };
+    }
+
     const piAgent = new AgentClass(agentConfig);
 
-    return new CortexAgent(piAgent, config, config.tools);
+    const cortexAgent = new CortexAgent(piAgent, config, config.tools);
+
+    // Wire the composed transformContext hook AFTER construction so the
+    // CortexAgent instance is fully initialized (compaction, skills, slots).
+    // Pi-agent-core calls this before every LLM call for context management.
+    const hook = cortexAgent.getTransformContextHook();
+    piAgent.transformContext = async (messages: unknown[]) => {
+      const result = hook({
+        systemPrompt: piAgent.state.systemPrompt,
+        messages: messages as AgentMessage[],
+        tools: piAgent.state.tools as unknown[],
+      });
+      return result.messages;
+    };
+
+    return cortexAgent;
   }
 
   // -----------------------------------------------------------------------
@@ -710,6 +845,23 @@ export class CortexAgent {
     return this.currentSystemPrompt;
   }
 
+  /**
+   * Get the Cortex operational system prompt sections as structured data.
+   * Useful for context snapshot / inspector tooling.
+   */
+  getSystemPromptSections(): Array<{ name: string; content: string }> {
+    const sections: Array<{ name: string; content: string }> = [];
+    if (this.workingTagsEnabled) {
+      sections.push({ name: 'Response Delivery', content: RESPONSE_DELIVERY_SECTION });
+    }
+    sections.push({ name: 'System Rules', content: SYSTEM_RULES_SECTION });
+    sections.push({ name: 'Taking Action', content: TAKING_ACTION_SECTION });
+    sections.push({ name: 'Tool Usage', content: TOOL_USAGE_SECTION });
+    sections.push({ name: 'Executing with Care', content: EXECUTING_WITH_CARE_SECTION });
+    sections.push({ name: 'Environment', content: this.buildEnvironmentSection() });
+    return sections;
+  }
+
   // -----------------------------------------------------------------------
   // Persistence (consumer-owned storage)
   // -----------------------------------------------------------------------
@@ -739,8 +891,18 @@ export class CortexAgent {
     const slotCount = this.contextManager.slotCount;
     // Remove existing conversation history (everything after slots)
     this.agent.state.messages.splice(slotCount);
+    // Sanitize restored messages: fix undefined/null/empty content that may
+    // have been checkpointed from previous sessions with tool execution bugs.
+    const sanitized = messages.map(msg => {
+      const content = (msg as unknown as Record<string, unknown>)['content'];
+      if (content === undefined || content === null ||
+          (Array.isArray(content) && content.length === 0)) {
+        return { ...msg, content: [{ type: 'text' as const, text: '(no output)' }] };
+      }
+      return msg;
+    });
     // Append restored messages
-    this.agent.state.messages.push(...messages);
+    this.agent.state.messages.push(...sanitized);
   }
 
   // -----------------------------------------------------------------------
@@ -769,10 +931,8 @@ export class CortexAgent {
    */
   setModel(model: PiModel): void {
     this.primaryModel = model;
-    // Update context window for compaction if the new model provides it
-    if (model.contextWindow) {
-      this.compactionManager.setContextWindow(model.contextWindow);
-    }
+    // Recompute effective context window (applies limit if set)
+    this._updateEffectiveContextWindow();
     // Update the pi-agent-core agent's model if it exposes setModel
     if (typeof this.agent.setModel === 'function') {
       this.agent.setModel(model);
@@ -791,15 +951,69 @@ export class CortexAgent {
   }
 
   /**
+   * Set the cache retention policy for the agentic loop.
+   * Used by the consumer to switch between short/long cache based on
+   * tick interval and provider. The pipeline sets the PI_CACHE_RETENTION
+   * env var to this value before each tick.
+   */
+  setCacheRetention(value: 'none' | 'short' | 'long'): void {
+    this._cacheRetention = value;
+  }
+
+  /**
+   * Get the current cache retention policy.
+   * Returns null if not yet resolved (pi-ai will use its own default).
+   */
+  getCacheRetention(): 'none' | 'short' | 'long' | null {
+    return this._cacheRetention;
+  }
+
+  /**
    * Update the agent's tool set. Merges built-in tools (registered at
    * construction) with MCP-discovered tools from connected servers.
    * Called after MCP server connections change (plugin install/uninstall).
+   *
+   * Adapts all tool execute functions to match pi-agent-core's signature:
+   *   execute(toolCallId, params, signal?, onUpdate?)
+   * Built-in cortex tools and consumer-provided tools may use the simpler
+   *   execute(params) signature, so this adapter ensures the validated
+   *   arguments (2nd parameter) are passed correctly.
    */
   refreshTools(): void {
     const mcpTools = this.mcpClientManager.getTools();
-    const allTools = [...this.registeredTools, ...mcpTools];
+    const allTools = [...this.registeredTools, ...mcpTools].map(tool => {
+      const originalExecute = tool.execute;
+      // If the function already accepts 2+ params (toolCallId, params),
+      // it's already adapted. Check arity to avoid double-wrapping.
+      if (originalExecute.length >= 2) return tool;
+      return {
+        ...tool,
+        label: (tool as Record<string, unknown>)['label'] ?? tool.name,
+        // Adapt: fix parameter order AND normalize return value.
+        // Pi-agent-core expects AgentToolResult { content: [...], details: T }.
+        // Tools may return plain strings, which have no .content property,
+        // causing toolResult messages with content: undefined.
+        execute: async (_toolCallId: string, params: unknown) => {
+          const result = await originalExecute(params);
+          // Already correct format: must have content as a non-empty array
+          if (result && typeof result === 'object' && 'content' in (result as Record<string, unknown>)) {
+            const asObj = result as Record<string, unknown>;
+            if (Array.isArray(asObj['content']) && asObj['content'].length > 0) {
+              return result;
+            }
+            // Has 'content' key but it's undefined, null, empty, or non-array.
+            // Fall through to wrap as text.
+          }
+          // Wrap string/primitive return values
+          return {
+            content: [{ type: 'text', text: typeof result === 'string' ? result : String(result ?? '') }],
+            details: {},
+          };
+        },
+      };
+    });
     if (typeof this.agent.setTools === 'function') {
-      this.agent.setTools(allTools);
+      this.agent.setTools(allTools as Parameters<typeof this.agent.setTools>[0]);
     }
   }
 
@@ -830,13 +1044,29 @@ export class CortexAgent {
       );
     }
 
+    // Resolve API key for the utility model's provider
+    const provider = (this.resolvedUtilityModel as Record<string, unknown>)['provider'] as string;
+    let apiKey: string | undefined;
+    if (this.config.getApiKey) {
+      try {
+        apiKey = await this.config.getApiKey(provider);
+      } catch {
+        // If key resolution fails, let pi-ai try env vars
+      }
+    }
+
+    this._lastDirectUsage = null;
+
     const result = await complete(this.resolvedUtilityModel, {
       systemPrompt: context.systemPrompt,
       messages: context.messages.map(m => ({
         role: m.role as 'user' | 'assistant',
         content: m.content,
       })),
-    });
+    }, apiKey ? { apiKey } : undefined);
+
+    // Capture usage from utility model calls
+    this._lastDirectUsage = this.extractUsageFromAssistantMessage(result);
 
     return this.extractTextFromAssistantMessage(result);
   }
@@ -1010,6 +1240,19 @@ export class CortexAgent {
     return this.budgetGuard;
   }
 
+  /**
+   * Get the usage data from the most recent directComplete() or
+   * structuredComplete() call. Returns null if no usage was available
+   * or no call has been made yet.
+   *
+   * This is the primary mechanism for consumers (like the backend pipeline)
+   * to capture per-phase usage for persistence. The value is reset to null
+   * at the start of each directComplete/structuredComplete call.
+   */
+  getLastDirectUsage(): CortexUsage | null {
+    return this._lastDirectUsage;
+  }
+
   // -----------------------------------------------------------------------
   // Token Tracking and Pipeline Phase
   // -----------------------------------------------------------------------
@@ -1032,10 +1275,58 @@ export class CortexAgent {
 
   /**
    * Set the context window size (from model metadata).
-   * Used for compaction threshold calculations.
+   * If a contextWindowLimit is set, the effective value will be
+   * min(limit, contextWindow) with a floor of MINIMUM_CONTEXT_WINDOW.
    */
   setContextWindow(contextWindow: number): void {
-    this.compactionManager.setContextWindow(contextWindow);
+    this.primaryModel = { ...this.primaryModel, contextWindow };
+    this._updateEffectiveContextWindow();
+  }
+
+  /**
+   * Set a user-configured limit on the context window.
+   * The effective context window becomes min(limit, model.contextWindow)
+   * with a floor of MINIMUM_CONTEXT_WINDOW (16K tokens).
+   * Pass null to remove the limit and use the model's full context window.
+   */
+  setContextWindowLimit(limit: number | null): void {
+    this._contextWindowLimit = limit;
+    this._updateEffectiveContextWindow();
+  }
+
+  /**
+   * Get the raw user-configured context window limit (null = no limit).
+   */
+  get contextWindowLimit(): number | null {
+    return this._contextWindowLimit;
+  }
+
+  /**
+   * Get the effective context window after applying the limit and floor.
+   */
+  get effectiveContextWindow(): number {
+    return this.compactionManager.contextWindow;
+  }
+
+  /**
+   * Recompute and apply the effective context window from the model
+   * and the user-configured limit.
+   */
+  private _updateEffectiveContextWindow(): void {
+    const modelWindow = this.primaryModel.contextWindow;
+    if (!modelWindow || !Number.isFinite(modelWindow)) {
+      // Model does not advertise a context window. Set a safe floor
+      // rather than leaving a stale value from a previous model.
+      this.compactionManager.setContextWindow(MINIMUM_CONTEXT_WINDOW);
+      return;
+    }
+
+    if (this._contextWindowLimit != null) {
+      const clamped = Math.min(this._contextWindowLimit, modelWindow);
+      this.compactionManager.setContextWindow(Math.max(MINIMUM_CONTEXT_WINDOW, clamped));
+    } else {
+      this.compactionManager.setContextWindow(modelWindow);
+    }
   }
 
   /**
@@ -1155,8 +1446,8 @@ export class CortexAgent {
    *
    * Composes three hooks in order:
    * 1. ContextManager ephemeral injection
-   * 2. Compaction (microcompaction + mid-loop failsafe)
-   * 3. Skill buffer injection (stub, wired in Phase 4)
+   * 2. Skill buffer injection
+   * 3. Compaction (microcompaction + mid-loop failsafe)
    *
    * @returns A transformContext function for the Agent constructor
    */
@@ -1165,10 +1456,39 @@ export class CortexAgent {
     const slotCount = this.contextManager.slotCount;
 
     return (context: AgentContext): AgentContext => {
+      // Step 0: Apply Tier 1 insertion-time cap to the source messages.
+      // This mutates agent.state.messages directly so that oversized tool
+      // results are capped once at first observation, before any other
+      // processing. See compaction-strategy.md (Tier 1).
+      this.compactionManager.applyInsertionCap(
+        this.agent.state.messages,
+        slotCount,
+      );
+
       // Step 1: Inject ephemeral context
       let result = ephemeralHook(context);
 
-      // Step 2: Compaction (microcompaction + mid-loop safety valve)
+      // Step 2: Skill buffer injection
+      result = this.injectSkillBuffer(result);
+
+      // Step 3: Sanitize messages BEFORE compaction.
+      // Pi-agent-core may append messages with content: undefined (bad tool
+      // results) or content: [] (empty API responses, error messages). These
+      // crash extractTextContent() in microcompaction and transform-messages
+      // in pi-ai. Must run before compaction touches the messages.
+      result = {
+        ...result,
+        messages: result.messages.map(msg => {
+          const content = (msg as unknown as Record<string, unknown>)['content'];
+          if (content === undefined || content === null ||
+              (Array.isArray(content) && content.length === 0)) {
+            return { ...msg, content: [{ type: 'text' as const, text: '(no output)' }] };
+          }
+          return msg;
+        }),
+      };
+
+      // Step 4: Compaction (microcompaction + mid-loop safety valve)
       result = this.compactionManager.applyInTransformContext(
         result,
         // getHistory: extract conversation history (post-slot region)
@@ -1179,9 +1499,6 @@ export class CortexAgent {
           messages: [...ctx.messages.slice(0, slotCount), ...history],
         }),
       );
-
-      // Step 3: Skill buffer injection
-      result = this.injectSkillBuffer(result);
 
       return result;
     };
@@ -1204,9 +1521,13 @@ export class CortexAgent {
       // Look up from defaults map
       const defaultModelId = UTILITY_MODEL_DEFAULTS[primaryProvider];
       if (defaultModelId) {
+        // Copy the api field from the primary model so pi-ai can resolve
+        // the correct provider endpoint. Without this, pi-ai throws
+        // "No API provider registered for api: undefined".
         return {
-          provider: primaryProvider,
+          ...primaryModel,
           name: defaultModelId,
+          id: defaultModelId,
         };
       }
       // No default: use primary model as utility
@@ -1303,6 +1624,16 @@ export class CortexAgent {
     // Map turn_end -> onTurnComplete with AgentTextOutput
     this.eventUnsubscribers.push(
       this.eventBridge.on('turn_end', (event) => {
+        // Auto-wire token tracking: extract input token count from the
+        // turn_end event's usage data and update the compaction manager.
+        // This replaces the need for consumers to call
+        // updateSessionTokenCount() manually. See compaction-strategy.md
+        // (Token Tracking / Post-Hoc Tracking).
+        const inputTokens = this.extractInputTokens(event.data);
+        if (inputTokens > 0) {
+          this.compactionManager.updateTokenCount(inputTokens);
+        }
+
         if (event.textOutput) {
           for (const handler of this.turnCompleteHandlers) {
             try {
@@ -1350,6 +1681,50 @@ export class CortexAgent {
     }
 
     return null;
+  }
+
+  /**
+   * Extract input token count from a turn_end event's raw data.
+   *
+   * Pi-agent-core's turn_end event carries the AssistantMessage which
+   * includes usage.input from pi-ai. This is the total input token count
+   * for that LLM call (an assignment, not a delta).
+   *
+   * Follows the same multi-pattern extraction approach as BudgetGuard's
+   * extractCost to handle variations in pi-agent-core event structure.
+   */
+  private extractInputTokens(data: unknown): number {
+    if (!data || typeof data !== 'object') {
+      return 0;
+    }
+
+    const event = data as Record<string, unknown>;
+
+    // Pattern 1: Direct usage property on the event
+    const eventUsage = event['usage'] as Record<string, unknown> | undefined;
+    if (eventUsage && typeof eventUsage['input'] === 'number') {
+      return eventUsage['input'];
+    }
+
+    // Pattern 2: message.usage.input (pi-ai AssistantMessage structure)
+    const message = event['message'] as Record<string, unknown> | undefined;
+    if (message) {
+      const msgUsage = message['usage'] as Record<string, unknown> | undefined;
+      if (msgUsage && typeof msgUsage['input'] === 'number') {
+        return msgUsage['input'];
+      }
+    }
+
+    // Pattern 3: result.usage.input
+    const result = event['result'] as Record<string, unknown> | undefined;
+    if (result) {
+      const resultUsage = result['usage'] as Record<string, unknown> | undefined;
+      if (resultUsage && typeof resultUsage['input'] === 'number') {
+        return resultUsage['input'];
+      }
+    }
+
+    return 0;
   }
 
   // -----------------------------------------------------------------------
@@ -1423,6 +1798,51 @@ export class CortexAgent {
     }
 
     return '';
+  }
+
+  /**
+   * Extract usage data from a pi-ai AssistantMessage response.
+   *
+   * The AssistantMessage.usage field has the structure:
+   *   { input, output, cacheRead, cacheWrite, totalTokens,
+   *     cost: { input, output, cacheRead, cacheWrite, total } }
+   *
+   * Returns null if usage data is not present or not in the expected format.
+   */
+  private extractUsageFromAssistantMessage(result: unknown): CortexUsage | null {
+    if (!result || typeof result !== 'object') return null;
+
+    const msg = result as Record<string, unknown>;
+    const usage = msg['usage'];
+    if (!usage || typeof usage !== 'object') return null;
+
+    const u = usage as Record<string, unknown>;
+
+    // Validate required numeric fields
+    const input = typeof u['input'] === 'number' ? u['input'] : 0;
+    const output = typeof u['output'] === 'number' ? u['output'] : 0;
+    const cacheRead = typeof u['cacheRead'] === 'number' ? u['cacheRead'] : 0;
+    const cacheWrite = typeof u['cacheWrite'] === 'number' ? u['cacheWrite'] : 0;
+    const totalTokens = typeof u['totalTokens'] === 'number' ? u['totalTokens'] : input + output;
+
+    // Extract cost breakdown
+    const costObj = u['cost'];
+    let cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+    if (costObj && typeof costObj === 'object') {
+      const c = costObj as Record<string, unknown>;
+      cost = {
+        input: typeof c['input'] === 'number' ? c['input'] : 0,
+        output: typeof c['output'] === 'number' ? c['output'] : 0,
+        cacheRead: typeof c['cacheRead'] === 'number' ? c['cacheRead'] : 0,
+        cacheWrite: typeof c['cacheWrite'] === 'number' ? c['cacheWrite'] : 0,
+        total: typeof c['total'] === 'number' ? c['total'] : 0,
+      };
+    }
+
+    // Extract model if available
+    const model = typeof msg['model'] === 'string' ? msg['model'] : undefined;
+
+    return { input, output, cacheRead, cacheWrite, totalTokens, cost, model };
   }
 
   /**
@@ -1554,8 +1974,10 @@ export class CortexAgent {
   }
 
   /**
-   * Clear the skill buffer. Called automatically at the start of each
-   * new agentic loop. The consumer can also call this manually.
+   * Clear the skill buffer. The consumer should call this at the start
+   * of each tick (before pre-loading skills for the new loop).
+   * Cortex cannot auto-clear because it has no concept of tick boundaries,
+   * and clearing at prompt() start would wipe consumer pre-loaded skills.
    */
   clearSkillBuffer(): void {
     this.skillBuffer = [];
@@ -1602,6 +2024,21 @@ export class CortexAgent {
   // -----------------------------------------------------------------------
   // Private: Skill buffer
   // -----------------------------------------------------------------------
+
+  /**
+   * Rebuild the load_skill tool's description with the current available
+   * skills summary. Called automatically when skills are added/removed
+   * via the registry's onChange callback.
+   */
+  private rebuildLoadSkillDescription(): void {
+    if (this.loadSkillTool) {
+      this.loadSkillTool.description = buildLoadSkillDescription(this.skillRegistry);
+      // Re-sync tools to pi-agent-core so the updated description is visible
+      // to the LLM. refreshTools() creates shallow copies, so mutating the
+      // description on this.loadSkillTool doesn't propagate without a re-sync.
+      this.refreshTools();
+    }
+  }
 
   /**
    * Push a loaded skill to the buffer with deduplication.
@@ -1701,6 +2138,9 @@ export class CortexAgent {
     const childConfig = this.buildChildAgentConfig(params);
 
     try {
+      // Build the system prompt for the child agent
+      const systemPrompt = params.systemPrompt ?? this.currentSystemPrompt;
+
       // Create the sub-agent CortexAgent
       const childCortexConfig: CortexAgentConfig = {
         model: this.primaryModel,
@@ -1714,14 +2154,22 @@ export class CortexAgent {
       if (this.config.getApiKey) childCortexConfig.getApiKey = this.config.getApiKey;
       if (this.config.resolvePermission) childCortexConfig.resolvePermission = this.config.resolvePermission;
 
+      const childPiAgent = await this.createChildPiAgent({
+        ...childConfig,
+        systemPrompt,
+      });
+
       const childAgent = new CortexAgent(
-        await this.createChildPiAgent(childConfig),
+        childPiAgent,
         childCortexConfig,
         this.buildChildToolSet(params.tools),
       );
 
-      // Set system prompt
-      childAgent.buildSystemPrompt(params.systemPrompt ?? this.currentSystemPrompt);
+      // Wire transformContext hook (mirrors CortexAgent.create() setup)
+      this.wireChildTransformContext(childAgent, childPiAgent);
+
+      // Apply system prompt to CortexAgent internals (currentSystemPrompt)
+      childAgent.buildSystemPrompt(systemPrompt);
 
       // Track the sub-agent
       const tracked: TrackedSubAgent = {
@@ -1786,6 +2234,9 @@ export class CortexAgent {
     // Create child agent config
     const childConfig = this.buildChildAgentConfig(params);
 
+    // Build the system prompt for the child agent
+    const systemPrompt = params.systemPrompt ?? this.currentSystemPrompt;
+
     const bgChildCortexConfig: CortexAgentConfig = {
       model: this.primaryModel,
       workingDirectory: this.workingDirectory,
@@ -1798,14 +2249,22 @@ export class CortexAgent {
     if (this.config.getApiKey) bgChildCortexConfig.getApiKey = this.config.getApiKey;
     if (this.config.resolvePermission) bgChildCortexConfig.resolvePermission = this.config.resolvePermission;
 
+    const childPiAgent = await this.createChildPiAgent({
+      ...childConfig,
+      systemPrompt,
+    });
+
     const childAgent = new CortexAgent(
-      await this.createChildPiAgent(childConfig),
+      childPiAgent,
       bgChildCortexConfig,
       this.buildChildToolSet(params.tools),
     );
 
-    // Set system prompt
-    childAgent.buildSystemPrompt(params.systemPrompt ?? this.currentSystemPrompt);
+    // Wire transformContext hook (mirrors CortexAgent.create() setup)
+    this.wireChildTransformContext(childAgent, childPiAgent);
+
+    // Apply system prompt to CortexAgent internals (currentSystemPrompt)
+    childAgent.buildSystemPrompt(systemPrompt);
 
     // Track the sub-agent
     const tracked: TrackedSubAgent = {
@@ -1942,7 +2401,7 @@ export class CortexAgent {
    * Create a child pi-agent-core Agent instance for a sub-agent.
    */
   private async createChildPiAgent(
-    config: { maxTurns: number; maxCost: number },
+    config: { maxTurns: number; maxCost: number; systemPrompt: string },
   ): Promise<PiAgent> {
     // Dynamically import pi-agent-core
     let AgentClass: new (config: Record<string, unknown>) => PiAgent;
@@ -1955,14 +2414,49 @@ export class CortexAgent {
       );
     }
 
+    // Must mirror the format used in CortexAgent.create():
+    // pi-agent-core expects { initialState: { model, tools, systemPrompt, messages }, getApiKey }
     const agentConfig: Record<string, unknown> = {
-      model: this.primaryModel,
-      tools: [],
-      systemPrompt: '',
+      initialState: {
+        systemPrompt: config.systemPrompt,
+        model: this.primaryModel,
+        tools: [],
+        messages: [],
+      },
       getApiKey: this.config.getApiKey,
     };
 
+    // Wire resolvePermission -> beforeToolCall for sub-agents (same gate as parent)
+    if (this.config.resolvePermission) {
+      const resolver = this.config.resolvePermission;
+      agentConfig['beforeToolCall'] = async (ctx: unknown) => {
+        const { toolCall, args } = ctx as { toolCall: { name: string }; args: unknown };
+        const allowed = await resolver(toolCall.name, args);
+        if (!allowed) {
+          return { block: true, reason: `Tool "${toolCall.name}" requires approval or is disabled.` };
+        }
+        return undefined;
+      };
+    }
+
     return new AgentClass(agentConfig);
+  }
+
+  /**
+   * Wire the transformContext hook on a child CortexAgent's pi-agent.
+   * Mirrors the setup in CortexAgent.create(). Without this, the child
+   * agent's context management (compaction, skill injection, slots) won't run.
+   */
+  private wireChildTransformContext(childAgent: CortexAgent, childPiAgent: PiAgent): void {
+    const hook = childAgent.getTransformContextHook();
+    childPiAgent.transformContext = async (messages: unknown[]) => {
+      const result = hook({
+        systemPrompt: childPiAgent.state.systemPrompt,
+        messages: messages as AgentMessage[],
+        tools: childPiAgent.state.tools as unknown[],
+      });
+      return result.messages;
+    };
   }
 
   /**

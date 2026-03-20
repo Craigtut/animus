@@ -117,13 +117,14 @@ export function buildSummaryMessage(
  * Extracts text content and labels each turn with role.
  */
 export function formatTurnsForSummarization(turns: AgentMessage[]): string {
+  // No per-turn truncation. The compaction target is already bounded by
+  // partitionHistory (everything minus the preserved tail), and the
+  // summarizer needs access to full turn content for high-quality
+  // compression. See compaction-strategy.md Layer 2.
   return turns
     .map((msg, i) => {
       const text = extractTextContent(msg);
-      const truncated = text.length > 4000
-        ? text.slice(0, 4000) + '\n... [truncated for summarization]'
-        : text;
-      return `[Turn ${i + 1}] ${msg.role}:\n${truncated}`;
+      return `[Turn ${i + 1}] ${msg.role}:\n${text}`;
     })
     .join('\n\n---\n\n');
 }
@@ -134,7 +135,7 @@ export function formatTurnsForSummarization(turns: AgentMessage[]): string {
  */
 export type CompleteFn = (context: {
   systemPrompt: string;
-  messages: Array<{ role: string; content: string }>;
+  messages: unknown[];
 }) => Promise<string>;
 
 /**

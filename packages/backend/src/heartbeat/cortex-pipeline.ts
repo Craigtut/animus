@@ -11,19 +11,23 @@
  * See docs/cortex/mind-migration.md for the full design.
  */
 
-import type { CortexAgent, AgentTextOutput, CortexEvent } from '@animus-labs/cortex';
+import type { CortexAgent, AgentTextOutput, CortexEvent, CortexUsage, AgentMessage } from '@animus-labs/cortex';
 import { zodToTypebox } from '@animus-labs/cortex';
 import type { MindOutput } from '@animus-labs/shared';
+import { getEmotionDescription, EMOTION_CATEGORIES } from '@animus-labs/shared';
 import { recordThoughtSchema, recordCognitiveStateSchema } from './cognitive-tools.js';
+import { formatEmotionalState } from './emotion-engine.js';
 
 import { createLogger } from '../lib/logger.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { getAgentLogsDb } from '../db/index.js';
 import * as agentLogStore from '../db/stores/agent-log-store.js';
 
+import type { AgentEventType } from '@animus-labs/shared';
 import type { GatherResult } from './gather-context.js';
 import type { CompiledPersona } from './persona-compiler.js';
 import { isNonResponse, type CognitiveSnapshot, createEmptySnapshot, snapshotToMindOutput, safeMindOutput } from './cognitive-tools.js';
+import { MIND_SLOT_NAMES } from './cortex-mind.js';
 import {
   buildTriggerSection,
   getReplyGuidance,
@@ -44,6 +48,180 @@ import {
 const log = createLogger('CortexPipeline', 'heartbeat');
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Try to extract a JSON object from text that may contain markdown fences
+ * or other wrapper text. Returns the parsed object or null.
+ */
+function tryParseJsonFromText(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
+  // Strip markdown code fences if present
+  const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const jsonStr = fenceMatch ? fenceMatch[1]!.trim() : trimmed;
+  try {
+    const parsed = JSON.parse(jsonStr);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Not valid JSON
+  }
+  return null;
+}
+
+/**
+ * Format a timestamp as a relative/short time string for ephemeral context.
+ * E.g., "2 min ago", "1h ago", "yesterday 9:14 PM"
+ */
+function formatRelativeTime(isoTimestamp: string, timezone: string): string {
+  try {
+    const date = new Date(isoTimestamp);
+    const nowMs = Date.now();
+    const diffMs = nowMs - date.getTime();
+    const diffMin = Math.floor(diffMs / 60_000);
+
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) {
+      const time = date.toLocaleString('en-US', { timeZone: timezone, hour: 'numeric', minute: '2-digit', hour12: true });
+      return `${diffHours}h ago (${time})`;
+    }
+
+    return date.toLocaleString('en-US', { timeZone: timezone, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+  } catch {
+    return isoTimestamp;
+  }
+}
+
+// ============================================================================
+// Phase Context Assembly
+// ============================================================================
+
+/** Max chars for serialized tool call args in conversation history. */
+const MAX_TOOL_ARGS_CHARS = 200;
+/** Max chars for serialized tool result text in conversation history. */
+const MAX_TOOL_RESULT_CHARS = 500;
+/** Number of recent messages to include in THOUGHT summary mode. */
+const THOUGHT_HISTORY_TAIL = 6;
+/** Max chars per message in THOUGHT summary mode. */
+const THOUGHT_MSG_TRUNCATE = 300;
+
+/**
+ * Serialize an AgentMessage (which may have complex content arrays) into
+ * a simple { role, content: string } for structuredComplete().
+ */
+function serializeAgentMessage(msg: AgentMessage): { role: string; content: string } {
+  if (typeof msg.content === 'string') {
+    return { role: msg.role, content: msg.content };
+  }
+
+  const parts: string[] = [];
+  for (const part of msg.content) {
+    if (part.type === 'text' && typeof part.text === 'string') {
+      parts.push(part.text);
+    } else if (part.type === 'tool_use' || part.type === 'toolCall') {
+      const name = (part as Record<string, unknown>)['name'] ?? (part as Record<string, unknown>)['toolName'] ?? 'unknown';
+      const args = JSON.stringify((part as Record<string, unknown>)['input'] ?? (part as Record<string, unknown>)['args'] ?? {});
+      parts.push(`[Tool: ${name}(${args.substring(0, MAX_TOOL_ARGS_CHARS)}${args.length > MAX_TOOL_ARGS_CHARS ? '...' : ''})]`);
+    } else if (part.type === 'tool_result') {
+      const content = (part as Record<string, unknown>)['content'];
+      let text: string;
+      if (typeof content === 'string') {
+        text = content;
+      } else if (Array.isArray(content)) {
+        text = (content as Array<Record<string, unknown>>)
+          .filter(p => p['type'] === 'text' && typeof p['text'] === 'string')
+          .map(p => p['text'] as string)
+          .join('\n');
+      } else {
+        text = String(content ?? '');
+      }
+      parts.push(`[Tool Result: ${text.substring(0, MAX_TOOL_RESULT_CHARS)}${text.length > MAX_TOOL_RESULT_CHARS ? '...' : ''}]`);
+    }
+  }
+
+  return { role: msg.role, content: parts.join('\n') || '(empty)' };
+}
+
+/**
+ * Assemble the messages array for THOUGHT or REFLECT structuredComplete calls.
+ *
+ * Follows the documented context layout from docs/cortex/mind-migration.md:
+ * [slots] + [history] + [ephemeral] + [phase prompt]
+ *
+ * Order is optimized for prefix caching (most stable content first).
+ *
+ * Returns unknown[] because the array may contain both simple { role, content }
+ * objects (slots, ephemeral, prompts) and native pi-ai messages (conversation
+ * history with AssistantMessage, ToolResultMessage, etc.). Pi-ai's
+ * transformMessages() and convertMessages() handle all format normalization.
+ */
+function buildPhaseMessages(
+  config: PipelineConfig,
+  thought: ThoughtResult | null,
+  options: {
+    includeHistory: 'none' | 'summary' | 'current-tick';
+    currentTickTurns?: AgentMessage[];
+    userPrompt: string;
+    excludeSlots?: string[];
+  },
+): unknown[] {
+  const { cortexAgent, gathered } = config;
+  const cm = cortexAgent.getContextManager();
+  const messages: unknown[] = [];
+  const excludeSet = new Set(options.excludeSlots ?? []);
+
+  // 1. Slots (most stable, best prefix cache hit rate)
+  for (const slotName of MIND_SLOT_NAMES) {
+    if (excludeSet.has(slotName)) continue;
+    const content = cm.getSlot(slotName);
+    if (content) {
+      messages.push({ role: 'user', content: `<context slot="${slotName}">\n${content}\n</context>` });
+    }
+  }
+
+  // 2. Conversation history (mode-dependent)
+  if (options.includeHistory === 'summary') {
+    // THOUGHT mode: lightweight text summary of recent turns, compressed
+    // into a single user message. Intentionally lossy for token efficiency.
+    const history = cortexAgent.getConversationHistory();
+    const recentTurns = history.slice(-THOUGHT_HISTORY_TAIL);
+    if (recentTurns.length > 0) {
+      const lines = recentTurns.map(m => {
+        const serialized = serializeAgentMessage(m);
+        const truncated = serialized.content.substring(0, THOUGHT_MSG_TRUNCATE);
+        return `[${serialized.role}]: ${truncated}${serialized.content.length > THOUGHT_MSG_TRUNCATE ? '...' : ''}`;
+      });
+      messages.push({ role: 'user', content: `<context slot="recent-conversation">\n${lines.join('\n')}\n</context>` });
+    }
+  } else if (options.includeHistory === 'current-tick' && options.currentTickTurns) {
+    // REFLECT mode: pass raw pi-ai messages from the agentic loop directly.
+    // This preserves the full structure (tool calls, tool results, thinking
+    // blocks) so the model has complete visibility into what happened.
+    // Pi-ai's transformMessages() handles cross-model normalization.
+    for (const msg of options.currentTickTurns) {
+      messages.push(msg);
+    }
+  }
+
+  // 3. Ephemeral context (per-tick situational awareness)
+  const ephSections = buildEphemeralSections(gathered, thought, config);
+  const ephemeralText = ephSections.map(s => s.content).join('\n\n');
+  if (ephemeralText) {
+    messages.push({ role: 'user', content: ephemeralText });
+  }
+
+  // 4. Phase-specific user prompt (last)
+  messages.push({ role: 'user', content: options.userPrompt });
+
+  return messages;
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -57,6 +235,8 @@ export interface PipelineResult {
   earlyReplyContent: string;
   allThoughts: Array<{ content: string; importance: number }>;
   replyTurnsSent: number;
+  /** Ephemeral sections used in the agentic loop (for context snapshot) */
+  ephemeralSections: EphemeralSection[];
 }
 
 /** Configuration for a pipeline run */
@@ -67,13 +247,19 @@ export interface PipelineConfig {
   tickNumber: number;
   systemPrompt: string;
   logSessionId: string | null;
+  /** Tick trigger type for usage records (e.g. 'message', 'interval'). */
+  tickType: string | null;
+  /** Contact ID from the trigger, for usage record attribution. */
+  contactId: string | null;
+  /** Model identifier string for usage records. */
+  model: string;
 }
 
 // ============================================================================
 // THOUGHT Phase (Phase 2)
 // ============================================================================
 
-interface ThoughtResult {
+export interface ThoughtResult {
   content: string;
   importance: number;
 }
@@ -102,8 +288,14 @@ async function executeThought(
     // Build THOUGHT-specific system prompt (stripped down, no tool/decision/goal guidance)
     const thoughtSystemPrompt = buildThoughtSystemPrompt(compiledPersona);
 
-    // Build THOUGHT-specific context (user message with structured output schema)
+    // Build THOUGHT-specific context with slots + history summary + ephemeral
+    // Per docs/cortex/mind-migration.md: THOUGHT receives slots, history, and ephemeral
     const thoughtPrompt = buildThoughtPrompt(gathered);
+    const phaseMessages = buildPhaseMessages(config, null, {
+      includeHistory: 'summary',
+      userPrompt: thoughtPrompt,
+      excludeSlots: ['credentials'],
+    });
 
     // THOUGHT uses the primary model (same as agentic loop), not the utility model.
     // Uses tool-call-as-structured-output: define a tool matching the desired schema,
@@ -112,11 +304,12 @@ async function executeThought(
     const result = await cortexAgent.structuredComplete(
       {
         systemPrompt: thoughtSystemPrompt,
-        messages: [{ role: 'user', content: thoughtPrompt }],
+        messages: phaseMessages,
       },
       thoughtSchema,
       'record_thought',
       'Record your inner thought for this moment.',
+      cortexAgent.getCacheRetention() ? { cacheRetention: cortexAgent.getCacheRetention()! } : undefined,
     );
 
     let thought: ThoughtResult;
@@ -130,9 +323,18 @@ async function executeThought(
       log.warn('THOUGHT: model did not produce structured output, using fallback');
       const textResponse = await cortexAgent.directComplete({
         systemPrompt: thoughtSystemPrompt,
-        messages: [{ role: 'user', content: thoughtPrompt }],
+        messages: phaseMessages,
       });
-      thought = { content: textResponse.trim() || 'A quiet moment passes.', importance: 0.2 };
+      // Try to parse JSON from the text (model may respond with JSON text instead of tool call)
+      const parsed = tryParseJsonFromText(textResponse);
+      if (parsed && typeof parsed['content'] === 'string') {
+        thought = {
+          content: parsed['content'],
+          importance: typeof parsed['importance'] === 'number' ? Math.max(0, Math.min(1, parsed['importance'])) : 0.2,
+        };
+      } else {
+        thought = { content: textResponse.trim() || 'A quiet moment passes.', importance: 0.2 };
+      }
     }
 
     log.info(`THOUGHT complete: "${thought.content.substring(0, 80)}${thought.content.length > 80 ? '...' : ''}" (importance=${thought.importance})`);
@@ -222,6 +424,7 @@ interface AgenticLoopResult {
   replySentEarly: boolean;
   replyTurnsSent: number;
   hadTurns: boolean;
+  ephemeralSections: EphemeralSection[];
 }
 
 /**
@@ -245,9 +448,10 @@ async function executeAgenticLoop(
 
   log.info(`AGENTIC LOOP starting (tick #${tickNumber})`);
 
-  // Set ephemeral context (thought + per-tick sections)
-  const ephemeralSections = buildEphemeralContext(gathered, thought, config);
-  cortexAgent.getContextManager().setEphemeral(ephemeralSections);
+  // Build ephemeral context (thought + per-tick sections)
+  const ephSections = buildEphemeralSections(gathered, thought, config);
+  const ephemeralText = ephSections.map(s => s.content).join('\n\n');
+  cortexAgent.getContextManager().setEphemeral(ephemeralText);
 
   // Build the tick prompt (trigger context IS the user message)
   const tickPrompt = buildTriggerSection(gathered.trigger);
@@ -284,7 +488,13 @@ async function executeAgenticLoop(
     // Determine if this is a non-web channel (external delivery target)
     const isWebChannel = gathered.trigger.channel === 'web';
 
-    // Send per-turn reply
+    // Mark reply as sent SYNCHRONOUSLY so the pipeline sees it before prompt() resolves.
+    // The async IIFE below does the actual send, but the flag must be set here to prevent
+    // execute-output from sending a duplicate.
+    replySentEarly = true;
+    replyTurnsSent++;
+
+    // Send per-turn reply (fire-and-forget)
     (async () => {
       try {
         const { getChannelRouter } = await import('../channels/channel-router.js');
@@ -306,8 +516,6 @@ async function executeAgenticLoop(
           ...(!isWebChannel ? { channelContent: userFacingText.trim() } : {}),
           ...(hasReplyMetadata ? { metadata: replyMetadata } : {}),
         });
-        replyTurnsSent++;
-        replySentEarly = true;
         log.info(`Turn reply sent on "${gathered.trigger.channel}" for tick #${tickNumber} (${userFacingText.length} chars)`);
 
         eventBus.emit('reply:turn_complete', {
@@ -326,15 +534,21 @@ async function executeAgenticLoop(
   const chunkUnsub = cortexAgent.getEventBridge().on('response_chunk', (event: CortexEvent) => {
     if (!isMessageTrigger) return;
 
-    // Extract text chunk from the event
+    // Extract text chunk from the pi-agent-core message_update event.
+    // The raw PiEvent has: { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: string, ... }, ... }
+    // IMPORTANT: Only stream text_delta events. message_update also fires for
+    // toolcall_delta (tool call argument JSON) which must NOT be streamed to
+    // the frontend as reply text.
     const data = event.data as Record<string, unknown> | undefined;
-    const chunk = data?.['text'] as string | undefined;
+    const assistantEvent = data?.['assistantMessageEvent'] as Record<string, unknown> | undefined;
+    if (!assistantEvent || assistantEvent['type'] !== 'text_delta') return;
+    const chunk = (assistantEvent['delta'] as string) ?? undefined;
     if (!chunk) return;
 
     eventBus.emit('reply:chunk', {
       content: chunk,
       accumulated: replyAccumulated + chunk,
-      turnIndex: 0, // Will be refined when turn tracking is wired
+      turnIndex: replyTurnsSent,
       channel: triggerChannel,
     });
   });
@@ -352,9 +566,38 @@ async function executeAgenticLoop(
     pendingInjections.length = 0; // clear
   }
 
+  // Set cache retention env var for the agentic loop. Pi-ai reads
+  // PI_CACHE_RETENTION on every API call within the loop.
+  const prevCacheRetention = process.env['PI_CACHE_RETENTION'];
+  const loopCacheRetention = cortexAgent.getCacheRetention();
+  if (loopCacheRetention && loopCacheRetention !== 'none') {
+    process.env['PI_CACHE_RETENTION'] = loopCacheRetention;
+  } else {
+    delete process.env['PI_CACHE_RETENTION'];
+  }
+
   try {
     // Run the agentic loop
     await cortexAgent.prompt(effectiveTickPrompt);
+
+    // Check for silent errors: pi-agent-core catches errors internally
+    // and resolves the promise normally, hiding the error in agent.state.error.
+    // Surface these so they're visible in the logs.
+    const agentState = (cortexAgent as unknown as { agent: { state: { error?: string } } }).agent?.state;
+    if (agentState?.error) {
+      log.error(`AGENTIC LOOP silent error (tick #${tickNumber}): ${agentState.error}`);
+
+      // Scan conversation history for malformed messages to help diagnose
+      try {
+        const history = cortexAgent.getConversationHistory();
+        const badMsgs = history
+          .map((m: Record<string, unknown>, i: number) => ({ i, role: m['role'], hasContent: m['content'] !== undefined && m['content'] !== null, contentType: typeof m['content'], isArray: Array.isArray(m['content']), len: Array.isArray(m['content']) ? (m['content'] as unknown[]).length : -1 }))
+          .filter(m => !m.hasContent || (m.isArray && m.len === 0));
+        if (badMsgs.length > 0) {
+          log.error(`AGENTIC LOOP: ${badMsgs.length} malformed message(s) in history: ${JSON.stringify(badMsgs)}`);
+        }
+      } catch { /* diagnostic only */ }
+    }
 
     // Clean up event handlers
     turnEndUnsub();
@@ -377,6 +620,7 @@ async function executeAgenticLoop(
       replySentEarly,
       replyTurnsSent,
       hadTurns: replyAccumulated.length > 0 || replyTurnsSent > 0,
+      ephemeralSections: ephSections,
     };
   } catch (err) {
     // Clean up event handlers on error too
@@ -390,7 +634,15 @@ async function executeAgenticLoop(
       replySentEarly,
       replyTurnsSent,
       hadTurns: replyAccumulated.length > 0 || replyTurnsSent > 0,
+      ephemeralSections: ephSections,
     };
+  } finally {
+    // Restore previous cache retention env var
+    if (prevCacheRetention !== undefined) {
+      process.env['PI_CACHE_RETENTION'] = prevCacheRetention;
+    } else {
+      delete process.env['PI_CACHE_RETENTION'];
+    }
   }
 }
 
@@ -431,6 +683,7 @@ async function executeReflect(
   config: PipelineConfig,
   thought: ThoughtResult | null,
   loopResult: AgenticLoopResult,
+  currentTickTurns: AgentMessage[],
 ): Promise<ReflectResult | null> {
   const { cortexAgent, gathered, compiledPersona, tickNumber } = config;
 
@@ -444,18 +697,28 @@ async function executeReflect(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
+      // Build REFLECT context with slots + current tick's agentic loop turns + ephemeral
+      // Per docs/cortex/mind-migration.md: REFLECT needs full visibility into what happened
+      const reflectPrompt = buildReflectPrompt(thought, loopResult);
+      const phaseMessages = buildPhaseMessages(config, thought, {
+        includeHistory: 'current-tick',
+        currentTickTurns,
+        userPrompt: reflectPrompt,
+        excludeSlots: ['credentials'],
+      });
+
       // REFLECT uses the primary model (same as agentic loop), not the utility model.
       // Uses tool-call-as-structured-output with the existing recordCognitiveStateSchema.
-      const reflectPrompt = buildReflectPrompt(thought, loopResult);
       const reflectSchema = await zodToTypebox(recordCognitiveStateSchema);
       const parsed = await cortexAgent.structuredComplete(
         {
           systemPrompt: reflectSystemPrompt,
-          messages: [{ role: 'user', content: reflectPrompt }],
+          messages: phaseMessages,
         },
         reflectSchema,
         'record_cognitive_state',
         'Record your cognitive state: experience, emotions, decisions, and memories.',
+        cortexAgent.getCacheRetention() ? { cacheRetention: cortexAgent.getCacheRetention()! } : undefined,
       );
 
       let result: ReflectResult;
@@ -564,6 +827,148 @@ function generatePlaceholderReflection(
 }
 
 // ============================================================================
+// Phase event logging
+// ============================================================================
+
+/**
+ * Log a pipeline phase event (thought_start/end, reflect_start/end) to
+ * agent_logs.db and emit on EventBus for live timeline updates.
+ */
+function logPhaseEvent(
+  logSessionId: string | null,
+  eventType: AgentEventType,
+  data: Record<string, unknown>,
+): void {
+  if (!logSessionId) return;
+  try {
+    const agentLogsDb = getAgentLogsDb();
+    const event = agentLogStore.insertEvent(agentLogsDb, {
+      sessionId: logSessionId,
+      eventType,
+      data,
+    });
+    const eventBus = getEventBus();
+    eventBus.emit('agent:event:logged', {
+      id: event.id,
+      sessionId: event.sessionId,
+      eventType: event.eventType,
+      data: event.data,
+      createdAt: event.createdAt,
+    });
+  } catch (err) {
+    log.debug('Failed to log phase event:', err);
+  }
+}
+
+// ============================================================================
+// Usage logging
+// ============================================================================
+
+/**
+ * Persist usage data from a pipeline phase to agent_logs.db.
+ *
+ * Accepts a CortexUsage (from CortexAgent.getLastDirectUsage()) or a
+ * manually assembled usage object for the agentic loop phase.
+ *
+ * Silently catches errors to avoid breaking the pipeline if logging fails.
+ */
+function logPhaseUsage(
+  config: PipelineConfig,
+  pipelinePhase: string,
+  usage: CortexUsage | null,
+): void {
+  if (!usage || !config.logSessionId) return;
+
+  try {
+    const agentLogsDb = getAgentLogsDb();
+    agentLogStore.insertUsage(agentLogsDb, {
+      sessionId: config.logSessionId,
+      inputTokens: usage.input,
+      outputTokens: usage.output,
+      cacheReadTokens: usage.cacheRead,
+      cacheWriteTokens: usage.cacheWrite,
+      totalTokens: usage.totalTokens,
+      costUsd: usage.cost.total,
+      model: usage.model ?? config.model,
+      tickNumber: config.tickNumber,
+      tickType: config.tickType,
+      pipelinePhase,
+      contactId: config.contactId,
+    });
+    log.debug(`Usage logged for ${pipelinePhase}: ${usage.totalTokens} tokens, $${usage.cost.total.toFixed(6)}`);
+  } catch (err) {
+    log.debug(`Failed to log usage for ${pipelinePhase}:`, err);
+  }
+}
+
+/**
+ * Extract accumulated usage from turn_end events during the agentic loop.
+ *
+ * The agentic loop may have multiple turns. The BudgetGuard tracks
+ * accumulated cost, but we need the full token breakdown. We accumulate
+ * usage from each turn_end event's AssistantMessage.usage.
+ */
+interface AccumulatedUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  totalTokens: number;
+  costTotal: number;
+  model: string | undefined;
+}
+
+function createUsageAccumulator(): AccumulatedUsage {
+  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, costTotal: 0, model: undefined };
+}
+
+function accumulateUsageFromTurnEnd(acc: AccumulatedUsage, event: CortexEvent): void {
+  const piEvent = event.data as Record<string, unknown> | undefined;
+  if (!piEvent) return;
+
+  const message = piEvent['message'] as Record<string, unknown> | undefined;
+  if (!message) return;
+
+  const usage = message['usage'] as Record<string, unknown> | undefined;
+  if (!usage) return;
+
+  acc.input += typeof usage['input'] === 'number' ? usage['input'] : 0;
+  acc.output += typeof usage['output'] === 'number' ? usage['output'] : 0;
+  acc.cacheRead += typeof usage['cacheRead'] === 'number' ? usage['cacheRead'] : 0;
+  acc.cacheWrite += typeof usage['cacheWrite'] === 'number' ? usage['cacheWrite'] : 0;
+  acc.totalTokens += typeof usage['totalTokens'] === 'number' ? usage['totalTokens'] : 0;
+
+  const cost = usage['cost'] as Record<string, unknown> | undefined;
+  if (cost && typeof cost['total'] === 'number') {
+    acc.costTotal += cost['total'];
+  }
+
+  // Capture model from the last turn
+  if (typeof message['model'] === 'string') {
+    acc.model = message['model'];
+  }
+}
+
+function accumulatedToCortexUsage(acc: AccumulatedUsage): CortexUsage | null {
+  if (acc.totalTokens === 0 && acc.input === 0 && acc.output === 0) return null;
+  return {
+    input: acc.input,
+    output: acc.output,
+    cacheRead: acc.cacheRead,
+    cacheWrite: acc.cacheWrite,
+    totalTokens: acc.totalTokens,
+    cost: {
+      input: 0, // Per-category cost breakdown is not accumulated; use total
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: acc.costTotal,
+    },
+    model: acc.model,
+  };
+}
+
+// ============================================================================
 // Full Pipeline
 // ============================================================================
 
@@ -588,11 +993,44 @@ export async function executeCortexPipeline(
 
   // Phase 2: THOUGHT
   currentPhase.value = 'thought';
+  logPhaseEvent(config.logSessionId, 'thought_start', { tickNumber });
+  const thoughtStartTime = Date.now();
   const thought = await executeThought(config);
+  logPhaseEvent(config.logSessionId, 'thought_end', {
+    tickNumber,
+    durationMs: Date.now() - thoughtStartTime,
+    content: thought?.content ?? null,
+    importance: thought?.importance ?? null,
+    failed: thought === null,
+  });
+
+  // Log THOUGHT phase usage (structuredComplete/directComplete captures it)
+  const thoughtUsage = config.cortexAgent.getLastDirectUsage();
+  logPhaseUsage(config, 'thought', thoughtUsage);
 
   // Phase 3: AGENTIC LOOP
   currentPhase.value = 'agentic-loop';
+
+  // Snapshot conversation history length before the loop so we can extract
+  // only the current tick's turns for REFLECT (docs: "critical" context).
+  const preLoopHistoryLength = config.cortexAgent.getConversationHistory().length;
+
+  // Set up usage accumulation for the agentic loop (may span multiple turns)
+  const loopUsageAcc = createUsageAccumulator();
+  const loopUsageUnsub = config.cortexAgent.getEventBridge().on('turn_end', (event: CortexEvent) => {
+    accumulateUsageFromTurnEnd(loopUsageAcc, event);
+  });
+
   const loopResult = await executeAgenticLoop(config, thought, pendingInjections);
+
+  // Extract this tick's agentic loop turns for REFLECT context
+  const postLoopHistory = config.cortexAgent.getConversationHistory();
+  const currentTickTurns = postLoopHistory.slice(preLoopHistoryLength);
+
+  // Clean up usage accumulation and log agentic loop usage
+  loopUsageUnsub();
+  const loopUsage = accumulatedToCortexUsage(loopUsageAcc);
+  logPhaseUsage(config, 'agentic_loop', loopUsage);
 
   // Decide whether to run REFLECT
   const thoughtFailed = thought === null;
@@ -608,12 +1046,28 @@ export async function executeCortexPipeline(
       earlyReplyContent: loopResult.replyText,
       allThoughts: thought ? [thought] : [],
       replyTurnsSent: loopResult.replyTurnsSent,
+      ephemeralSections: loopResult.ephemeralSections,
     };
   }
 
   // Phase 4: REFLECT
   currentPhase.value = 'reflect';
-  const reflectResult = await executeReflect(config, thought, loopResult);
+  logPhaseEvent(config.logSessionId, 'reflect_start', { tickNumber });
+  const reflectStartTime = Date.now();
+  const reflectResult = await executeReflect(config, thought, loopResult, currentTickTurns);
+  logPhaseEvent(config.logSessionId, 'reflect_end', {
+    tickNumber,
+    durationMs: Date.now() - reflectStartTime,
+    emotionDeltaCount: reflectResult?.emotionDeltas?.length ?? 0,
+    decisionCount: reflectResult?.decisions?.length ?? 0,
+    memoryCandidateCount: reflectResult?.memoryCandidate?.length ?? 0,
+    hasExperience: reflectResult?.experience != null,
+    failed: reflectResult === null,
+  });
+
+  // Log REFLECT phase usage (structuredComplete captures it)
+  const reflectUsage = config.cortexAgent.getLastDirectUsage();
+  logPhaseUsage(config, 'reflect', reflectUsage);
 
   // Assemble MindOutput from the combined pipeline results
   currentPhase.value = 'execute';
@@ -643,6 +1097,7 @@ export async function executeCortexPipeline(
     earlyReplyContent: loopResult.replyText,
     allThoughts: thought ? [thought] : [],
     replyTurnsSent: loopResult.replyTurnsSent,
+    ephemeralSections: loopResult.ephemeralSections,
   };
 }
 
@@ -674,13 +1129,9 @@ consider what has arrived (a message, a completed task, the passage of time),
 and generate the next natural thought. Progress the narrative. Do not repeat
 or summarize. Keep it short: a few sentences, under 40 words.
 
-Respond with a JSON object:
-{
-  "content": "your thought text",
-  "importance": 0.0-1.0
-}
-
-Where importance: 0.0 = idle musing, 1.0 = critical realization.`);
+You MUST use the record_thought tool to capture your thought. Do not respond
+with text. Call the tool with your thought content and an importance score
+(0.0 = idle musing, 1.0 = critical realization).`);
 
   // Persona
   if (compiledPersona.compiledText) {
@@ -717,29 +1168,16 @@ visibility into the conversation history, tool calls, and decisions made.
 Your task is to produce a structured cognitive state capturing your inner
 experience.
 
-Respond with a JSON object containing:
-{
-  "experience": {
-    "content": "Third-person past tense narration of what happened, under 72 words, using your name.",
-    "importance": 0.0-1.0
-  },
-  "emotionDeltas": [
-    { "emotion": "<one of 12 emotions>", "delta": -0.3 to 0.3, "reasoning": "why this shifted" }
-  ],
-  "energyDelta": { "delta": -0.1 to 0.1, "reasoning": "why energy changed" } | null,
-  "decisions": [
-    { "type": "<decision_type>", "description": "what and why", "parameters": { ... } }
-  ],
-  "workingMemoryUpdate": "complete replacement text" | null,
-  "coreSelfUpdate": "complete replacement text" | null,
-  "memoryCandidate": [
-    { "content": "...", "memoryType": "fact|experience|procedure|outcome", "importance": 0.0-1.0, "contactId?": "...", "keywords?": [...] }
-  ]
-}
+You MUST use the record_cognitive_state tool to capture your reflection.
+Do not respond with text. Call the tool with all required fields.
 
-Only include emotions that actually shifted. Only include memory candidates
-for genuinely noteworthy knowledge. Experience narration should be in third
-person, past tense, using your name.`);
+Guidelines for the tool parameters:
+- experience: Third-person past tense narration using your name, under 72 words
+- emotionDeltas: Only include emotions that actually shifted this tick
+- energyDelta: null if no change
+- decisions: Only include if you need to take action
+- workingMemoryUpdate/coreSelfUpdate: null unless genuinely new knowledge
+- memoryCandidate: Only genuinely noteworthy knowledge worth preserving`);
 
   // 2. Persona
   if (compiledPersona.compiledText) {
@@ -824,19 +1262,25 @@ function buildReflectPrompt(
   return lines.join('\n');
 }
 
+/** Named ephemeral section for context snapshot */
+export interface EphemeralSection {
+  name: string;
+  content: string;
+}
+
 /**
- * Build ephemeral context for the agentic loop.
- * Injected via transformContext, never stored in messages.
+ * Build ephemeral context sections for the agentic loop.
+ * Returns structured data so the context snapshot can capture individual sections.
  *
  * Includes all 17 documented ephemeral sections from
  * docs/cortex/mind-migration.md.
  */
-function buildEphemeralContext(
+export function buildEphemeralSections(
   gathered: GatherResult,
   thought: ThoughtResult | null,
   config: PipelineConfig,
-): string {
-  const sections: string[] = [];
+): EphemeralSection[] {
+  const sections: EphemeralSection[] = [];
 
   // 1. Date/time awareness
   const now = new Date();
@@ -852,21 +1296,21 @@ function buildEphemeralContext(
       minute: '2-digit',
       hour12: true,
     });
-    sections.push(`Current date and time: ${formatted} (${tz})`);
+    sections.push({ name: 'Date/Time', content: `Current date and time: ${formatted} (${tz})` });
   } catch {
-    sections.push(`Current date and time: ${now.toISOString()}`);
+    sections.push({ name: 'Date/Time', content: `Current date and time: ${now.toISOString()}` });
   }
 
   // 2. Active contact (message triggers only)
   if (gathered.trigger.type === 'message' && gathered.contact) {
-    sections.push(`You are talking to: ${gathered.contact.fullName} (${gathered.contact.permissionTier} tier)`);
+    sections.push({ name: 'Active Contact', content: `You are talking to: ${gathered.contact.fullName} (${gathered.contact.permissionTier} tier)` });
   }
 
   // 3. Reply guidance (channel-specific)
   if (gathered.trigger.channel) {
     const replyGuidance = getReplyGuidance(gathered.trigger.channel);
     if (replyGuidance) {
-      sections.push(replyGuidance);
+      sections.push({ name: 'Reply Guidance', content: replyGuidance });
     }
   }
 
@@ -874,7 +1318,7 @@ function buildEphemeralContext(
   if (gathered.trigger.channel) {
     const capabilities = buildChannelCapabilities(gathered.trigger.channel);
     if (capabilities) {
-      sections.push(capabilities);
+      sections.push({ name: 'Channel Capabilities', content: capabilities });
     }
   }
 
@@ -882,53 +1326,69 @@ function buildEphemeralContext(
   if (gathered.contact && gathered.trigger.channel) {
     const presence = buildContactPresence(gathered.contact, gathered.trigger.channel);
     if (presence) {
-      sections.push(presence);
+      sections.push({ name: 'Contact Presence', content: presence });
     }
   }
 
   // 6. Thought from Phase 2 (or null note)
   if (thought) {
-    sections.push(`Your current thought: "${thought.content}" (importance: ${thought.importance.toFixed(1)})`);
+    sections.push({ name: 'Current Thought', content: `Your current thought: "${thought.content}" (importance: ${thought.importance.toFixed(1)})` });
   } else {
-    sections.push('Thought generation was skipped this tick.');
+    sections.push({ name: 'Current Thought', content: 'Thought generation was skipped this tick.' });
   }
 
-  // 7. Emotional state
-  const activeEmotions = gathered.emotions.filter(e => e.intensity > 0.1);
-  if (activeEmotions.length > 0) {
-    const emotionLines = activeEmotions.map(e =>
-      `  ${e.emotion}: ${e.intensity.toFixed(2)}`
-    );
-    sections.push('Current emotional state:\n' + emotionLines.join('\n'));
+  // 7. Emotional state (rich format with descriptions and categories)
+  if (gathered.emotions.length > 0) {
+    sections.push({ name: 'Emotional State', content: formatEmotionalState(gathered.emotions, gathered.tickIntervalMs) });
   }
 
-  // 8. Energy state
+  // 8. Energy state (descriptive)
   if (gathered.energySystemEnabled && gathered.energyLevel != null) {
-    sections.push(`Energy: ${gathered.energyLevel.toFixed(2)} (${gathered.energyBand ?? 'unknown'})`);
+    const band = gathered.energyBand ?? 'unknown';
+    const level = gathered.energyLevel;
+    const descriptions: Record<string, string> = {
+      'resting': 'deeply asleep, minimal awareness',
+      'drowsy': 'half-asleep, thoughts drift slowly',
+      'alert': 'awake and present, normal awareness',
+      'focused': 'sharp and engaged, heightened attention',
+      'energized': 'buzzing with energy, highly motivated',
+      'wired': 'overstimulated, restless, may need to wind down',
+    };
+    const desc = descriptions[band] ?? band;
+    sections.push({ name: 'Energy State', content: `Energy level: ${level.toFixed(2)} (${band}) — ${desc}` });
   }
 
-  // 9. Recent thoughts (raw, for context)
+  // 9. Recent thoughts (with timestamps)
+  // Use the full token-budgeted array from the observational memory system.
+  // These are all items since the observation watermark — the observation slot
+  // covers everything before it, so truncating here creates a blind spot.
   if (gathered.recentThoughts.length > 0) {
-    const recent = gathered.recentThoughts.slice(-5);
-    const lines = recent.map(t => `  - ${t.content}`);
-    sections.push('Recent thoughts:\n' + lines.join('\n'));
+    const tz = gathered.aiTimezone || 'UTC';
+    const lines = gathered.recentThoughts.map(t => {
+      const ts = formatRelativeTime(t.createdAt, tz);
+      return `  - [${ts}] ${t.content}`;
+    });
+    sections.push({ name: 'Recent Thoughts', content: 'Recent thoughts:\n' + lines.join('\n') });
   }
 
-  // 10. Recent experiences (raw, for context)
+  // 10. Recent experiences (with timestamps)
   if (gathered.recentExperiences.length > 0) {
-    const recent = gathered.recentExperiences.slice(-5);
-    const lines = recent.map(e => `  - ${e.content}`);
-    sections.push('Recent experiences:\n' + lines.join('\n'));
+    const tz = gathered.aiTimezone || 'UTC';
+    const lines = gathered.recentExperiences.map(e => {
+      const ts = formatRelativeTime(e.createdAt, tz);
+      return `  - [${ts}] ${e.content}`;
+    });
+    sections.push({ name: 'Recent Experiences', content: 'Recent experiences:\n' + lines.join('\n') });
   }
 
   // 11. Long-term memories (from semantic search)
   if (gathered.memoryContext?.longTermMemorySection) {
-    sections.push(gathered.memoryContext.longTermMemorySection);
+    sections.push({ name: 'Long-term Memories', content: gathered.memoryContext.longTermMemorySection });
   }
 
   // 12. External history (messages from Discord servers, Slack channels, etc.)
   if (gathered.externalHistory && gathered.externalHistory.size > 0) {
-    sections.push(buildExternalHistorySection(gathered.externalHistory));
+    sections.push({ name: 'External History', content: buildExternalHistorySection(gathered.externalHistory) });
   }
 
   // 13. Previous tick outcomes
@@ -937,50 +1397,49 @@ function buildEphemeralContext(
       const status = d.outcome === 'executed' ? 'done' : d.outcome;
       return `  - ${d.type}: ${d.description} [${status}]`;
     });
-    sections.push('Previous tick outcomes:\n' + lines.join('\n'));
+    sections.push({ name: 'Previous Tick Outcomes', content: 'Previous tick outcomes:\n' + lines.join('\n') });
   }
 
   // 14. Graduating seeds (one-time prompt when a seed graduates to goal proposal)
   if (gathered.goalContext?.graduatingSeedsSection) {
-    sections.push('-- EMERGING INTEREST --\n' + gathered.goalContext.graduatingSeedsSection);
+    sections.push({ name: 'Graduating Seeds', content: '-- EMERGING INTEREST --\n' + gathered.goalContext.graduatingSeedsSection });
   }
 
   // 15. Delivery failures (outbound messages that failed after retries)
   if (gathered.deliveryFailures.length > 0) {
-    sections.push(buildDeliveryFailuresSection(gathered.deliveryFailures));
+    sections.push({ name: 'Delivery Failures', content: buildDeliveryFailuresSection(gathered.deliveryFailures) });
   }
 
   // 16. Tick-interval energy magnitude calibration
   if (gathered.energySystemEnabled) {
-    sections.push(buildEnergyMagnitudeCalibration(gathered.tickIntervalMs));
+    sections.push({ name: 'Energy Calibration', content: buildEnergyMagnitudeCalibration(gathered.tickIntervalMs) });
   }
 
   // 17. First tick kickstart (only on tick 1 with no prior experiences)
   if (config.tickNumber === 1 && gathered.recentExperiences.length === 0) {
-    sections.push(buildFirstTickKickstart(
+    sections.push({ name: 'First Tick Kickstart', content: buildFirstTickKickstart(
       config.compiledPersona,
-      // Infer paradigm from persona config or default
       undefined,
       undefined,
-    ));
+    ) });
   }
 
   // Plugin context sources
   if (gathered.pluginContextSources) {
-    sections.push(gathered.pluginContextSources);
+    sections.push({ name: 'Plugin Context', content: gathered.pluginContextSources });
   }
 
   // Trust ramp
   if (gathered.trustRampContext) {
-    sections.push(gathered.trustRampContext);
+    sections.push({ name: 'Trust Ramp', content: gathered.trustRampContext });
   }
 
   // Spawn budget
   if (gathered.spawnBudgetNote) {
-    sections.push(gathered.spawnBudgetNote);
+    sections.push({ name: 'Spawn Budget', content: gathered.spawnBudgetNote });
   }
 
-  return sections.join('\n\n');
+  return sections;
 }
 
 // Note: buildTriggerSection is imported from context-builder.ts (now exported)
