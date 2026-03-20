@@ -13,6 +13,7 @@
 
 // Types
 export type {
+  CortexUsage,
   CortexLifecycleState,
   CortexAgentConfig,
   ContextManagerConfig,
@@ -86,7 +87,7 @@ export type {
 export { BudgetGuard } from './budget-guard.js';
 
 // CortexAgent (Phase 1B)
-export { CortexAgent } from './cortex-agent.js';
+export { CortexAgent, MINIMUM_CONTEXT_WINDOW } from './cortex-agent.js';
 export type { PiAgent, PiModel } from './cortex-agent.js';
 
 // MCP Client Manager (Phase 3)
@@ -201,11 +202,15 @@ export {
   LOGIN_FUNCTION_NAMES,
   UTILITY_MODEL_DEFAULTS,
   PRIMARY_MODEL_DEFAULTS,
+  PROVIDER_CACHE_CONFIG,
+  resolveCacheRetention,
 } from './provider-registry.js';
 export type {
   AuthMethod,
   ProviderInfo,
   ModelInfo,
+  ProviderCacheConfig,
+  CacheRetention,
 } from './provider-registry.js';
 
 // Provider Manager (Phase 1D)

@@ -112,6 +112,12 @@ export interface PiModel {
  */
 export const MINIMUM_CONTEXT_WINDOW = 16_384;
 
+/**
+ * Default context window limit applied when no explicit limit is set.
+ * New installs use min(DEFAULT_CONTEXT_WINDOW_LIMIT, model.contextWindow).
+ */
+export const DEFAULT_CONTEXT_WINDOW_LIMIT = 100_000;
+
 // ---------------------------------------------------------------------------
 // System prompt sections
 // ---------------------------------------------------------------------------

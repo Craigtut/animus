@@ -8,43 +8,12 @@
  * See docs/architecture/agent-orchestration.md for the full design.
  */
 
-import type { AgentProvider, PermissionTier } from '@animus-labs/shared';
 import { generateUUID, now } from '@animus-labs/shared';
-import type {
-  AgentManager,
-  IAgentSession,
-  AgentResponse,
-} from '@animus-labs/agents';
-import { attachSessionLogging, type AgentLogStore } from '@animus-labs/agents';
 import type { IEventBus } from '@animus-labs/shared';
-import type { CortexAgent, SubAgentManager } from '@animus-labs/cortex';
-import { CodexAuthProvider } from '@animus-labs/agents';
-import { createCredentialStore } from '../services/credential-store-adapter.js';
-import { getSystemDb, getContactsDb } from '../db/index.js';
-import * as systemStore from '../db/stores/system-store.js';
-import * as contactStore from '../db/stores/contact-store.js';
-import * as messageStore from '../db/stores/message-store.js';
-import { getMessagesDb, getMemoryDb } from '../db/index.js';
+import type { CortexAgent } from '@animus-labs/cortex';
 import { createLogger } from '../lib/logger.js';
-import { logProcessSpawn } from '../lib/process-diagnostics.js';
-import { env, PROJECT_ROOT } from '../utils/env.js';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import {
-  startBridge,
-  registerContext,
-  unregisterContext,
-  updatePermissions,
-  updateSubagentTier,
-  buildMcpServerConfig,
-  type MutableToolContext,
-  type ToolPermissionLookup,
-} from '../tools/servers/mcp-bridge.js';
-import type { ToolHandlerContext } from '../tools/types.js';
-import { getToolPermissions } from '../db/stores/system-store.js';
-import { getPluginManager } from '../plugins/index.js';
-import { getAllowedTools, ANIMUS_TOOL_DEFS } from '@animus-labs/shared';
+import { getAgentLogsDb } from '../db/index.js';
+import * as agentLogStore from '../db/stores/agent-log-store.js';
 
 const log = createLogger('AgentOrchestrator', 'agents');
 
@@ -76,7 +45,7 @@ export interface AgentTaskRecord {
   id: string;
   tickNumber: number;
   sessionId: string | null;
-  provider: AgentProvider;
+  provider: string;
   status: 'spawning' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out';
   taskType: string;
   taskDescription: string;
@@ -115,7 +84,7 @@ export interface AgentTaskStore {
     id: string;
     tickNumber: number;
     sessionId: string | null;
-    provider: AgentProvider;
+    provider: string;
     status: string;
     taskType: string;
     taskDescription: string;
@@ -143,38 +112,24 @@ export interface AgentTaskStore {
 // ============================================================================
 
 export class AgentOrchestrator {
-  private manager: AgentManager;
   private taskStore: AgentTaskStore;
-  private logStore: AgentLogStore;
   private eventBus: IEventBus;
-  private activeSessions = new Map<string, IAgentSession>();
   private timeoutTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private settledTasks = new Set<string>();
   private spawnTimestamps: number[] = [];
   private spawnBudgetPerHour: number;
-  private getPreferredProvider: (() => AgentProvider | null) | null;
-  private getPreferredModel: (() => string | undefined) | null;
-  /** Per-task mutable tool contexts for sub-agent MCP handlers */
-  private subAgentToolContexts = new Map<string, MutableToolContext>();
   private onAgentComplete: (params: {
     agentId: string;
     taskDescription: string;
     outcome: string;
     resultContent?: string;
   }) => void;
-  private buildToolContextFactory: ((taskId: string, params: SpawnAgentParams) => ToolHandlerContext) | null;
-  /** Optional CortexAgent for cortex-based sub-agent spawning */
+  /** CortexAgent for sub-agent spawning (required) */
   private cortexAgent: CortexAgent | null = null;
 
   constructor(params: {
-    manager: AgentManager;
     taskStore: AgentTaskStore;
-    logStore: AgentLogStore;
     eventBus: IEventBus;
     spawnBudgetPerHour?: number;
-    getPreferredProvider?: () => AgentProvider | null;
-    getPreferredModel?: () => string | undefined;
-    buildToolContext?: (taskId: string, params: SpawnAgentParams) => ToolHandlerContext;
     onAgentComplete: (params: {
       agentId: string;
       taskDescription: string;
@@ -182,14 +137,9 @@ export class AgentOrchestrator {
       resultContent?: string;
     }) => void;
   }) {
-    this.manager = params.manager;
     this.taskStore = params.taskStore;
-    this.logStore = params.logStore;
     this.eventBus = params.eventBus;
     this.spawnBudgetPerHour = params.spawnBudgetPerHour ?? 20;
-    this.getPreferredProvider = params.getPreferredProvider ?? null;
-    this.getPreferredModel = params.getPreferredModel ?? null;
-    this.buildToolContextFactory = params.buildToolContext ?? null;
     this.onAgentComplete = params.onAgentComplete;
   }
 
@@ -198,9 +148,8 @@ export class AgentOrchestrator {
   // --------------------------------------------------------------------------
 
   /**
-   * Set the CortexAgent for cortex-based sub-agent spawning.
-   * When set, spawnAgent/updateAgent/cancelAgent route through cortex.
-   * When null, the legacy @animus-labs/agents path is used.
+   * Set the CortexAgent for sub-agent spawning.
+   * Must be set before calling spawnAgent/updateAgent/cancelAgent.
    */
   setCortexAgent(cortexAgent: CortexAgent | null): void {
     this.cortexAgent = cortexAgent;
@@ -229,6 +178,26 @@ export class AgentOrchestrator {
         result: result || null,
         completedAt: now(),
       });
+
+      // Persist sub-agent usage to agent_logs.db
+      const usageData = usage as { turns?: number; cost?: number; durationMs?: number } | null;
+      if (usageData?.cost != null && usageData.cost > 0) {
+        try {
+          agentLogStore.insertUsage(getAgentLogsDb(), {
+            sessionId: taskId,
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            costUsd: usageData.cost,
+            model: 'cortex-sub-agent',
+            tickType: 'agent_complete',
+            pipelinePhase: 'agentic_loop',
+            contactId: null,
+          });
+        } catch (err) {
+          log.warn('Failed to log sub-agent usage:', err);
+        }
+      }
 
       this.eventBus.emit('agent:completed', { taskId, result });
 
@@ -290,17 +259,15 @@ export class AgentOrchestrator {
   /**
    * Spawn a new sub-agent for a task.
    *
-   * When a CortexAgent is configured, delegates to the cortex SubAgent
-   * infrastructure. Otherwise, falls back to the legacy @animus-labs/agents
-   * path using Claude/Codex SDK sessions.
+   * Delegates to the cortex SubAgentManager infrastructure.
+   * Requires a CortexAgent to be set via setCortexAgent().
    */
   async spawnAgent(params: SpawnAgentParams): Promise<string> {
-    // Route through cortex when available
-    if (this.cortexAgent) {
-      return this.spawnCortexSubAgent(params);
+    if (!this.cortexAgent) {
+      throw new Error('Cannot spawn sub-agent: no CortexAgent configured. Call setCortexAgent() first.');
     }
 
-    return this.spawnLegacyAgent(params);
+    return this.spawnCortexSubAgent(params);
   }
 
   /**
@@ -321,7 +288,7 @@ export class AgentOrchestrator {
         id: taskId,
         tickNumber: params.tickNumber,
         sessionId: null,
-        provider: 'cortex' as AgentProvider,
+        provider: 'cortex',
         status: 'failed',
         taskType: params.taskType,
         taskDescription: params.description,
@@ -344,7 +311,7 @@ export class AgentOrchestrator {
       id: taskId,
       tickNumber: params.tickNumber,
       sessionId: null,
-      provider: 'cortex' as AgentProvider,
+      provider: 'cortex',
       status: 'spawning',
       taskType: params.taskType,
       taskDescription: params.description,
@@ -375,7 +342,7 @@ export class AgentOrchestrator {
       // Set timeout
       const timeoutMs = TASK_TIMEOUTS[params.taskType] ?? DEFAULT_TIMEOUT_MS;
       const timer = setTimeout(() => {
-        this.handleCortexTimeout(taskId);
+        this.handleTimeout(taskId);
       }, timeoutMs);
       this.timeoutTimers.set(taskId, timer);
 
@@ -406,318 +373,48 @@ export class AgentOrchestrator {
   }
 
   /**
-   * Legacy sub-agent spawning via @animus-labs/agents SDK sessions.
-   * Used when no CortexAgent is configured.
-   */
-  private async spawnLegacyAgent(params: SpawnAgentParams): Promise<string> {
-    const taskId = generateUUID();
-    const timestamp = now();
-    // Determine provider: prefer user's setting, fall back to first configured
-    const preferred = this.getPreferredProvider?.();
-    const provider = (preferred && this.manager.isConfigured(preferred))
-      ? preferred
-      : (this.manager.getConfiguredProviders()[0] ?? 'claude');
-
-    // Check spawn budget before proceeding
-    const budget = this.checkSpawnBudget();
-    if (!budget.allowed) {
-      this.taskStore.insertAgentTask({
-        id: taskId,
-        tickNumber: params.tickNumber,
-        sessionId: null,
-        provider,
-        status: 'failed',
-        taskType: params.taskType,
-        taskDescription: params.description,
-        contactId: params.contactId,
-        sourceChannel: params.channel,
-        createdAt: timestamp,
-      });
-      this.taskStore.updateAgentTask(taskId, {
-        status: 'failed',
-        error: 'Spawn budget exhausted',
-        completedAt: timestamp,
-      });
-      this.eventBus.emit('agent:rate_limited', { taskId, count: budget.count, limit: budget.limit });
-      throw new Error(`Agent spawn budget exhausted (${budget.count}/${budget.limit} per hour)`);
-    }
-    this.spawnTimestamps.push(Date.now());
-
-    // Insert task record
-    this.taskStore.insertAgentTask({
-      id: taskId,
-      tickNumber: params.tickNumber,
-      sessionId: null,
-      provider,
-      status: 'spawning',
-      taskType: params.taskType,
-      taskDescription: params.description,
-      contactId: params.contactId,
-      sourceChannel: params.channel,
-      createdAt: timestamp,
-    });
-
-    let codexTempDir: string | null = null;
-
-    try {
-      // Prepare Codex session auth if needed
-      let sessionEnv: Record<string, string> | undefined;
-      if (provider === 'codex' && (process.env['CODEX_OAUTH_CONFIGURED'] || process.env['CODEX_CLI_CONFIGURED'])) {
-        try {
-          codexTempDir = await mkdtemp(join(tmpdir(), 'animus-codex-'));
-          const codexAuth = new CodexAuthProvider();
-          const store = createCredentialStore(getSystemDb());
-          sessionEnv = await codexAuth.prepareSessionEnv(store, codexTempDir);
-        } catch (err) {
-          log.warn('Codex session auth prep failed, falling back:', err);
-          if (codexTempDir) {
-            rm(codexTempDir, { recursive: true, force: true }).catch(() => {});
-            codexTempDir = null;
-          }
-        }
-      }
-
-      // Build sub-agent MCP server via stdio bridge (works for ALL providers)
-      const contactTier = this.resolveContactTier(params.contactId);
-      const subAgentContext: MutableToolContext = { current: null };
-      this.subAgentToolContexts.set(taskId, subAgentContext);
-
-      let subAgentMcpConfig: { serverConfig: Record<string, unknown>; allowedTools: string[] } | null = null;
-      try {
-        const permissions = this.buildToolPermissionLookup();
-        updatePermissions(permissions);
-        updateSubagentTier(contactTier);
-        const bridgePort = await startBridge();
-        registerContext(taskId, subAgentContext);
-        const serverConfig = buildMcpServerConfig(bridgePort, 'subagent', taskId);
-        // Build allowed tools list from the sub-agent tool set
-        const subAgentToolNames = getAllowedTools(contactTier);
-        const allowedTools: string[] = [];
-        for (const toolName of subAgentToolNames) {
-          const mode = permissions.get(toolName);
-          if (mode === 'off' || mode === 'ask') continue;
-          allowedTools.push(`mcp__animus__${toolName}`);
-        }
-        subAgentMcpConfig = { serverConfig: serverConfig as unknown as Record<string, unknown>, allowedTools };
-        log.info(`Sub-agent MCP server built (stdio bridge) with tools: ${allowedTools.join(', ')}`);
-      } catch (err) {
-        log.warn('Failed to build sub-agent MCP server:', err);
-      }
-
-      // Merge built-in sub-agent MCP tools with plugin MCP servers.
-      // Sub-agents can't interact with users for approval, so exclude
-      // plugin MCP servers with 'off' or 'ask' mode (only 'always_allow' passes).
-      const pluginMcp = getPluginManager().getPluginMcpServersForSdk();
-      const filteredPluginServers: Record<string, Record<string, unknown>> = {};
-      const filteredPluginTools: string[] = [];
-      try {
-        const sysDb = getSystemDb();
-        for (const [key, config] of Object.entries(pluginMcp.mcpServers)) {
-          const permKey = `mcp__${key}`;
-          const perm = systemStore.getToolPermission(sysDb, permKey);
-          if (perm && (perm.mode === 'off' || perm.mode === 'ask')) {
-            continue; // Sub-agents skip disabled and gated tools
-          }
-          filteredPluginServers[key] = config;
-          filteredPluginTools.push(`mcp__${key}__*`);
-        }
-      } catch {
-        // DB not available — include all plugin servers as fallback
-        Object.assign(filteredPluginServers, pluginMcp.mcpServers);
-        filteredPluginTools.push(...pluginMcp.allowedTools);
-      }
-      const mergedMcpServers: Record<string, Record<string, unknown>> = {
-        ...(subAgentMcpConfig ? { animus: subAgentMcpConfig.serverConfig } : {}),
-        ...filteredPluginServers,
-      };
-      const mergedAllowedTools: string[] = [
-        ...(subAgentMcpConfig ? subAgentMcpConfig.allowedTools : []),
-        ...filteredPluginTools,
-      ];
-
-      // Provider-specific skill discovery wiring:
-      // - Claude: expose Animus plugin skills via the local bridge plugin.
-      // - Codex: inject generated runtime config via CODEX_HOME.
-      let sdkPlugins: Array<{ type: 'local'; path: string }> | undefined;
-      if (provider === 'codex') {
-        sessionEnv = await getPluginManager().buildCodexRuntimeEnv(sessionEnv);
-      }
-      if (provider === 'claude') {
-        const bridgePath = getPluginManager().getSkillBridgePath();
-        sdkPlugins = [{ type: 'local' as const, path: bridgePath }];
-        if (!mergedAllowedTools.includes('Skill')) {
-          mergedAllowedTools.push('Skill');
-        }
-      }
-
-      // Create the agent session
-      const verboseAgent = env.LOG_LEVEL === 'debug' || env.LOG_LEVEL === 'trace';
-      const model = this.getPreferredModel?.();
-
-      // Sub-agents cannot interact with the user for approval, so both
-      // 'off' and 'ask' SDK built-in tools are disallowed.
-      const disabledSdkTools = this.getDisabledSdkTools('off', 'ask');
-
-      logProcessSpawn(
-        `sub-agent:${taskId}`,
-        `sdk:${provider}`,
-        [params.taskType, params.description.substring(0, 60)],
-        sessionEnv,
-      );
-
-      // When using Claude Code, use the claude_code preset so sub-agents get
-      // the full Claude Code system prompt (tool instructions, coding guidelines).
-      // Other providers (Codex, OpenCode) get the plain system prompt string.
-      const systemPromptConfig = provider === 'claude'
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: params.systemPrompt }
-        : params.systemPrompt;
-
-      const session = await this.manager.createSession({
-        provider,
-        ...(model != null ? { model } : {}),
-        cwd: PROJECT_ROOT,
-        systemPrompt: systemPromptConfig,
-        permissions: {
-          executionMode: 'build',
-          approvalLevel: 'none',
-        },
-        ...(sessionEnv ? { env: sessionEnv } : {}),
-        ...(Object.keys(mergedMcpServers).length > 0 ? {
-          mcpServers: mergedMcpServers,
-        } : {}),
-        // allowedTools: MCP tool patterns + 'Skill' for SDK skill discovery
-        ...(mergedAllowedTools.length > 0 ? { allowedTools: mergedAllowedTools } : {}),
-        // Disable SDK built-in tools with mode='off' or 'ask' (sub-agents can't do approvals)
-        ...(disabledSdkTools.length > 0 ? { disallowedTools: disabledSdkTools } : {}),
-        // Claude SDK plugins for skill discovery (bridge to runtime claude/skills/)
-        ...(sdkPlugins ? { plugins: sdkPlugins } : {}),
-        verbose: verboseAgent,
-      });
-
-      // Attach logging
-      const logging = attachSessionLogging(session, { store: this.logStore });
-
-      // Update task with session info
-      this.taskStore.updateAgentTask(taskId, {
-        sessionId: session.id,
-        status: 'running',
-        startedAt: now(),
-      });
-
-      // Track session
-      this.activeSessions.set(taskId, session);
-
-      // Emit event
-      this.eventBus.emit('agent:spawned', { taskId, provider });
-
-      // Set timeout
-      const timeoutMs = TASK_TIMEOUTS[params.taskType] ?? DEFAULT_TIMEOUT_MS;
-      const timer = setTimeout(() => {
-        this.handleTimeout(taskId);
-      }, timeoutMs);
-      this.timeoutTimers.set(taskId, timer);
-
-      // Set the sub-agent tool context for this task
-      subAgentContext.current = this.buildToolContextFactory
-        ? this.buildToolContextFactory(taskId, params)
-        : this.buildSubAgentToolContext(taskId, params);
-
-      // Run asynchronously (non-blocking)
-      this.runAgent(taskId, session, params.instructions, logging)
-        .catch((err) => {
-          log.error(`Agent ${taskId} run error:`, err);
-        })
-        .finally(() => {
-          // Clean up Codex OAuth temp directory
-          if (codexTempDir) {
-            rm(codexTempDir, { recursive: true, force: true }).catch(() => {});
-          }
-        });
-
-      return taskId;
-    } catch (err) {
-      // Failed to create session
-      this.taskStore.updateAgentTask(taskId, {
-        status: 'failed',
-        error: err instanceof Error ? err.message : String(err),
-        completedAt: now(),
-      });
-
-      this.eventBus.emit('agent:failed', {
-        taskId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-
-      // Clean up Codex temp dir on session creation failure
-      if (codexTempDir) {
-        rm(codexTempDir, { recursive: true, force: true }).catch(() => {});
-      }
-
-      throw err;
-    }
-  }
-
-  /**
    * Forward new information to a running sub-agent.
    *
-   * When cortex is available, uses agent.steer() to inject context into
-   * the running agentic loop. Otherwise, uses the legacy session.prompt().
+   * Uses agent.steer() to inject context into the running agentic loop.
    */
   async updateAgent(params: UpdateAgentParams): Promise<void> {
-    // Cortex path: steer the sub-agent via SubAgentManager
-    if (this.cortexAgent) {
-      const subAgentManager = this.cortexAgent.getSubAgentManager();
-      const tracked = subAgentManager.get(params.agentId);
-      if (!tracked) {
-        log.warn(`Cannot steer cortex sub-agent ${params.agentId}: not tracked`);
-        return;
-      }
-
-      try {
-        const subAgent = tracked.agent as CortexAgent;
-        subAgent.steer(params.context);
-        this.taskStore.updateAgentTask(params.agentId, {
-          currentActivity: 'Processing update (steered)',
-        });
-        log.info(`Steered cortex sub-agent ${params.agentId}`);
-      } catch (err) {
-        log.error(`Failed to steer cortex sub-agent ${params.agentId}:`, err);
-      }
+    if (!this.cortexAgent) {
+      log.warn(`Cannot update agent ${params.agentId}: no CortexAgent configured`);
       return;
     }
 
-    // Legacy path
-    const session = this.activeSessions.get(params.agentId);
-    if (!session) {
-      log.warn(`Cannot update agent ${params.agentId}: no active session`);
+    const subAgentManager = this.cortexAgent.getSubAgentManager();
+    const tracked = subAgentManager.get(params.agentId);
+    if (!tracked) {
+      log.warn(`Cannot steer sub-agent ${params.agentId}: not tracked`);
       return;
     }
 
     try {
-      await session.prompt(params.context);
+      const subAgent = tracked.agent as CortexAgent;
+      subAgent.steer(params.context);
       this.taskStore.updateAgentTask(params.agentId, {
-        currentActivity: 'Processing update',
+        currentActivity: 'Processing update (steered)',
       });
+      log.info(`Steered sub-agent ${params.agentId}`);
     } catch (err) {
-      log.error(`Failed to update agent ${params.agentId}:`, err);
+      log.error(`Failed to steer sub-agent ${params.agentId}:`, err);
     }
   }
 
   /**
    * Cancel a running sub-agent.
    *
-   * When cortex is available, calls abort() on the cortex sub-agent.
-   * Otherwise, cancels the legacy SDK session.
+   * Calls abort() on the cortex sub-agent and marks it as cancelled.
    */
   async cancelAgent(params: CancelAgentParams): Promise<void> {
-    // Clear timeout (applies to both paths)
+    // Clear timeout
     const timer = this.timeoutTimers.get(params.agentId);
     if (timer) {
       clearTimeout(timer);
       this.timeoutTimers.delete(params.agentId);
     }
 
-    // Cortex path: abort the sub-agent via SubAgentManager
     if (this.cortexAgent) {
       const subAgentManager = this.cortexAgent.getSubAgentManager();
       const tracked = subAgentManager.get(params.agentId);
@@ -725,41 +422,15 @@ export class AgentOrchestrator {
         try {
           const subAgent = tracked.agent as CortexAgent;
           await subAgent.abort();
-          log.info(`Aborted cortex sub-agent ${params.agentId}`);
+          log.info(`Aborted sub-agent ${params.agentId}`);
         } catch (err) {
-          log.warn(`Failed to abort cortex sub-agent ${params.agentId}:`, err);
+          log.warn(`Failed to abort sub-agent ${params.agentId}:`, err);
         }
 
         // Remove from tracking with a cancelled result
         subAgentManager.fail(params.agentId, params.reason);
       }
-
-      this.taskStore.updateAgentTask(params.agentId, {
-        status: 'cancelled',
-        error: params.reason,
-        completedAt: now(),
-      });
-
-      this.eventBus.emit('agent:cancelled', {
-        taskId: params.agentId,
-        reason: params.reason,
-      });
-      return;
     }
-
-    // Legacy path
-    const session = this.activeSessions.get(params.agentId);
-    if (session) {
-      try {
-        await session.cancel();
-        await session.end();
-      } catch (err) {
-        log.warn(`Failed to cancel session for ${params.agentId}:`, err);
-      }
-      this.activeSessions.delete(params.agentId);
-    }
-    this.subAgentToolContexts.delete(params.agentId);
-    unregisterContext(params.agentId);
 
     this.taskStore.updateAgentTask(params.agentId, {
       status: 'cancelled',
@@ -784,9 +455,6 @@ export class AgentOrchestrator {
    * Check if a specific agent is still running.
    */
   isAgentRunning(agentId: string): boolean {
-    if (this.activeSessions.has(agentId)) return true;
-
-    // Also check cortex sub-agents
     if (this.cortexAgent) {
       const subAgentManager = this.cortexAgent.getSubAgentManager();
       return subAgentManager.get(agentId) !== undefined;
@@ -796,7 +464,7 @@ export class AgentOrchestrator {
   }
 
   /**
-   * Clean up all active sessions and timers.
+   * Clean up all active timers and references.
    */
   async cleanup(): Promise<void> {
     // Clear all timeouts
@@ -804,20 +472,6 @@ export class AgentOrchestrator {
       clearTimeout(timer);
     }
     this.timeoutTimers.clear();
-
-    // End all active legacy sessions
-    const endPromises = Array.from(this.activeSessions.entries()).map(
-      async ([taskId, session]) => {
-        try {
-          await session.end();
-        } catch (err) {
-          log.warn(`Failed to end session for ${taskId}:`, err);
-        }
-      }
-    );
-    await Promise.allSettled(endPromises);
-    this.activeSessions.clear();
-    this.settledTasks.clear();
 
     // Clear cortex reference (cortex agent lifecycle managed separately)
     this.cortexAgent = null;
@@ -828,217 +482,10 @@ export class AgentOrchestrator {
   // --------------------------------------------------------------------------
 
   /**
-   * Build a ToolPermissionLookup from the tool_permissions table.
-   */
-  private buildToolPermissionLookup(): ToolPermissionLookup {
-    try {
-      const sysDb = getSystemDb();
-      const perms = getToolPermissions(sysDb);
-      const lookup: ToolPermissionLookup = new Map();
-      for (const p of perms) {
-        lookup.set(p.toolName, p.mode);
-      }
-      return lookup;
-    } catch {
-      return new Map();
-    }
-  }
-
-  /**
-   * Get SDK built-in tools that should be disallowed based on permission mode.
-   */
-  private getDisabledSdkTools(...blockModes: Array<'off' | 'ask'>): string[] {
-    try {
-      const sysDb = getSystemDb();
-      const perms = getToolPermissions(sysDb);
-      const modes = new Set<string>(blockModes);
-      return perms
-        .filter((p) => p.toolSource.startsWith('sdk:') && modes.has(p.mode))
-        .map((p) => p.toolName);
-    } catch {
-      return [];
-    }
-  }
-
-  /**
-   * Resolve the contact permission tier, defaulting to 'primary'.
-   */
-  private resolveContactTier(contactId: string): PermissionTier {
-    if (!contactId) return 'primary';
-    try {
-      const cDb = getContactsDb();
-      const contact = contactStore.getContact(cDb, contactId);
-      return (contact?.permissionTier ?? 'primary') as PermissionTier;
-    } catch {
-      return 'primary';
-    }
-  }
-
-  /**
-   * Build a ToolHandlerContext for a sub-agent task.
-   */
-  private buildSubAgentToolContext(
-    taskId: string,
-    params: SpawnAgentParams,
-  ): ToolHandlerContext {
-    const msgDb = getMessagesDb();
-    const memDb = getMemoryDb();
-
-    // Resolve conversation for the contact + channel
-    let conversationId = '';
-    if (params.contactId && params.channel) {
-      try {
-        const conv = messageStore.getConversationByContactAndChannel(
-          msgDb, params.contactId, params.channel as any,
-        );
-        if (conv) conversationId = conv.id;
-      } catch {
-        // No conversation yet — fine
-      }
-    }
-
-    return {
-      agentTaskId: taskId,
-      contactId: params.contactId,
-      sourceChannel: params.channel,
-      conversationId,
-      stores: {
-        messages: {
-          createMessage: (data) => messageStore.createMessage(msgDb, data),
-        },
-        heartbeat: {
-          updateAgentTaskProgress: (agentTaskId, activity, percentComplete) => {
-            this.taskStore.updateAgentTask(agentTaskId, {
-              currentActivity: activity + (percentComplete != null ? ` (${percentComplete}%)` : ''),
-            });
-          },
-        },
-        memory: {
-          retrieveRelevant: async () => [],
-        },
-      },
-      eventBus: this.eventBus,
-    };
-  }
-
-  /**
-   * Run an agent session asynchronously.
-   * This is fire-and-forget from the caller's perspective.
-   */
-  private async runAgent(
-    taskId: string,
-    session: IAgentSession,
-    instructions: string,
-    logging: { logUsage: (usage: any, cost: any, model: string) => void },
-  ): Promise<void> {
-    try {
-      const response: AgentResponse = await session.prompt(instructions);
-
-      // Guard: if already settled by timeout, bail out
-      if (this.settledTasks.has(taskId)) return;
-      this.settledTasks.add(taskId);
-
-      // Log usage with tick metadata for the usage & budget system.
-      // The logUsage signature already accepts a TickContext parameter.
-      const taskRecord = this.taskStore.getAgentTask(taskId);
-      logging.logUsage(response.usage, response.cost ?? null, response.model, {
-        tickNumber: taskRecord?.tickNumber ?? null,
-        tickType: 'agent_complete',
-        contactId: taskRecord?.contactId ?? null,
-      });
-
-      // Clear timeout
-      const timer = this.timeoutTimers.get(taskId);
-      if (timer) {
-        clearTimeout(timer);
-        this.timeoutTimers.delete(taskId);
-      }
-
-      // Clean up session, tool context, and bridge registration
-      this.activeSessions.delete(taskId);
-      this.subAgentToolContexts.delete(taskId);
-      unregisterContext(taskId);
-      await session.end();
-
-      // Check for empty result
-      const result = response.content?.trim();
-      if (!result) {
-        this.taskStore.updateAgentTask(taskId, {
-          status: 'failed',
-          error: 'Empty result',
-          completedAt: now(),
-        });
-
-        this.eventBus.emit('agent:failed', { taskId, error: 'Empty result' });
-
-        this.onAgentComplete({
-          agentId: taskId,
-          taskDescription: this.taskStore.getAgentTask(taskId)?.taskDescription ?? '',
-          outcome: 'failed',
-          resultContent: 'The sub-agent returned an empty result.',
-        });
-        return;
-      }
-
-      // Store result
-      const task = this.taskStore.getAgentTask(taskId);
-      this.taskStore.updateAgentTask(taskId, {
-        status: 'completed',
-        result,
-        completedAt: now(),
-      });
-
-      this.eventBus.emit('agent:completed', { taskId, result });
-
-      // Trigger agent_complete tick
-      this.onAgentComplete({
-        agentId: taskId,
-        taskDescription: task?.taskDescription ?? '',
-        outcome: 'completed',
-        resultContent: result,
-      });
-    } catch (err) {
-      // Guard: if already settled by timeout, bail out
-      if (this.settledTasks.has(taskId)) return;
-      this.settledTasks.add(taskId);
-
-      // Clear timeout
-      const timer = this.timeoutTimers.get(taskId);
-      if (timer) {
-        clearTimeout(timer);
-        this.timeoutTimers.delete(taskId);
-      }
-
-      this.activeSessions.delete(taskId);
-      this.subAgentToolContexts.delete(taskId);
-      unregisterContext(taskId);
-
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      const task = this.taskStore.getAgentTask(taskId);
-
-      this.taskStore.updateAgentTask(taskId, {
-        status: 'failed',
-        error: errorMsg,
-        completedAt: now(),
-      });
-
-      this.eventBus.emit('agent:failed', { taskId, error: errorMsg });
-
-      // Trigger agent_complete tick with failure
-      this.onAgentComplete({
-        agentId: taskId,
-        taskDescription: task?.taskDescription ?? '',
-        outcome: 'failed',
-        resultContent: `Sub-agent failed: ${errorMsg}`,
-      });
-    }
-  }
-
-  /**
-   * Handle cortex sub-agent timeout.
+   * Handle sub-agent timeout.
    * Aborts the sub-agent and marks it as timed out in the task store.
    */
-  private async handleCortexTimeout(taskId: string): Promise<void> {
+  private async handleTimeout(taskId: string): Promise<void> {
     this.timeoutTimers.delete(taskId);
 
     if (!this.cortexAgent) return;
@@ -1050,51 +497,10 @@ export class AgentOrchestrator {
         const subAgent = tracked.agent as CortexAgent;
         await subAgent.abort();
       } catch (err) {
-        log.warn(`Failed to abort timed out cortex sub-agent ${taskId}:`, err);
+        log.warn(`Failed to abort timed out sub-agent ${taskId}:`, err);
       }
       subAgentManager.fail(taskId, 'Agent exceeded timeout');
     }
-
-    const task = this.taskStore.getAgentTask(taskId);
-
-    this.taskStore.updateAgentTask(taskId, {
-      status: 'timed_out',
-      error: 'Agent exceeded timeout',
-      completedAt: now(),
-    });
-
-    this.eventBus.emit('agent:failed', { taskId, error: 'Agent timed out' });
-
-    this.onAgentComplete({
-      agentId: taskId,
-      taskDescription: task?.taskDescription ?? '',
-      outcome: 'timed_out',
-      resultContent: 'The sub-agent timed out before completing its task.',
-    });
-  }
-
-  /**
-   * Handle legacy agent timeout.
-   */
-  private async handleTimeout(taskId: string): Promise<void> {
-    this.timeoutTimers.delete(taskId);
-
-    // Guard: if already settled by runAgent completion/error, bail out
-    if (this.settledTasks.has(taskId)) return;
-    this.settledTasks.add(taskId);
-
-    const session = this.activeSessions.get(taskId);
-    if (session) {
-      try {
-        await session.cancel();
-        await session.end();
-      } catch (err) {
-        log.warn(`Failed to cancel timed out session ${taskId}:`, err);
-      }
-      this.activeSessions.delete(taskId);
-    }
-    this.subAgentToolContexts.delete(taskId);
-    unregisterContext(taskId);
 
     const task = this.taskStore.getAgentTask(taskId);
 

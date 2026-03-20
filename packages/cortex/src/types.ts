@@ -14,6 +14,38 @@
  */
 
 // ---------------------------------------------------------------------------
+// Usage
+// ---------------------------------------------------------------------------
+
+/**
+ * Token usage and cost data from a single LLM call.
+ * Mirrors the pi-ai AssistantMessage.usage structure but is decoupled
+ * from pi-ai's types to avoid hard runtime dependencies.
+ */
+export interface CortexUsage {
+  /** Input (prompt) tokens. */
+  input: number;
+  /** Output (completion) tokens. */
+  output: number;
+  /** Cache-read tokens (tokens served from cache). */
+  cacheRead: number;
+  /** Cache-write tokens (tokens written to cache). */
+  cacheWrite: number;
+  /** Total tokens (input + output). */
+  totalTokens: number;
+  /** Cost breakdown in USD. */
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+  /** Model identifier string (if available from the response). */
+  model?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
@@ -102,6 +134,13 @@ export interface CortexAgentConfig {
    * If not provided, all tools are allowed.
    */
   resolvePermission?: (toolName: string, toolArgs: unknown) => Promise<boolean>;
+
+  /**
+   * Limit the effective context window for compaction calculations.
+   * Clamped to min(limit, model.contextWindow) with a floor of MINIMUM_CONTEXT_WINDOW (16K).
+   * null or undefined = use the model's full context window (no limit).
+   */
+  contextWindowLimit?: number | null;
 
   /** Compaction configuration. All layers are always active. */
   compaction?: Partial<CortexCompactionConfig>;
@@ -475,6 +514,12 @@ export interface SkillConfig {
   path: string;
   /** Where this skill came from. Used for display and debugging. */
   source: string;  // e.g., 'plugin:weather', 'plugin:discord', 'user', 'builtin'
+  /**
+   * Per-skill variables for ${VAR} substitution in the SKILL.md body.
+   * Merged into the preprocessor variables when getSkillBody() runs.
+   * Useful for plugin skills that reference ${PLUGIN_ROOT}.
+   */
+  variables?: Record<string, string>;
 }
 
 /**
@@ -495,6 +540,8 @@ export interface SkillEntry {
   frontmatter: Record<string, unknown>;
   /** Whether the agent can auto-load this skill. Derived from disable-model-invocation. */
   modelInvocable: boolean;
+  /** Per-skill variables for ${VAR} substitution. */
+  variables?: Record<string, string>;
 }
 
 /**
