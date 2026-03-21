@@ -163,7 +163,8 @@ export async function preprocessSkillBody(
       const output = result.status === 'fulfilled'
         ? result.value
         : `[Error: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}]`;
-      content = content.replace(replacement.marker, output);
+      // Use callback to prevent $& and other replacement patterns in output
+      content = content.replace(replacement.marker, () => output);
     }
   }
 
@@ -180,7 +181,7 @@ export function substituteVariables(
   let result = body;
 
   // Replace $ARGUMENTS first (before ${} to avoid partial matching)
-  result = result.replace(ARGUMENTS_PATTERN, variables['ARGUMENTS'] ?? '');
+  result = result.replace(ARGUMENTS_PATTERN, () => variables['ARGUMENTS'] ?? '');
 
   // Replace positional $1..$9
   result = result.replace(POSITIONAL_PATTERN, (_match, num: string) => {
@@ -269,7 +270,10 @@ export async function executeScript(
     }
   }
 
-  // Build context: merge Cortex built-ins with consumer context
+  // Build context: consumer context spread first, then Cortex built-ins
+  // override (skillDir and scriptArgs are Cortex-owned and cannot be
+  // overridden by consumer). args/rawArgs come pre-merged in
+  // config.scriptContext from the registry with the same precedence.
   const ctx: Record<string, unknown> = {
     ...config.scriptContext,
     skillDir: config.skillDir,

@@ -245,6 +245,31 @@ function buildOAuthMeta(
 }
 
 // ---------------------------------------------------------------------------
+// Legacy model filtering
+// ---------------------------------------------------------------------------
+
+/**
+ * Model ID prefixes considered legacy/deprecated per provider.
+ * Pi-ai doesn't flag deprecation, so we maintain this list to keep
+ * the model picker clean and prevent users from selecting models that
+ * produce poor results with modern tool-use patterns.
+ */
+const LEGACY_MODEL_PREFIXES: Record<string, string[]> = {
+  anthropic: [
+    'claude-3-',      // Claude 3.x family (Haiku/Sonnet/Opus from 2024)
+    'claude-3.',      // Alternate naming
+  ],
+  openai: [
+    'gpt-3.5-',      // GPT-3.5 family
+    'gpt-4-',        // GPT-4 original (not 4o/4.1)
+  ],
+  google: [
+    'gemini-1.',      // Gemini 1.x family
+    'gemini-pro',     // Original Gemini Pro
+  ],
+};
+
+// ---------------------------------------------------------------------------
 // Model mapping helper
 // ---------------------------------------------------------------------------
 
@@ -257,8 +282,13 @@ function mapRawToModelInfo(raw: Record<string, unknown>): ModelInfo {
   const rawId = raw['id'];
   const id = typeof rawId === 'string' ? rawId : String(rawId ?? raw['name'] ?? 'unknown');
 
+  const rawDisplayName = raw['displayName'];
   const rawName = raw['name'];
-  const name = typeof rawName === 'string' ? rawName : id;
+  const name = typeof rawDisplayName === 'string'
+    ? rawDisplayName
+    : typeof rawName === 'string'
+      ? rawName
+      : id;
 
   const rawContextWindow = raw['contextWindow'];
   const contextWindow = typeof rawContextWindow === 'number' ? rawContextWindow : 200_000;
@@ -324,16 +354,22 @@ export class ProviderManager implements IProviderManager {
     const rawModels = piAi.getModels(provider);
     const models = rawModels.map(mapRawToModelInfo);
 
-    // Filter out "latest" alias entries that duplicate pinned versions.
-    // pi-ai includes both "claude-sonnet-4-6" and "claude-sonnet-4-6-latest"
-    // which creates confusing duplicates in the UI.
+    // Filter pipeline:
+    // 1. Remove legacy/deprecated generation models
+    // 2. Remove "-latest" alias duplicates
+    // 3. Remove duplicate display names
+    const legacyPrefixes = LEGACY_MODEL_PREFIXES[provider];
+    const filtered = legacyPrefixes
+      ? models.filter(m => !legacyPrefixes.some(prefix => m.id.startsWith(prefix)))
+      : models;
+
     const seen = new Set<string>();
-    return models.filter(m => {
+    return filtered.filter(m => {
       // Strip "-latest" suffix to check for duplicate base names
       const baseName = m.id.replace(/-latest$/, '');
       if (m.id.endsWith('-latest')) {
         // Only include the "-latest" alias if no pinned version exists
-        return !models.some(other => other.id === baseName);
+        return !filtered.some(other => other.id === baseName);
       }
       // Skip duplicates with identical names (different IDs but same display name)
       if (seen.has(m.name)) return false;
@@ -467,10 +503,13 @@ export class ProviderManager implements IProviderManager {
       if (models.length === 0) {
         throw new Error(`No models found for provider "${provider}"`);
       }
+      const firstRawId = models[0]!['id'];
       const firstRawName = models[0]!['name'];
-      const firstModelId = typeof firstRawName === 'string'
-        ? firstRawName
-        : String(firstRawName);
+      const firstModelId = typeof firstRawId === 'string'
+        ? firstRawId
+        : typeof firstRawName === 'string'
+          ? firstRawName
+          : String(firstRawId ?? firstRawName);
       return this.tryValidation(piAi, provider, firstModelId, apiKey);
     }
 

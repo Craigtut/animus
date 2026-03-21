@@ -397,15 +397,17 @@ export function createGrepTool(config: GrepToolConfig): {
             if (outputMode === 'count') {
               fileCounts.push({ file, count: matches.length });
             } else if (outputMode === 'content') {
-              // For multiline, find the line numbers of each match
-              const lines = content.split('\n');
-              for (const match of matches) {
-                const matchIdx = content.indexOf(match);
+              // For multiline, use exec() to get correct index for each match
+              regex.lastIndex = 0;
+              let execMatch: RegExpExecArray | null;
+              while ((execMatch = regex.exec(content)) !== null) {
+                const matchIdx = execMatch.index;
                 const lineNum = content.slice(0, matchIdx).split('\n').length;
+                const matchText = execMatch[0];
                 contentMatches.push({
                   file,
                   lineNumber: lineNum,
-                  line: match.length > 500 ? match.slice(0, 500) + '...' : match,
+                  line: matchText.length > 500 ? matchText.slice(0, 500) + '...' : matchText,
                 });
               }
             }
@@ -415,6 +417,7 @@ export function createGrepTool(config: GrepToolConfig): {
           const lines = content.split('\n');
           let fileMatchCount = 0;
           let hasMatch = false;
+          const emittedLines = new Set<number>();
 
           for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
             const line = lines[lineIdx]!;
@@ -430,6 +433,9 @@ export function createGrepTool(config: GrepToolConfig): {
                   const startCtx = Math.max(0, lineIdx - contextLines);
                   const endCtx = Math.min(lines.length - 1, lineIdx + contextLines);
                   for (let ci = startCtx; ci <= endCtx; ci++) {
+                    // Skip lines already emitted by a previous context window
+                    if (emittedLines.has(ci)) continue;
+                    emittedLines.add(ci);
                     const prefix = ci === lineIdx ? ':' : '-';
                     contentMatches.push({
                       file,

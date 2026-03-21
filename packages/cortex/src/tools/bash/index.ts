@@ -107,6 +107,17 @@ export function getBackgroundTask(id: string): BackgroundTask | undefined {
   return backgroundTasks.get(id);
 }
 
+/** Clean up completed background tasks older than 30 minutes to prevent memory leaks. */
+function cleanupCompletedTasks(): void {
+  const maxAge = 30 * 60 * 1000;
+  const now = Date.now();
+  for (const [id, task] of backgroundTasks) {
+    if (task.completed && now - task.startTime > maxAge) {
+      backgroundTasks.delete(id);
+    }
+  }
+}
+
 export function getAllBackgroundTasks(): Map<string, BackgroundTask> {
   return backgroundTasks;
 }
@@ -276,6 +287,7 @@ export function createBashTool(config: BashToolConfig): {
     parameters: BashParams,
 
     async execute(params: BashParamsType): Promise<ToolContentDetails<BashDetails>> {
+      cleanupCompletedTasks();
       const timeout = Math.min(params.timeout ?? DEFAULT_TIMEOUT, MAX_TIMEOUT);
       const background = params.background ?? false;
       const startTime = Date.now();
@@ -442,6 +454,9 @@ export function createBashTool(config: BashToolConfig): {
             };
             backgroundTasks.set(taskId, task);
 
+            // Remove original foreground listeners to prevent memory leak
+            proc.stdout?.removeAllListeners('data');
+            proc.stderr?.removeAllListeners('data');
             // Continue collecting output for the background task
             proc.stdout?.on('data', (data: string) => { task.stdout += data; });
             proc.stderr?.on('data', (data: string) => { task.stderr += data; });

@@ -322,7 +322,13 @@ describe('McpClientManager', () => {
 
       const tools = manager.getTools();
       const result = await tools[0].execute({ location: 'NYC' });
-      expect(result).toBe('Sunny, 72F');
+      expect(result).toEqual({
+        content: [{ type: 'text', text: 'Sunny, 72F' }],
+        details: {
+          structuredContent: null,
+          rawContent: [{ type: 'text', text: 'Sunny, 72F' }],
+        },
+      });
     });
 
     it('throws on error tool call', async () => {

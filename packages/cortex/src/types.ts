@@ -76,6 +76,12 @@ export interface CortexAgentConfig {
   model: unknown;
 
   /**
+   * Initial application/base prompt.
+   * Cortex composes its operational sections around this prompt.
+   */
+  initialBasePrompt?: string;
+
+  /**
    * Utility model for internal operations (WebFetch summarization, safety classifier).
    * - `'default'`: Cortex selects from a built-in mapping based on the primary model's provider.
    * - A Model object: explicit utility model (must be same provider as primary).
@@ -138,7 +144,8 @@ export interface CortexAgentConfig {
   /**
    * Limit the effective context window for compaction calculations.
    * Clamped to min(limit, model.contextWindow) with a floor of MINIMUM_CONTEXT_WINDOW (16K).
-   * null or undefined = use the model's full context window (no limit).
+   * null or undefined = use the default limit of min(100K, model.contextWindow).
+   * To use the model's full context window, pass the model's contextWindow value explicitly.
    */
   contextWindowLimit?: number | null;
 
@@ -398,16 +405,6 @@ export interface CompactionResult {
   /** The generated summary text. */
   summary: string;
 }
-
-/**
- * Pipeline phase flag. Prevents Layer 2 from firing mid-tick.
- * - idle: between ticks, compaction allowed
- * - thought: THOUGHT phase in progress
- * - agentic_loop: agentic loop in progress
- * - reflect: REFLECT phase in progress
- * - execute: EXECUTE phase in progress
- */
-export type PipelinePhase = 'idle' | 'thought' | 'agentic_loop' | 'reflect' | 'execute';
 
 // ---------------------------------------------------------------------------
 // Events

@@ -140,6 +140,11 @@ export function extractTextContent(message: AgentMessage): string {
     return message.content;
   }
 
+  // Guard: content may be undefined/null (corrupted toolResult) or empty
+  if (!Array.isArray(message.content) || message.content.length === 0) {
+    return '';
+  }
+
   return message.content
     .filter(part => typeof part.text === 'string')
     .map(part => part.text as string)
@@ -152,7 +157,7 @@ export function extractTextContent(message: AgentMessage): string {
  * containing tool_result type parts.
  */
 export function isToolResultMessage(message: AgentMessage): boolean {
-  if (typeof message.content === 'string') {
+  if (!Array.isArray(message.content)) {
     return false;
   }
   return message.content.some(part => part.type === 'tool_result');
@@ -165,7 +170,7 @@ export function isToolUseMessage(message: AgentMessage): boolean {
   if (message.role !== 'assistant') {
     return false;
   }
-  if (typeof message.content === 'string') {
+  if (!Array.isArray(message.content)) {
     return false;
   }
   return message.content.some(part => part.type === 'tool_use');
@@ -176,7 +181,7 @@ export function isToolUseMessage(message: AgentMessage): boolean {
  * Returns null if the message is not a tool-related message.
  */
 export function extractToolName(message: AgentMessage): string | null {
-  if (typeof message.content === 'string') {
+  if (!Array.isArray(message.content)) {
     return null;
   }
 

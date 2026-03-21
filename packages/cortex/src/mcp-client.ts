@@ -68,6 +68,12 @@ export class McpClientManager {
   private connections = new Map<string, McpConnection>();
 
   /**
+   * Callback invoked whenever the aggregate tool set changes.
+   * CortexAgent uses this to resync live tools after connect/disconnect/reconnect.
+   */
+  onToolsChanged?: () => void;
+
+  /**
    * Callback invoked when a subprocess is spawned (for PID tracking).
    * The consumer (CortexAgent) uses this to track PIDs for exit cleanup.
    */
@@ -172,6 +178,7 @@ export class McpClientManager {
 
     this.connections.set(serverName, connection);
     this.log?.info(`Connected to MCP server ${serverName}: ${tools.length} tools discovered [${tools.map(t => t.name).join(', ')}]`);
+    this.onToolsChanged?.();
   }
 
   /**
@@ -198,6 +205,7 @@ export class McpClientManager {
     }
 
     this.connections.delete(serverName);
+    this.onToolsChanged?.();
   }
 
   /**
@@ -400,16 +408,66 @@ export class McpClientManager {
             throw new Error(errorText || 'MCP tool call failed');
           }
 
-          // Extract text from content array
+          const normalizedContent: Array<
+            | { type: 'text'; text: string }
+            | { type: 'image'; data: string; mimeType: string }
+          > = [];
+
           if (Array.isArray(result.content)) {
-            return result.content
-              .filter((c): c is { type: 'text'; text: string } =>
-                typeof c === 'object' && c !== null && 'type' in c && c.type === 'text')
-              .map(c => c.text)
-              .join('\n');
+            for (const item of result.content) {
+              if (!item || typeof item !== 'object') {
+                normalizedContent.push({ type: 'text', text: String(item) });
+                continue;
+              }
+
+              const block = item as Record<string, unknown>;
+              const type = block['type'];
+
+              if (type === 'text' && typeof block['text'] === 'string') {
+                normalizedContent.push({ type: 'text', text: block['text'] });
+                continue;
+              }
+
+              if (type === 'image' &&
+                  typeof block['data'] === 'string' &&
+                  typeof block['mimeType'] === 'string') {
+                normalizedContent.push({
+                  type: 'image',
+                  data: block['data'],
+                  mimeType: block['mimeType'],
+                });
+                continue;
+              }
+
+              normalizedContent.push({
+                type: 'text',
+                text: JSON.stringify(block, null, 2),
+              });
+            }
           }
 
-          return String(result.content ?? '');
+          if (normalizedContent.length === 0) {
+            const structuredContent = (result as Record<string, unknown>)['structuredContent'];
+            if (structuredContent !== undefined) {
+              normalizedContent.push({
+                type: 'text',
+                text: JSON.stringify(structuredContent, null, 2),
+              });
+            } else {
+              normalizedContent.push({
+                type: 'text',
+                text: String(result.content ?? ''),
+              });
+            }
+          }
+
+          return {
+            content: normalizedContent,
+            details: {
+              structuredContent: (result as Record<string, unknown>)['structuredContent'] ?? null,
+              rawContent: result.content ?? null,
+            },
+          };
         } catch (err) {
           // Re-throw as a standard error for pi-agent-core to handle
           if (err instanceof Error) throw err;
@@ -447,6 +505,7 @@ export class McpClientManager {
     if (conn.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       this.log?.error(`MCP server ${serverName} failed to reconnect after ${MAX_RECONNECT_ATTEMPTS} attempts; deregistering tools`);
       this.connections.delete(serverName);
+      this.onToolsChanged?.();
       return;
     }
 
@@ -466,10 +525,13 @@ export class McpClientManager {
     const existing = this.connections.get(serverName);
     if (!existing) return; // Was deregistered during delay
 
+    let client: Client | null = null;
+    let pid: number | null = null;
+
     try {
       // Attempt fresh connection
       const transport = this.createTransport(config);
-      const client = new Client(
+      client = new Client(
         { name: `cortex-${serverName}`, version: '1.0.0' },
         { capabilities: {} },
       );
@@ -477,7 +539,6 @@ export class McpClientManager {
       await client.connect(transport as Transport);
 
       // Track subprocess PID
-      let pid: number | null = null;
       if (transport instanceof StdioClientTransport) {
         pid = transport.pid;
         if (pid != null) {
@@ -502,14 +563,27 @@ export class McpClientManager {
       // Keep reconnectAttempts as-is (reset only on fresh connect)
 
       this.log?.info(`Reconnected to MCP server ${serverName}: ${tools.length} tools`);
+      this.onToolsChanged?.();
     } catch (err) {
+      // Clean up resources from partial connection
+      if (client) {
+        try { await client.close(); } catch { /* best-effort */ }
+      }
+      if (pid != null) {
+        this.onSubprocessExited?.(pid);
+      }
+
       this.log?.warn(`Reconnect to ${serverName} failed: ${err instanceof Error ? err.message : String(err)}`);
-      // handleDisconnect will fire again if the transport closes
-      // If we've exhausted attempts, the server will be deregistered
       existing.reconnectAttempts++;
       if (existing.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
         this.log?.error(`MCP server ${serverName} exceeded max reconnect attempts; deregistering`);
         this.connections.delete(serverName);
+        this.onToolsChanged?.();
+      } else {
+        // Schedule another attempt since transport.onclose may not fire
+        this.attemptReconnect(serverName, config).catch((retryErr) => {
+          this.log?.error(`Subsequent reconnect for ${serverName} failed`, retryErr);
+        });
       }
     }
   }

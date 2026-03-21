@@ -142,6 +142,12 @@ export class SkillRegistry {
   /** Consumer-provided context for !{script:} executions. */
   private scriptContext: Record<string, unknown> = {};
 
+  /**
+   * Callback fired when skills are added or removed.
+   * CortexAgent sets this to rebuild the load_skill tool description.
+   */
+  onChange: (() => void) | null = null;
+
   constructor(configs?: SkillConfig[]) {
     if (configs) {
       for (const config of configs) {
@@ -187,15 +193,22 @@ export class SkillRegistry {
       frontmatter,
       modelInvocable: !disableModelInvocation,
     };
+    if (config.variables) {
+      entry.variables = config.variables;
+    }
 
     this.entries.set(name, entry);
+    this.onChange?.();
   }
 
   /**
    * Remove a skill by name.
    */
   removeSkill(name: string): void {
-    this.entries.delete(name);
+    const existed = this.entries.delete(name);
+    if (existed) {
+      this.onChange?.();
+    }
   }
 
   /**
@@ -228,7 +241,7 @@ export class SkillRegistry {
    * Format: XML listing with name, source, and description per skill.
    * Each skill consumes approximately 100 tokens.
    */
-  getAvailableSkillsSummary(): string {
+  getAvailableSkillsSummary(maxTokens = Number.POSITIVE_INFINITY): string {
     const invocableSkills = [...this.entries.values()]
       .filter(e => e.modelInvocable)
       .sort((a, b) => {
@@ -248,7 +261,24 @@ export class SkillRegistry {
       return '<available-skills>\n(No skills available)\n</available-skills>';
     }
 
-    const skillXml = invocableSkills.map(e => {
+    let usedTokens = 0;
+    const visibleSkills: SkillEntry[] = [];
+
+    for (const entry of invocableSkills) {
+      const approxTokens = Math.max(
+        32,
+        Math.ceil((entry.name.length + entry.description.trim().length) / 4),
+      );
+
+      if (visibleSkills.length > 0 && usedTokens + approxTokens > maxTokens) {
+        continue;
+      }
+
+      visibleSkills.push(entry);
+      usedTokens += approxTokens;
+    }
+
+    const skillXml = visibleSkills.map(e => {
       const desc = e.description.trim();
       return `<skill name="${e.name}" source="${e.source}">\n${desc}\n</skill>`;
     }).join('\n');
@@ -293,16 +323,21 @@ export class SkillRegistry {
     for (let i = 0; i < 9; i++) {
       variables[String(i + 1)] = callArgs.args[i] ?? '';
     }
+    // Merge per-skill variables (e.g., PLUGIN_ROOT for plugin skills)
+    if (entry.variables) {
+      Object.assign(variables, entry.variables);
+    }
     // Merge consumer variables (consumer wins on collision)
     Object.assign(variables, this.preprocessorVariables);
 
-    // Build merged script context
+    // Build merged script context (consumer first, Cortex built-ins last so
+    // they cannot be overridden — skillDir, args, rawArgs are Cortex-owned)
     const mergedScriptContext: Record<string, unknown> = {
+      ...this.scriptContext,
       skillDir: entry.dir,
       args: callArgs.args,
       rawArgs: callArgs.rawArgs,
       scriptArgs: {},
-      ...this.scriptContext,
     };
 
     // Run preprocessor

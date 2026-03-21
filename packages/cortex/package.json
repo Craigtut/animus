@@ -20,7 +20,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:eval": "vitest run --config vitest.config.eval.ts"
   },
   "dependencies": {
     "@mariozechner/pi-agent-core": "^0.58.0",

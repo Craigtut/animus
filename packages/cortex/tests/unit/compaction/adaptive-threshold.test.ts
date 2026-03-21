@@ -279,7 +279,6 @@ describe('checkAndRunCompaction with adaptive threshold', () => {
     const config = buildCompactionConfig();
     const manager = new CompactionManager(config, 2);
     manager.setContextWindow(200_000);
-    manager.setPipelinePhase('idle');
 
     // 60% usage: below static 0.70 but above adaptive idle 0.50
     manager.updateTokenCount(120_000);
@@ -306,7 +305,6 @@ describe('checkAndRunCompaction with adaptive threshold', () => {
     const config = buildCompactionConfig();
     const manager = new CompactionManager(config, 2);
     manager.setContextWindow(200_000);
-    manager.setPipelinePhase('idle');
 
     // 60% usage: below static 0.70
     manager.updateTokenCount(120_000);

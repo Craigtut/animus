@@ -42,10 +42,10 @@ import type {
   AgentTextOutput,
   CompactionResult,
   CompactionTarget,
-  PipelinePhase,
   McpTransportConfig,
   SkillConfig,
   LoadedSkill,
+  SubAgentSpawnConfig,
   SubAgentResult,
   TrackedSubAgent,
 } from './types.js';
@@ -92,7 +92,17 @@ export interface PiAgent extends AgentStateAccessor, PiEventSource {
    * Replace the agent's tool set at runtime.
    * Optional: only available if the underlying agent supports it.
    */
-  setTools?(tools: Array<{ name: string; description: string; parameters: unknown; execute: (args: unknown) => Promise<unknown> }>): void;
+  setTools?(tools: Array<{
+    name: string;
+    description: string;
+    parameters: unknown;
+    execute: (...args: any[]) => Promise<unknown>;
+  }>): void;
+
+  /**
+   * Context transformation hook installed by Cortex.
+   */
+  transformContext?: (messages: unknown[]) => Promise<unknown[]>;
 }
 
 /**
@@ -124,32 +134,17 @@ export const DEFAULT_CONTEXT_WINDOW_LIMIT = 100_000;
 
 const RESPONSE_DELIVERY_SECTION = `# Response Delivery
 
-When working through multi-step tasks, distinguish between internal
-working content and direct communication using <working> tags.
+Use <working> tags to separate internal reasoning from user-facing
+communication. Text outside <working> tags is delivered to the user.
+Text inside <working> tags stays in your conversation history for
+your reference but may not be shown to the user.
 
-**Wrap in <working> tags:**
-- Your analysis of tool call results
-- Reasoning about what to do next
-- Synthesis of findings you will reference in later steps
-- Planning and strategy
+<working> tags are for: analysis of results, reasoning about next
+steps, synthesis of findings, planning. Everything else (answers,
+progress updates, questions) stays outside tags.
 
-**Keep outside <working> tags (delivered to user):**
-- Acknowledgments when starting work
-- Progress updates at meaningful milestones
-- Final answers, recommendations, and deliverables
-- Questions directed at the user
-
-Text outside <working> tags is what the user sees. Text inside <working>
-tags stays in your conversation for your own reference but may not be
-displayed to the user depending on their interface.
-
-Good progress updates are concise and informative: "Found 5 strong
-candidates, analyzing their requirements now." Do not narrate every
-step, but do keep the user informed at natural milestones.
-
-For complex tasks requiring extensive research or multiple phases of
-work, consider delegating to a sub-agent so you remain responsive
-for other interactions.`;
+For complex tasks requiring extensive research, consider delegating
+to a sub-agent so you remain responsive.`;
 
 const SYSTEM_RULES_SECTION = `# System Rules
 
@@ -192,11 +187,36 @@ const TOOL_USAGE_SECTION = `# Tool Usage
     tool covers.
 - You can call multiple tools in a single response. When multiple
   independent operations are needed, make all calls in parallel.
-- Do not narrate routine tool calls. Just call the tool. Only
-  explain what you're doing for multi-step, complex, or sensitive
-  operations.
 - Do not poll, loop, or sleep-wait for backgrounded tasks. You
-  will be notified when they complete.`;
+  will be notified when they complete.
+
+## IMPORTANT: Text output during tool use
+
+When you are using tools, do NOT produce text that narrates what
+you are doing. Just call the tool. No preamble, no commentary,
+no "let me look at that", no "I found it", no status updates
+between every tool call.
+
+BAD (do not do this):
+  "Let me search for that file." [tool_use: Glob]
+  "Found it. Let me read it now." [tool_use: Read]
+  "Good, I can see the code. Let me trace the function." [tool_use: Grep]
+
+GOOD (do this instead):
+  [tool_use: Glob]
+  [tool_use: Read]
+  [tool_use: Grep]
+  <working>The function traces through three layers: router -> service -> store.
+  The foreign key constraint is in the messages table schema.</working>
+  The issue is in the messages table schema. Here is what I found: ...
+
+Rules:
+1. When calling a tool, produce ONLY the tool call. No text.
+2. After receiving results, wrap your analysis in <working> tags.
+3. Only produce text outside <working> tags when you have something
+   meaningful to tell the user: a finding, a question, or a final answer.
+4. A brief acknowledgment on the FIRST message is fine ("Sure, let me
+   look into that."). After that, work silently until you have results.`;
 
 const EXECUTING_WITH_CARE_SECTION = `# Executing with Care
 
@@ -219,11 +239,26 @@ When encountering unexpected state (unfamiliar files, branches,
 or configurations), investigate before modifying or deleting.
 It may represent in-progress work.`;
 
+type RegisteredTool = {
+  name: string;
+  description: string;
+  parameters: unknown;
+  execute: (...args: any[]) => Promise<unknown>;
+};
+
+interface CortexAgentConstructorOptions {
+  enableSubAgentTool?: boolean;
+  enableLoadSkillTool?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // CortexAgent
 // ---------------------------------------------------------------------------
 
 export class CortexAgent {
+  private static readonly globalTrackedPids = new Set<number>();
+  private static exitHandlerInstalled = false;
+
   private readonly agent: PiAgent;
   private readonly contextManager: ContextManager;
   private readonly eventBridge: EventBridge;
@@ -234,6 +269,7 @@ export class CortexAgent {
   private readonly envOverrides: Record<string, string> | undefined;
 
   private lifecycleState: CortexLifecycleState = 'created';
+  private currentBasePrompt: string | null = null;
   private currentSystemPrompt: string = '';
 
   // Cache retention resolved by the consumer via resolveCacheRetention().
@@ -247,7 +283,7 @@ export class CortexAgent {
   private readonly resolvedUtilityModel: PiModel;
 
   // Built-in tools registered at construction (distinct from MCP-discovered tools)
-  private readonly registeredTools: Array<{ name: string; description: string; parameters: unknown; execute: (args: unknown) => Promise<unknown> }>;
+  private readonly registeredTools: RegisteredTool[];
 
   // Compaction Manager
   private readonly compactionManager: CompactionManager;
@@ -292,25 +328,44 @@ export class CortexAgent {
   // Skill buffer: loaded skill content for ephemeral injection
   private skillBuffer: LoadedSkill[] = [];
 
+  // Cache breakpoint optimization: boundary tracking and API index state.
+  // _prePromptMessageCount records agent.state.messages.length BEFORE each
+  // prompt() call, marking the boundary between "old history" (stable,
+  // cacheable) and "new tick content" (varies per tick). This enables
+  // cross-tick prefix caching of conversation history.
+  private _prePromptMessageCount: number = 0;
+
+  // Shared state between getTransformContextHook() and the onPayload hook.
+  // Computed in transformContext (which has the transformed message array),
+  // consumed in onPayload (which has the final Anthropic API params).
+  // Stores the API-level message indices where cache_control breakpoints
+  // should be injected (BP2 = after last slot, BP3 = old history boundary).
+  private _cacheBreakpointIndices: { bp2ApiIndex: number; bp3ApiIndex: number } | null = null;
+
   // Usage from the most recent directComplete() or structuredComplete() call.
   // Reset to null before each call. Consumers read this after a call to
   // capture per-phase usage for persistence.
   private _lastDirectUsage: CortexUsage | null = null;
 
   /**
-   * Create a CortexAgent.
+   * Create a CortexAgent. Prefer CortexAgent.create().
    *
    * @param agent - A pi-agent-core Agent instance
    * @param config - CortexAgent configuration
    * @throws Error if the utility model violates the same-provider constraint
    */
-  constructor(agent: PiAgent, config: CortexAgentConfig, tools?: Array<{ name: string; description: string; parameters: unknown; execute: (args: unknown) => Promise<unknown> }>) {
+  private constructor(
+    agent: PiAgent,
+    config: CortexAgentConfig,
+    tools?: RegisteredTool[],
+    options?: CortexAgentConstructorOptions,
+  ) {
     this.agent = agent;
     this.config = config;
     this.workingTagsEnabled = config.workingTags?.enabled ?? true;
     this.workingDirectory = config.workingDirectory;
     this.envOverrides = config.envOverrides;
-    this.registeredTools = tools ?? [];
+    this.registeredTools = [...(tools ?? [])];
 
     // Resolve models
     if (!config.model) {
@@ -332,11 +387,15 @@ export class CortexAgent {
     this.wireInternalEvents();
 
     // Set up BudgetGuard
+    const budgetGuardConfig: { maxTurns?: number; maxCost?: number } = {};
+    if (config.budgetGuard?.maxTurns !== undefined) {
+      budgetGuardConfig.maxTurns = config.budgetGuard.maxTurns;
+    }
+    if (config.budgetGuard?.maxCost !== undefined) {
+      budgetGuardConfig.maxCost = config.budgetGuard.maxCost;
+    }
     this.budgetGuard = new BudgetGuard(
-      {
-        maxTurns: config.budgetGuard?.maxTurns,
-        maxCost: config.budgetGuard?.maxCost,
-      },
+      budgetGuardConfig,
       () => this.agent.abort(),
     );
     this.budgetGuard.wire(this.eventBridge);
@@ -344,14 +403,17 @@ export class CortexAgent {
     // Set up MCP Client Manager with PID tracking and env overrides
     this.mcpClientManager = new McpClientManager();
     this.mcpClientManager.onSubprocessSpawned = (pid) => {
-      this.trackedPids.add(pid);
+      this.trackPid(pid);
     };
     this.mcpClientManager.onSubprocessExited = (pid) => {
-      this.trackedPids.delete(pid);
+      this.untrackPid(pid);
     };
     if (this.envOverrides) {
       this.mcpClientManager.envOverrides = this.envOverrides;
     }
+    this.mcpClientManager.onToolsChanged = () => {
+      this.refreshTools();
+    };
 
     // Set up Sub-Agent Manager (must be before wireSubAgentHooks)
     this.subAgentManager = new SubAgentManager({
@@ -368,25 +430,30 @@ export class CortexAgent {
 
     // Create and register the SubAgent tool.
     // Must be after subAgentManager and wireSubAgentHooks.
-    const subAgentTool = createSubAgentTool({
-      spawnSubAgent: (params) => this.spawnForegroundSubAgent(params),
-      spawnBackgroundSubAgent: (params) => this.spawnBackgroundSubAgent(params),
-      canSpawn: () => this.subAgentManager.activeCount < this.subAgentManager.limit,
-      getConcurrencyInfo: () => ({
-        active: this.subAgentManager.activeCount,
-        limit: this.subAgentManager.limit,
-      }),
-    });
-    this.registeredTools.push(subAgentTool as typeof this.registeredTools[number]);
+    if (options?.enableSubAgentTool !== false) {
+      const subAgentTool = createSubAgentTool({
+        spawnSubAgent: (params) => this.spawnForegroundSubAgentInternal(params),
+        spawnBackgroundSubAgent: (params) => this.spawnBackgroundSubAgentInternal(params),
+        canSpawn: () => this.subAgentManager.activeCount < this.subAgentManager.limit,
+        getConcurrencyInfo: () => ({
+          active: this.subAgentManager.activeCount,
+          limit: this.subAgentManager.limit,
+        }),
+      });
+      this.registeredTools.push(subAgentTool as RegisteredTool);
+    }
 
     // Create and register the load_skill tool.
     // Must be after skillRegistry is initialized.
-    this.loadSkillTool = createLoadSkillTool({
-      registry: this.skillRegistry,
-      getSkillBuffer: () => this.skillBuffer,
-      pushToSkillBuffer: (skill) => this.pushToSkillBuffer(skill),
-    });
-    this.registeredTools.push(this.loadSkillTool as typeof this.registeredTools[number]);
+    if (options?.enableLoadSkillTool !== false) {
+      this.loadSkillTool = createLoadSkillTool({
+        registry: this.skillRegistry,
+        getAvailableSkillsSummary: () => this.buildAvailableSkillsSummary(),
+        getSkillBuffer: () => this.skillBuffer,
+        pushToSkillBuffer: (skill) => this.pushToSkillBuffer(skill),
+      });
+      this.registeredTools.push(this.loadSkillTool as RegisteredTool);
+    }
 
     // Apply execute signature adapter and sync tools to pi-agent-core.
     // Tools are initially set via initialState.tools but without the arity
@@ -404,6 +471,15 @@ export class CortexAgent {
     // Apply context window limit from config and model
     this._contextWindowLimit = config.contextWindowLimit ?? null;
     this._updateEffectiveContextWindow();
+
+    const existingPrompt = typeof this.agent.state.systemPrompt === 'string'
+      ? this.agent.state.systemPrompt
+      : '';
+    this.currentSystemPrompt = existingPrompt;
+
+    if (typeof config.initialBasePrompt === 'string') {
+      this.setBasePrompt(config.initialBasePrompt);
+    }
 
     // Wire compaction completion function (uses directComplete)
     this.compactionManager.setCompleteFn(async (context) => {
@@ -439,6 +515,12 @@ export class CortexAgent {
     if (this.lifecycleState === 'destroyed') {
       throw new Error('Agent has been destroyed');
     }
+    if (!this.hasConfiguredSystemPrompt()) {
+      throw new Error(
+        'CortexAgent prompt is not configured. Call setBasePrompt() before prompt(), ' +
+        'or provide initialBasePrompt during creation.',
+      );
+    }
 
     // Transition to ACTIVE on first prompt
     if (this.lifecycleState === 'created') {
@@ -446,6 +528,13 @@ export class CortexAgent {
     }
 
     this._isPrompting = true;
+
+    // Record the message count before this prompt so the transformContext
+    // hook knows where "old history" ends and "new tick content" begins.
+    // This enables cache breakpoint optimization: old history is stable
+    // across ticks and can be cached, while new content changes each tick.
+    this._prePromptMessageCount = this.agent.state.messages.length;
+
     try {
       const result = await this.agent.prompt(input);
       return result;
@@ -523,10 +612,10 @@ export class CortexAgent {
     cacheRetention?: 'none' | 'short' | 'long';
   }): Promise<string> {
     // Dynamically import pi-ai's complete() function
-    let complete: (model: unknown, context: unknown, options?: unknown) => Promise<unknown>;
+    let completeFn: typeof import('@mariozechner/pi-ai').complete;
     try {
       const piAi = await import('@mariozechner/pi-ai');
-      complete = piAi.complete;
+      completeFn = piAi.complete;
     } catch {
       throw new Error(
         'directComplete() requires @mariozechner/pi-ai to be installed. ' +
@@ -555,10 +644,16 @@ export class CortexAgent {
     // provider-specific convertMessages() handle all format normalization:
     // UserMessage (string or content blocks), AssistantMessage (content block
     // arrays with text/thinking/toolCall), and ToolResultMessage.
-    const result = await complete(this.primaryModel, {
-      systemPrompt: context.systemPrompt,
-      messages: context.messages,
-    }, Object.keys(completeOptions).length > 0 ? completeOptions : undefined);
+    const result = await completeFn(
+      this.primaryModel as unknown as Parameters<typeof completeFn>[0],
+      {
+        systemPrompt: context.systemPrompt,
+        messages: context.messages,
+      } as Parameters<typeof completeFn>[1],
+      Object.keys(completeOptions).length > 0
+        ? completeOptions as Parameters<typeof completeFn>[2]
+        : undefined,
+    );
 
     // Check for silent errors: pi-ai resolves with stopReason 'error' instead of throwing
     this.checkForSilentError(result);
@@ -591,10 +686,10 @@ export class CortexAgent {
   }, schema: unknown, toolName: string = 'structured_output', toolDescription: string = 'Produce structured output', options?: {
     cacheRetention?: 'none' | 'short' | 'long';
   }): Promise<Record<string, unknown> | null> {
-    let complete: (model: unknown, context: unknown, options?: unknown) => Promise<unknown>;
+    let completeFn: typeof import('@mariozechner/pi-ai').complete;
     try {
       const piAi = await import('@mariozechner/pi-ai');
-      complete = piAi.complete;
+      completeFn = piAi.complete;
     } catch {
       throw new Error(
         'structuredComplete() requires @mariozechner/pi-ai to be installed.',
@@ -624,17 +719,21 @@ export class CortexAgent {
     // provider-specific convertMessages() handle all format normalization:
     // UserMessage (string or content blocks), AssistantMessage (content block
     // arrays with text/thinking/toolCall), and ToolResultMessage.
-    const result = await complete(this.primaryModel, {
-      systemPrompt: context.systemPrompt,
-      messages: context.messages,
-      tools: [tool],
-    }, {
-      ...(apiKey ? { apiKey } : {}),
-      // Force the model to call a tool (since we only pass one, it must call ours).
-      // "any" has the widest provider support across Anthropic, Google, Mistral, OpenAI, Bedrock.
-      toolChoice: 'any',
-      ...(options?.cacheRetention ? { cacheRetention: options.cacheRetention } : {}),
-    });
+    const result = await completeFn(
+      this.primaryModel as unknown as Parameters<typeof completeFn>[0],
+      {
+        systemPrompt: context.systemPrompt,
+        messages: context.messages,
+        tools: [tool],
+      } as Parameters<typeof completeFn>[1],
+      {
+        ...(apiKey ? { apiKey } : {}),
+        // Force the model to call a tool (since we only pass one, it must call ours).
+        // "any" has the widest provider support across Anthropic, Google, Mistral, OpenAI, Bedrock.
+        toolChoice: 'any',
+        ...(options?.cacheRetention ? { cacheRetention: options.cacheRetention } : {}),
+      } as Parameters<typeof completeFn>[2],
+    );
 
     // Check for silent errors: pi-ai resolves with stopReason 'error' instead of throwing
     this.checkForSilentError(result);
@@ -699,6 +798,170 @@ export class CortexAgent {
   // Static Factory
   // -----------------------------------------------------------------------
 
+  private static async loadAgentClass(errorMessage: string): Promise<new (config: Record<string, unknown>) => PiAgent> {
+    try {
+      const piAgentCore = await import('@mariozechner/pi-agent-core');
+      return piAgentCore.Agent as unknown as new (config: Record<string, unknown>) => PiAgent;
+    } catch {
+      throw new Error(errorMessage);
+    }
+  }
+
+  private static buildPiAgentConfig(params: {
+    cortexConfig: CortexAgentConfig;
+    tools: RegisteredTool[];
+    initialSystemPrompt?: string;
+    cacheBreakpointState: { cortexAgent: CortexAgent | null };
+  }): Record<string, unknown> {
+    const { cortexConfig, tools, initialSystemPrompt = '', cacheBreakpointState } = params;
+    const agentConfig: Record<string, unknown> = {
+      initialState: {
+        systemPrompt: initialSystemPrompt,
+        model: cortexConfig.model,
+        tools,
+        messages: [],
+      },
+      getApiKey: cortexConfig.getApiKey,
+    };
+
+    if (cortexConfig.resolvePermission) {
+      const resolver = cortexConfig.resolvePermission;
+      agentConfig['beforeToolCall'] = async (ctx: unknown) => {
+        const { toolCall, args } = ctx as { toolCall: { name: string }; args: unknown };
+        const allowed = await resolver(toolCall.name, args);
+        if (!allowed) {
+          return { block: true, reason: `Tool "${toolCall.name}" requires approval or is disabled.` };
+        }
+        return undefined;
+      };
+    }
+
+    const workingTagsEnabled = cortexConfig.workingTags?.enabled ?? true;
+    if (workingTagsEnabled) {
+      agentConfig['afterToolCall'] = async (ctx: unknown) => {
+        const { result, isError } = ctx as {
+          toolCall: { name: string };
+          result: { content: unknown };
+          isError: boolean;
+          context: unknown;
+        };
+        if (isError) return undefined;
+
+        const reminder = '\n\n[Do not narrate. If analyzing these results, use <working> tags. Only text outside <working> tags is shown to the user.]';
+        const content = result.content;
+        if (typeof content === 'string') {
+          return { content: content + reminder };
+        }
+        if (Array.isArray(content)) {
+          return { content: [...content, { type: 'text', text: reminder }] };
+        }
+        return undefined;
+      };
+    }
+
+    agentConfig['onPayload'] = async (payload: Record<string, unknown>, model: Record<string, unknown>) => {
+      const agent = cacheBreakpointState.cortexAgent;
+      if (!agent) return undefined;
+
+      const provider = (model as Record<string, unknown>)['provider'];
+      if (provider !== 'anthropic') return undefined;
+
+      const indices = agent._cacheBreakpointIndices;
+      if (!indices) return undefined;
+
+      const systemBlocks = payload['system'] as Array<Record<string, unknown>> | undefined;
+      if (!systemBlocks || systemBlocks.length === 0) return undefined;
+      const cacheControl = systemBlocks[systemBlocks.length - 1]!['cache_control'];
+      if (!cacheControl) return undefined;
+
+      const messages = payload['messages'] as Array<Record<string, unknown>>;
+      if (!messages) return undefined;
+
+      if (indices.bp2ApiIndex >= 0 && indices.bp2ApiIndex < messages.length) {
+        addCacheControlToMessage(messages[indices.bp2ApiIndex]!, cacheControl);
+      }
+
+      if (indices.bp3ApiIndex >= 0 && indices.bp3ApiIndex < messages.length &&
+          indices.bp3ApiIndex !== indices.bp2ApiIndex) {
+        addCacheControlToMessage(messages[indices.bp3ApiIndex]!, cacheControl);
+      }
+
+      return payload;
+    };
+
+    return agentConfig;
+  }
+
+  private static wireManagedPiAgent(cortexAgent: CortexAgent, piAgent: PiAgent): void {
+    const hook = cortexAgent.getTransformContextHook();
+    piAgent.transformContext = async (messages: unknown[]) => {
+      const result = await hook({
+        systemPrompt: piAgent.state.systemPrompt ?? '',
+        model: piAgent.state.model ?? null,
+        messages: messages as AgentMessage[],
+        tools: (piAgent.state.tools ?? []) as unknown[],
+        thinkingLevel: typeof piAgent.state.thinkingLevel === 'string'
+          ? piAgent.state.thinkingLevel
+          : 'medium',
+      });
+      return result.messages;
+    };
+  }
+
+  private static async createManagedAgent(params: {
+    cortexConfig: CortexAgentConfig;
+    tools?: RegisteredTool[];
+    initialBasePrompt?: string;
+    initialSystemPrompt?: string;
+    constructorOptions?: CortexAgentConstructorOptions;
+    missingDependencyMessage: string;
+  }): Promise<CortexAgent> {
+    const {
+      cortexConfig,
+      tools = [],
+      initialBasePrompt,
+      initialSystemPrompt,
+      constructorOptions,
+      missingDependencyMessage,
+    } = params;
+
+    const AgentClass = await CortexAgent.loadAgentClass(missingDependencyMessage);
+    const cacheBreakpointState = { cortexAgent: null as CortexAgent | null };
+    const agentConfigParams: {
+      cortexConfig: CortexAgentConfig;
+      tools: RegisteredTool[];
+      initialSystemPrompt?: string;
+      cacheBreakpointState: { cortexAgent: CortexAgent | null };
+    } = {
+      cortexConfig,
+      tools,
+      cacheBreakpointState,
+    };
+    if (initialSystemPrompt !== undefined) {
+      agentConfigParams.initialSystemPrompt = initialSystemPrompt;
+    }
+    const agentConfig = CortexAgent.buildPiAgentConfig(agentConfigParams);
+
+    const piAgent = new AgentClass(agentConfig);
+    const cortexAgent = new CortexAgent(
+      piAgent,
+      cortexConfig,
+      tools,
+      constructorOptions,
+    );
+
+    cacheBreakpointState.cortexAgent = cortexAgent;
+    CortexAgent.wireManagedPiAgent(cortexAgent, piAgent);
+
+    if (typeof initialBasePrompt === 'string') {
+      cortexAgent.setBasePrompt(initialBasePrompt);
+    } else if (typeof initialSystemPrompt === 'string' && initialSystemPrompt.trim()) {
+      cortexAgent.applySystemPrompt(initialSystemPrompt);
+    }
+
+    return cortexAgent;
+  }
+
   /**
    * Create a CortexAgent with a pi-agent-core Agent constructed internally.
    *
@@ -713,68 +976,29 @@ export class CortexAgent {
    */
   static async create(config: CortexAgentConfig & {
     /** Tools to register with the agent. Each must have name, description, parameters, execute. */
-    tools?: Array<{ name: string; description: string; parameters: unknown; execute: (args: unknown) => Promise<unknown> }>;
-    /** Initial system prompt. Can be rebuilt later via rebuildSystemPrompt(). */
+    tools?: RegisteredTool[];
+    /** @deprecated Use initialBasePrompt instead. */
     systemPrompt?: string;
   }): Promise<CortexAgent> {
-    // Dynamically import pi-agent-core
-    let AgentClass: new (config: Record<string, unknown>) => PiAgent;
-    try {
-      const piAgentCore = await import('@mariozechner/pi-agent-core');
-      AgentClass = piAgentCore.Agent as unknown as new (config: Record<string, unknown>) => PiAgent;
-    } catch {
-      throw new Error(
+    const managedCreateParams: {
+      cortexConfig: CortexAgentConfig;
+      tools?: RegisteredTool[];
+      initialBasePrompt?: string;
+      missingDependencyMessage: string;
+    } = {
+      cortexConfig: config,
+      missingDependencyMessage:
         'CortexAgent.create() requires @mariozechner/pi-agent-core to be installed. ' +
         'Install it as a dependency or peer dependency.',
-      );
-    }
-
-    // Build the pi-agent-core Agent config.
-    // Pi-agent-core expects { initialState: { systemPrompt, model, tools, messages }, getApiKey, ... }
-    const agentConfig: Record<string, unknown> = {
-      initialState: {
-        systemPrompt: config.systemPrompt ?? '',
-        model: config.model,
-        tools: config.tools ?? [],
-        messages: [],
-      },
-      getApiKey: config.getApiKey,
     };
-
-    // Wire resolvePermission -> pi-agent-core's beforeToolCall hook.
-    // This is the single enforcement point for the tool permission system.
-    // Without this, cortex built-in tools (Bash, Read, Write, Edit, Glob,
-    // Grep, WebFetch) bypass the permission gate entirely.
-    if (config.resolvePermission) {
-      const resolver = config.resolvePermission;
-      agentConfig['beforeToolCall'] = async (ctx: unknown) => {
-        const { toolCall, args } = ctx as { toolCall: { name: string }; args: unknown };
-        const allowed = await resolver(toolCall.name, args);
-        if (!allowed) {
-          return { block: true, reason: `Tool "${toolCall.name}" requires approval or is disabled.` };
-        }
-        return undefined;
-      };
+    if (config.tools) {
+      managedCreateParams.tools = config.tools;
     }
-
-    const piAgent = new AgentClass(agentConfig);
-
-    const cortexAgent = new CortexAgent(piAgent, config, config.tools);
-
-    // Wire the composed transformContext hook AFTER construction so the
-    // CortexAgent instance is fully initialized (compaction, skills, slots).
-    // Pi-agent-core calls this before every LLM call for context management.
-    const hook = cortexAgent.getTransformContextHook();
-    piAgent.transformContext = async (messages: unknown[]) => {
-      const result = hook({
-        systemPrompt: piAgent.state.systemPrompt,
-        messages: messages as AgentMessage[],
-        tools: piAgent.state.tools as unknown[],
-      });
-      return result.messages;
-    };
-
-    return cortexAgent;
+    const initialBasePrompt = config.initialBasePrompt ?? config.systemPrompt;
+    if (initialBasePrompt !== undefined) {
+      managedCreateParams.initialBasePrompt = initialBasePrompt;
+    }
+    return CortexAgent.createManagedAgent(managedCreateParams);
   }
 
   // -----------------------------------------------------------------------
@@ -793,17 +1017,18 @@ export class CortexAgent {
   // -----------------------------------------------------------------------
 
   /**
-   * Build a system prompt from consumer content + cortex operational sections.
+   * Compose a system prompt from the application/base prompt plus
+   * Cortex operational sections.
    *
-   * Consumer content comes FIRST (identity, persona, domain instructions).
+   * Base prompt content comes FIRST (identity, persona, domain instructions).
    * Cortex appends operational rules AFTER (system rules, tool guidance,
    * safety, environment info).
    *
-   * @param consumerPrompt - The consumer's system prompt content
+   * @param basePrompt - The application/base prompt content
    * @returns The assembled system prompt
    */
-  buildSystemPrompt(consumerPrompt: string): string {
-    const sections: string[] = [consumerPrompt];
+  composeSystemPrompt(basePrompt: string): string {
+    const sections: string[] = [basePrompt];
 
     // Section 1: Response Delivery (conditional on workingTags.enabled)
     if (this.workingTagsEnabled) {
@@ -825,23 +1050,40 @@ export class CortexAgent {
     // Section 6: Environment
     sections.push(this.buildEnvironmentSection());
 
-    this.currentSystemPrompt = sections.join('\n\n');
-    return this.currentSystemPrompt;
+    return sections.join('\n\n');
   }
 
   /**
-   * Rebuild the system prompt with new consumer content.
-   * Preserves conversation history. Non-destructive.
-   *
-   * @param newConsumerPrompt - The new consumer system prompt content
+   * @deprecated Use composeSystemPrompt() for pure composition or
+   * setBasePrompt() to update the live agent state.
    */
-  rebuildSystemPrompt(newConsumerPrompt: string): void {
-    const newPrompt = this.buildSystemPrompt(newConsumerPrompt);
+  buildSystemPrompt(basePrompt: string): string {
+    return this.composeSystemPrompt(basePrompt);
+  }
 
-    // Update the agent's system prompt directly
-    if ('systemPrompt' in this.agent.state) {
-      (this.agent.state as { systemPrompt: string }).systemPrompt = newPrompt;
-    }
+  /**
+   * Set the application/base prompt and update the live agent state.
+   *
+   * Preserves conversation history. Non-destructive.
+   */
+  setBasePrompt(basePrompt: string): string {
+    this.currentBasePrompt = basePrompt;
+    const nextPrompt = this.composeSystemPrompt(basePrompt);
+    return this.applySystemPrompt(nextPrompt);
+  }
+
+  /**
+   * @deprecated Use setBasePrompt().
+   */
+  rebuildSystemPrompt(newBasePrompt: string): void {
+    this.setBasePrompt(newBasePrompt);
+  }
+
+  /**
+   * Get the current application/base prompt.
+   */
+  getBasePrompt(): string {
+    return this.currentBasePrompt ?? '';
   }
 
   /**
@@ -866,6 +1108,30 @@ export class CortexAgent {
     sections.push({ name: 'Executing with Care', content: EXECUTING_WITH_CARE_SECTION });
     sections.push({ name: 'Environment', content: this.buildEnvironmentSection() });
     return sections;
+  }
+
+  private applySystemPrompt(systemPrompt: string): string {
+    this.currentSystemPrompt = systemPrompt;
+    if ('systemPrompt' in this.agent.state) {
+      (this.agent.state as { systemPrompt: string }).systemPrompt = systemPrompt;
+    }
+    return systemPrompt;
+  }
+
+  private refreshPromptState(): void {
+    if (this.currentBasePrompt !== null) {
+      this.applySystemPrompt(this.composeSystemPrompt(this.currentBasePrompt));
+      return;
+    }
+
+    const existing = typeof this.agent.state.systemPrompt === 'string'
+      ? this.agent.state.systemPrompt
+      : '';
+    this.currentSystemPrompt = existing;
+  }
+
+  private hasConfiguredSystemPrompt(): boolean {
+    return this.currentSystemPrompt.trim().length > 0;
   }
 
   // -----------------------------------------------------------------------
@@ -939,6 +1205,7 @@ export class CortexAgent {
     this.primaryModel = model;
     // Recompute effective context window (applies limit if set)
     this._updateEffectiveContextWindow();
+    this.rebuildLoadSkillDescription();
     // Update the pi-agent-core agent's model if it exposes setModel
     if (typeof this.agent.setModel === 'function') {
       this.agent.setModel(model);
@@ -1021,6 +1288,7 @@ export class CortexAgent {
     if (typeof this.agent.setTools === 'function') {
       this.agent.setTools(allTools as Parameters<typeof this.agent.setTools>[0]);
     }
+    this.refreshPromptState();
   }
 
   /**
@@ -1039,10 +1307,10 @@ export class CortexAgent {
     systemPrompt: string;
     messages: Array<{ role: string; content: string }>;
   }): Promise<string> {
-    let complete: (model: unknown, context: unknown, options?: unknown) => Promise<unknown>;
+    let completeFn: typeof import('@mariozechner/pi-ai').complete;
     try {
       const piAi = await import('@mariozechner/pi-ai');
-      complete = piAi.complete;
+      completeFn = piAi.complete;
     } catch {
       throw new Error(
         'utilityComplete() requires @mariozechner/pi-ai to be installed. ' +
@@ -1063,13 +1331,20 @@ export class CortexAgent {
 
     this._lastDirectUsage = null;
 
-    const result = await complete(this.resolvedUtilityModel, {
-      systemPrompt: context.systemPrompt,
-      messages: context.messages.map(m => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-      })),
-    }, apiKey ? { apiKey } : undefined);
+    const result = await completeFn(
+      this.resolvedUtilityModel as unknown as Parameters<typeof completeFn>[0],
+      {
+        systemPrompt: context.systemPrompt,
+        messages: context.messages.map(m => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        })),
+      } as Parameters<typeof completeFn>[1],
+      apiKey ? { apiKey } as Parameters<typeof completeFn>[2] : undefined,
+    );
+
+    // Check for silent errors (same as directComplete/structuredComplete)
+    this.checkForSilentError(result);
 
     // Capture usage from utility model calls
     this._lastDirectUsage = this.extractUsageFromAssistantMessage(result);
@@ -1152,6 +1427,15 @@ export class CortexAgent {
    */
   get state(): CortexLifecycleState {
     return this.lifecycleState;
+  }
+
+  /**
+   * The number of messages in agent.state.messages before the current
+   * prompt() call. Used by the cache breakpoint system to distinguish
+   * "old history" (cacheable) from "new tick content" (ephemeral).
+   */
+  get prePromptMessageCount(): number {
+    return this._prePromptMessageCount;
   }
 
   // -----------------------------------------------------------------------
@@ -1287,6 +1571,7 @@ export class CortexAgent {
   setContextWindow(contextWindow: number): void {
     this.primaryModel = { ...this.primaryModel, contextWindow };
     this._updateEffectiveContextWindow();
+    this.rebuildLoadSkillDescription();
   }
 
   /**
@@ -1298,6 +1583,7 @@ export class CortexAgent {
   setContextWindowLimit(limit: number | null): void {
     this._contextWindowLimit = limit;
     this._updateEffectiveContextWindow();
+    this.rebuildLoadSkillDescription();
   }
 
   /**
@@ -1324,31 +1610,21 @@ export class CortexAgent {
       // Model does not advertise a context window. Set a safe floor
       // rather than leaving a stale value from a previous model.
       this.compactionManager.setContextWindow(MINIMUM_CONTEXT_WINDOW);
+      this.compactionManager.setModelContextWindow(MINIMUM_CONTEXT_WINDOW);
       return;
     }
 
-    if (this._contextWindowLimit != null) {
-      const clamped = Math.min(this._contextWindowLimit, modelWindow);
-      this.compactionManager.setContextWindow(Math.max(MINIMUM_CONTEXT_WINDOW, clamped));
-    } else {
-      this.compactionManager.setContextWindow(modelWindow);
-    }
-  }
+    // Always set the model's actual context window for Layer 3 failsafe.
+    // Layer 3 uses this to avoid dropping messages when the model still
+    // has capacity, even if the user's budget has been exceeded.
+    this.compactionManager.setModelContextWindow(modelWindow);
 
-  /**
-   * Set the pipeline phase. Controls when Layer 2 compaction can fire.
-   * - 'idle': between ticks, compaction allowed
-   * - 'thought'/'agentic_loop'/'reflect'/'execute': mid-tick, Layer 2 blocked
-   */
-  setPipelinePhase(phase: PipelinePhase): void {
-    this.compactionManager.setPipelinePhase(phase);
-  }
-
-  /**
-   * Get the current pipeline phase.
-   */
-  get pipelinePhase(): PipelinePhase {
-    return this.compactionManager.pipelinePhase;
+    // Determine the effective budget for Layer 1/2:
+    // - explicit limit set by user: use it (clamped to model max)
+    // - null (default): use min(DEFAULT_CONTEXT_WINDOW_LIMIT, modelWindow)
+    const limit = this._contextWindowLimit ?? Math.min(DEFAULT_CONTEXT_WINDOW_LIMIT, modelWindow);
+    const clamped = Math.min(limit, modelWindow);
+    this.compactionManager.setContextWindow(Math.max(MINIMUM_CONTEXT_WINDOW, clamped));
   }
 
   /**
@@ -1450,18 +1726,33 @@ export class CortexAgent {
   /**
    * Get the composed transformContext hook for the pi-agent-core Agent.
    *
-   * Composes three hooks in order:
-   * 1. ContextManager ephemeral injection
-   * 2. Skill buffer injection
-   * 3. Compaction (microcompaction + mid-loop failsafe)
+   * Composes five steps in order:
+   * 0. Tier 1 insertion-time cap (mutates source messages)
+   * 1. Insert ephemeral + skill buffer at the boundary position
+   *    (after old history, before new tick content) for cache optimization
+   * 2. Message sanitization
+   * 3. Compaction (all three layers: microcompaction, summarization, failsafe)
+   * 4. Compute API message indices for cache breakpoints BP2 and BP3
    *
-   * @returns A transformContext function for the Agent constructor
+   * Cache breakpoint strategy:
+   *   Anthropic allows 4 cache_control breakpoints. Pi-ai uses 2 (system
+   *   prompt = BP1, last user message = BP4). This hook computes indices
+   *   for 2 more (BP2 = after last slot, BP3 = old history boundary),
+   *   which are injected by the onPayload hook in create().
+   *
+   *   By inserting ephemeral at the boundary instead of the end, the
+   *   conversation history prefix becomes stable across ticks, enabling
+   *   cache reads on ~128K of tokens instead of only ~5.5K.
+   *
+   * The hook is async because Layer 2 compaction may require an LLM call
+   * for summarization. Pi-agent-core's transformContext supports async hooks.
+   *
+   * @returns An async transformContext function for the Agent constructor
    */
-  getTransformContextHook(): (context: AgentContext) => AgentContext {
-    const ephemeralHook = this.contextManager.getTransformContextHook();
+  getTransformContextHook(): (context: AgentContext) => Promise<AgentContext> {
     const slotCount = this.contextManager.slotCount;
 
-    return (context: AgentContext): AgentContext => {
+    return async (context: AgentContext): Promise<AgentContext> => {
       // Step 0: Apply Tier 1 insertion-time cap to the source messages.
       // This mutates agent.state.messages directly so that oversized tool
       // results are capped once at first observation, before any other
@@ -1471,13 +1762,40 @@ export class CortexAgent {
         slotCount,
       );
 
-      // Step 1: Inject ephemeral context
-      let result = ephemeralHook(context);
+      // Step 1: Insert ephemeral and skill buffer at the boundary position
+      // (after old history, before new tick content).
+      // This keeps the tick prompt as the last message for better model
+      // attention and enables cross-tick conversation history caching.
+      // Previously, ephemeral was appended at the END of messages, making
+      // it the "last user message" where pi-ai places BP4. That meant
+      // the entire conversation history was cache-WRITTEN but never
+      // cache-READ because the ephemeral prefix changed every tick.
+      let result = context;
+      const ephemeralContent = this.contextManager.getEphemeral();
+      const boundary = this._prePromptMessageCount;
 
-      // Step 2: Skill buffer injection
-      result = this.injectSkillBuffer(result);
+      // Build injection messages (ephemeral + skills)
+      const injections: AgentMessage[] = [];
+      if (ephemeralContent) {
+        injections.push({ role: 'user' as const, content: ephemeralContent });
+      }
+      if (this.skillBuffer.length > 0) {
+        const formatted = this.skillBuffer.map(s =>
+          `<skill-instructions name="${s.name}">\n${s.content}\n</skill-instructions>`,
+        ).join('\n\n');
+        injections.push({ role: 'user' as const, content: formatted });
+      }
 
-      // Step 3: Sanitize messages BEFORE compaction.
+      if (injections.length > 0) {
+        // Insert at boundary: [...slots + old_history] [injections] [...new_tick_content]
+        const messages = [...result.messages];
+        // boundary may exceed array length on first tick or after reset
+        const insertIdx = Math.min(boundary, messages.length);
+        messages.splice(insertIdx, 0, ...injections);
+        result = { ...result, messages };
+      }
+
+      // Step 2: Sanitize messages BEFORE compaction.
       // Pi-agent-core may append messages with content: undefined (bad tool
       // results) or content: [] (empty API responses, error messages). These
       // crash extractTextContent() in microcompaction and transform-messages
@@ -1494,8 +1812,11 @@ export class CortexAgent {
         }),
       };
 
-      // Step 4: Compaction (microcompaction + mid-loop safety valve)
-      result = this.compactionManager.applyInTransformContext(
+      // Step 3: Compaction (all three layers integrated)
+      // Layer 2 operates on agent.state.messages (the original transcript),
+      // not the in-memory context copy. After Layer 2 modifies the source,
+      // the rest of the hook rebuilds context from the updated messages.
+      result = await this.compactionManager.applyInTransformContext(
         result,
         // getHistory: extract conversation history (post-slot region)
         (ctx) => ctx.messages.slice(slotCount),
@@ -1504,10 +1825,116 @@ export class CortexAgent {
           ...ctx,
           messages: [...ctx.messages.slice(0, slotCount), ...history],
         }),
+        // getSourceHistory: get original transcript history for Layer 2
+        () => this.agent.state.messages.slice(slotCount),
+        // setSourceHistory: replace original transcript after Layer 2
+        (history) => {
+          // Adjust boundary after compaction
+          const currentTickCount = this.agent.state.messages.length - this._prePromptMessageCount;
+          this.agent.state.messages = [
+            ...this.agent.state.messages.slice(0, slotCount),
+            ...history,
+          ];
+          // Recalculate boundary: new total minus current-tick messages
+          this._prePromptMessageCount = Math.max(
+            slotCount,
+            this.agent.state.messages.length - currentTickCount,
+          );
+        },
+      );
+
+      // Step 4: Compute API message indices for cache breakpoints.
+      // Count how messages map from our array to the Anthropic API format
+      // (convertMessages skips empty user messages and merges consecutive
+      // tool_results). The indices are consumed by the onPayload hook.
+      this._cacheBreakpointIndices = this.computeCacheBreakpointIndices(
+        result.messages, slotCount,
       );
 
       return result;
     };
+  }
+
+  // -----------------------------------------------------------------------
+  // Private: Cache breakpoint computation
+  // -----------------------------------------------------------------------
+
+  /**
+   * Compute API message indices for cache breakpoints BP2 and BP3.
+   *
+   * Walks the transformed message array and counts how messages will appear
+   * in the final Anthropic API params after convertMessages processes them.
+   * convertMessages skips empty user messages and merges consecutive
+   * toolResult messages into single user messages.
+   *
+   * BP2: placed after the last slot message. Slots are stable across the
+   *   entire session lifetime, so everything up to BP2 is always cached.
+   * BP3: placed at the old history boundary (before injected ephemeral/skills).
+   *   Old history is stable across ticks within the same session, so this
+   *   is a "ratcheting" breakpoint that advances as history grows.
+   *
+   * @param messages - The transformed message array (after injection + sanitization)
+   * @param slotCount - Number of slot messages at the start of the array
+   * @returns API indices for BP2 and BP3, or -1 if not applicable
+   */
+  private computeCacheBreakpointIndices(
+    messages: AgentMessage[],
+    slotCount: number,
+  ): { bp2ApiIndex: number; bp3ApiIndex: number } {
+    let apiIndex = -1;
+    let bp2ApiIndex = -1;
+    let bp3ApiIndex = -1;
+    let inToolResultRun = false;
+
+    // The boundary in the transformed messages accounts for injected
+    // ephemeral/skills. Ephemeral + skills were inserted at
+    // _prePromptMessageCount, so the boundary in the transformed array
+    // shifts by the number of injections.
+    const ephemeralContent = this.contextManager.getEphemeral();
+    const injectionCount = (ephemeralContent ? 1 : 0) + (this.skillBuffer.length > 0 ? 1 : 0);
+    const transformedBoundary = this._prePromptMessageCount + injectionCount;
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i]!;
+      const role = msg.role;
+      const content = typeof msg.content === 'string' ? msg.content : '';
+      const isToolResult = role === 'user' && Array.isArray(msg.content) &&
+        (msg.content as Array<Record<string, unknown>>).some(
+          (block) => block['type'] === 'tool_result',
+        );
+
+      // convertMessages skips empty user messages
+      if (role === 'user' && typeof msg.content === 'string' && content.trim() === '') {
+        continue;
+      }
+
+      // convertMessages merges consecutive toolResult messages
+      if (isToolResult) {
+        if (!inToolResultRun) {
+          apiIndex++;
+          inToolResultRun = true;
+        }
+        // else: merged into the same API message, don't increment
+      } else {
+        inToolResultRun = false;
+        apiIndex++;
+      }
+
+      // BP2: last slot message
+      if (i === slotCount - 1) {
+        bp2ApiIndex = apiIndex;
+      }
+
+      // BP3: last message before the boundary (old history end).
+      // The boundary is the index where ephemeral was inserted.
+      // The message at transformedBoundary - 1 is the last old
+      // history message.
+      if (i === transformedBoundary - 1 && transformedBoundary > slotCount) {
+        bp3ApiIndex = apiIndex;
+      }
+    }
+
+    return { bp2ApiIndex, bp3ApiIndex };
   }
 
   // -----------------------------------------------------------------------
@@ -1597,12 +2024,12 @@ export class CortexAgent {
   private detectShell(): string {
     if (process.platform === 'win32') {
       // Check for PowerShell version
-      const psVersion = process.env.PSModulePath ? 'PowerShell' : 'cmd.exe';
+      const psVersion = process.env['PSModulePath'] ? 'PowerShell' : 'cmd.exe';
       return psVersion;
     }
 
     // Unix: use $SHELL env var
-    return process.env.SHELL ?? '/bin/sh';
+    return process.env['SHELL'] ?? '/bin/sh';
   }
 
   // -----------------------------------------------------------------------
@@ -1617,6 +2044,7 @@ export class CortexAgent {
     // Map session_end -> onLoopComplete
     this.eventUnsubscribers.push(
       this.eventBridge.on('session_end', () => {
+        this.skillBuffer = [];
         for (const handler of this.loopCompleteHandlers) {
           try {
             handler();
@@ -1638,6 +2066,13 @@ export class CortexAgent {
         const inputTokens = this.extractInputTokens(event.data);
         if (inputTokens > 0) {
           this.compactionManager.updateTokenCount(inputTokens);
+        }
+        // Debug: always log extraction result and event structure
+        if (event.data && typeof event.data === 'object') {
+          const d = event.data as Record<string, unknown>;
+          const msg = d['message'] as Record<string, unknown> | undefined;
+          const usage = msg?.['usage'] as Record<string, unknown> | undefined;
+          this.compactionManager._debugLog?.(`turn_end: extracted=${inputTokens}, raw.input=${usage?.['input']}, raw.cacheRead=${usage?.['cacheRead']}, raw.output=${usage?.['output']}, raw.totalTokens=${usage?.['totalTokens']}`);
         }
 
         if (event.textOutput) {
@@ -1677,13 +2112,13 @@ export class CortexAgent {
 
     const event = data as Record<string, unknown>;
 
-    if (typeof event.text === 'string') {
-      return event.text;
+    if (typeof event['text'] === 'string') {
+      return event['text'];
     }
 
-    const message = event.message as Record<string, unknown> | undefined;
-    if (message && typeof message.content === 'string') {
-      return message.content;
+    const message = event['message'] as Record<string, unknown> | undefined;
+    if (message && typeof message['content'] === 'string') {
+      return message['content'];
     }
 
     return null;
@@ -1706,28 +2141,62 @@ export class CortexAgent {
 
     const event = data as Record<string, unknown>;
 
-    // Pattern 1: Direct usage property on the event
-    const eventUsage = event['usage'] as Record<string, unknown> | undefined;
-    if (eventUsage && typeof eventUsage['input'] === 'number') {
-      return eventUsage['input'];
-    }
+    // Pi-ai's Usage type has: input, output, cacheRead, cacheWrite, totalTokens.
+    // With prefix caching, most input tokens are reported as cacheRead, not input.
+    // For compaction, we need the TOTAL context size the model saw:
+    // input + cacheRead = total input tokens (both cached and uncached).
+    // Fallback to totalTokens - output if individual fields are unavailable.
 
-    // Pattern 2: message.usage.input (pi-ai AssistantMessage structure)
+    // Pattern 1: message.usage (pi-ai AssistantMessage structure, most common)
     const message = event['message'] as Record<string, unknown> | undefined;
     if (message) {
       const msgUsage = message['usage'] as Record<string, unknown> | undefined;
-      if (msgUsage && typeof msgUsage['input'] === 'number') {
-        return msgUsage['input'];
+      if (msgUsage) {
+        const totalInput = this.computeTotalInput(msgUsage);
+        if (totalInput > 0) return totalInput;
       }
     }
 
-    // Pattern 3: result.usage.input
+    // Pattern 2: Direct usage property on the event
+    const eventUsage = event['usage'] as Record<string, unknown> | undefined;
+    if (eventUsage) {
+      const totalInput = this.computeTotalInput(eventUsage);
+      if (totalInput > 0) return totalInput;
+    }
+
+    // Pattern 3: result.usage
     const result = event['result'] as Record<string, unknown> | undefined;
     if (result) {
       const resultUsage = result['usage'] as Record<string, unknown> | undefined;
-      if (resultUsage && typeof resultUsage['input'] === 'number') {
-        return resultUsage['input'];
+      if (resultUsage) {
+        const totalInput = this.computeTotalInput(resultUsage);
+        if (totalInput > 0) return totalInput;
       }
+    }
+
+    return 0;
+  }
+
+  /**
+   * Compute total input tokens from a pi-ai Usage object.
+   * With prefix caching, `input` only reflects uncached tokens.
+   * The real context size is `input + cacheRead`.
+   * Falls back to `totalTokens - output` if individual fields are missing.
+   */
+  private computeTotalInput(usage: Record<string, unknown>): number {
+    const input = typeof usage['input'] === 'number' ? usage['input'] : 0;
+    const cacheRead = typeof usage['cacheRead'] === 'number' ? usage['cacheRead'] : 0;
+
+    // Primary: input + cacheRead = total tokens the model saw as input
+    if (input + cacheRead > 0) {
+      return input + cacheRead;
+    }
+
+    // Fallback: totalTokens - output
+    const totalTokens = typeof usage['totalTokens'] === 'number' ? usage['totalTokens'] : 0;
+    const output = typeof usage['output'] === 'number' ? usage['output'] : 0;
+    if (totalTokens > output) {
+      return totalTokens - output;
     }
 
     return 0;
@@ -1749,13 +2218,14 @@ export class CortexAgent {
 
     // Check if the agent's error looks like an abort/cancel
     const state = this.agent.state as Record<string, unknown>;
-    if (state.error) {
-      const errorMsg = typeof state.error === 'string'
-        ? state.error
-        : state.error instanceof Error
-          ? state.error.message
-          : typeof (state.error as Record<string, unknown>).message === 'string'
-            ? (state.error as Record<string, unknown>).message as string
+    if (state['error']) {
+      const rawError = state['error'];
+      const errorMsg = typeof rawError === 'string'
+        ? rawError
+        : rawError instanceof Error
+          ? rawError.message
+          : typeof (rawError as Record<string, unknown>)['message'] === 'string'
+            ? (rawError as Record<string, unknown>)['message'] as string
             : '';
       return /abort/i.test(errorMsg) || /cancell?ed/i.test(errorMsg);
     }
@@ -1786,21 +2256,21 @@ export class CortexAgent {
     const msg = result as Record<string, unknown>;
 
     // Direct string content
-    if (typeof msg.content === 'string') {
-      return msg.content;
+    if (typeof msg['content'] === 'string') {
+      return msg['content'];
     }
 
     // Content array: extract text parts
-    if (Array.isArray(msg.content)) {
-      return (msg.content as Array<Record<string, unknown>>)
-        .filter(part => part.type === 'text' && typeof part.text === 'string')
-        .map(part => part.text as string)
+    if (Array.isArray(msg['content'])) {
+      return (msg['content'] as Array<Record<string, unknown>>)
+        .filter(part => part['type'] === 'text' && typeof part['text'] === 'string')
+        .map(part => part['text'] as string)
         .join('');
     }
 
     // Fallback: try .text field directly
-    if (typeof msg.text === 'string') {
-      return msg.text;
+    if (typeof msg['text'] === 'string') {
+      return msg['text'];
     }
 
     return '';
@@ -1848,7 +2318,15 @@ export class CortexAgent {
     // Extract model if available
     const model = typeof msg['model'] === 'string' ? msg['model'] : undefined;
 
-    return { input, output, cacheRead, cacheWrite, totalTokens, cost, model };
+    return {
+      input,
+      output,
+      cacheRead,
+      cacheWrite,
+      totalTokens,
+      cost,
+      ...(model !== undefined && { model }),
+    };
   }
 
   /**
@@ -1932,6 +2410,7 @@ export class CortexAgent {
       } catch {
         // Process may have already exited
       }
+      CortexAgent.globalTrackedPids.delete(pid);
     }
     this.trackedPids.clear();
   }
@@ -1940,17 +2419,31 @@ export class CortexAgent {
    * Set up process exit handler for orphaned subprocess cleanup (Level 3 safety net).
    */
   private setupExitHandler(): void {
-    const handler = (): void => {
-      this.forceKillAll();
-    };
+    if (!CortexAgent.exitHandlerInstalled) {
+      process.on('exit', CortexAgent.handleProcessExit);
+      CortexAgent.exitHandlerInstalled = true;
+    }
+  }
 
-    // Use a WeakRef-like pattern: store the handler so we can remove it on destroy
-    process.on('exit', handler);
+  private static handleProcessExit(): void {
+    for (const pid of CortexAgent.globalTrackedPids) {
+      try {
+        process.kill(pid);
+      } catch {
+        // Process may have already exited
+      }
+    }
+    CortexAgent.globalTrackedPids.clear();
+  }
 
-    // Store cleanup for this handler too
-    this.eventUnsubscribers.push(() => {
-      process.removeListener('exit', handler);
-    });
+  private trackPid(pid: number): void {
+    this.trackedPids.add(pid);
+    CortexAgent.globalTrackedPids.add(pid);
+  }
+
+  private untrackPid(pid: number): void {
+    this.trackedPids.delete(pid);
+    CortexAgent.globalTrackedPids.delete(pid);
   }
 
   // -----------------------------------------------------------------------
@@ -2027,6 +2520,14 @@ export class CortexAgent {
     return this.subAgentManager;
   }
 
+  /**
+   * Spawn a background sub-agent and return its task ID immediately.
+   * Used by consumers that manage delegated work outside the SubAgent tool.
+   */
+  async spawnBackgroundSubAgent(params: Omit<SubAgentSpawnConfig, 'background'>): Promise<{ taskId: string }> {
+    return this.spawnBackgroundSubAgentInternal(params);
+  }
+
   // -----------------------------------------------------------------------
   // Private: Skill buffer
   // -----------------------------------------------------------------------
@@ -2038,12 +2539,24 @@ export class CortexAgent {
    */
   private rebuildLoadSkillDescription(): void {
     if (this.loadSkillTool) {
-      this.loadSkillTool.description = buildLoadSkillDescription(this.skillRegistry);
+      this.loadSkillTool.description = buildLoadSkillDescription(
+        this.skillRegistry,
+        this.buildAvailableSkillsSummary(),
+      );
       // Re-sync tools to pi-agent-core so the updated description is visible
       // to the LLM. refreshTools() creates shallow copies, so mutating the
       // description on this.loadSkillTool doesn't propagate without a re-sync.
       this.refreshTools();
     }
+  }
+
+  private buildAvailableSkillsSummary(): string {
+    const effectiveContextWindow = this.compactionManager?.contextWindow ?? Math.max(
+      MINIMUM_CONTEXT_WINDOW,
+      this._contextWindowLimit ?? Math.min(DEFAULT_CONTEXT_WINDOW_LIMIT, this.primaryModel.contextWindow ?? DEFAULT_CONTEXT_WINDOW_LIMIT),
+    );
+    const maxTokens = Math.max(128, Math.floor(effectiveContextWindow * 0.02));
+    return this.skillRegistry.getAvailableSkillsSummary(maxTokens);
   }
 
   /**
@@ -2060,25 +2573,13 @@ export class CortexAgent {
   }
 
   /**
-   * Inject loaded skill content into the context during transformContext.
-   * Replaces the Phase 1B stub.
+   * Skill injection is now handled inline in getTransformContextHook()
+   * at the boundary position for cache optimization. This method is
+   * retained as a no-op for backward compatibility.
+   * @deprecated Skill injection moved to getTransformContextHook() boundary insertion
    */
   private injectSkillBuffer(context: AgentContext): AgentContext {
-    if (this.skillBuffer.length === 0) {
-      return context;
-    }
-
-    const formatted = this.skillBuffer.map(s =>
-      `<skill-instructions name="${s.name}">\n${s.content}\n</skill-instructions>`,
-    ).join('\n\n');
-
-    return {
-      ...context,
-      messages: [
-        ...context.messages,
-        { role: 'user', content: formatted },
-      ],
-    };
+    return context;
   }
 
   // -----------------------------------------------------------------------
@@ -2124,7 +2625,7 @@ export class CortexAgent {
    * Spawn a foreground sub-agent and block until completion.
    * Used by the SubAgent tool.
    */
-  private async spawnForegroundSubAgent(params: {
+  private async spawnForegroundSubAgentInternal(params: {
     instructions: string;
     tools?: string[];
     systemPrompt?: string;
@@ -2140,42 +2641,8 @@ export class CortexAgent {
       resolveCompletion = resolve;
     });
 
-    // Create child agent config
-    const childConfig = this.buildChildAgentConfig(params);
-
     try {
-      // Build the system prompt for the child agent
-      const systemPrompt = params.systemPrompt ?? this.currentSystemPrompt;
-
-      // Create the sub-agent CortexAgent
-      const childCortexConfig: CortexAgentConfig = {
-        model: this.primaryModel,
-        workingDirectory: this.workingDirectory,
-        workingTags: { enabled: this.workingTagsEnabled },
-        budgetGuard: {
-          maxTurns: childConfig.maxTurns,
-          maxCost: childConfig.maxCost,
-        },
-      };
-      if (this.config.getApiKey) childCortexConfig.getApiKey = this.config.getApiKey;
-      if (this.config.resolvePermission) childCortexConfig.resolvePermission = this.config.resolvePermission;
-
-      const childPiAgent = await this.createChildPiAgent({
-        ...childConfig,
-        systemPrompt,
-      });
-
-      const childAgent = new CortexAgent(
-        childPiAgent,
-        childCortexConfig,
-        this.buildChildToolSet(params.tools),
-      );
-
-      // Wire transformContext hook (mirrors CortexAgent.create() setup)
-      this.wireChildTransformContext(childAgent, childPiAgent);
-
-      // Apply system prompt to CortexAgent internals (currentSystemPrompt)
-      childAgent.buildSystemPrompt(systemPrompt);
+      const childAgent = await this.createChildAgent(params);
 
       // Track the sub-agent
       const tracked: TrackedSubAgent = {
@@ -2221,7 +2688,7 @@ export class CortexAgent {
   /**
    * Spawn a background sub-agent and return the task ID immediately.
    */
-  private async spawnBackgroundSubAgent(params: {
+  private async spawnBackgroundSubAgentInternal(params: {
     instructions: string;
     tools?: string[];
     systemPrompt?: string;
@@ -2237,40 +2704,7 @@ export class CortexAgent {
       resolveCompletion = resolve;
     });
 
-    // Create child agent config
-    const childConfig = this.buildChildAgentConfig(params);
-
-    // Build the system prompt for the child agent
-    const systemPrompt = params.systemPrompt ?? this.currentSystemPrompt;
-
-    const bgChildCortexConfig: CortexAgentConfig = {
-      model: this.primaryModel,
-      workingDirectory: this.workingDirectory,
-      workingTags: { enabled: this.workingTagsEnabled },
-      budgetGuard: {
-        maxTurns: childConfig.maxTurns,
-        maxCost: childConfig.maxCost,
-      },
-    };
-    if (this.config.getApiKey) bgChildCortexConfig.getApiKey = this.config.getApiKey;
-    if (this.config.resolvePermission) bgChildCortexConfig.resolvePermission = this.config.resolvePermission;
-
-    const childPiAgent = await this.createChildPiAgent({
-      ...childConfig,
-      systemPrompt,
-    });
-
-    const childAgent = new CortexAgent(
-      childPiAgent,
-      bgChildCortexConfig,
-      this.buildChildToolSet(params.tools),
-    );
-
-    // Wire transformContext hook (mirrors CortexAgent.create() setup)
-    this.wireChildTransformContext(childAgent, childPiAgent);
-
-    // Apply system prompt to CortexAgent internals (currentSystemPrompt)
-    childAgent.buildSystemPrompt(systemPrompt);
+    const childAgent = await this.createChildAgent(params);
 
     // Track the sub-agent
     const tracked: TrackedSubAgent = {
@@ -2293,6 +2727,72 @@ export class CortexAgent {
     });
 
     return { taskId };
+  }
+
+  private async createChildAgent(params: {
+    tools?: string[];
+    systemPrompt?: string;
+    maxTurns?: number;
+    maxCost?: number;
+  }): Promise<CortexAgent> {
+    const childConfig = this.buildChildAgentConfig(params);
+    const promptSeed = this.resolveChildPromptSeed(params.systemPrompt);
+
+    const childCortexConfig: CortexAgentConfig = {
+      model: this.primaryModel,
+      workingDirectory: this.workingDirectory,
+      workingTags: { enabled: this.workingTagsEnabled },
+      budgetGuard: {
+        maxTurns: childConfig.maxTurns,
+        maxCost: childConfig.maxCost,
+      },
+      contextWindowLimit: this._contextWindowLimit,
+    };
+    if (this.envOverrides) childCortexConfig.envOverrides = this.envOverrides;
+    if (this.config.getApiKey) childCortexConfig.getApiKey = this.config.getApiKey;
+    if (this.config.resolvePermission) childCortexConfig.resolvePermission = this.config.resolvePermission;
+
+    const childCreateParams: {
+      cortexConfig: CortexAgentConfig;
+      tools: RegisteredTool[];
+      initialBasePrompt?: string;
+      initialSystemPrompt?: string;
+      constructorOptions: CortexAgentConstructorOptions;
+      missingDependencyMessage: string;
+    } = {
+      cortexConfig: childCortexConfig,
+      tools: this.buildChildToolSet(params.tools),
+      constructorOptions: {
+        enableSubAgentTool: false,
+        enableLoadSkillTool: false,
+      },
+      missingDependencyMessage:
+        'Sub-agent spawning requires @mariozechner/pi-agent-core to be installed.',
+    };
+    if (promptSeed.initialBasePrompt !== undefined) {
+      childCreateParams.initialBasePrompt = promptSeed.initialBasePrompt;
+    }
+    if (promptSeed.initialSystemPrompt !== undefined) {
+      childCreateParams.initialSystemPrompt = promptSeed.initialSystemPrompt;
+    }
+
+    const childAgent = await CortexAgent.createManagedAgent(childCreateParams);
+
+    childAgent.setCacheRetention(this.getCacheRetention() ?? 'none');
+    return childAgent;
+  }
+
+  private resolveChildPromptSeed(systemPrompt?: string): {
+    initialBasePrompt?: string;
+    initialSystemPrompt?: string;
+  } {
+    if (typeof systemPrompt === 'string') {
+      return { initialBasePrompt: systemPrompt };
+    }
+    if (this.currentBasePrompt !== null) {
+      return { initialBasePrompt: this.currentBasePrompt };
+    }
+    return { initialSystemPrompt: this.currentSystemPrompt };
   }
 
   /**
@@ -2383,7 +2883,7 @@ export class CortexAgent {
    */
   private buildChildToolSet(
     requestedTools?: string[],
-  ): Array<{ name: string; description: string; parameters: unknown; execute: (args: unknown) => Promise<unknown> }> {
+  ): RegisteredTool[] {
     const parentTools = this.registeredTools;
     const excludedNames = new Set([SUB_AGENT_TOOL_NAME, LOAD_SKILL_TOOL_NAME]);
 
@@ -2404,68 +2904,6 @@ export class CortexAgent {
   }
 
   /**
-   * Create a child pi-agent-core Agent instance for a sub-agent.
-   */
-  private async createChildPiAgent(
-    config: { maxTurns: number; maxCost: number; systemPrompt: string },
-  ): Promise<PiAgent> {
-    // Dynamically import pi-agent-core
-    let AgentClass: new (config: Record<string, unknown>) => PiAgent;
-    try {
-      const piAgentCore = await import('@mariozechner/pi-agent-core');
-      AgentClass = piAgentCore.Agent as unknown as new (config: Record<string, unknown>) => PiAgent;
-    } catch {
-      throw new Error(
-        'Sub-agent spawning requires @mariozechner/pi-agent-core to be installed.',
-      );
-    }
-
-    // Must mirror the format used in CortexAgent.create():
-    // pi-agent-core expects { initialState: { model, tools, systemPrompt, messages }, getApiKey }
-    const agentConfig: Record<string, unknown> = {
-      initialState: {
-        systemPrompt: config.systemPrompt,
-        model: this.primaryModel,
-        tools: [],
-        messages: [],
-      },
-      getApiKey: this.config.getApiKey,
-    };
-
-    // Wire resolvePermission -> beforeToolCall for sub-agents (same gate as parent)
-    if (this.config.resolvePermission) {
-      const resolver = this.config.resolvePermission;
-      agentConfig['beforeToolCall'] = async (ctx: unknown) => {
-        const { toolCall, args } = ctx as { toolCall: { name: string }; args: unknown };
-        const allowed = await resolver(toolCall.name, args);
-        if (!allowed) {
-          return { block: true, reason: `Tool "${toolCall.name}" requires approval or is disabled.` };
-        }
-        return undefined;
-      };
-    }
-
-    return new AgentClass(agentConfig);
-  }
-
-  /**
-   * Wire the transformContext hook on a child CortexAgent's pi-agent.
-   * Mirrors the setup in CortexAgent.create(). Without this, the child
-   * agent's context management (compaction, skill injection, slots) won't run.
-   */
-  private wireChildTransformContext(childAgent: CortexAgent, childPiAgent: PiAgent): void {
-    const hook = childAgent.getTransformContextHook();
-    childPiAgent.transformContext = async (messages: unknown[]) => {
-      const result = hook({
-        systemPrompt: childPiAgent.state.systemPrompt,
-        messages: messages as AgentMessage[],
-        tools: childPiAgent.state.tools as unknown[],
-      });
-      return result.messages;
-    };
-  }
-
-  /**
    * Generate a unique task ID for sub-agents.
    */
   private generateTaskId(): string {
@@ -2476,5 +2914,35 @@ export class CortexAgent {
     bytes[8] = (bytes[8]! & 0x3f) | 0x80;
     const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Module-level helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Add cache_control to the last content block of an Anthropic API message.
+ * Handles both string content (converts to block array) and existing block
+ * arrays. This is a mutation-in-place operation on the message object.
+ *
+ * Used by the onPayload hook to inject cache breakpoints on intermediate
+ * messages (BP2 and BP3) beyond what pi-ai places automatically (BP1 on
+ * system prompt, BP4 on last user message).
+ */
+function addCacheControlToMessage(
+  message: Record<string, unknown>,
+  cacheControl: unknown,
+): void {
+  const content = message['content'];
+  if (Array.isArray(content) && content.length > 0) {
+    const lastBlock = content[content.length - 1] as Record<string, unknown>;
+    lastBlock['cache_control'] = cacheControl;
+  } else if (typeof content === 'string') {
+    message['content'] = [{
+      type: 'text',
+      text: content,
+      cache_control: cacheControl,
+    }];
   }
 }

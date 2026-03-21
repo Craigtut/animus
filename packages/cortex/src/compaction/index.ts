@@ -5,9 +5,12 @@
  * Layer 2 (Compaction): conversation summarization via LLM
  * Layer 3 (Failsafe): emergency truncation, purely mechanical
  *
- * The composition runs in transformContext, which fires before every LLM call.
- * Layer 2 fires only at end-of-tick (when pipelinePhase is 'idle').
- * Layer 3 fires both at end-of-tick and mid-loop (safety valve).
+ * All three layers run inside transformContext, which fires before every LLM
+ * call. Compaction is fully self-contained within Cortex; no external calls
+ * from the backend are needed to trigger it. Layer 2 fires when token usage
+ * exceeds 70% of the context window and a completeFn + source accessors are
+ * provided. Layer 3 fires whenever tokens exceed 90% of the model's context
+ * window.
  *
  * References:
  *   - compaction-strategy.md
@@ -20,10 +23,9 @@ import type {
   AdaptiveThresholdConfig,
   CompactionResult,
   CompactionTarget,
-  PipelinePhase,
 } from '../types.js';
 import { estimateTokens } from '../token-estimator.js';
-import { MicrocompactionEngine, MICROCOMPACTION_DEFAULTS, extractTextContent } from './microcompaction.js';
+import { MicrocompactionEngine, MICROCOMPACTION_DEFAULTS, extractTextContent, isToolResultMessage, capToolResult } from './microcompaction.js';
 import {
   runCompaction,
   shouldCompact,
@@ -149,9 +151,10 @@ export function computeAdaptiveThreshold(
 /**
  * CompactionManager orchestrates all three compaction layers.
  *
- * It is stateful: it tracks the current token count, the microcompaction
- * cache, and the pipeline phase flag. The CortexAgent creates one instance
- * and delegates all compaction decisions to it.
+ * It is stateful: it tracks the current token count and the microcompaction
+ * cache. The CortexAgent creates one instance and delegates all compaction
+ * decisions to it. Compaction is fully autonomous: all three layers run
+ * inside applyInTransformContext(), which fires before every LLM call.
  */
 export class CompactionManager {
   private readonly config: CortexCompactionConfig;
@@ -161,11 +164,11 @@ export class CompactionManager {
   /** Running session token count, updated after each LLM call. */
   private _sessionTokenCount = 0;
 
-  /** Pipeline phase flag. Controls when Layer 2 can fire. */
-  private _pipelinePhase: PipelinePhase = 'idle';
-
-  /** Context window size from the model. */
+  /** Context budget for Layer 1/2 compaction decisions (may be artificially limited). */
   private _contextWindow = 0;
+
+  /** Actual model context window for Layer 3 failsafe (never artificially limited). */
+  private _modelContextWindow = 0;
 
   /**
    * Timestamp (ms) of the last user interaction. Used by the adaptive
@@ -184,6 +187,9 @@ export class CompactionManager {
   /** LLM completion function, set by CortexAgent. */
   private completeFn: CompleteFn | null = null;
 
+  /** Optional debug log callback, wired by consumer for diagnostics. */
+  _debugLog: ((msg: string) => void) | null = null;
+
   constructor(
     config: CortexCompactionConfig,
     slotCount: number,
@@ -198,10 +204,22 @@ export class CompactionManager {
   // -----------------------------------------------------------------------
 
   /**
-   * Set the context window size (from the model's metadata).
+   * Set the context budget (the effective limit for Layer 1/2 compaction).
+   * This may be smaller than the model's actual context window when a
+   * user-configured limit is applied.
    */
   setContextWindow(contextWindow: number): void {
     this._contextWindow = contextWindow;
+  }
+
+  /**
+   * Set the model's actual context window (for Layer 3 failsafe only).
+   * Layer 3 emergency truncation uses this to avoid dropping messages
+   * when the model still has capacity, even if the user-configured
+   * budget has been exceeded.
+   */
+  setModelContextWindow(modelContextWindow: number): void {
+    this._modelContextWindow = modelContextWindow;
   }
 
   /**
@@ -212,17 +230,11 @@ export class CompactionManager {
   }
 
   /**
-   * Set the current pipeline phase.
+   * Set a debug log callback for compaction diagnostics.
+   * The consumer wires this to their logging system.
    */
-  setPipelinePhase(phase: PipelinePhase): void {
-    this._pipelinePhase = phase;
-  }
-
-  /**
-   * Get the current pipeline phase.
-   */
-  get pipelinePhase(): PipelinePhase {
-    return this._pipelinePhase;
+  setDebugLog(fn: (msg: string) => void): void {
+    this._debugLog = fn;
   }
 
   /**
@@ -265,6 +277,7 @@ export class CompactionManager {
    * Update the session token count from LLM usage data.
    */
   updateTokenCount(inputTokens: number): void {
+    this._debugLog?.(`updateTokenCount: ${inputTokens}`);
     this._sessionTokenCount = inputTokens;
   }
 
@@ -276,10 +289,17 @@ export class CompactionManager {
   }
 
   /**
-   * Get the context window size.
+   * Get the context budget (effective limit for Layer 1/2).
    */
   get contextWindow(): number {
     return this._contextWindow;
+  }
+
+  /**
+   * Get the model's actual context window (for Layer 3 failsafe).
+   */
+  get modelContextWindow(): number {
+    return this._modelContextWindow;
   }
 
   /**
@@ -333,6 +353,49 @@ export class CompactionManager {
     return this.microcompaction.capAtInsertion(content);
   }
 
+  /**
+   * Apply insertion-time cap to all uncapped tool results in the source
+   * messages array (mutates in place).
+   *
+   * Called from the transformContext hook on `agent.state.messages` so that
+   * Tier 1 capping is automatically applied when tool results enter
+   * conversation history through pi-agent-core's internal tool execution
+   * loop. The cap is applied at most once per tool result part; already
+   * capped content (containing the insertion marker) is skipped.
+   *
+   * @param messages - The source messages array (mutated in place)
+   * @param slotCount - Number of slot messages to skip at the start
+   */
+  applyInsertionCap(messages: AgentMessage[], slotCount: number): void {
+    const config = this.microcompaction.getConfig();
+    for (let i = slotCount; i < messages.length; i++) {
+      const msg = messages[i]!;
+      if (!isToolResultMessage(msg)) continue;
+      if (typeof msg.content === 'string') continue;
+
+      let modified = false;
+      const newContent = msg.content.map(part => {
+        if (part.type !== 'tool_result' || typeof part.text !== 'string') {
+          return part;
+        }
+        // Skip already-capped content
+        if (part.text.includes('tokens trimmed at insertion')) {
+          return part;
+        }
+        const capped = capToolResult(part.text, config);
+        if (capped !== part.text) {
+          modified = true;
+          return { ...part, text: capped };
+        }
+        return part;
+      });
+
+      if (modified) {
+        messages[i] = { ...msg, content: newContent };
+      }
+    }
+  }
+
   // -----------------------------------------------------------------------
   // transformContext hook
   // -----------------------------------------------------------------------
@@ -341,22 +404,34 @@ export class CompactionManager {
    * Apply compaction layers to the context in transformContext.
    *
    * This is the main entry point called from CortexAgent.getTransformContextHook().
-   * Runs Layer 1 (microcompaction) always, Layer 3 (failsafe) as mid-loop
-   * safety valve when needed.
+   * It is fully self-contained: all three compaction layers are integrated here,
+   * triggered autonomously based on token thresholds. No external calls from
+   * the backend are needed to trigger compaction.
    *
-   * Layer 2 is NOT triggered here. It is triggered at end-of-tick by
-   * checkAndRunCompaction() called from the pipeline.
+   * Execution order:
+   * 1. Layer 1 (microcompaction): tool result trimming at threshold crossings
+   * 2. Layer 2 (summarization): if tokens exceed 70% after Layer 1, run LLM
+   *    summarization on agent.state.messages (the original transcript), then
+   *    rebuild context from the updated messages
+   * 3. Layer 3 (failsafe): if tokens still exceed 90% after Layers 1-2,
+   *    emergency truncation drops the oldest turns
    *
    * @param context - The AgentContext from transformContext
    * @param getHistory - Function to get conversation history from the context
+   * @param setHistory - Function to set conversation history in the context
+   * @param getSourceHistory - Function to get the original transcript history (agent.state.messages post-slot)
+   * @param setSourceHistory - Function to replace the original transcript history (agent.state.messages)
    * @returns Modified context with compacted history
    */
-  applyInTransformContext(
+  async applyInTransformContext(
     context: AgentContext,
     getHistory: (ctx: AgentContext) => AgentMessage[],
     setHistory: (ctx: AgentContext, history: AgentMessage[]) => AgentContext,
-  ): AgentContext {
+    getSourceHistory?: () => AgentMessage[],
+    setSourceHistory?: (history: AgentMessage[]) => void,
+  ): Promise<AgentContext> {
     if (this._contextWindow <= 0) {
+      // contextWindow not set, skip compaction
       return context;
     }
 
@@ -370,19 +445,85 @@ export class CompactionManager {
       ? this._sessionTokenCount
       : this.estimateContextTokens(context);
 
+    this._debugLog?.(`transformContext: historyLen=${history.length}, sessionTokens=${this._sessionTokenCount}, heuristic=${this.estimateContextTokens(context)}, currentTokens=${currentTokens}, ctxWindow=${this._contextWindow}`);
+
     // Layer 1: Microcompaction (always runs at threshold crossings)
     history = this.microcompaction.apply(history, this._contextWindow, currentTokens);
 
-    // Layer 3: Mid-loop safety valve (only during agentic loop, at 90%)
-    if (this._pipelinePhase === 'agentic_loop') {
-      const postMicroTokens = this.estimateHistoryTokens(history);
-      const slotTokens = currentTokens - this.estimateHistoryTokens(getHistory(context));
-      const totalAfterMicro = slotTokens + postMicroTokens;
+    // Layer 2: Conversation summarization (70% threshold)
+    // Operates on the original transcript (agent.state.messages), not the
+    // in-memory microcompacted context. After Layer 2 modifies the source,
+    // we rebuild the context from the updated messages.
+    const postMicroTokens = this.estimateHistoryTokens(history);
+    const slotTokens = currentTokens - this.estimateHistoryTokens(getHistory(context));
+    const totalAfterMicro = slotTokens + postMicroTokens;
 
-      if (shouldTruncate(totalAfterMicro, this._contextWindow, this.config.failsafe.threshold)) {
+    const effectiveThreshold = this.getEffectiveThreshold();
+
+    this._debugLog?.(`Layer2: totalAfterMicro=${totalAfterMicro}, threshold=${effectiveThreshold}, ratio=${(totalAfterMicro / this._contextWindow).toFixed(3)}, completeFn=${!!this.completeFn}, srcAccessors=${!!getSourceHistory && !!setSourceHistory}, shouldCompact=${shouldCompact(totalAfterMicro, this._contextWindow, effectiveThreshold)}`);
+
+    if (
+      this.completeFn &&
+      getSourceHistory &&
+      setSourceHistory &&
+      shouldCompact(totalAfterMicro, this._contextWindow, effectiveThreshold)
+    ) {
+      try {
+        const sourceHistory = getSourceHistory();
+        if (sourceHistory.length > 0) {
+          const { newHistory: compactedSource, result } = await runCompaction(
+            sourceHistory,
+            this.config.compaction,
+            this.completeFn,
+            {
+              onBeforeCompaction: this.beforeCompactionHandlers,
+              onPostCompaction: this.postCompactionHandlers,
+              onCompactionError: this.compactionErrorHandlers,
+            },
+          );
+
+          // Update the source transcript
+          setSourceHistory(compactedSource);
+          this.microcompaction.resetCache();
+
+          // Update token count estimate
+          this._sessionTokenCount = result.tokensAfter;
+
+          // Emit result to CortexAgent event handlers
+          for (const handler of this.compactionResultHandlers) {
+            try {
+              handler(result);
+            } catch {
+              // Swallow handler errors
+            }
+          }
+
+          // Rebuild context from updated source: re-apply microcompaction
+          // on the now-shorter history
+          history = this.microcompaction.apply(
+            compactedSource,
+            this._contextWindow,
+            result.tokensAfter,
+          );
+        }
+      } catch {
+        // Layer 2 failed, fall through to Layer 3
+      }
+    }
+
+    // Layer 3: Emergency truncation (90% of model context window)
+    // Uses the MODEL's actual context window, not the budget. Emergency
+    // truncation should only fire when we're near the model's real limit,
+    // not the user's artificial budget. Layer 1/2 handle the budget.
+    {
+      const failsafeWindow = this._modelContextWindow > 0 ? this._modelContextWindow : this._contextWindow;
+      const postLayerTokens = this.estimateHistoryTokens(history);
+      const totalNow = slotTokens + postLayerTokens;
+
+      if (shouldTruncate(totalNow, failsafeWindow, this.config.failsafe.threshold)) {
         const result = emergencyTruncate(
           history,
-          this._contextWindow,
+          failsafeWindow,
           slotTokens,
           this.config.failsafe.threshold,
         );
@@ -398,11 +539,12 @@ export class CompactionManager {
   // -----------------------------------------------------------------------
 
   /**
-   * Check if compaction is needed and run it. Called at end-of-tick
-   * (after EXECUTE, before the next tick).
+   * Manually check if compaction is needed and run it.
    *
-   * This is where Layer 2 (summarization) fires. Layer 3 fires as
-   * a fallback if Layer 2 fails or is insufficient.
+   * This is a convenience API for consumers who want to trigger compaction
+   * outside the agentic loop (e.g., for testing or manual maintenance).
+   * The primary compaction trigger is `applyInTransformContext`, which runs
+   * automatically before every LLM call.
    *
    * @param getHistory - Get current conversation history
    * @param setHistory - Replace conversation history
@@ -413,9 +555,6 @@ export class CompactionManager {
     setHistory: (history: AgentMessage[]) => void,
   ): Promise<CompactionResult | null> {
     if (this._contextWindow <= 0) return null;
-
-    // Only allow Layer 2 when idle (between ticks)
-    if (this._pipelinePhase !== 'idle') return null;
 
     const history = getHistory();
     if (history.length === 0) return null;
@@ -469,12 +608,13 @@ export class CompactionManager {
       }
     }
 
-    // Layer 3 fallback: emergency truncation
+    // Layer 3 fallback: emergency truncation (uses model's actual window)
+    const failsafeWindow = this._modelContextWindow > 0 ? this._modelContextWindow : this._contextWindow;
     const slotTokens = this._sessionTokenCount - estimatedTokens;
-    if (shouldTruncate(this._sessionTokenCount, this._contextWindow, this.config.failsafe.threshold)) {
+    if (shouldTruncate(this._sessionTokenCount, failsafeWindow, this.config.failsafe.threshold)) {
       const result = emergencyTruncate(
         history,
-        this._contextWindow,
+        failsafeWindow,
         Math.max(0, slotTokens),
         this.config.failsafe.threshold,
       );
@@ -504,12 +644,14 @@ export class CompactionManager {
     const history = getHistory();
     if (history.length === 0) return;
 
+    // API returned overflow error, so use the model's actual window
+    const failsafeWindow = this._modelContextWindow > 0 ? this._modelContextWindow : this._contextWindow;
     const estimatedTokens = this.estimateHistoryTokens(history);
     const slotTokens = Math.max(0, this._sessionTokenCount - estimatedTokens);
 
     const result = emergencyTruncate(
       history,
-      this._contextWindow,
+      failsafeWindow,
       slotTokens,
       this.config.failsafe.threshold,
     );

@@ -5,6 +5,7 @@ import {
   partitionHistory,
   buildSummaryMessage,
   formatTurnsForSummarization,
+  extractSummaryContent,
   COMPACTION_DEFAULTS,
 } from '../../../src/compaction/compaction.js';
 import type { CompleteFn } from '../../../src/compaction/compaction.js';
@@ -136,13 +137,47 @@ describe('formatTurnsForSummarization', () => {
     expect(result).toContain('Hi there');
   });
 
-  it('truncates long turn content', () => {
+  it('preserves full turn content without truncation', () => {
     const longContent = 'x'.repeat(5000);
     const turns = [makeUserMsg(longContent)];
 
     const result = formatTurnsForSummarization(turns);
-    expect(result).toContain('truncated for summarization');
-    expect(result.length).toBeLessThan(longContent.length);
+    expect(result).not.toContain('truncated for summarization');
+    expect(result).toContain(longContent);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: extractSummaryContent
+// ---------------------------------------------------------------------------
+
+describe('extractSummaryContent', () => {
+  it('extracts content from <summary> tags', () => {
+    const raw = '<analysis>thinking...</analysis>\n<summary>The actual summary</summary>';
+    expect(extractSummaryContent(raw)).toBe('The actual summary');
+  });
+
+  it('handles multiline summary content', () => {
+    const raw = '<analysis>notes</analysis>\n<summary>\n1. First point\n2. Second point\n</summary>';
+    expect(extractSummaryContent(raw)).toBe('1. First point\n2. Second point');
+  });
+
+  it('falls back to full output when no summary tags present', () => {
+    const raw = 'Just a plain summary without tags';
+    expect(extractSummaryContent(raw)).toBe('Just a plain summary without tags');
+  });
+
+  it('strips analysis tags in fallback mode', () => {
+    const raw = '<analysis>thinking...</analysis>\nThe summary without tags';
+    expect(extractSummaryContent(raw)).toBe('The summary without tags');
+  });
+
+  it('handles empty summary tags', () => {
+    const raw = '<analysis>thinking</analysis>\n<summary></summary>';
+    // Empty summary falls back to stripping analysis
+    const result = extractSummaryContent(raw);
+    expect(result).not.toContain('analysis');
+    expect(result).not.toContain('thinking');
   });
 });
 

@@ -228,19 +228,19 @@ export class EventBridge {
     // The structure varies, so we try multiple access patterns.
 
     // Pattern 1: Direct text property
-    if (typeof piEvent.text === 'string') {
-      return piEvent.text;
+    if (typeof piEvent['text'] === 'string') {
+      return piEvent['text'];
     }
 
     // Pattern 2: message.content as string
-    const message = piEvent.message as Record<string, unknown> | undefined;
-    if (message && typeof message.content === 'string') {
-      return message.content;
+    const message = piEvent['message'] as Record<string, unknown> | undefined;
+    if (message && typeof message['content'] === 'string') {
+      return message['content'];
     }
 
     // Pattern 3: message.content as array with text parts
-    if (message && Array.isArray(message.content)) {
-      const textParts = (message.content as Array<{ type: string; text?: string }>)
+    if (message && Array.isArray(message['content'])) {
+      const textParts = (message['content'] as Array<{ type: string; text?: string }>)
         .filter((part) => part.type === 'text' && typeof part.text === 'string')
         .map((part) => part.text!);
       if (textParts.length > 0) {
@@ -249,14 +249,14 @@ export class EventBridge {
     }
 
     // Pattern 4: result.content
-    const result = piEvent.result as Record<string, unknown> | undefined;
-    if (result && typeof result.content === 'string') {
-      return result.content;
+    const result = piEvent['result'] as Record<string, unknown> | undefined;
+    if (result && typeof result['content'] === 'string') {
+      return result['content'];
     }
 
     // Pattern 5: content on the content parts of the result
-    if (result && Array.isArray(result.content)) {
-      const textParts = (result.content as Array<{ type: string; text?: string }>)
+    if (result && Array.isArray(result['content'])) {
+      const textParts = (result['content'] as Array<{ type: string; text?: string }>)
         .filter((part) => part.type === 'text' && typeof part.text === 'string')
         .map((part) => part.text!);
       if (textParts.length > 0) {

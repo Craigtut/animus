@@ -37,6 +37,11 @@ export interface AgentMessage {
 export interface AgentStateAccessor {
   state: {
     messages: AgentMessage[];
+    systemPrompt?: string;
+    model?: unknown;
+    thinkingLevel?: string;
+    tools?: unknown[];
+    error?: string;
   };
 }
 

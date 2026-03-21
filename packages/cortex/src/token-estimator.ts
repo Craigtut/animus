@@ -1,8 +1,10 @@
 /**
  * Heuristic token estimation.
  *
- * Estimates token count from text using a word-count * 1.3 multiplier.
- * Used for pre-request context size estimation and compaction triggering.
+ * Uses character-based heuristic (chars / 4), the community standard and
+ * closest to Anthropic's official recommendation (chars / 3.5).
+ * Character-based is more stable than word-based across content types
+ * (prose, code, JSON, markdown).
  *
  * This is a duplicate of the same utility in @animus-labs/shared,
  * kept inline to avoid a dependency from cortex to shared.
@@ -11,14 +13,14 @@
 /**
  * Estimate the number of tokens in a text string.
  *
- * Uses a simple heuristic: split by whitespace, count words, multiply by 1.3.
- * This approximation works well enough for English text and mixed content.
- * It is not a tokenizer; it is a fast estimation for budget decisions.
+ * Uses chars / 4 heuristic (community standard, ~15% underestimate for Claude).
+ * Not a tokenizer; a fast estimation for budget decisions and compaction triggers.
+ * For exact counts, use the Anthropic count_tokens API.
  *
  * @param text - The text to estimate tokens for
  * @returns Estimated token count (always at least 0, rounded up)
  */
 export function estimateTokens(text: string): number {
-  const words = text.split(/\s+/).filter(Boolean).length;
-  return Math.ceil(words * 1.3);
+  if (!text) return 0;
+  return Math.ceil(text.length / 4);
 }

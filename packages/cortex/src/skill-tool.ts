@@ -44,6 +44,8 @@ export const LOAD_SKILL_TOOL_NAME = 'load_skill';
 export interface LoadSkillToolConfig {
   /** The skill registry to load skills from. */
   registry: SkillRegistry;
+  /** Build the visible skills summary for the tool description. */
+  getAvailableSkillsSummary?: () => string;
   /** The skill buffer to push loaded skills into. */
   getSkillBuffer: () => LoadedSkill[];
   /** Push a loaded skill to the buffer (handles deduplication). */
@@ -72,7 +74,7 @@ export function createLoadSkillTool(config: LoadSkillToolConfig): {
 
     description: `Load a skill's full instructions into your active context. Call this tool when you need detailed guidance for a specific task. The skill's instructions will be available in your context for the remainder of this loop.
 
-${config.registry.getAvailableSkillsSummary()}`,
+${config.getAvailableSkillsSummary ? config.getAvailableSkillsSummary() : config.registry.getAvailableSkillsSummary()}`,
 
     parameters: LoadSkillParams,
 
@@ -117,8 +119,11 @@ ${config.registry.getAvailableSkillsSummary()}`,
  *
  * Returns a function that produces the updated description string.
  */
-export function buildLoadSkillDescription(registry: SkillRegistry): string {
+export function buildLoadSkillDescription(
+  registry: SkillRegistry,
+  availableSkillsSummary?: string,
+): string {
   return `Load a skill's full instructions into your active context. Call this tool when you need detailed guidance for a specific task. The skill's instructions will be available in your context for the remainder of this loop.
 
-${registry.getAvailableSkillsSummary()}`;
+${availableSkillsSummary ?? registry.getAvailableSkillsSummary()}`;
 }

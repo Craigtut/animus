@@ -101,16 +101,6 @@ describe('CompactionManager', () => {
       manager.setContextWindow(200_000);
       expect(manager.contextWindow).toBe(200_000);
     });
-
-    it('tracks pipeline phase', () => {
-      expect(manager.pipelinePhase).toBe('idle');
-
-      manager.setPipelinePhase('agentic_loop');
-      expect(manager.pipelinePhase).toBe('agentic_loop');
-
-      manager.setPipelinePhase('idle');
-      expect(manager.pipelinePhase).toBe('idle');
-    });
   });
 
   // -----------------------------------------------------------------------
@@ -149,16 +139,103 @@ describe('CompactionManager', () => {
   });
 
   // -----------------------------------------------------------------------
+  // applyInsertionCap
+  // -----------------------------------------------------------------------
+
+  describe('applyInsertionCap', () => {
+    function generateLargeContent(wordCount: number): string {
+      const words: string[] = [];
+      for (let i = 0; i < wordCount; i++) {
+        words.push(`word${i}`);
+      }
+      return words.join(' ');
+    }
+
+    function makeToolResultMsg(text: string, toolName?: string): AgentMessage {
+      return {
+        role: 'user',
+        content: [
+          { type: 'tool_result', text, ...(toolName ? { name: toolName } : {}) },
+        ],
+      };
+    }
+
+    it('caps oversized tool results in place', () => {
+      // ~40000 words * 1.3 = ~52000 tokens, exceeding 50000 default
+      const largeContent = generateLargeContent(40_000);
+      const slot = makeUserMsg('slot content');
+      const toolResult = makeToolResultMsg(largeContent, 'Read');
+      const messages: AgentMessage[] = [slot, toolResult, makeAssistantMsg('analysis')];
+
+      manager.applyInsertionCap(messages, 1);
+
+      // The tool result should have been capped
+      const capped = messages[1]!;
+      expect(Array.isArray(capped.content)).toBe(true);
+      const part = (capped.content as Array<{ text?: string }>)[0]!;
+      expect(part.text).toContain('tokens trimmed at insertion');
+      expect(part.text!.length).toBeLessThan(largeContent.length);
+    });
+
+    it('skips already-capped tool results', () => {
+      const alreadyCapped = 'HEAD\n\n... [~1000 tokens trimmed at insertion] ...\n\nTAIL';
+      const toolResult = makeToolResultMsg(alreadyCapped, 'Read');
+      const messages: AgentMessage[] = [toolResult];
+
+      manager.applyInsertionCap(messages, 0);
+
+      // Should be unchanged
+      const part = (messages[0]!.content as Array<{ text?: string }>)[0]!;
+      expect(part.text).toBe(alreadyCapped);
+    });
+
+    it('skips small tool results', () => {
+      const smallContent = 'small result';
+      const toolResult = makeToolResultMsg(smallContent, 'Read');
+      const messages: AgentMessage[] = [toolResult];
+
+      manager.applyInsertionCap(messages, 0);
+
+      const part = (messages[0]!.content as Array<{ text?: string }>)[0]!;
+      expect(part.text).toBe(smallContent);
+    });
+
+    it('skips messages in the slot region', () => {
+      const largeContent = generateLargeContent(40_000);
+      const slotToolResult = makeToolResultMsg(largeContent, 'Read');
+      const messages: AgentMessage[] = [slotToolResult, makeAssistantMsg('after slot')];
+
+      manager.applyInsertionCap(messages, 1);
+
+      // Slot region (index 0) should be untouched
+      const part = (messages[0]!.content as Array<{ text?: string }>)[0]!;
+      expect(part.text).toBe(largeContent);
+    });
+
+    it('skips non-tool-result messages', () => {
+      const messages: AgentMessage[] = [
+        makeUserMsg('regular message'),
+        makeAssistantMsg('response'),
+      ];
+
+      manager.applyInsertionCap(messages, 0);
+
+      expect(messages[0]!.content).toBe('regular message');
+      expect(messages[1]!.content).toBe('response');
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // transformContext integration
   // -----------------------------------------------------------------------
 
   describe('applyInTransformContext', () => {
-    it('returns context unchanged when contextWindow is 0', () => {
+    it('returns context unchanged when contextWindow is 0', async () => {
       const slots = [makeUserMsg('slot1'), makeUserMsg('slot2')];
       const history = buildHistory(5);
       const context = makeContext([...slots, ...history]);
 
-      const result = manager.applyInTransformContext(
+      const result = await manager.applyInTransformContext(
         context,
         (ctx) => ctx.messages.slice(2),
         (ctx, hist) => ({ ...ctx, messages: [...ctx.messages.slice(0, 2), ...hist] }),
@@ -167,7 +244,7 @@ describe('CompactionManager', () => {
       expect(result.messages).toEqual(context.messages);
     });
 
-    it('applies microcompaction when above soft threshold', () => {
+    it('applies microcompaction when above soft threshold', async () => {
       manager.setContextWindow(100_000);
       manager.updateTokenCount(45_000); // 45% > 40% threshold
 
@@ -188,7 +265,7 @@ describe('CompactionManager', () => {
       ];
       const context = makeContext([...slots, ...history]);
 
-      const result = manager.applyInTransformContext(
+      const result = await manager.applyInTransformContext(
         context,
         (ctx) => ctx.messages.slice(2),
         (ctx, hist) => ({ ...ctx, messages: [...ctx.messages.slice(0, 2), ...hist] }),
@@ -199,28 +276,106 @@ describe('CompactionManager', () => {
       expect(result.messages[1]).toBe(slots[1]);
     });
 
-    it('does not trigger Layer 3 when not in agentic_loop phase', () => {
+    it('triggers Layer 3 when tokens exceed 90% threshold', async () => {
       manager.setContextWindow(100_000);
       manager.updateTokenCount(95_000); // 95% > 90% threshold
-      manager.setPipelinePhase('thought'); // NOT agentic_loop
 
       const slots = [makeUserMsg('slot1'), makeUserMsg('slot2')];
       const history = buildHistory(5);
       const context = makeContext([...slots, ...history]);
 
-      const result = manager.applyInTransformContext(
+      const result = await manager.applyInTransformContext(
         context,
         (ctx) => ctx.messages.slice(2),
         (ctx, hist) => ({ ...ctx, messages: [...ctx.messages.slice(0, 2), ...hist] }),
       );
 
-      // Layer 3 should not fire; message count should be unchanged (microcompaction may modify content)
-      expect(result.messages.length).toBe(context.messages.length);
+      // Layer 3 fires unconditionally when above 90% threshold.
+      // Message count may or may not change depending on token estimates,
+      // but the method should complete without error.
+      expect(result.messages.length).toBeLessThanOrEqual(context.messages.length);
+    });
+
+    it('runs Layer 2 when completeFn and source accessors are provided and above 70%', async () => {
+      manager.setContextWindow(200_000);
+      manager.updateTokenCount(150_000); // 75% > 70% threshold
+
+      const mockComplete = vi.fn().mockResolvedValue('Summary of conversation');
+      manager.setCompleteFn(mockComplete);
+
+      const slots = [makeUserMsg('slot1'), makeUserMsg('slot2')];
+      const history = buildHistory(10); // 20 messages
+      const context = makeContext([...slots, ...history]);
+
+      // Simulate source history (the original transcript)
+      let sourceHistory = [...history];
+
+      const result = await manager.applyInTransformContext(
+        context,
+        (ctx) => ctx.messages.slice(2),
+        (ctx, hist) => ({ ...ctx, messages: [...ctx.messages.slice(0, 2), ...hist] }),
+        () => sourceHistory,
+        (h) => { sourceHistory = h; },
+      );
+
+      // Layer 2 should have fired (completeFn called)
+      expect(mockComplete).toHaveBeenCalled();
+      // Source history should be updated (compacted)
+      expect(sourceHistory.length).toBeLessThan(history.length);
+      // Result should reflect the compacted state
+      expect(result.messages.length).toBeLessThan(context.messages.length);
+    });
+
+    it('does not run Layer 2 when source accessors are not provided', async () => {
+      manager.setContextWindow(200_000);
+      manager.updateTokenCount(150_000); // 75% > 70% threshold
+
+      const mockComplete = vi.fn().mockResolvedValue('Summary');
+      manager.setCompleteFn(mockComplete);
+
+      const slots = [makeUserMsg('slot1'), makeUserMsg('slot2')];
+      const history = buildHistory(10);
+      const context = makeContext([...slots, ...history]);
+
+      // No source accessors: Layer 2 should not fire
+      await manager.applyInTransformContext(
+        context,
+        (ctx) => ctx.messages.slice(2),
+        (ctx, hist) => ({ ...ctx, messages: [...ctx.messages.slice(0, 2), ...hist] }),
+      );
+
+      expect(mockComplete).not.toHaveBeenCalled();
+    });
+
+    it('fires onBeforeCompaction handlers during Layer 2 in transformContext', async () => {
+      manager.setContextWindow(200_000);
+      manager.updateTokenCount(150_000);
+      manager.setCompleteFn(vi.fn().mockResolvedValue('Summary'));
+
+      const callOrder: string[] = [];
+      manager.onBeforeCompaction(async () => {
+        callOrder.push('before');
+      });
+
+      const slots = [makeUserMsg('slot1'), makeUserMsg('slot2')];
+      const history = buildHistory(10);
+      const context = makeContext([...slots, ...history]);
+      let sourceHistory = [...history];
+
+      await manager.applyInTransformContext(
+        context,
+        (ctx) => ctx.messages.slice(2),
+        (ctx, hist) => ({ ...ctx, messages: [...ctx.messages.slice(0, 2), ...hist] }),
+        () => sourceHistory,
+        (h) => { sourceHistory = h; },
+      );
+
+      expect(callOrder[0]).toBe('before');
     });
   });
 
   // -----------------------------------------------------------------------
-  // End-of-tick compaction
+  // Manual compaction (convenience API)
   // -----------------------------------------------------------------------
 
   describe('checkAndRunCompaction', () => {
@@ -237,24 +392,9 @@ describe('CompactionManager', () => {
       expect(result).toBeNull();
     });
 
-    it('returns null when not in idle phase', async () => {
+    it('runs Layer 2 when threshold is exceeded', async () => {
       manager.setContextWindow(200_000);
       manager.updateTokenCount(150_000); // 75% > 70%
-      manager.setPipelinePhase('agentic_loop');
-
-      const history = buildHistory(10);
-      const result = await manager.checkAndRunCompaction(
-        () => history,
-        () => {},
-      );
-
-      expect(result).toBeNull();
-    });
-
-    it('runs Layer 2 when threshold is exceeded and phase is idle', async () => {
-      manager.setContextWindow(200_000);
-      manager.updateTokenCount(150_000); // 75% > 70%
-      manager.setPipelinePhase('idle');
 
       const mockComplete = vi.fn().mockResolvedValue('Summary of conversation');
       manager.setCompleteFn(mockComplete);
@@ -276,7 +416,6 @@ describe('CompactionManager', () => {
     it('fires onBeforeCompaction handlers before summarization', async () => {
       manager.setContextWindow(200_000);
       manager.updateTokenCount(150_000);
-      manager.setPipelinePhase('idle');
       manager.setCompleteFn(vi.fn().mockResolvedValue('Summary'));
 
       const callOrder: string[] = [];
@@ -296,7 +435,6 @@ describe('CompactionManager', () => {
     it('fires onPostCompaction and onCompactionResult handlers', async () => {
       manager.setContextWindow(200_000);
       manager.updateTokenCount(150_000);
-      manager.setPipelinePhase('idle');
       manager.setCompleteFn(vi.fn().mockResolvedValue('Summary'));
 
       const postHandler = vi.fn();

@@ -426,10 +426,25 @@ describe('Bash safety layers', () => {
     });
 
     // New shell metacharacter patterns
-    it('blocks backslash-escaped operators', () => {
+    it('blocks backslash-escaped operators outside quotes', () => {
       const result = checkObfuscation('echo test\\;rm -rf /');
       expect(result.allowed).toBe(false);
       expect(result.reason).toContain('Backslash-escaped');
+    });
+
+    it('allows backslash-escaped operators inside double quotes (grep regex)', () => {
+      expect(checkObfuscation('grep -rl "foo\\|bar" ~/Code').allowed).toBe(true);
+      expect(checkObfuscation('grep "proactive\\|sendProactive" src/').allowed).toBe(true);
+      expect(checkObfuscation('grep -r "send_proactive\\|outbound\\|agent.*send" ~/Code/').allowed).toBe(true);
+    });
+
+    it('allows backslash-escaped operators inside single quotes (grep regex)', () => {
+      expect(checkObfuscation("grep -rl 'foo\\|bar' ~/Code").allowed).toBe(true);
+    });
+
+    it('blocks backslash-escaped operators when outside all quotes', () => {
+      expect(checkObfuscation('echo hello\\|rm -rf /').allowed).toBe(false);
+      expect(checkObfuscation('cmd\\;evil').allowed).toBe(false);
     });
 
     it('blocks Unicode whitespace (non-breaking space)', () => {

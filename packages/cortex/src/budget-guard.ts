@@ -155,34 +155,34 @@ export class BudgetGuard {
     const event = data as Record<string, unknown>;
 
     // Pattern 1: Direct cost property
-    if (typeof event.cost === 'number') {
-      return event.cost;
+    if (typeof event['cost'] === 'number') {
+      return event['cost'];
     }
 
     // Pattern 2: message.cost.total (pi-ai AssistantMessage structure)
-    const message = event.message as Record<string, unknown> | undefined;
+    const message = event['message'] as Record<string, unknown> | undefined;
     if (message) {
-      const cost = message.cost as Record<string, unknown> | undefined;
-      if (cost && typeof cost.total === 'number') {
-        return cost.total;
+      const cost = message['cost'] as Record<string, unknown> | undefined;
+      if (cost && typeof cost['total'] === 'number') {
+        return cost['total'];
       }
     }
 
     // Pattern 3: result.cost.total
-    const result = event.result as Record<string, unknown> | undefined;
+    const result = event['result'] as Record<string, unknown> | undefined;
     if (result) {
-      const cost = result.cost as Record<string, unknown> | undefined;
-      if (cost && typeof cost.total === 'number') {
-        return cost.total;
+      const cost = result['cost'] as Record<string, unknown> | undefined;
+      if (cost && typeof cost['total'] === 'number') {
+        return cost['total'];
       }
     }
 
     // Pattern 4: usage.cost.total
-    const usage = event.usage as Record<string, unknown> | undefined;
+    const usage = event['usage'] as Record<string, unknown> | undefined;
     if (usage) {
-      const cost = usage.cost as Record<string, unknown> | undefined;
-      if (cost && typeof cost.total === 'number') {
-        return cost.total;
+      const cost = usage['cost'] as Record<string, unknown> | undefined;
+      if (cost && typeof cost['total'] === 'number') {
+        return cost['total'];
       }
     }
 

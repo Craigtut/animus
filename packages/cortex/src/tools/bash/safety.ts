@@ -506,10 +506,17 @@ function extractUrls(command: string): string[] {
   return command.match(urlRegex) ?? [];
 }
 
+interface ObfuscationPattern {
+  pattern: RegExp;
+  description: string;
+  /** When true, only match against unquoted portions of the command. */
+  quoteAware?: boolean;
+}
+
 /**
  * Unix obfuscation and injection patterns.
  */
-const UNIX_OBFUSCATION_PATTERNS: Array<{ pattern: RegExp; description: string }> = [
+const UNIX_OBFUSCATION_PATTERNS: ObfuscationPattern[] = [
   // Encoded execution
   { pattern: /base64\s+(-d|--decode)\s*\|.*\b(ba)?sh\b/i, description: 'Base64 decode piped to shell' },
   { pattern: /xxd\s+-r\s*\|.*\b(ba)?sh\b/i, description: 'Hex decode piped to shell' },
@@ -529,8 +536,9 @@ const UNIX_OBFUSCATION_PATTERNS: Array<{ pattern: RegExp; description: string }>
   { pattern: /\w+=[^;]*;\s*\w+=[^;]*;\s*\$\{?\w+\}?\$\{?\w+\}?/i, description: 'Variable assignment chains constructing commands' },
   // Process substitution with remote content
   { pattern: /<\(.*(?:curl|wget|nc)\s+/i, description: 'Remote content via process substitution' },
-  // Shell metacharacters
-  { pattern: /\\[;&|]/, description: 'Backslash-escaped operators or whitespace' },
+  // Shell metacharacters — uses quote-aware matching in checkObfuscation()
+  // so that legitimate regex patterns inside quotes (e.g., grep "foo\|bar") are not flagged.
+  { pattern: /\\[;&|]/, description: 'Backslash-escaped operators or whitespace', quoteAware: true },
   { pattern: /[\u200B\u200C\u200D\uFEFF\u00A0]/, description: 'Unicode whitespace characters' },
   { pattern: /[\x00-\x08\x0E-\x1F]/, description: 'Control characters in command' },
   { pattern: /\w#\w/, description: 'Mid-word hash (potential comment injection)' },
@@ -548,7 +556,7 @@ const UNIX_OBFUSCATION_PATTERNS: Array<{ pattern: RegExp; description: string }>
 /**
  * PowerShell obfuscation patterns.
  */
-const PS_OBFUSCATION_PATTERNS: Array<{ pattern: RegExp; description: string }> = [
+const PS_OBFUSCATION_PATTERNS: ObfuscationPattern[] = [
   { pattern: /-EncodedCommand\b/i, description: 'PowerShell encoded command' },
   { pattern: /\[Convert\]::FromBase64String.*\|\s*iex/i, description: 'Base64 decode piped to Invoke-Expression' },
   { pattern: /Invoke-Expression\s+.*(\+|\[char\]|\.Replace)/i, description: 'Invoke-Expression with constructed strings' },
@@ -558,6 +566,20 @@ const PS_OBFUSCATION_PATTERNS: Array<{ pattern: RegExp; description: string }> =
   { pattern: /\[Reflection\.Assembly\]::Load/i, description: 'Reflection-based assembly loading' },
   { pattern: /-ExecutionPolicy\s+Bypass/i, description: 'Execution policy bypass' },
 ];
+
+/**
+ * Strip the content of single-quoted and double-quoted strings from a command,
+ * preserving the quotes themselves. This lets obfuscation patterns check only
+ * the unquoted portions of a command so that legitimate regex syntax inside
+ * quotes (e.g., grep "foo\|bar") is not flagged as shell obfuscation.
+ */
+function stripQuotedContent(command: string): string {
+  return command.replace(/"[^"]*"|'[^']*'/g, (match) => {
+    // Preserve the quote characters but empty the content
+    const quote = match[0];
+    return `${quote}${quote}`;
+  });
+}
 
 /**
  * Check a command for obfuscation and injection patterns.
@@ -601,8 +623,16 @@ export function checkObfuscation(command: string): SafetyCheckResult {
     ? PS_OBFUSCATION_PATTERNS
     : UNIX_OBFUSCATION_PATTERNS;
 
-  for (const { pattern, description } of patterns) {
-    if (pattern.test(command)) {
+  // Quote-stripped version for patterns where matches inside quoted strings
+  // are benign (e.g., backslash-escaped operators in grep regex patterns).
+  const unquotedCommand = stripQuotedContent(command);
+
+  for (const { pattern, description, quoteAware } of patterns) {
+    // Quote-aware patterns only match against unquoted portions of the command.
+    // e.g., "echo test\;rm -rf /" is obfuscation (unquoted), but
+    // "grep 'foo\|bar'" is legitimate grep regex (inside quotes).
+    const target = quoteAware ? unquotedCommand : command;
+    if (pattern.test(target)) {
       return {
         allowed: false,
         reason: `Obfuscation pattern detected: ${description}`,

@@ -8,6 +8,7 @@
  * Reference: docs/cortex/tools/edit.md
  */
 
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Type, type Static } from '@sinclair/typebox';
@@ -311,8 +312,21 @@ export function createEditTool(config: EditToolConfig): {
       // Compute diff
       const diff = computeEditDiff(originalContent, finalContent);
 
-      // Write the file
-      await fs.promises.writeFile(filePath, finalContent, 'utf8');
+      // Atomic write: write to temp file, then rename
+      const tempPath = path.join(path.dirname(filePath), `.edit-${crypto.randomUUID()}.tmp`);
+      try {
+        await fs.promises.writeFile(tempPath, finalContent, 'utf8');
+        try {
+          await fs.promises.rename(tempPath, filePath);
+        } catch {
+          // Rename may fail on Windows if target is open. Fall back to direct write.
+          await fs.promises.writeFile(filePath, finalContent, 'utf8');
+          try { await fs.promises.unlink(tempPath); } catch { /* ignore */ }
+        }
+      } catch (writeErr) {
+        try { await fs.promises.unlink(tempPath); } catch { /* ignore */ }
+        throw writeErr;
+      }
 
       const plural = replacementCount === 1 ? 'replacement' : 'replacements';
       return {

@@ -99,6 +99,11 @@ export const PROVIDER_REGISTRY: ProviderInfo[] = [
     authMethods: ['oauth'],
   },
   {
+    id: 'google-antigravity',
+    name: 'Google Antigravity',
+    authMethods: ['oauth'],
+  },
+  {
     id: 'github-copilot',
     name: 'GitHub Copilot',
     authMethods: ['oauth'],
@@ -231,3 +236,83 @@ export const UTILITY_MODEL_DEFAULTS: Record<string, string> = {
   cerebras: 'llama3.1-8b',                    // ~$0.10/$0.10 per 1M tokens
   mistral: 'mistral-small-2506',             // $0.06/$0.18 per 1M tokens
 };
+
+// ---------------------------------------------------------------------------
+// Cache Retention
+// ---------------------------------------------------------------------------
+
+export type CacheRetention = 'none' | 'short' | 'long';
+
+/** Per-provider prompt caching characteristics as implemented in pi-ai. */
+export interface ProviderCacheConfig {
+  /** Whether pi-ai implements cacheRetention for this provider. */
+  supported: boolean;
+  /** Short-term cache TTL in ms (0 if unsupported). */
+  shortTtlMs: number;
+  /** Long-term cache TTL in ms (0 if unsupported). */
+  longTtlMs: number;
+  /** Write cost multiplier vs base input price for short cache (1.0 = free). */
+  shortWritePremium: number;
+  /** Write cost multiplier vs base input price for long cache. */
+  longWritePremium: number;
+  /** Read cost multiplier vs base input price (0.1 = 90% discount). */
+  readDiscount: number;
+  /** Whether the TTL resets on each cache hit. */
+  ttlResetsOnHit: boolean;
+  /** True if "long" has no cost penalty over "short" (e.g. OpenAI). */
+  preferLong: boolean;
+}
+
+/**
+ * Cache configuration for all known providers.
+ *
+ * Only Anthropic, Bedrock (Claude), and OpenAI Responses actually implement
+ * cacheRetention in pi-ai. All other providers ignore it (no-op).
+ */
+export const PROVIDER_CACHE_CONFIG: Record<string, ProviderCacheConfig> = {
+  anthropic:  { supported: true,  shortTtlMs: 300_000,  longTtlMs: 3_600_000,   shortWritePremium: 1.25, longWritePremium: 2.0, readDiscount: 0.1, ttlResetsOnHit: true,  preferLong: false },
+  bedrock:    { supported: true,  shortTtlMs: 300_000,  longTtlMs: 3_600_000,   shortWritePremium: 1.25, longWritePremium: 2.0, readDiscount: 0.1, ttlResetsOnHit: true,  preferLong: false },
+  openai:     { supported: true,  shortTtlMs: 600_000,  longTtlMs: 86_400_000,  shortWritePremium: 1.0,  longWritePremium: 1.0, readDiscount: 0.5, ttlResetsOnHit: true,  preferLong: true  },
+  google:     { supported: false, shortTtlMs: 0,        longTtlMs: 0,           shortWritePremium: 1.0,  longWritePremium: 1.0, readDiscount: 1.0, ttlResetsOnHit: false, preferLong: false },
+  mistral:    { supported: false, shortTtlMs: 0,        longTtlMs: 0,           shortWritePremium: 1.0,  longWritePremium: 1.0, readDiscount: 1.0, ttlResetsOnHit: false, preferLong: false },
+  azure:      { supported: false, shortTtlMs: 0,        longTtlMs: 0,           shortWritePremium: 1.0,  longWritePremium: 1.0, readDiscount: 1.0, ttlResetsOnHit: false, preferLong: false },
+};
+
+/**
+ * Resolve the optimal cache retention setting for a provider and tick interval.
+ *
+ * Decision logic:
+ * - Providers with preferLong (e.g. OpenAI, free writes): always "long"
+ * - Anthropic/Bedrock with interval ≤ 4.5 min: "short" (cheaper writes, TTL resets on hit)
+ * - Anthropic/Bedrock with interval > 4.5 min: "long" (need 1-hour window for sleep ticks)
+ * - Unsupported providers: "none"
+ */
+export function resolveCacheRetention(provider: string, tickIntervalMs: number): CacheRetention {
+  const config = PROVIDER_CACHE_CONFIG[provider];
+
+  // Unknown or unsupported provider
+  if (!config || !config.supported) {
+    return 'none';
+  }
+
+  // Providers where long cache is free (e.g. OpenAI): always use long
+  if (config.preferLong) {
+    return 'long';
+  }
+
+  // Providers with a write cost premium (e.g. Anthropic):
+  // use short when the interval fits within the short TTL (with safety margin)
+  const SHORT_TTL_SAFETY_MARGIN = 0.9; // 90% of TTL as threshold
+  const shortThreshold = config.shortTtlMs * SHORT_TTL_SAFETY_MARGIN;
+
+  if (tickIntervalMs <= shortThreshold) {
+    return 'short';
+  }
+
+  // Interval exceeds short TTL: use long if available
+  if (config.longTtlMs > 0) {
+    return 'long';
+  }
+
+  return 'none';
+}
