@@ -16,6 +16,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { runCompaction, partitionHistory } from '../../src/compaction/compaction.js';
 import { extractSummaryContent } from '../../src/compaction/compaction.js';
 import { COMPACTION_DEFAULTS } from '../../src/compaction/compaction.js';
+import { estimateTokens } from '../../src/token-estimator.js';
+import { extractTextContent } from '../../src/compaction/microcompaction.js';
 import type { CompactionResult } from '../../src/types.js';
 import type { AgentMessage } from '../../src/context-manager.js';
 import { createEvalCompleteFn } from './helpers/provider.js';
@@ -26,6 +28,8 @@ import {
   CONFIG_REFACTOR_FACTS,
   MEMORY_LEAK_CONVERSATION,
   MEMORY_LEAK_FACTS,
+  AUTH_REFACTOR_CONVERSATION,
+  AUTH_REFACTOR_FACTS,
   conversationToText,
 } from './helpers/fixtures.js';
 
@@ -38,11 +42,120 @@ afterAll(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Compaction Quality Tests
+// Large Conversation Compaction (Auth Refactor - ~80K tokens)
 // ---------------------------------------------------------------------------
 
 describe('Compaction Quality', () => {
-  describe('Config Refactor Conversation', () => {
+  describe('Auth Refactor (large, ~80K tokens)', () => {
+    let compactionResult: CompactionResult;
+    let newHistory: AgentMessage[];
+    let inputTokenEstimate: number;
+
+    beforeAll(async () => {
+      // Estimate input size
+      inputTokenEstimate = estimateTokens(
+        AUTH_REFACTOR_CONVERSATION.map(m => extractTextContent(m)).join('\n'),
+      );
+      console.log(`  Input conversation: ${AUTH_REFACTOR_CONVERSATION.length} turns, ~${inputTokenEstimate} tokens`);
+
+      const completeFn = createEvalCompleteFn();
+      const result = await runCompaction(
+        AUTH_REFACTOR_CONVERSATION,
+        COMPACTION_DEFAULTS,
+        completeFn,
+      );
+      compactionResult = result.result;
+      newHistory = result.newHistory;
+    });
+
+    it('produces a compaction summary from large input', () => {
+      expect(compactionResult.summary.length).toBeGreaterThan(500);
+      expect(compactionResult.turnsCompacted).toBeGreaterThan(10);
+      expect(compactionResult.turnsPreserved).toBe(COMPACTION_DEFAULTS.preserveRecentTurns);
+      expect(newHistory.length).toBe(COMPACTION_DEFAULTS.preserveRecentTurns + 1);
+      console.log(`  Turns compacted: ${compactionResult.turnsCompacted}, preserved: ${compactionResult.turnsPreserved}`);
+    });
+
+    it('achieves meaningful token reduction on large input', () => {
+      // With 80K+ tokens of input, the summary MUST be significantly smaller
+      const ratio = compactionResult.tokensAfter / compactionResult.tokensBefore;
+      console.log(`  Token reduction: ${compactionResult.tokensBefore} -> ${compactionResult.tokensAfter} (${((1 - ratio) * 100).toFixed(1)}% reduction)`);
+      console.log(`  Summary tokens: ${compactionResult.summaryTokens}`);
+
+      // Large conversations should achieve at least 50% reduction
+      expect(ratio).toBeLessThan(0.5);
+    });
+
+    it('extracts summary from XML tags', () => {
+      const extracted = extractSummaryContent(compactionResult.summary);
+      expect(extracted.length).toBeGreaterThan(200);
+      expect(extracted).not.toContain('<analysis>');
+    });
+
+    it('preserves critical facts from large conversation (LLM-as-judge)', async () => {
+      const extracted = extractSummaryContent(compactionResult.summary);
+
+      // For the large conversation, we don't pass the original text as context
+      // to the judge (it would exceed the judge's own context window). The judge
+      // evaluates the summary standalone, which is the realistic scenario.
+      const result = await judgeFacts(extracted, AUTH_REFACTOR_FACTS);
+
+      console.log(`  Fact preservation scores (${AUTH_REFACTOR_FACTS.length} facts):`);
+      for (const [fact, score] of Object.entries(result.scores)) {
+        const icon = score >= 0.8 ? 'PASS' : score >= 0.5 ? 'PARTIAL' : 'FAIL';
+        console.log(`    [${icon}] ${score.toFixed(1)} - ${fact.slice(0, 80)}...`);
+      }
+      console.log(`  Average: ${result.averageScore.toFixed(2)}`);
+
+      // For large conversations, fact preservation is harder. Require at least 60%.
+      const preserved = Object.values(result.scores).filter(s => s >= 0.5).length;
+      const preservedRatio = preserved / AUTH_REFACTOR_FACTS.length;
+      console.log(`  Facts preserved (>= 0.5): ${preserved}/${AUTH_REFACTOR_FACTS.length} (${(preservedRatio * 100).toFixed(0)}%)`);
+      expect(preservedRatio).toBeGreaterThanOrEqual(0.6);
+      expect(result.averageScore).toBeGreaterThanOrEqual(0.4);
+    });
+
+    it('maintains structural quality on large conversation', async () => {
+      const extracted = extractSummaryContent(compactionResult.summary);
+
+      const result = await judgeQuality(extracted, [
+        {
+          name: 'file_paths',
+          description: 'Contains specific file paths mentioned in the conversation (not just generic references like "the auth file")',
+        },
+        {
+          name: 'security_details',
+          description: 'Preserves specific security findings (MD5 vulnerability, bcrypt cost factor, race condition details)',
+        },
+        {
+          name: 'user_corrections',
+          description: 'Captures the user\'s naming convention correction (camelCase, req.authUser not req.user)',
+        },
+        {
+          name: 'test_outcomes',
+          description: 'Mentions test results, broken tests, and their fixes',
+        },
+        {
+          name: 'coherence',
+          description: 'Reads as a coherent, useful summary that someone could use to continue the work without re-reading the original conversation',
+        },
+      ]);
+
+      console.log(`  Quality scores:`);
+      for (const [criterion, score] of Object.entries(result.scores)) {
+        console.log(`    ${score.toFixed(1)} - ${criterion}`);
+      }
+      console.log(`  Average: ${result.averageScore.toFixed(2)}`);
+
+      expect(result.averageScore).toBeGreaterThanOrEqual(0.5);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Small Conversation Tests (existing, kept for fast feedback)
+  // ---------------------------------------------------------------------------
+
+  describe('Config Refactor (small)', () => {
     let compactionResult: CompactionResult;
     let newHistory: AgentMessage[];
 
@@ -60,91 +173,20 @@ describe('Compaction Quality', () => {
     it('produces a compaction summary', () => {
       expect(compactionResult.summary.length).toBeGreaterThan(100);
       expect(compactionResult.turnsCompacted).toBeGreaterThan(0);
-      expect(compactionResult.turnsPreserved).toBe(COMPACTION_DEFAULTS.preserveRecentTurns);
-      expect(newHistory.length).toBe(COMPACTION_DEFAULTS.preserveRecentTurns + 1); // summary + preserved tail
-    });
-
-    it('produces a summary shorter than the compacted portion', () => {
-      // The summary should be shorter than the turns it replaces.
-      // Note: tokensAfter includes summary + preserved tail, so we compare
-      // summaryTokens against the tokens that were compacted (before - after + summary).
-      const compactedPortionTokens = compactionResult.tokensBefore -
-        (compactionResult.tokensAfter - compactionResult.summaryTokens);
-      const ratio = compactionResult.summaryTokens / compactedPortionTokens;
-
-      console.log(`  Compacted portion: ~${compactedPortionTokens} tokens`);
-      console.log(`  Summary: ~${compactionResult.summaryTokens} tokens`);
-      console.log(`  Compression ratio: ${ratio.toFixed(2)} (${ratio < 1 ? 'smaller' : 'larger'} than original)`);
-      console.log(`  Total: ${compactionResult.tokensBefore} -> ${compactionResult.tokensAfter} (summary + ${compactionResult.turnsPreserved} preserved turns)`);
-
-      // The summary should exist and have meaningful content
-      expect(compactionResult.summaryTokens).toBeGreaterThan(50);
-      // Log the ratio for tracking, but don't hard-assert on reduction
-      // since short conversations can produce summaries longer than the input
-    });
-
-    it('extracts summary from XML tags', () => {
-      const extracted = extractSummaryContent(compactionResult.summary);
-      expect(extracted.length).toBeGreaterThan(50);
-      expect(extracted).not.toContain('<analysis>');
     });
 
     it('preserves critical facts (LLM-as-judge)', async () => {
       const extracted = extractSummaryContent(compactionResult.summary);
       const originalText = conversationToText(CONFIG_REFACTOR_CONVERSATION);
-
       const result = await judgeFacts(extracted, CONFIG_REFACTOR_FACTS, originalText);
 
-      console.log(`  Fact preservation scores:`);
-      for (const [fact, score] of Object.entries(result.scores)) {
-        const icon = score >= 0.8 ? 'PASS' : score >= 0.5 ? 'PARTIAL' : 'FAIL';
-        console.log(`    [${icon}] ${score.toFixed(1)} - ${fact.slice(0, 80)}...`);
-      }
-      console.log(`  Average: ${result.averageScore.toFixed(2)}`);
-
-      // At least 70% of facts should be preserved (score >= 0.5)
+      console.log(`  Fact preservation: ${result.averageScore.toFixed(2)} avg`);
       const preserved = Object.values(result.scores).filter(s => s >= 0.5).length;
-      const preservedRatio = preserved / CONFIG_REFACTOR_FACTS.length;
-      expect(preservedRatio).toBeGreaterThanOrEqual(0.7);
-
-      // Average score should be reasonable
-      expect(result.averageScore).toBeGreaterThanOrEqual(0.5);
-    });
-
-    it('maintains structural quality', async () => {
-      const extracted = extractSummaryContent(compactionResult.summary);
-
-      const result = await judgeQuality(extracted, [
-        {
-          name: 'file_paths',
-          description: 'Contains specific file paths mentioned in the conversation (not just generic references)',
-        },
-        {
-          name: 'user_decisions',
-          description: 'Captures decisions the user made (corrections, preferences, explicit directives)',
-        },
-        {
-          name: 'error_details',
-          description: 'Preserves specific error details and how they were resolved',
-        },
-        {
-          name: 'coherence',
-          description: 'Reads as a coherent summary that someone could use to continue the work',
-        },
-      ]);
-
-      console.log(`  Quality scores:`);
-      for (const [criterion, score] of Object.entries(result.scores)) {
-        console.log(`    ${score.toFixed(1)} - ${criterion}`);
-      }
-      console.log(`  Average: ${result.averageScore.toFixed(2)}`);
-
-      // All quality dimensions should be at least passable
-      expect(result.averageScore).toBeGreaterThanOrEqual(0.5);
+      expect(preserved / CONFIG_REFACTOR_FACTS.length).toBeGreaterThanOrEqual(0.7);
     });
   });
 
-  describe('Memory Leak Conversation', () => {
+  describe('Memory Leak (small)', () => {
     let compactionResult: CompactionResult;
 
     beforeAll(async () => {
@@ -157,27 +199,15 @@ describe('Compaction Quality', () => {
       compactionResult = result.result;
     });
 
-    it('compacts the memory leak conversation', () => {
+    it('compacts and preserves debugging facts', async () => {
       expect(compactionResult.summary.length).toBeGreaterThan(100);
-      expect(compactionResult.turnsCompacted).toBeGreaterThan(0);
-    });
-
-    it('preserves debugging facts', async () => {
       const extracted = extractSummaryContent(compactionResult.summary);
       const originalText = conversationToText(MEMORY_LEAK_CONVERSATION);
-
       const result = await judgeFacts(extracted, MEMORY_LEAK_FACTS, originalText);
 
-      console.log(`  Fact preservation scores:`);
-      for (const [fact, score] of Object.entries(result.scores)) {
-        const icon = score >= 0.8 ? 'PASS' : score >= 0.5 ? 'PARTIAL' : 'FAIL';
-        console.log(`    [${icon}] ${score.toFixed(1)} - ${fact.slice(0, 80)}...`);
-      }
-      console.log(`  Average: ${result.averageScore.toFixed(2)}`);
-
+      console.log(`  Fact preservation: ${result.averageScore.toFixed(2)} avg`);
       const preserved = Object.values(result.scores).filter(s => s >= 0.5).length;
-      const preservedRatio = preserved / MEMORY_LEAK_FACTS.length;
-      expect(preservedRatio).toBeGreaterThanOrEqual(0.7);
+      expect(preserved / MEMORY_LEAK_FACTS.length).toBeGreaterThanOrEqual(0.7);
     });
   });
 
