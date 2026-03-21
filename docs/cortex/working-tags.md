@@ -94,40 +94,82 @@ The consumer decides when to enable or disable. A common pattern: enable for tex
 
 ## System Prompt Guidance
 
-When `workingTags.enabled` is true, Cortex appends a "Response Delivery" section to its operational rules. This section is placed first in the operational rules (before "System Rules") so the agent internalizes it as a core operating principle.
+When `workingTags.enabled` is true, Cortex adds working tag guidance in two places:
+
+### 1. Response Delivery Section (System Prompt)
+
+A slim "Response Delivery" section is appended first in the operational rules, introducing the `<working>` tag concept:
 
 ```
 # Response Delivery
 
-When working through multi-step tasks, distinguish between internal
-working content and direct communication using <working> tags.
+Use <working> tags to separate internal reasoning from user-facing
+communication. Text outside <working> tags is delivered to the user.
+Text inside <working> tags stays in your conversation history for
+your reference but may not be shown to the user.
 
-**Wrap in <working> tags:**
-- Your analysis of tool call results
-- Reasoning about what to do next
-- Synthesis of findings you will reference in later steps
-- Planning and strategy
+<working> tags are for: analysis of results, reasoning about next
+steps, synthesis of findings, planning. Everything else (answers,
+progress updates, questions) stays outside tags.
 
-**Keep outside <working> tags (delivered to user):**
-- Acknowledgments when starting work
-- Progress updates at meaningful milestones
-- Final answers, recommendations, and deliverables
-- Questions directed at the user
-
-Text outside <working> tags is what the user sees. Text inside <working>
-tags stays in your conversation for your own reference but may not be
-displayed to the user depending on their interface.
-
-Good progress updates are concise and informative: "Found 5 strong
-candidates, analyzing their requirements now." Do not narrate every
-step, but do keep the user informed at natural milestones.
-
-For complex tasks requiring extensive research or multiple phases of
-work, consider delegating to a sub-agent so you remain responsive
-for other interactions.
+For complex tasks requiring extensive research, consider delegating
+to a sub-agent so you remain responsive.
 ```
 
-This guidance is Cortex-owned and always present when working tags are enabled. The consumer does not need to add their own working tag instructions. Channel-specific communication style guidance (e.g., "You are communicating via SMS, be concise") is the consumer's responsibility and goes in the consumer's system prompt content.
+### 2. Tool Usage Section (System Prompt)
+
+The Tool Usage section contains strong, example-driven guidance about text output during tool use. This is positioned alongside tool instructions because the narration problem occurs specifically when the agent is making tool calls:
+
+```
+## IMPORTANT: Text output during tool use
+
+When you are using tools, do NOT produce text that narrates what
+you are doing. Just call the tool. No preamble, no commentary,
+no "let me look at that", no "I found it", no status updates
+between every tool call.
+
+BAD (do not do this):
+  "Let me search for that file." [tool_use: Glob]
+  "Found it. Let me read it now." [tool_use: Read]
+  "Good, I can see the code. Let me trace the function." [tool_use: Grep]
+
+GOOD (do this instead):
+  [tool_use: Glob]
+  [tool_use: Read]
+  [tool_use: Grep]
+  <working>The function traces through three layers: router -> service -> store.
+  The foreign key constraint is in the messages table schema.</working>
+  The issue is in the messages table schema. Here is what I found: ...
+
+Rules:
+1. When calling a tool, produce ONLY the tool call. No text.
+2. After receiving results, wrap your analysis in <working> tags.
+3. Only produce text outside <working> tags when you have something
+   meaningful to tell the user: a finding, a question, or a final answer.
+4. A brief acknowledgment on the FIRST message is fine ("Sure, let me
+   look into that."). After that, work silently until you have results.
+```
+
+### 3. Tool Result Reminder (afterToolCall Hook)
+
+Cortex wires pi-agent-core's `afterToolCall` hook to append a brief reminder to every tool result. This is the last thing the LLM sees before generating its next response, providing the strongest possible signal at the exact point where narration occurs.
+
+The reminder is appended to the tool result content:
+```
+[Do not narrate. If analyzing these results, use <working> tags. Only text outside <working> tags is shown to the user.]
+```
+
+This fires on every successful tool call (not on errors). It adds approximately 30 tokens per tool call, which is a small cost for significantly better output behavior.
+
+### Why Three Layers
+
+Each layer targets a different part of the problem:
+
+- **Response Delivery section**: Establishes the `<working>` tag concept once, early in the prompt. The model knows what working tags are.
+- **Tool Usage section**: Provides concrete examples of good vs. bad behavior right next to the tool instructions. The model associates "using tools" with "no narration."
+- **afterToolCall reminder**: Reinforces the behavior at the exact moment narration occurs (after receiving tool results, before generating the next response). This catches turns 2+ in the agentic loop.
+
+The consumer does not need to add their own working tag instructions. Channel-specific communication style guidance (e.g., "You are communicating via SMS, be concise") is the consumer's responsibility and goes in the consumer's system prompt content.
 
 ## Event Model
 

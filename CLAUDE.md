@@ -17,6 +17,7 @@ Animus is an autonomous AI assistant designed to be genuinely helpful while main
 ```
 /packages
   /shared       - Shared types, Zod schemas, utilities
+  /cortex       - General-purpose agent framework (standalone, reusable)
   /agents       - Agent SDK abstraction layer (Claude, Codex, OpenCode)
   /backend      - Fastify + tRPC server
   /frontend     - Vite + React 19 SPA
@@ -42,7 +43,8 @@ Animus is an autonomous AI assistant designed to be genuinely helpful while main
 - Seven SQLite databases (see below)
 - LanceDB for vector storage/semantic search
 - Transformers.js + BGE-small-en-v1.5 for local embeddings
-- Agent SDKs: Claude (default), Codex, OpenCode
+- Cortex agent framework (`@animus-labs/cortex`) wrapping pi-agent-core
+- Agent SDKs (legacy, used for sub-agents): Claude, Codex, OpenCode
 
 ### Database Architecture
 
@@ -94,35 +96,38 @@ The heartbeat is the core tick system that drives Animus's inner life. The mind 
 3. **Scheduled task fires** — A cron-like task activates
 4. **Sub-agent completion** — A delegated agent finishes its work
 
-**Pipeline** — Each tick runs three stages:
-1. **Gather Context** (system) — Assemble inputs: trigger context, emotional state, recent thoughts, active goals, running sub-agent status
-2. **Mind Query** (agent session) — Single structured output covering thoughts, experiences, emotion analysis, decisions, and contextually message replies
-3. **Execute** (system) — Persist data, send replies, spawn sub-agents, cleanup expired entries
+**Pipeline** — Each tick runs five stages:
+1. **Gather** (system) — Assemble inputs: trigger context, emotional state, recent thoughts, active goals, running sub-agent status
+2. **Thought** (direct LLM call) — Generates a stream-of-consciousness thought with importance rating. Not part of the agentic loop.
+3. **Agentic Loop** (CortexAgent) — The agent reasons, uses tools, makes decisions, and replies. The thought from phase 2 is available in ephemeral context.
+4. **Reflect** (direct LLM call) — Produces experience narration, emotion deltas, energy delta, memory candidates, working memory/core self updates. Not part of the agentic loop.
+5. **Execute** (system) — Persist data from all phases, send replies, spawn sub-agents, cleanup expired entries
 
-The mind is a top-level orchestrator. It does not perform long-running work — it delegates to sub-agents for complex tasks (research, multi-step workflows, code generation). Sub-agents are independent agent sessions managed by a custom orchestration layer. They carry the full Animus personality and can message the user directly. The mind can forward new information to running sub-agents via `update_agent` decisions. See `docs/architecture/agent-orchestration.md` for the full design. Pipeline state is persisted to SQLite for crash recovery.
+The mind is a top-level orchestrator. It does not perform long-running work; it delegates to sub-agents for complex tasks (research, multi-step workflows, code generation). Sub-agents are independent agent sessions managed by a custom orchestration layer. They carry the full Animus personality and can message the user directly. The mind can forward new information to running sub-agents via `update_agent` decisions. See `docs/architecture/agent-orchestration.md` for the full design and `docs/cortex/mind-migration.md` for the 5-phase pipeline details. Pipeline state is persisted to SQLite for crash recovery.
+
+### The Cortex Package (`@animus-labs/cortex`)
+
+**Cortex is a general-purpose agent framework, not an Animus-specific module.** It wraps `@mariozechner/pi-agent-core` into a production-grade agent with capabilities pi-agent-core deliberately omits: MCP tool support, tool permissions, budget guards, context compaction, skill system, event logging, built-in tools (Bash, Read, Write, Edit, Glob, Grep, WebFetch), and provider management.
+
+Cortex is designed to be reusable across any application, not just Animus. It has zero knowledge of Animus-specific concepts (thoughts, emotions, decisions, persona, contacts, heartbeat ticks, observational memory). The Animus backend is a *consumer* of Cortex.
+
+**Sanitized boundary: Cortex must never import from `@animus-labs/shared` or `packages/backend/`.** The backend imports from Cortex, never the reverse. Cortex's only dependencies are `pi-agent-core`, `pi-ai`, `@modelcontextprotocol/sdk`, and `@sinclair/typebox`. If a feature requires Animus-specific data, Cortex provides a hook or callback that the consumer implements.
+
+**Two main exports, fully independent:**
+- `CortexAgent` — The agentic loop, tools, context management, compaction, skills. Always-warm session, no cold/warm state machine.
+- `ProviderManager` — Provider discovery, OAuth flows, API key validation, model resolution. Wraps pi-ai's multi-provider ecosystem. Consumers never import `@mariozechner/pi-ai` directly.
+
+**Key design patterns for the boundary:**
+- **No persistence**: Cortex is in-memory only. It provides `getConversationHistory()`, `restoreConversationHistory()`, and `onLoopComplete` hooks. The consumer decides where and when to persist (SQLite, filesystem, etc.).
+- **No application logic**: No thoughts, emotions, persona compilation, goal tracking, or decision handling. Those are backend concerns.
+- **Callback-driven integration**: `getApiKey` callback for credentials, `beforeToolCall` hook for permissions, `transformContext` for ephemeral context injection, `onBeforeCompaction`/`onPostCompaction` for domain-specific coordination.
+- **Consumer-provided system prompt**: Cortex appends operational rules (tool guidance, safety, environment info) after the consumer's content. The consumer owns identity and domain instructions.
+
+**Documentation**: `docs/cortex/` contains the full architecture: `cortex-architecture.md`, `mind-migration.md`, `compaction-strategy.md`, `skill-system.md`, `provider-manager.md`, `context-manager.md`, `system-prompt.md`, `model-tiers.md`, `error-recovery.md`, `working-tags.md`, `backend-auth-integration.md`, `cross-platform-considerations.md`.
 
 ### The Agents Package (`@animus-labs/agents`)
 
-A separate package providing a unified abstraction over multiple agent SDKs:
-
-| SDK | Provider | Purpose |
-|-----|----------|---------|
-| Claude Agent SDK | Anthropic | Default provider, full-featured agent capabilities |
-| Codex SDK | OpenAI | Alternative provider |
-| OpenCode SDK | OpenCode.ai | Alternative provider |
-
-**Why a separate package?**
-- Clean separation from backend HTTP/database concerns
-- Can be tested independently
-- Allows heavy iteration without touching backend code
-- Clear interface boundaries for each SDK adapter
-
-**Key interfaces** (in `/packages/agents/src/types.ts`):
-- `IAgentAdapter` - Interface each SDK adapter must implement
-- `IAgentSession` - Active session with prompt/streaming methods
-- `AgentEvent` - Normalized event type across all providers
-
-**Status**: Interface types defined, SDK adapter implementations pending.
+A separate package providing a unified abstraction over multiple subprocess-based agent SDKs (Claude Agent SDK, Codex SDK, OpenCode SDK). Used for sub-agent orchestration where subprocess-based SDKs may still be useful. The Cortex package is the primary agent framework for the mind.
 
 ## Development Guidelines
 
@@ -147,11 +152,12 @@ cp .env.example .env
 # If you need to verify the backend is running:
 # netstat -ano | grep ":3000 " | grep LISTEN
 
-# NOTE: In dev mode, the backend imports @animus-labs/shared and @animus-labs/agents
-# source (.ts) directly via the "source" export condition (--conditions source).
-# This means changes to shared/agents source are picked up immediately —
-# no need to rebuild their dist. The dist is only used for production builds.
-# If you need dist for any reason: npm run build -w @animus-labs/shared
+# NOTE: In dev mode, the backend imports @animus-labs/shared, @animus-labs/agents,
+# and @animus-labs/cortex source (.ts) directly via the "source" export condition
+# (--conditions source). This means changes to shared/agents/cortex source are
+# picked up immediately — no need to rebuild their dist. The dist is only used
+# for production builds. If you need dist for any reason:
+# npm run build -w @animus-labs/shared
 ```
 
 ### Testing Requirements
@@ -310,17 +316,13 @@ const { data } = trpc.onHeartbeat.useSubscription();
 
 ### Agent Integration
 
-The `@animus-labs/agents` package provides a unified interface for all agent SDKs. Claude and Codex adapters are fully implemented and integrated. The OpenCode adapter is built but not yet wired into the backend/frontend. See `docs/agents/sdk-comparison.md` for provider comparison and `docs/agents/architecture-overview.md` for the abstraction layer design.
+The mind uses `@animus-labs/cortex` (CortexAgent) for the primary agentic loop. The backend is a consumer of Cortex; see "The Cortex Package" section above for the boundary rules. The `@animus-labs/agents` package remains available for sub-agent orchestration. See `docs/cortex/cortex-architecture.md` for the full design and `docs/cortex/mind-migration.md` for how the backend integrates with Cortex.
+
+**Boundary reminder**: When working on the heartbeat pipeline or agent-related backend code, never add Animus-specific logic to `packages/cortex/`. If the backend needs Cortex to do something application-specific, use one of Cortex's hooks or callbacks. If no suitable hook exists, add a general-purpose hook to Cortex that any consumer could use, then implement the Animus-specific behavior in the backend's hook handler.
 
 ### Event Logging
 
-All agent interactions must be logged. The agent abstraction layer handles this automatically, but ensure:
-
-- Session start/end events
-- All inputs and outputs
-- Tool calls with inputs, outputs, and errors
-- Token usage and costs
-- Timing information
+All agent interactions are logged via Cortex's EventBridge, which normalizes pi-agent-core events into the existing `AgentEventType` enum. The backend's `CortexLogBridge` listens to these events and persists them to `agent_logs.db`. Each pipeline phase (THOUGHT, AGENTIC LOOP, REFLECT) creates its own log session scope for traceability. The backend also emits its own pipeline events (`tick_input`, `tick_output`, `execute_*`) independently.
 
 ## Important Principles
 
@@ -345,6 +347,7 @@ docs/
   brand-vision.md            # Visual identity, personality, design language
   design-principles.md       # UI/UX design philosophy and component guidelines
   architecture/              # Backend architecture specs (source of truth)
+  cortex/                    # Cortex agent framework docs (architecture, tools, compaction, skills)
   agents/                    # Agent SDK docs, comparison, per-provider references
   research/                  # Planned features and exploratory research (not yet built)
   guides/                    # Getting started, setup instructions
@@ -367,8 +370,9 @@ docs/
 - **Security**: `docs/architecture/encryption-architecture.md`, `docs/architecture/credential-passing.md`
 - **Telemetry**: `docs/architecture/telemetry.md`
 - **Infrastructure**: `docs/architecture/data-directory.md`, `docs/architecture/backend-architecture.md`, `docs/architecture/tech-stack.md`, `docs/architecture/sleep-energy.md`, `docs/architecture/release-engineering.md`
-- **Agent SDKs**: `docs/agents/sdk-comparison.md`, `docs/agents/architecture-overview.md`, plus per-provider docs in `docs/agents/claude/`, `docs/agents/codex/`, `docs/agents/opencode/`
-- **Planned (not built)**: `docs/research/reflex-system.md`, `docs/research/voice-mode.md`, `docs/agents/pi/research/`
+- **Cortex Framework**: `docs/cortex/cortex-architecture.md`, `docs/cortex/mind-migration.md`, `docs/cortex/compaction-strategy.md`, `docs/cortex/skill-system.md`, `docs/cortex/provider-manager.md`, `docs/cortex/context-manager.md`
+- **Agent SDKs (legacy)**: `docs/agents/sdk-comparison.md`, `docs/agents/architecture-overview.md`, plus per-provider docs in `docs/agents/claude/`, `docs/agents/codex/`, `docs/agents/opencode/`
+- **Planned (not built)**: `docs/research/reflex-system.md`, `docs/research/voice-mode.md`
 
 Use `/doc-explorer <topic>` for the full index and keyword guide. Examples:
 - `/doc-explorer heartbeat` for the tick system
@@ -380,7 +384,9 @@ Use `/doc-explorer <topic>` for the full index and keyword guide. Examples:
 
 - Types: `/packages/shared/src/types/`
 - Schemas: `/packages/shared/src/schemas/`
-- Agent abstractions: `/packages/agents/src/`
+- Cortex agent framework: `/packages/cortex/src/`
+- Cortex built-in tools: `/packages/cortex/src/tools/`
+- Agent abstractions (legacy): `/packages/agents/src/`
 - API routes: `/packages/backend/src/api/routers/`
 - Database: `/packages/backend/src/db/`
 - Heartbeat: `/packages/backend/src/heartbeat/`

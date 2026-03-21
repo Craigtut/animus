@@ -92,9 +92,12 @@ interface OnboardingState {
   currentStep: OnboardingStep;
   completedSteps: OnboardingStep[];
   personaDraft: PersonaDraft;
+  cortexProvider: string | null;
+  cortexModel: string | null;
   setCurrentStep: (step: OnboardingStep) => void;
   markStepComplete: (step: OnboardingStep) => void;
   updatePersonaDraft: (updates: Partial<PersonaDraft>) => void;
+  setCortexProvider: (provider: string | null, model: string | null) => void;
   reset: () => void;
 }
 
@@ -104,6 +107,8 @@ export const useOnboardingStore = create<OnboardingState>()(
       currentStep: 'welcome',
       completedSteps: [],
       personaDraft: { ...defaultPersonaDraft },
+      cortexProvider: null,
+      cortexModel: null,
       setCurrentStep: (step) => set({ currentStep: step }),
       markStepComplete: (step) =>
         set((state) => ({
@@ -115,11 +120,15 @@ export const useOnboardingStore = create<OnboardingState>()(
         set((state) => ({
           personaDraft: { ...state.personaDraft, ...updates },
         })),
+      setCortexProvider: (provider, model) =>
+        set({ cortexProvider: provider, cortexModel: model }),
       reset: () =>
         set({
           currentStep: 'welcome',
           completedSteps: [],
           personaDraft: { ...defaultPersonaDraft },
+          cortexProvider: null,
+          cortexModel: null,
         }),
     }),
     {

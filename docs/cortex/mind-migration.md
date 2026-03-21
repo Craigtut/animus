@@ -518,8 +518,7 @@ The system prompt is set once at process start, but certain events require a reb
 
 **Rebuild process**:
 1. The consumer detects the change via EventBus.
-2. Calls `buildSystemPrompt()` to generate new content.
-3. Calls `cortexAgent.rebuildSystemPrompt(newPrompt)` on the Cortex agent.
+2. Recomputes the application's new base prompt content.
+3. Calls `cortexAgent.setBasePrompt(newPrompt)` on the Cortex agent.
 
 Conversation history is preserved across rebuilds; only the system prompt changes. Context slots are unaffected by system prompt rebuilds.
-

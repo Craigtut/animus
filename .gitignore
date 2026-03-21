@@ -36,6 +36,9 @@ Thumbs.db
 # Test coverage
 coverage/
 
+# Eval credentials (OAuth tokens, API keys for LLM eval tests)
+.eval-credentials.json
+
 # Logs
 logs/
 *.log

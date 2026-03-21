@@ -191,7 +191,7 @@ Cortex assembles a system prompt from two layers: a **cortex default** (operatio
 
 See **`system-prompt.md`** for the full design: all seven default sections, how the consumer appends, platform-aware tool guidance, and caching implications.
 
-Cortex provides a `rebuildSystemPrompt(newPrompt: string)` method for when the prompt needs to change:
+Cortex provides a `setBasePrompt(newPrompt: string)` method for when the application prompt needs to change:
 
 - **Triggers for rebuild**: Consumer-detected (e.g., persona changes, plugin install/remove, settings changes).
 - **Non-destructive**: Rebuilding does NOT tear down the session or lose conversation history.
@@ -352,7 +352,7 @@ CREATED → ACTIVE → DESTROYED
                 └── abort() returns to ACTIVE (agent still usable)
 ```
 
-- **CREATED**: After `new CortexAgent(config)`. Slots can be set, but no loops have run.
+- **CREATED**: After `await CortexAgent.create(config)`. Slots can be set, but no loops have run.
 - **ACTIVE**: After the first `prompt()` call. The agent is running or idle between prompts.
 - **DESTROYED**: After `destroy()`. All resources released. Any `prompt()` call throws.
 

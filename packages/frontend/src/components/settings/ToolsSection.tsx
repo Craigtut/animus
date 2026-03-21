@@ -414,8 +414,8 @@ function ToolGroup({ source, tools }: { source: string; tools: ToolPermission[] 
   });
 
   const displayName = useMemo(() => {
-    if (source === 'core') return 'Core Tools';
-    if (source.startsWith('sdk:')) return `SDK: ${source.slice(4)}`;
+    if (source === 'animus:core') return 'Core Tools';
+    if (source.startsWith('cortex:')) return 'Built-in Tools';
     if (source.startsWith('plugin:')) return `Plugin: ${source.slice(7)}`;
     return source;
   }, [source]);
@@ -540,10 +540,10 @@ export function ToolsSection() {
       existing.push(tool);
       map.set(tool.toolSource, existing);
     }
-    // Sort: core first, then sdk:*, then plugin:*
+    // Sort: built-in (cortex) first, then core (animus), then plugin:*
     const entries = Array.from(map.entries());
     entries.sort(([a], [b]) => {
-      const order = (s: string) => (s === 'core' ? 0 : s.startsWith('sdk:') ? 1 : 2);
+      const order = (s: string) => (s.startsWith('cortex:') ? 0 : s === 'animus:core' ? 1 : 2);
       return order(a) - order(b) || a.localeCompare(b);
     });
     return entries;

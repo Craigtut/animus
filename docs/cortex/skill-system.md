@@ -292,7 +292,7 @@ private skillBuffer: LoadedSkill[] = [];
 ```
 
 **Lifecycle:**
-- Cleared at the start of each new agentic loop (each tick)
+- Cleared by the consumer at the start of each tick, before pre-loading skills for the new loop. Cortex cannot auto-clear because it has no concept of tick boundaries, and clearing at `prompt()` start would wipe consumer pre-loaded skills.
 - Populated during the loop via `load_skill` tool calls or consumer pre-loading
 - Read by `transformContext` on every LLM call within the loop
 - Not persisted to conversation history or disk
@@ -310,9 +310,10 @@ Skill content is injected via a dedicated step in the `transformContext` composi
 
 ```
 transformContext fires:
+  0. Tier 1 insertion cap      →  cap oversized tool results in source messages
   1. ContextManager ephemeral  →  consumer's tick context (emotions, energy, etc.)
   2. Skill buffer injection    →  loaded skill instructions
-  3. Compaction                →  if token threshold exceeded
+  3. Compaction                →  microcompaction + mid-loop safety valve
 ```
 
 The consumer does not wire skill injection manually. They use Cortex's single composed hook:
@@ -540,8 +541,9 @@ class CortexAgent {
   async loadSkill(name: string, args?: string): Promise<void>;
 
   /**
-   * Clear the skill buffer. Called automatically at the start of each
-   * new agentic loop. The consumer can also call this manually.
+   * Clear the skill buffer. The consumer calls this at the start of each
+   * tick, before pre-loading skills for the new loop. Cortex cannot
+   * auto-clear because it has no concept of tick boundaries.
    */
   clearSkillBuffer(): void;
 
@@ -619,23 +621,24 @@ Script context:
 
 ```
 GATHER phase:
-  1. Consumer updates preprocessor variables and script context
+  1. Consumer clears the skill buffer from the previous tick
+     → cortexAgent.clearSkillBuffer()
+  2. Consumer updates preprocessor variables and script context
      → cortexAgent.setPreprocessorVariables({ AGENT_NAME, CONTACT_NAME, ... })
      → cortexAgent.setScriptContext({ contact, channelType, ... })
-  2. Consumer optionally pre-loads skills it knows are needed
+  3. Consumer optionally pre-loads skills it knows are needed
      → cortexAgent.loadSkill('discord-channel')
-  3. Skill buffer now has pre-loaded content
+  4. Skill buffer now has pre-loaded content
 
 AGENTIC LOOP phase:
-  4. transformContext fires → injects skillBuffer into ephemeral region
-  5. Agent sees pre-loaded skill instructions
-  6. Agent may call load_skill to load additional skills on demand
-  7. load_skill pushes to skillBuffer → next transformContext includes it
-  8. Loop continues with all loaded skills in ephemeral
+  5. transformContext fires → injects skillBuffer into ephemeral region
+  6. Agent sees pre-loaded skill instructions
+  7. Agent may call load_skill to load additional skills on demand
+  8. load_skill pushes to skillBuffer → next transformContext includes it
+  9. Loop continues with all loaded skills in ephemeral
 
 Next tick:
-  9. skillBuffer.clear() → skills are gone
-  10. Back to step 1
+  10. Back to step 1 (consumer clears buffer)
 ```
 
 ## Integration with Existing Systems

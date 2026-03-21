@@ -29,7 +29,7 @@ The user never sees utility model output directly. It powers behind-the-scenes o
 ## Configuration
 
 ```typescript
-const agent = new CortexAgent({
+const agent = await CortexAgent.create({
   model: getModel('anthropic', 'claude-sonnet-4-6'),       // primary
   utilityModel: 'default',                                  // use provider default
   // or: utilityModel: getModel('anthropic', 'claude-haiku-4-5'),  // explicit

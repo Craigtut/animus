@@ -23,7 +23,7 @@ const commands: CommandItem[] = [
   { id: 'persona', label: 'Persona Settings', secondaryLabel: 'Settings', icon: GearSix, path: '/settings/persona' },
   { id: 'heartbeat', label: 'Heartbeat Settings', secondaryLabel: 'Settings', icon: GearSix, path: '/settings/heartbeat' },
   { id: 'channels', label: 'Channel Settings', secondaryLabel: 'Settings', icon: GearSix, path: '/settings/channels' },
-  { id: 'provider', label: 'Provider Settings', secondaryLabel: 'Settings', icon: GearSix, path: '/settings/provider' },
+  { id: 'cortex_provider', label: 'AI Provider', secondaryLabel: 'Settings', icon: GearSix, path: '/settings/cortex_provider' },
 ];
 
 export function CommandPalette() {

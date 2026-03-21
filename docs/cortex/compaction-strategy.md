@@ -26,7 +26,7 @@ Additionally, Animus has a domain-specific compaction system (observational memo
 
 4. **Ephemeral context is always fresh.** Ephemeral context is injected per-call via `transformContext` and never persists in history. It is never a compaction target.
 
-5. **Compaction is an event, not just an internal operation.** When Cortex compacts, it emits an `onPostCompaction` event that the backend uses to coordinate domain-specific work (observational memory processing, message re-seeding).
+5. **Compaction is autonomous with event notifications.** Cortex triggers compaction internally whenever thresholds are crossed. It emits `onBeforeCompaction` and `onPostCompaction` events so consumers can coordinate domain-specific work (e.g., observational memory processing, message re-seeding). The consumer never triggers compaction; it only reacts to it.
 
 6. **Prefix cache preservation.** Compaction should minimize cache invalidation. Slots at the top of the message array are stable; compaction operates on conversation history below the slot region.
 
@@ -93,7 +93,7 @@ The oldest tool results (beyond the bookend window) are replaced with a one-line
 
 Microcompaction does NOT modify history on every LLM call. It checks the threshold on every `transformContext` call but only **acts** at discrete threshold crossings. Between crossings, the previously computed trim state is replayed identically, preserving prefix cache.
 
-**Thresholds**: 40%, 50%, 60% of context window. At each crossing, a full re-evaluation pass assigns tiers to all tool results based on their distance from the current turn. The tier boundaries naturally advance as more turns accumulate.
+**Thresholds**: Derived from the two config values: `softTrimThreshold` (default: 0.40), a midpoint at `(softTrimThreshold + hardClearThreshold) / 2` (default: 0.50), and `hardClearThreshold` (default: 0.60). At each crossing, a full re-evaluation pass assigns tiers to all tool results based on their distance from the current turn. The tier boundaries naturally advance as more turns accumulate.
 
 ```
 Tick 1-9:   Context < 40%. All tool results full. Cache builds.
@@ -121,15 +121,15 @@ Tick 34:    Context crosses 70%. Layer 2 (full summarization) fires.
 
 Between threshold crossings, the entire trimmed conversation is identical on every call. The provider caches all of it. Cache invalidation happens once per threshold crossing, then rebuilds immediately.
 
-**Recency window**: The most recent `preserveRecentTurns` assistant turns (default: 5) are fully protected from all trimming at every re-evaluation. Only tool results older than this window are candidates.
+**Recency window**: The most recent `microcompaction.preserveRecentTurns` assistant turns (default: 5) are fully protected from all trimming at every re-evaluation. Only tool results older than this window are candidates. Note: this is a separate config from `compaction.preserveRecentTurns` (default: 6), which controls how many turns are kept as the preserved tail during Layer 2 summarization. The microcompaction recency window is typically slightly smaller since it only protects tool results, while the compaction preserved tail protects entire turns including user messages.
 
 **Tool-type-aware retention**: Different tool types have different retention value based on whether their output is reproducible:
 
 | Category | Examples | Retention | Rationale |
 |----------|----------|-----------|-----------|
 | Re-readable | File reads, directory listings | Shorter (standard window) | Agent can re-read the file if needed |
-| Non-reproducible | Web searches, web fetches, API calls | Longer (2x standard window) | Cannot be re-fetched; page may change, costs an API call |
-| Ephemeral | Command output (ls, git status) | Shorter (standard window) | Stale quickly, re-runnable |
+| Non-reproducible | Web searches, web fetches, API calls, Bash commands | Longer (2x standard window) | Cannot be re-fetched; page may change, costs an API call, or may have side effects |
+| Ephemeral | Sub-agent results, task output | Shorter (standard window) | Stale quickly, re-runnable |
 | Computational | Math, code execution results | Standard window | Small, but non-reproducible without re-running |
 
 The consumer (backend) can register tool categories when configuring Cortex. Unregistered tools default to standard retention.
@@ -174,9 +174,9 @@ interface MicrocompactionConfig {
    - Trigger observational memory processing for any unprocessed raw items (synchronous, awaited)
    - Flush any other critical state to disk/database
 
-4. **Generate summary**: Send the compaction target to the model with a structured summarization prompt (see below). Uses the same model as the main session.
+4. **Generate summary**: Make a direct `pi-ai` call (not through the agent loop) with the compaction target and the summarization prompt. Uses the same model as the main agent session. The compaction target is sourced from the **original session transcript** (not the in-memory microcompacted version), so the summarizer has access to full tool result content for high-quality compression. The summarization response is not added to the agent's conversation history.
 
-5. **Replace history**: Replace the compaction target with a single tagged summary message. The new conversation history becomes: `[summary] + [preserved tail]`.
+5. **Replace history**: Replace the compaction target in the agent's conversation history with a single `user`-role message containing the tagged summary. The new conversation history becomes: `[summary message] + [preserved tail]`.
 
 6. **Post-compaction event**: Emit `onPostCompaction` with metadata (tokens before, tokens after, summary content, oldest preserved turn timestamp). The backend uses this to:
    - Re-seed messages from `messages.db` that fall in the gap between the observation watermark and the preserved tail's oldest timestamp
@@ -194,51 +194,24 @@ interface MicrocompactionConfig {
 </compaction-summary>
 ```
 
-**Summarization prompt**: The default prompt is general-purpose (Cortex may be used outside of Animus). Consumers with domain-specific context systems (e.g., Animus's observational memory slots) can provide a narrower prompt via `customPrompt` that skips content already covered by those systems.
+**Summarization prompt**: The default prompt is general-purpose (Cortex may be used outside of Animus). It follows Claude Code's proven pattern: require an `<analysis>` scratchpad first (stripped from the final output), then a structured `<summary>` with explicit sections. Consumers can override via `customPrompt`.
 
-```
-You are performing a context compaction for a long-running agent session.
-The conversation history will be replaced with your summary. A small tail
-of recent turns is preserved separately and does not need to be repeated.
+The prompt requires 11 sections:
+1. **Primary Request and Intent** - All user requests, preserved verbatim
+2. **Key Technical Concepts** - Technologies and frameworks discussed
+3. **Files and Code Sections** - Specific files with paths, snippets, and why each matters
+4. **Tool Call Outcomes** - What tools were called, what they returned, errors encountered
+5. **Errors and Fixes** - Every error and its resolution, including user corrections
+6. **All User Messages** - ALL non-tool-result user messages listed (critical for preserving intent)
+7. **Problem Solving** - Problems solved and ongoing troubleshooting
+8. **Pending Tasks** - Explicitly requested but not yet completed
+9. **Current Work** - Exactly what was being worked on right before compaction (most important section)
+10. **Key Decisions (Cumulative)** - Carried forward across compactions to prevent progressive loss
+11. **Optional Next Step** - Only if directly aligned with the user's most recent request
 
-Create a structured summary covering:
+**Output parsing**: The model produces `<analysis>` (private reasoning scratchpad) then `<summary>` (the actual summary). The analysis is stripped; only the summary content is kept and wrapped in the `<compaction-summary>` tag.
 
-## Conversation Context
-Key topics discussed, user requests, and important statements.
-Preserve the user's exact words for directives, preferences, and
-constraints.
-
-## Tool Call History
-What tools were called, what they found, and what failed. Include
-specific file paths, function names, URLs, error messages, and outcomes.
-
-## In-Progress Work
-Any multi-step task or investigation that was underway. What has been
-completed, what remains.
-
-## Reasoning and Rationale
-Why specific approaches were chosen over alternatives. Key analysis
-that informed decisions during this session.
-
-## Key Decisions (Cumulative)
-If a previous compaction summary exists, carry forward its Key Decisions
-section and append any new decisions from this cycle. This section grows
-across compactions to prevent progressive loss of important decisions.
-
-Be thorough but concise. When preserving details, extract and retain
-exact values rather than paraphrasing:
-- File paths, directory names, and line numbers
-- URLs, API endpoints, and query parameters
-- Function names, class names, variable names
-- IDs, hashes, version numbers, and configuration values
-- Error messages and status codes
-- Specific quantities, dates, and thresholds
-
-These exact details are what the agent needs to continue working
-without re-discovering them via tool calls.
-```
-
-**Animus-specific override**: The Animus backend provides a `customPrompt` that narrows the focus, since user messages are already covered by the message-observations slot and personality/memory/goals are covered by other slots. The custom prompt can skip "Conversation Context" and focus on tool history, task state, and reasoning.
+**Animus-specific override**: The Animus backend can provide a `customPrompt` via config that narrows the focus (e.g., skip "All User Messages" since message-observations already cover them).
 
 **Configuration**:
 ```typescript
@@ -299,8 +272,9 @@ interface CompactionResult {
   turnsCompacted: number;
   turnsPreserved: number;
   summaryTokens: number;
-  oldestPreservedTimestamp: string; // ISO timestamp of oldest turn in preserved tail
-  summary: string;                 // the generated summary content
+  oldestPreservedTimestamp: string | null; // ISO timestamp of oldest turn in preserved tail (null if no timestamp found)
+  oldestPreservedIndex: number;            // index of oldest preserved turn for reliable fallback
+  summary: string;                         // the generated summary content
 }
 ```
 
@@ -370,11 +344,13 @@ This also means other consumers of Cortex (non-Animus applications) can implemen
 Cortex tracks tokens through two complementary mechanisms:
 
 ### Post-Hoc Tracking
-After every LLM call, read `AssistantMessage.usage` to get the actual token count. This is authoritative but only available after the call completes.
+After every LLM call, read `AssistantMessage.usage` to get the actual token count. This is authoritative but only available after the call completes. Cortex auto-wires this internally: the EventBridge intercepts `turn_end` events from pi-agent-core, extracts usage data, and updates the compaction manager's token count. No consumer wiring is needed.
 
 ```typescript
-sessionTokenCount += response.usage.input_tokens;
+sessionTokenCount = response.usage.input_tokens;
 ```
+
+Note: this is an assignment, not an addition. `usage.input_tokens` reflects the total input size for that call, not a delta.
 
 ### Heuristic Estimation
 Between LLM calls, estimate context size for proactive compaction decisions:
@@ -401,49 +377,43 @@ const compactionThreshold = contextWindow * config.compaction.threshold;
 
 ---
 
-## Compaction and the 5-Phase Pipeline
+## Compaction Is Autonomous
 
-The 5-phase pipeline (THOUGHT -> AGENTIC LOOP -> REFLECT) introduces two distinct compaction scenarios:
+Cortex is a standalone package with no knowledge of the backend's pipeline, ticks, or phases. It is always an agentic loop. Compaction runs entirely within Cortex's `transformContext` hook, which fires before every LLM call in the loop.
 
-### End-of-Tick Compaction (Primary)
+### All Layers Fire in `transformContext`
 
-The preferred compaction point is at the end of a completed tick, after REFLECT finishes and EXECUTE has persisted all outputs. At this point:
-- All phases have completed and their data is safely in the database
-- Observational memory can be flushed synchronously
-- The next tick starts with a clean, compacted history
-- From a UX perspective, compaction is invisible (it happens between ticks)
+Every LLM call in the agentic loop triggers `transformContext`. Inside that hook, compaction checks thresholds and acts:
 
 ```
-Tick N:
-  THOUGHT  ──→  AGENTIC LOOP  ──→  REFLECT  ──→  EXECUTE
-                                                      │
-                                                 [COMPACTION CHECK]
-                                                      │
-Tick N+1:                                             ▼
-  THOUGHT  ──→  AGENTIC LOOP  ──→  REFLECT  ──→  EXECUTE
+Every LLM call in the agentic loop:
+  transformContext fires:
+    1. Tier 1 insertion-time cap (mutates agent.state.messages)
+    2. Ephemeral context injection
+    3. Sanitize messages
+    4. Layer 1: Microcompaction (in-memory, threshold-triggered at 40/50/60%)
+    5. Layer 2: Summarization (if tokens > 70%, modifies agent.state.messages)
+    6. Layer 3: Emergency truncation (if tokens > 90%)
+    7. Return final context to model
 ```
 
-The check runs after EXECUTE completes. If the session token count exceeds the compaction threshold, Layers 1-2 fire before the next tick begins.
+- **Layer 2 runs mid-loop.** The hook is async, so the summarization LLM call happens inline. When Layer 2 fires, it modifies `agent.state.messages` (the persistent transcript), emits `onBeforeCompaction` (awaited) and `onPostCompaction` events, then rebuilds the context from the updated messages. The agentic loop continues seamlessly from the compacted state.
+- **Layer 3 runs unconditionally at 90%.** No phase check. If context exceeds 90% of the context window, emergency truncation fires regardless of what else has happened.
+- **There is no `setPipelinePhase` or external trigger.** Cortex has no concept of pipeline phases. Compaction is self-contained.
 
-### Mid-Loop Compaction (Safety Valve)
+### Events Are Notifications, Not Triggers
 
-The agentic loop can run for many turns: complex tasks with 20+ tool calls, large file reads, extensive reasoning chains. A single agentic loop can easily blow past any threshold set at the tick boundary.
+When Layer 2 fires (whether mid-loop or at any other point), Cortex emits:
+- `onBeforeCompaction` (awaited): The consumer can flush state (e.g., Animus flushes observational memory)
+- `onPostCompaction`: The consumer can re-seed messages or update internal state
 
-Compaction runs inside the `transformContext` hook, which fires before every LLM call, including each turn within the agentic loop. If the estimated token count exceeds the failsafe threshold (default: 90%) during the loop, only microcompaction and emergency truncation fire.
+These events flow UP from Cortex to the consumer. The consumer never triggers compaction; it only reacts to it.
 
-**What happens mid-loop:**
-1. Layer 1 (microcompaction) clears old tool results from earlier in the loop
-2. If still over threshold, Layer 3 (emergency truncation) drops the oldest conversation turns to get below the 90% threshold
-3. The agentic loop continues from the truncated history
-4. The agent retains enough context to finish its current task
+### Relationship to the 5-Phase Pipeline (Animus-Specific)
 
-**What does NOT fire mid-loop:**
-- Layer 2 (summarization) does NOT fire mid-loop. It requires an LLM call and consumer hooks (onBeforeCompaction/onPostCompaction for observational memory flush and message re-seeding), which are unsafe to run in the middle of tool-call chains. Layer 2 only fires at end-of-tick when the pipeline phase is `idle`.
-- The `onBeforeCompaction` event is NOT emitted mid-loop. Observational memory processing is a backend concern that should only run at tick boundaries.
+The Animus backend runs a 5-phase pipeline (THOUGHT, AGENTIC LOOP, REFLECT, EXECUTE). Of these, only the AGENTIC LOOP goes through Cortex (via `agent.prompt()`). THOUGHT and REFLECT are direct pi-ai calls that bypass the agent entirely and do not add to conversation history. EXECUTE is backend logic (database writes, decision execution). Cortex is unaware of any of this.
 
-### Between Phases
-
-Compaction should NOT fire between THOUGHT and AGENTIC LOOP, or between AGENTIC LOOP and REFLECT within a single tick. These phases share a cognitive cycle. The THOUGHT output lives in ephemeral context (not conversation history), so it naturally survives compaction. But the REFLECT phase needs visibility into what happened during the agentic loop, so compacting between loop and reflect would degrade reflection quality.
+Compaction fires during the AGENTIC LOOP because that is when `transformContext` runs. If the loop generates enough context to cross thresholds, compaction fires automatically. After the loop completes and the backend runs EXECUTE, there is nothing for Cortex to do: it already compacted during the loop if needed.
 
 ---
 
@@ -489,8 +459,15 @@ interface CortexCompactionConfig {
   failsafe: {
     threshold: number;                   // default: 0.90
   };
+  adaptive: {
+    enabled: boolean;                    // default: false
+    minThreshold: number;               // default: 0.50 (lowest Layer 2 can drop to)
+    idleMinutes: number;                // default: 30 (minutes of inactivity before lowering)
+  };
 }
 ```
+
+**Adaptive threshold** (optional): When enabled, lowers the Layer 2 compaction threshold during idle periods. After `idleMinutes` of no user interaction, the threshold gradually drops from the configured 70% toward `minThreshold` (default: 50%). This proactively compacts during autonomous interval ticks when the user isn't actively engaged, keeping context lean for when they return. Disabled by default.
 
 Compaction is always active. There are no `enabled` toggles. The summarization model is always the same model used by the main agent session. Microcompaction operates in-memory only; the session transcript on disk is never modified.
 
@@ -515,7 +492,7 @@ This should be implemented as part of **Phase 5: Compaction** in the pi-agent-co
 3. **Layer 2 (Compaction)**: Implement summarization pipeline with event hooks
 4. **Layer 3 (Failsafe)**: Implement emergency truncation
 5. **Backend integration**: Wire `onBeforeCompaction` / `onPostCompaction` handlers in the heartbeat pipeline for observational memory coordination and message re-seeding
-7. **Observability**: Add compaction events to agent logs and frontend tick timeline
+6. **Observability**: Add compaction events to agent logs and frontend tick timeline
 
 ---
 
@@ -563,10 +540,10 @@ Message re-seeding after compaction follows the same watermark pattern used by t
 
 This is entirely a backend operation, not a Cortex concern. Cortex has no knowledge of `messages.db`, contacts, watermarks, or observational memory. It emits the `onPostCompaction` event; the backend's handler does the re-seeding.
 
-After compaction clears conversation history, the backend's `onPostCompaction` handler:
-1. Queries `messages.db` for the active contact's messages where `createdAt > observation.lastRawTimestamp`
-2. These are the messages that have NOT been compressed into observation summaries
-3. Formats them as conversation turns and injects after the compaction summary via Cortex's API
+After compaction, the backend's `onPostCompaction` handler re-seeds the gap:
+1. Queries `messages.db` for the active contact's messages where `createdAt > observation.lastRawTimestamp AND createdAt < oldestPreservedTimestamp` (the gap between the observation watermark and the preserved tail)
+2. These are the messages that have NOT been compressed into observation summaries and are NOT already in the preserved tail
+3. Formats them as conversation turns and injects between the compaction summary and the preserved tail via Cortex's API
 4. Applies the same `rawTokens` budget (default: 4,000 tokens for messages) to cap the re-seeded amount
 
 This is the natural boundary: if a message has already been compressed into an observation summary (which lives in a slot and survives compaction), it does not need to be re-seeded. Only messages newer than the watermark need full representation in conversation history.

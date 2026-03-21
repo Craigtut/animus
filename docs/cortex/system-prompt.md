@@ -22,12 +22,14 @@ The consumer's content is the agent's identity. The cortex operational rules are
 
 ## API
 
-The consumer provides environment details at agent construction time:
+The consumer provides environment details when creating the agent:
 
 ```typescript
-const agent = new CortexAgent({
+const agent = await CortexAgent.create({
+  model,
   workingDirectory: '/path/to/workspace',  // e.g., ANIMUS_DATA_DIR/workspace/
-  // ...other config (tools, context manager, hooks, etc.)
+  initialBasePrompt: 'You are the application agent.',
+  // ...other config (tools, hooks, etc.)
 });
 ```
 
@@ -36,7 +38,7 @@ Platform and shell are detected automatically at runtime. The working directory 
 System prompt assembly:
 
 ```typescript
-const fullSystemPrompt = agent.buildSystemPrompt(consumerPrompt);
+const fullSystemPrompt = agent.composeSystemPrompt(basePrompt);
 // Returns: consumerPrompt + '\n\n' + cortexOperationalRules
 ```
 
@@ -48,40 +50,25 @@ These sections are appended after the consumer's content. They are the operation
 
 ### Section 1: Response Delivery (Conditional)
 
-Present only when `workingTags.enabled` is true (the default). Placed first in the operational rules so the agent internalizes it as a core operating principle.
+Present only when `workingTags.enabled` is true (the default). A slim introduction to `<working>` tags. The heavier behavioral guidance lives in Section 4 (Tool Usage) where it has more impact alongside tool instructions.
 
 ```
 # Response Delivery
 
-When working through multi-step tasks, distinguish between internal
-working content and direct communication using <working> tags.
+Use <working> tags to separate internal reasoning from user-facing
+communication. Text outside <working> tags is delivered to the user.
+Text inside <working> tags stays in your conversation history for
+your reference but may not be shown to the user.
 
-**Wrap in <working> tags:**
-- Your analysis of tool call results
-- Reasoning about what to do next
-- Synthesis of findings you will reference in later steps
-- Planning and strategy
+<working> tags are for: analysis of results, reasoning about next
+steps, synthesis of findings, planning. Everything else (answers,
+progress updates, questions) stays outside tags.
 
-**Keep outside <working> tags (delivered to user):**
-- Acknowledgments when starting work
-- Progress updates at meaningful milestones
-- Final answers, recommendations, and deliverables
-- Questions directed at the user
-
-Text outside <working> tags is what the user sees. Text inside <working>
-tags stays in your conversation for your own reference but may not be
-displayed to the user depending on their interface.
-
-Good progress updates are concise and informative: "Found 5 strong
-candidates, analyzing their requirements now." Do not narrate every
-step, but do keep the user informed at natural milestones.
-
-For complex tasks requiring extensive research or multiple phases of
-work, consider delegating to a sub-agent so you remain responsive
-for other interactions.
+For complex tasks requiring extensive research, consider delegating
+to a sub-agent so you remain responsive.
 ```
 
-See **`working-tags.md`** for the full design: tag rules, event model, parsing utilities, and consumer integration.
+See **`working-tags.md`** for the full design: tag rules, event model, afterToolCall reminder, and consumer integration.
 
 ### Section 2: System Rules
 
@@ -223,7 +210,7 @@ The cortex operational sections rarely change (only if platform, shell, or regis
 On rebuild:
 1. Consumer detects change (via event bus or other mechanism)
 2. Consumer provides new content
-3. Calls `cortexAgent.rebuildSystemPrompt(newConsumerPrompt)`
+3. Calls `cortexAgent.setBasePrompt(newBasePrompt)`
 4. Cortex reappends its operational rules
 5. Conversation history is preserved
 

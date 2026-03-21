@@ -5,7 +5,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Heartbeat as HeartbeatIcon,
-  Robot,
   ChatCircle,
   Target,
   GearSix,
@@ -18,10 +17,7 @@ import {
   Warning,
   CheckCircle,
   XCircle,
-  ShieldCheck,
-  Copy,
   ArrowSquareOut,
-  CircleNotch,
   Trash,
   List,
   X,
@@ -36,7 +32,6 @@ import {
   CaretDown,
   Wrench,
   SignOut,
-  MagnifyingGlass,
   Key,
   Brain,
   type Icon as PhosphorIcon,
@@ -63,22 +58,7 @@ import DOMPurify from 'dompurify';
 // Types
 // ============================================================================
 
-type SettingsSection = 'heartbeat' | 'cortex_provider' | 'provider' | 'channels' | 'plugins' | 'passwords' | 'tools' | 'goals' | 'saves' | 'system';
-
-interface ModelData {
-  id: string;
-  name: string;
-  provider: string;
-  contextWindow: number;
-  maxOutputTokens: number;
-  inputPricePer1M: number;
-  outputPricePer1M: number;
-  supportsVision: boolean;
-  supportsThinking: boolean;
-  recommended: boolean;
-  isDefault: boolean;
-  createdAt: string | null;
-}
+type SettingsSection = 'heartbeat' | 'cortex_provider' | 'channels' | 'plugins' | 'passwords' | 'tools' | 'goals' | 'saves' | 'system';
 
 interface SidebarItem {
   id: SettingsSection;
@@ -89,7 +69,6 @@ interface SidebarItem {
 const sections: SidebarItem[] = [
   { id: 'heartbeat', label: 'Heartbeat', icon: HeartbeatIcon },
   { id: 'cortex_provider', label: 'AI Provider', icon: Brain },
-  { id: 'provider', label: 'Legacy SDKs', icon: Robot },
   { id: 'channels', label: 'Channels', icon: ChatCircle },
   { id: 'plugins', label: 'Plugins', icon: PuzzlePiece },
   { id: 'passwords', label: 'Passwords', icon: Key },
@@ -161,7 +140,6 @@ function HeartbeatSection() {
   const [showPauseConfirm, setShowPauseConfirm] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
   const intervalSave = useSaveFlash();
-  const budgetSave = useSaveFlash();
 
   const isRunning = hbState?.isRunning ?? false;
 
@@ -175,22 +153,14 @@ function HeartbeatSection() {
 
   // Local state for immediate slider feedback (avoids waiting for API round-trip)
   const [localIntervalMs, setLocalIntervalMs] = useState<number | null>(null);
-  const [localBudget, setLocalBudget] = useState<number | null>(null);
-
   const intervalMs = localIntervalMs ?? systemSettings?.heartbeatIntervalMs ?? 300000;
-  const contextBudget = localBudget ?? systemSettings?.sessionContextBudget ?? 0.7;
 
   // Sync local state when server data arrives (and local isn't overriding)
   useEffect(() => {
     if (systemSettings && localIntervalMs === null) setLocalIntervalMs(null);
   }, [systemSettings?.heartbeatIntervalMs]);
-  useEffect(() => {
-    if (systemSettings && localBudget === null) setLocalBudget(null);
-  }, [systemSettings?.sessionContextBudget]);
-
   // Debounced API persistence
   const intervalTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const budgetTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const formatInterval = (ms: number) => {
     const mins = Math.round(ms / 60000);
@@ -232,14 +202,6 @@ function HeartbeatSection() {
     intervalTimerRef.current = setTimeout(() => {
       updateIntervalMutation.mutate({ intervalMs: ms }, { onSuccess: () => intervalSave.flash() });
       updateSettingsMutation.mutate({ heartbeatIntervalMs: ms });
-    }, 300);
-  };
-
-  const handleBudgetChange = (val: number) => {
-    setLocalBudget(val);
-    clearTimeout(budgetTimerRef.current);
-    budgetTimerRef.current = setTimeout(() => {
-      updateSettingsMutation.mutate({ sessionContextBudget: val }, { onSuccess: () => budgetSave.flash() });
     }, 300);
   };
 
@@ -370,32 +332,6 @@ function HeartbeatSection() {
             </div>
           </div>
         </Modal>
-      </div>
-
-      {/* Session Info */}
-      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
-          Session
-        </Typography.Subtitle>
-
-        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-            <Typography.SmallBody as="label" color="secondary">
-              Context budget: {Math.round(contextBudget * 100)}%
-            </Typography.SmallBody>
-            <SaveIndicator show={budgetSave.show} />
-          </div>
-          <Slider
-            value={contextBudget}
-            onChange={handleBudgetChange}
-            min={0.3}
-            max={1}
-            step={0.05}
-            leftLabel="30%"
-            rightLabel="100%"
-            showNeutral={false}
-          />
-        </div>
       </div>
 
       {/* Sleep & Energy */}
@@ -645,6 +581,17 @@ function CortexProviderSection() {
   const thinkingSave = useSaveFlash();
   const modelSave = useSaveFlash();
   const utilityModelSave = useSaveFlash();
+  const contextLimitSave = useSaveFlash();
+
+  // Context window limit slider state
+  const setContextLimitMutation = trpc.cortexProvider.setContextWindowLimit.useMutation({
+    onSuccess: () => {
+      contextLimitSave.flash();
+      utils.cortexProvider.getStatus.invalidate();
+    },
+  });
+  const [localContextLimit, setLocalContextLimit] = useState<number | null | 'unset'>('unset');
+  const contextLimitTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Utility model
   const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
@@ -711,6 +658,9 @@ function CortexProviderSection() {
 
   const handleModelChange = (modelId: string) => {
     if (!activeProvider) return;
+    // Reset context limit slider so it reflects the new model's server value
+    setLocalContextLimit('unset');
+    clearTimeout(contextLimitTimerRef.current);
     setActiveMutation.mutate(
       { provider: activeProvider, model: modelId },
       {
@@ -735,6 +685,38 @@ function CortexProviderSection() {
       { level: level as 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' },
       { onSuccess: () => thinkingSave.flash() }
     );
+  };
+
+  const activeModelData = models?.find(m => m.id === statusData?.model);
+  const modelContextWindow = activeModelData?.contextWindow ?? 200_000;
+  const MINIMUM_CONTEXT_WINDOW = 16_384;
+  const DEFAULT_CONTEXT_WINDOW_LIMIT = 100_000;
+
+  // Resolve the effective slider value:
+  //   local override > server value > default (min(100K, model max))
+  // Always clamp to [MINIMUM_CONTEXT_WINDOW, modelContextWindow] so the slider
+  // stays in range when switching from a larger to a smaller model.
+  const serverContextLimit = statusData?.contextWindowLimit as number | null | undefined;
+  const defaultLimit = Math.min(DEFAULT_CONTEXT_WINDOW_LIMIT, modelContextWindow);
+  const rawContextLimit =
+    localContextLimit !== 'unset' ? localContextLimit
+    : serverContextLimit != null ? serverContextLimit
+    : defaultLimit;
+  const sliderValue = Math.max(MINIMUM_CONTEXT_WINDOW, Math.min(rawContextLimit ?? defaultLimit, modelContextWindow));
+  const contextPercentage = Math.round((sliderValue / modelContextWindow) * 100);
+
+  const handleContextLimitChange = (tokens: number) => {
+    // Store the exact token value; the backend/cortex handle clamping
+    setLocalContextLimit(tokens);
+    clearTimeout(contextLimitTimerRef.current);
+    contextLimitTimerRef.current = setTimeout(() => {
+      setContextLimitMutation.mutate({ limit: tokens });
+    }, 300);
+  };
+
+  const formatContextTokens = (tokens: number) => {
+    if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+    return `${Math.round(tokens / 1000)}K`;
   };
 
   const handleReconnect = useCallback(() => {
@@ -943,6 +925,39 @@ function CortexProviderSection() {
               </div>
             )}
 
+            {/* Context window limit */}
+            {models && models.length > 0 && (
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                  <Typography.SmallBodyAlt>Context Usage</Typography.SmallBodyAlt>
+                  <SaveIndicator show={contextLimitSave.show} />
+                </div>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[4]};`}>
+                  <div css={css`flex: 1;`}>
+                    <Slider
+                      value={sliderValue}
+                      onChange={handleContextLimitChange}
+                      min={MINIMUM_CONTEXT_WINDOW}
+                      max={modelContextWindow}
+                      step={1000}
+                      leftLabel={formatContextTokens(MINIMUM_CONTEXT_WINDOW)}
+                      rightLabel={formatContextTokens(modelContextWindow)}
+                      showNeutral={false}
+                    />
+                  </div>
+                  <Typography.SmallBodyAlt as="span" css={css`
+                    white-space: nowrap;
+                    min-width: 110px;
+                  `}>
+                    {`${contextPercentage}% · ${formatContextTokens(sliderValue)}`}
+                  </Typography.SmallBodyAlt>
+                </div>
+                <Typography.Caption as="p" color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+                  Limits how much of the model's context window is used. Lower values trigger compaction sooner, reducing token costs. Default is {formatContextTokens(defaultLimit)}.
+                </Typography.Caption>
+              </div>
+            )}
+
             {/* Utility model picker */}
             {models && models.length > 0 && (
               <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
@@ -1020,38 +1035,45 @@ function CortexProviderSection() {
               css={css`overflow: hidden;`}
             >
               <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
-                {/* Thinking level */}
-                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
-                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                    <Typography.SmallBodyAlt>Thinking Level</Typography.SmallBodyAlt>
-                    <SaveIndicator show={thinkingSave.show} />
-                  </div>
-                  <Select
-                    value={statusData?.thinkingLevel ?? 'off'}
-                    onChange={(value) => handleThinkingChange(value)}
-                    maxWidth="200px"
-                    options={[
-                      { value: 'off', label: 'Off' },
-                      { value: 'minimal', label: 'Minimal' },
-                      { value: 'low', label: 'Low' },
-                      { value: 'medium', label: 'Medium' },
-                      { value: 'high', label: 'High' },
-                      { value: 'xhigh', label: 'Extra High' },
-                    ]}
-                  />
-                  <Typography.Caption color="hint">
-                    Controls how much the model reasons before responding. Higher levels use more tokens.
-                  </Typography.Caption>
-                </div>
+                {/* Thinking level — only shown when the active model supports thinking */}
+                {(() => {
+                  const activeModelData = models?.find(m => m.id === statusData?.model);
+                  if (!activeModelData?.supportsThinking) return null;
+                  return (
+                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                        <Typography.SmallBodyAlt>Thinking Level</Typography.SmallBodyAlt>
+                        <SaveIndicator show={thinkingSave.show} />
+                      </div>
+                      <Select
+                        value={statusData?.thinkingLevel ?? 'off'}
+                        onChange={(value) => handleThinkingChange(value)}
+                        maxWidth="200px"
+                        options={[
+                          { value: 'off', label: 'Off' },
+                          { value: 'minimal', label: 'Minimal' },
+                          { value: 'low', label: 'Low' },
+                          { value: 'medium', label: 'Medium' },
+                          { value: 'high', label: 'High' },
+                          { value: 'xhigh', label: 'Extra High' },
+                        ]}
+                      />
+                      <Typography.Caption color="hint">
+                        Controls how much the model reasons before responding. Higher levels use more tokens.
+                      </Typography.Caption>
+                    </div>
+                  );
+                })()}
 
                 {/* Additional providers list */}
-                {allProviders && allProviders.some(p => p.status.connected) && (
+                {allProviders && (
                   <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                    <Typography.SmallBodyAlt>Configured Providers</Typography.SmallBodyAlt>
+                    <Typography.SmallBodyAlt>Additional Providers</Typography.SmallBodyAlt>
                     <Typography.Caption color="hint">
-                      You can configure multiple providers and switch between them.
+                      You can configure multiple providers and switch between them at any time.
                     </Typography.Caption>
                     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+                      {/* Connected providers */}
                       {allProviders.filter(p => p.status.connected).map((p) => (
                         <div
                           key={p.id}
@@ -1077,7 +1099,6 @@ function CortexProviderSection() {
                               variant="ghost"
                               size="sm"
                               onClick={() => {
-                                // Switch to this provider with its first model
                                 utils.cortexProvider.listModels.fetch({ provider: p.id }).then((m) => {
                                   const model = m[0]?.id ?? '';
                                   if (model) {
@@ -1091,9 +1112,47 @@ function CortexProviderSection() {
                           )}
                         </div>
                       ))}
+                      {/* Unconfigured providers */}
+                      {allProviders.filter(p => !p.status.connected).slice(0, 5).map((p) => (
+                        <div
+                          key={p.id}
+                          css={css`
+                            display: flex; align-items: center; justify-content: space-between;
+                            padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                            border-radius: ${theme.borderRadius.sm};
+                            background: ${theme.colors.background.paper};
+                            opacity: 0.7;
+                          `}
+                        >
+                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                            <div css={css`width: 14px; height: 14px; border-radius: 50%; border: 1px solid ${theme.colors.border.default};`} />
+                            <Typography.SmallBody color="hint">{p.name}</Typography.SmallBody>
+                            <Typography.Tiny color="disabled">Not configured</Typography.Tiny>
+                          </div>
+                          <Button variant="ghost" size="sm" onClick={() => setSwitchModalOpen(true)}>
+                            Add
+                          </Button>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
+
+                {/* Custom endpoint shortcut */}
+                <div css={css`
+                  display: flex; align-items: center; justify-content: space-between;
+                  padding: ${theme.spacing[3]};
+                  border-radius: ${theme.borderRadius.sm};
+                  border: 1px solid ${theme.colors.border.default};
+                `}>
+                  <div>
+                    <Typography.SmallBodyAlt>Custom Endpoint</Typography.SmallBodyAlt>
+                    <Typography.Caption color="hint">Ollama, vLLM, LM Studio, or any OpenAI-compatible API</Typography.Caption>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => setSwitchModalOpen(true)}>
+                    Configure
+                  </Button>
+                </div>
               </div>
             </motion.div>
           )}
@@ -1618,2195 +1677,6 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ============================================================================
-// Section: Legacy Agent SDKs
-// ============================================================================
-
-function ProviderSection() {
-  const theme = useTheme();
-  const utils = trpc.useUtils();
-  const [legacyExpanded, setLegacyExpanded] = useState(false);
-
-  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
-  const { data: claudeKey } = trpc.provider.hasKey.useQuery({ provider: 'claude' });
-  const { data: codexKey } = trpc.provider.hasKey.useQuery({ provider: 'codex' });
-  const { data: detectData, dataUpdatedAt: detectUpdatedAt } = trpc.provider.detect.useQuery();
-
-  const saveKeyMutation = trpc.provider.saveKey.useMutation({
-    onSuccess: () => {
-      utils.provider.hasKey.invalidate();
-      utils.provider.detect.invalidate();
-    },
-  });
-  const validateMutation = trpc.provider.validateKey.useMutation();
-  const removeKeyMutation = trpc.provider.removeKey.useMutation({
-    onSuccess: () => {
-      utils.provider.hasKey.invalidate();
-      utils.provider.detect.invalidate();
-    },
-  });
-  const useCliMutation = trpc.provider.useCli.useMutation({
-    onSuccess: () => {
-      utils.provider.hasKey.invalidate();
-      utils.provider.detect.invalidate();
-    },
-  });
-  const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation({
-    onSuccess: () => {
-      utils.settings.getSystemSettings.invalidate();
-      // Provider changes re-seed tool permissions on the backend;
-      // invalidate the tools cache so the UI picks up the new set.
-      utils.tools.listTools.invalidate();
-    },
-  });
-
-  // Codex OAuth mutations
-  const codexInitiateMutation = trpc.codexAuth.initiate.useMutation();
-  const codexCancelMutation = trpc.codexAuth.cancel.useMutation();
-
-  // Claude OAuth mutations
-  const claudeInitiateMutation = trpc.claudeAuth.initiate.useMutation();
-  const claudeCancelMutation = trpc.claudeAuth.cancel.useMutation();
-  const claudeLogoutMutation = trpc.claudeAuth.logout.useMutation({
-    onSuccess: () => {
-      utils.provider.hasKey.invalidate();
-      utils.provider.detect.invalidate();
-    },
-  });
-
-  // Codex CLI auth mutations
-  const codexCliInitiateMutation = trpc.codexCliAuth.initiate.useMutation();
-  const codexCliCancelMutation = trpc.codexCliAuth.cancel.useMutation();
-  const codexCliLogoutMutation = trpc.codexCliAuth.logout.useMutation({
-    onSuccess: () => {
-      utils.provider.hasKey.invalidate();
-      utils.provider.detect.invalidate();
-    },
-  });
-
-  const rawProvider = systemSettings?.defaultAgentProvider ?? 'claude';
-  const activeProvider: 'claude' | 'codex' = rawProvider === 'codex' ? 'codex' : 'claude';
-  const activeModel = systemSettings?.defaultModel ?? null;
-
-  // Local state
-  const [expandedProviderGroup, setExpandedProviderGroup] = useState<'claude' | 'codex'>(activeProvider);
-  const [showAllClaudeModels, setShowAllClaudeModels] = useState(false);
-  const [showAllCodexModels, setShowAllCodexModels] = useState(false);
-  const [claudeModelSearch, setClaudeModelSearch] = useState('');
-  const [codexModelSearch, setCodexModelSearch] = useState('');
-  const [credentialsExpandedProvider, setCredentialsExpandedProvider] = useState<'claude' | 'codex' | null>(null);
-  const [credentialInput, setCredentialInput] = useState('');
-  const [showKey, setShowKey] = useState(false);
-  const [validateResult, setValidateResult] = useState<{ valid: boolean; message: string } | null>(null);
-  const [recentSwitch, setRecentSwitch] = useState<{
-    fromModel: string | null;
-    fromProvider: string;
-    toModel: string;
-    toProvider: string;
-    modelName: string;
-    undoTimer: ReturnType<typeof setTimeout> | null;
-  } | null>(null);
-  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Codex OAuth state
-  const [codexOAuthSession, setCodexOAuthSession] = useState<string | null>(null);
-  const [codexOAuthData, setCodexOAuthData] = useState<{
-    userCode: string;
-    verificationUrl: string;
-    expiresIn: number;
-  } | null>(null);
-  const [codexOAuthStatus, setCodexOAuthStatus] = useState<'idle' | 'pending' | 'success' | 'error' | 'expired'>('idle');
-  const [codexOAuthMessage, setCodexOAuthMessage] = useState('');
-  const [codexCountdown, setCodexCountdown] = useState(0);
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [codeCopied, setCodeCopied] = useState(false);
-
-  // Claude OAuth state
-  const [claudeOAuthSession, setClaudeOAuthSession] = useState<string | null>(null);
-  const [claudeOAuthStatus, setClaudeOAuthStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
-  const [claudeOAuthMessage, setClaudeOAuthMessage] = useState('');
-
-  // Codex CLI auth state
-  const [codexCliAuthSession, setCodexCliAuthSession] = useState<string | null>(null);
-  const [codexCliAuthStatus, setCodexCliAuthStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
-  const [codexCliAuthMessage, setCodexCliAuthMessage] = useState('');
-
-  // Sync expanded provider group with active provider on initial load
-  const initialSyncDone = useRef(false);
-  useEffect(() => {
-    if (!initialSyncDone.current && systemSettings) {
-      initialSyncDone.current = true;
-      setExpandedProviderGroup(activeProvider);
-    }
-  }, [systemSettings, activeProvider]);
-
-  // Auto-reset reasoning effort from 'max' when switching away from Claude
-  useEffect(() => {
-    if (systemSettings?.reasoningEffort === 'max' && activeProvider !== 'claude') {
-      updateSettingsMutation.mutate({ reasoningEffort: 'high' });
-    }
-  }, [activeProvider, systemSettings?.reasoningEffort]);
-
-  // detect may clean up stale CLI credentials; refetch hasKey to stay in sync
-  useEffect(() => {
-    if (detectUpdatedAt) {
-      utils.provider.hasKey.invalidate();
-    }
-  }, [detectUpdatedAt, utils.provider.hasKey]);
-
-  // Two parallel model queries — one per provider
-  const { data: claudeModels } = trpc.provider.listModels.useQuery({ provider: 'claude' }) as { data: ModelData[] | undefined };
-  const { data: codexModels } = trpc.provider.listModels.useQuery({ provider: 'codex' }) as { data: ModelData[] | undefined };
-
-  const stopCountdown = useCallback(() => {
-    if (countdownRef.current) {
-      clearInterval(countdownRef.current);
-      countdownRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => stopCountdown();
-  }, [stopCountdown]);
-
-  // Codex OAuth status subscription
-  trpc.codexAuth.status.useSubscription(
-    { sessionId: codexOAuthSession! },
-    {
-      enabled: codexOAuthSession !== null && codexOAuthStatus === 'pending',
-      onData: (data) => {
-        if (data.status === 'success') {
-          setCodexOAuthStatus('success');
-          stopCountdown();
-          utils.provider.hasKey.invalidate();
-          utils.provider.detect.invalidate();
-        } else if (data.status === 'error') {
-          setCodexOAuthStatus('error');
-          setCodexOAuthMessage(data.message ?? 'Authorization failed');
-          stopCountdown();
-        } else if (data.status === 'expired') {
-          setCodexOAuthStatus('expired');
-          setCodexOAuthMessage('Authorization code expired');
-          stopCountdown();
-        } else if (data.status === 'cancelled') {
-          setCodexOAuthStatus('idle');
-          stopCountdown();
-        }
-      },
-    }
-  );
-
-  // Claude OAuth status subscription
-  trpc.claudeAuth.status.useSubscription(
-    { sessionId: claudeOAuthSession! },
-    {
-      enabled: claudeOAuthSession !== null && claudeOAuthStatus === 'pending',
-      onData: (data) => {
-        if (data.status === 'success') {
-          setClaudeOAuthStatus('success');
-          utils.provider.hasKey.invalidate();
-          utils.provider.detect.invalidate();
-        } else if (data.status === 'error') {
-          setClaudeOAuthStatus('error');
-          setClaudeOAuthMessage(data.message ?? 'Authentication failed');
-        } else if (data.status === 'cancelled') {
-          setClaudeOAuthStatus('idle');
-        }
-      },
-    }
-  );
-
-  // Codex CLI auth status subscription
-  trpc.codexCliAuth.status.useSubscription(
-    { sessionId: codexCliAuthSession! },
-    {
-      enabled: codexCliAuthSession !== null && codexCliAuthStatus === 'pending',
-      onData: (data) => {
-        if (data.status === 'success') {
-          setCodexCliAuthStatus('success');
-          utils.provider.hasKey.invalidate();
-          utils.provider.detect.invalidate();
-        } else if (data.status === 'error') {
-          setCodexCliAuthStatus('error');
-          setCodexCliAuthMessage(data.message ?? 'Authentication failed');
-        } else if (data.status === 'cancelled') {
-          setCodexCliAuthStatus('idle');
-        }
-      },
-    }
-  );
-
-  // Derive CLI detection
-  const claudeCliInstalled = detectData?.find((d) => d.provider === 'claude')?.cliInstalled ?? false;
-  const codexCliInstalled = detectData?.find((d) => d.provider === 'codex')?.cliInstalled ?? false;
-  const claudeCliAvailable = detectData?.find((d) => d.provider === 'claude')?.methods.some((m) => m.method === 'cli' && m.available) ?? false;
-  const codexCliAvailable = detectData?.find((d) => d.provider === 'codex')?.methods.some((m) => m.method === 'cli' && m.available) ?? false;
-
-  // Auto-persist cli_detected sentinel when live CLI auth is found but DB has no record.
-  // This keeps the DB in sync so backend consumers (heartbeat, etc.) also see credentials.
-  useEffect(() => {
-    if (claudeCliAvailable && claudeKey && !claudeKey.hasKey) {
-      useCliMutation.mutate({ provider: 'claude' });
-    }
-  }, [claudeCliAvailable, claudeKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (codexCliAvailable && codexKey && !codexKey.hasKey) {
-      useCliMutation.mutate({ provider: 'codex' });
-    }
-  }, [codexCliAvailable, codexKey]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Credential status helpers
-  const getKeyData = (provider: string) => {
-    if (provider === 'claude') return claudeKey;
-    if (provider === 'codex') return codexKey;
-    return null;
-  };
-
-  const hasCredentials = (provider: string) => {
-    // Check DB-stored credentials first
-    if (getKeyData(provider)?.hasKey) return true;
-    // Also consider live CLI auth (detect query) so the badge stays
-    // consistent with the expanded "signed in" state
-    if (provider === 'claude') return claudeCliAvailable;
-    if (provider === 'codex') return codexCliAvailable;
-    return false;
-  };
-
-  // Infer credential type from input prefix
-  const inferredType = (() => {
-    if (!credentialInput || credentialInput.length < 5) return null;
-    if (credentialInput.startsWith('sk-ant-oat01-')) return 'OAuth Token';
-    if (credentialInput.startsWith('sk-ant-api03-')) return 'API Key';
-    if (credentialInput.startsWith('sk-ant-')) return 'API Key';
-    if (credentialInput.startsWith('sk-')) return 'API Key';
-    return null;
-  })();
-
-  // Formatting helpers
-  const formatTokens = (n: number) =>
-    n >= 1_000_000 ? `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M` :
-    n >= 1_000 ? `${Math.round(n / 1_000)}K` : String(n);
-
-  const formatPrice = (per1M: number) => `$${per1M.toFixed(2)}`;
-
-  // Auto-save model selection with optional provider switch
-  const handleModelClick = (model: ModelData) => {
-    // If provider is uncredentialed, open its credential card instead
-    if (!hasCredentials(model.provider)) {
-      setCredentialsExpandedProvider(model.provider as 'claude' | 'codex');
-      return;
-    }
-    // If already the active model, do nothing
-    if (model.id === activeModel && model.provider === activeProvider) return;
-
-    const mutation: { defaultModel: string; defaultAgentProvider?: 'claude' | 'codex' | 'opencode' } = { defaultModel: model.id };
-    if (model.provider !== activeProvider) {
-      mutation.defaultAgentProvider = model.provider as 'claude' | 'codex' | 'opencode';
-    }
-
-    const prevModel = activeModel;
-    const prevProvider = activeProvider;
-
-    updateSettingsMutation.mutate(mutation, {
-      onSuccess: () => {
-        if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-        const timer = setTimeout(() => setRecentSwitch(null), 5000);
-        undoTimerRef.current = timer;
-        setRecentSwitch({
-          fromModel: prevModel,
-          fromProvider: prevProvider,
-          toModel: model.id,
-          toProvider: model.provider,
-          modelName: model.name,
-          undoTimer: timer,
-        });
-      },
-    });
-  };
-
-  const handleUndo = () => {
-    if (!recentSwitch) return;
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    undoTimerRef.current = null;
-
-    const mutation: { defaultModel: string | null; defaultAgentProvider?: 'claude' | 'codex' | 'opencode' } = { defaultModel: recentSwitch.fromModel };
-    if (recentSwitch.fromProvider !== recentSwitch.toProvider) {
-      mutation.defaultAgentProvider = recentSwitch.fromProvider as 'claude' | 'codex' | 'opencode';
-    }
-    updateSettingsMutation.mutate(mutation);
-    setRecentSwitch(null);
-  };
-
-  const toggleCredentialCard = (provider: 'claude' | 'codex') => {
-    setCredentialsExpandedProvider(prev => prev === provider ? null : provider);
-    setCredentialInput('');
-    setShowKey(false);
-    setValidateResult(null);
-  };
-
-  // Cleanup undo timer on unmount
-  useEffect(() => {
-    return () => {
-      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    };
-  }, []);
-
-  const handleValidateAndSave = (provider: 'claude' | 'codex') => {
-    if (!credentialInput.trim()) return;
-    validateMutation.mutate(
-      { provider, key: credentialInput },
-      {
-        onSuccess: (result) => {
-          setValidateResult(result);
-          if (result.valid) {
-            saveKeyMutation.mutate(
-              { provider, key: credentialInput, credentialType: result.credentialType as 'api_key' | 'oauth_token' | undefined },
-              {
-                onSuccess: () => {
-                  setCredentialInput('');
-                  setShowKey(false);
-                },
-              },
-            );
-          }
-        },
-      },
-    );
-  };
-
-  const handleRemove = (provider: 'claude' | 'codex') => {
-    removeKeyMutation.mutate({ provider });
-  };
-
-  const handleUseCli = (provider: 'claude' | 'codex') => {
-    useCliMutation.mutate({ provider });
-  };
-
-  const handleCodexOAuthStart = () => {
-    setCodexOAuthStatus('pending');
-    setCodexOAuthMessage('');
-    setCodexOAuthData(null);
-
-    codexInitiateMutation.mutate(undefined, {
-      onSuccess: (result) => {
-        setCodexOAuthData({
-          userCode: result.userCode ?? '',
-          verificationUrl: result.verificationUrl ?? '',
-          expiresIn: result.expiresIn ?? 0,
-        });
-        setCodexOAuthSession(result.sessionId);
-        setCodexCountdown(result.expiresIn ?? 0);
-
-        stopCountdown();
-        countdownRef.current = setInterval(() => {
-          setCodexCountdown((prev) => {
-            if (prev <= 1) {
-              stopCountdown();
-              return 0;
-            }
-            return prev - 1;
-          });
-        }, 1000);
-      },
-      onError: (err) => {
-        setCodexOAuthStatus('error');
-        setCodexOAuthMessage(err.message ?? 'Failed to start authentication');
-      },
-    });
-  };
-
-  const handleCodexOAuthCancel = () => {
-    if (codexOAuthSession) {
-      codexCancelMutation.mutate({ sessionId: codexOAuthSession });
-    }
-    setCodexOAuthStatus('idle');
-    setCodexOAuthSession(null);
-    setCodexOAuthData(null);
-    stopCountdown();
-  };
-
-  const handleClaudeOAuthStart = () => {
-    setClaudeOAuthStatus('pending');
-    setClaudeOAuthMessage('');
-
-    claudeInitiateMutation.mutate(undefined, {
-      onSuccess: (result) => {
-        setClaudeOAuthSession(result.sessionId);
-        if (result.status === 'success') {
-          setClaudeOAuthStatus('success');
-          utils.provider.hasKey.invalidate();
-          utils.provider.detect.invalidate();
-        } else if (result.status === 'error') {
-          setClaudeOAuthStatus('error');
-          setClaudeOAuthMessage(result.message ?? 'Authentication failed');
-        }
-      },
-      onError: (err) => {
-        setClaudeOAuthStatus('error');
-        setClaudeOAuthMessage(err.message ?? 'Failed to start authentication');
-      },
-    });
-  };
-
-  const handleClaudeOAuthCancel = () => {
-    if (claudeOAuthSession) {
-      claudeCancelMutation.mutate({ sessionId: claudeOAuthSession });
-    }
-    setClaudeOAuthStatus('idle');
-    setClaudeOAuthSession(null);
-  };
-
-  const handleCodexCliAuthStart = () => {
-    setCodexCliAuthStatus('pending');
-    setCodexCliAuthMessage('');
-    codexCliInitiateMutation.mutate(undefined, {
-      onSuccess: (result) => setCodexCliAuthSession(result.sessionId),
-      onError: (err) => {
-        setCodexCliAuthStatus('error');
-        setCodexCliAuthMessage(err.message ?? 'Failed to start authentication');
-      },
-    });
-  };
-
-  const handleCodexCliAuthCancel = () => {
-    if (codexCliAuthSession) codexCliCancelMutation.mutate({ sessionId: codexCliAuthSession });
-    setCodexCliAuthStatus('idle');
-    setCodexCliAuthSession(null);
-  };
-
-  const handleSignOut = (provider: 'claude' | 'codex') => {
-    if (provider === 'claude') {
-      claudeLogoutMutation.mutate();
-    } else {
-      codexCliLogoutMutation.mutate();
-    }
-    // Reset any in-progress auth flows
-    setClaudeOAuthStatus('idle');
-    setClaudeOAuthSession(null);
-    setCodexCliAuthStatus('idle');
-    setCodexCliAuthSession(null);
-  };
-
-  const handleCopyCode = async (code: string) => {
-    try {
-      await navigator.clipboard.writeText(code);
-      setCodeCopied(true);
-      setTimeout(() => setCodeCopied(false), 2000);
-    } catch {
-      // Fallback
-    }
-  };
-
-  const formatCountdown = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
-
-  // Sort models by release date (newest first)
-  const sortByDate = (a: ModelData, b: ModelData) => {
-    if (!a.createdAt && !b.createdAt) return 0;
-    if (!a.createdAt) return 1;
-    if (!b.createdAt) return -1;
-    return b.createdAt.localeCompare(a.createdAt);
-  };
-
-  // Per-provider model lists
-  const claudeRecommended = (claudeModels?.filter(m => m.recommended) ?? []).sort(sortByDate);
-  const claudeNonRecommended = (claudeModels?.filter(m => !m.recommended) ?? []).sort(sortByDate);
-  const codexRecommended = (codexModels?.filter(m => m.recommended) ?? []).sort(sortByDate);
-  const codexNonRecommended = (codexModels?.filter(m => !m.recommended) ?? []).sort(sortByDate);
-
-  // Per-provider search filtering
-  const claudeSearchLower = claudeModelSearch.toLowerCase();
-  const filteredClaudeNonRec = claudeModelSearch
-    ? claudeNonRecommended.filter(m =>
-        m.id.toLowerCase().includes(claudeSearchLower) ||
-        m.name.toLowerCase().includes(claudeSearchLower)
-      )
-    : claudeNonRecommended;
-  const codexSearchLower = codexModelSearch.toLowerCase();
-  const filteredCodexNonRec = codexModelSearch
-    ? codexNonRecommended.filter(m =>
-        m.id.toLowerCase().includes(codexSearchLower) ||
-        m.name.toLowerCase().includes(codexSearchLower)
-      )
-    : codexNonRecommended;
-
-  const MAX_VISIBLE_ALL = 20;
-
-  // Active model data (for reasoning effort support check)
-  const activeModelData = activeModel
-    ? (claudeModels?.find(m => m.id === activeModel) ?? codexModels?.find(m => m.id === activeModel))
-    : null;
-  const activeModelSupportsThinking = activeModelData?.supportsThinking ?? false;
-
-  return (
-    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-      {/* Collapsed header */}
-      <button
-        onClick={() => setLegacyExpanded(!legacyExpanded)}
-        css={css`
-          display: flex; align-items: center; gap: ${theme.spacing[2]};
-          padding: ${theme.spacing[3]} 0; background: none; border: none; cursor: pointer;
-          font-family: inherit; text-align: left; width: 100%;
-        `}
-      >
-        <CaretRight size={14} css={css`
-          color: ${theme.colors.text.hint};
-          transition: transform 150ms ease;
-          transform: rotate(${legacyExpanded ? '90deg' : '0deg'});
-          flex-shrink: 0;
-        `} />
-        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]};`}>
-          <Typography.SmallBodyAlt css={css`color: ${theme.colors.text.secondary};`}>
-            Legacy Agent SDKs (Claude CLI / Codex CLI)
-          </Typography.SmallBodyAlt>
-          <Typography.Caption css={css`color: ${theme.colors.text.hint};`}>
-            Used for sub-agents. Will be deprecated in a future release.
-          </Typography.Caption>
-        </div>
-      </button>
-
-      <AnimatePresence>
-        {legacyExpanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            css={css`overflow: hidden;`}
-          >
-    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
-
-      {/* ============ Undo Banner ============ */}
-      <AnimatePresence>
-        {recentSwitch && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
-          >
-            <div css={css`
-              padding: ${theme.spacing[3]} ${theme.spacing[4]};
-              border: 1px solid ${theme.colors.success.main}33;
-              border-radius: ${theme.borderRadius.md};
-              background: ${theme.colors.success.main}08;
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-              gap: ${theme.spacing[3]};
-            `}>
-              <Typography.SmallBody css={css`
-                display: flex;
-                align-items: center;
-                gap: ${theme.spacing[2]};
-              `}>
-                <CheckCircle size={16} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                <span>Switched to <strong>{recentSwitch.modelName}</strong>. Mind session restarts on next tick.</span>
-              </Typography.SmallBody>
-              <Button variant="ghost" size="sm" onClick={handleUndo} css={css`flex-shrink: 0;`}>
-                Undo
-              </Button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ============ Model Section Header ============ */}
-      <div>
-        <Typography.Body as="div" css={css`
-          font-weight: ${theme.typography.fontWeight.semibold};
-          margin-bottom: ${theme.spacing[1]};
-        `}>
-          Model
-        </Typography.Body>
-        <Typography.SmallBody color="secondary">
-          Choose which model powers your Animus.
-        </Typography.SmallBody>
-      </div>
-
-      {/* ============ Claude Provider Group ============ */}
-      <div>
-        {/* Provider header row — clickable to expand/collapse */}
-        <button
-          onClick={() => setExpandedProviderGroup(expandedProviderGroup === 'claude' ? 'codex' : 'claude')}
-          css={css`
-            width: 100%;
-            display: flex;
-            align-items: center;
-            gap: ${theme.spacing[2]};
-            margin-bottom: ${expandedProviderGroup === 'claude' ? theme.spacing[2] : '0'};
-            padding: 0;
-            background: transparent;
-            cursor: pointer;
-            border: none;
-            text-align: left;
-          `}
-        >
-          {expandedProviderGroup === 'claude' ? <CaretDown size={12} css={css`color: ${theme.colors.text.hint};`} /> : <CaretRight size={12} css={css`color: ${theme.colors.text.hint};`} />}
-          <span css={css`
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: ${hasCredentials('claude') ? theme.colors.success.main : theme.colors.text.disabled};
-            flex-shrink: 0;
-          `} />
-          <Typography.Body as="span" css={css`
-            font-weight: ${theme.typography.fontWeight.semibold};
-          `}>
-            Claude
-          </Typography.Body>
-          {activeProvider === 'claude' && (
-            <Badge variant="default" css={css`
-              font-size: ${theme.typography.fontSize.xs};
-              background: ${theme.colors.accent}15;
-              color: ${theme.colors.accent};
-            `}>
-              Active
-            </Badge>
-          )}
-          {!hasCredentials('claude') && (
-            <span
-              onClick={(e) => { e.stopPropagation(); toggleCredentialCard('claude'); }}
-              css={css`
-                margin-left: auto;
-                font-size: 13px;
-                color: ${theme.colors.accent};
-                cursor: pointer;
-                &:hover { text-decoration: underline; }
-              `}
-            >
-              Set up credentials
-            </span>
-          )}
-        </button>
-
-        <AnimatePresence initial={false}>
-        {expandedProviderGroup === 'claude' && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            css={css`overflow: hidden;`}
-          >
-        {!hasCredentials('claude') ? (
-          <div css={css`
-            padding: ${theme.spacing[3]} ${theme.spacing[4]};
-            border: 1px solid ${theme.colors.border.light};
-            border-radius: ${theme.borderRadius.md};
-            text-align: center;
-          `}>
-            <Typography.SmallBody color="secondary">
-              Set up Claude credentials below to select a model.
-            </Typography.SmallBody>
-          </div>
-        ) : (
-          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-            {/* Recommended Claude models */}
-            {claudeRecommended.length > 0 && (
-              <div css={css`
-                border: 1px solid ${theme.colors.border.light};
-                border-radius: ${theme.borderRadius.md};
-                overflow: hidden;
-              `}>
-                <div css={css`
-                  padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                  background: ${theme.colors.background.elevated};
-                  border-bottom: 1px solid ${theme.colors.border.light};
-                `}>
-                  <Typography.SmallBody css={css`
-                    font-weight: ${theme.typography.fontWeight.semibold};
-                    color: ${theme.colors.text.primary};
-                  `}>
-                    Recommended
-                  </Typography.SmallBody>
-                </div>
-
-                {claudeRecommended.map((model, idx) => {
-                  const isCurrent = model.id === activeModel;
-                  return (
-                    <div
-                      key={model.id}
-                      onClick={() => handleModelClick(model)}
-                      css={css`
-                        padding: ${theme.spacing[3]} ${theme.spacing[4]};
-                        cursor: pointer;
-                        transition: background 150ms ease-out;
-                        position: relative;
-                        ${idx > 0 ? `border-top: 1px solid ${theme.colors.border.light};` : ''}
-                        ${isCurrent ? `
-                          background: ${theme.colors.accent}0a;
-                          border-left: 2px solid ${theme.colors.accent};
-                          padding-left: calc(${theme.spacing[4]} - 2px);
-                        ` : `
-                          border-left: 2px solid transparent;
-                          padding-left: calc(${theme.spacing[4]} - 2px);
-                          &:hover {
-                            background: ${theme.colors.accent}05;
-                          }
-                        `}
-                      `}
-                    >
-                      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; margin-bottom: ${theme.spacing[1]};`}>
-                        <span css={css`
-                          width: 18px;
-                          height: 18px;
-                          border-radius: 50%;
-                          border: 2px solid ${isCurrent ? theme.colors.accent : theme.colors.border.default};
-                          display: flex;
-                          align-items: center;
-                          justify-content: center;
-                          flex-shrink: 0;
-                          transition: all 150ms ease-out;
-                          ${isCurrent ? `background: ${theme.colors.accent};` : ''}
-                        `}>
-                          {isCurrent && (
-                            <span css={css`
-                              width: 6px;
-                              height: 6px;
-                              border-radius: 50%;
-                              background: ${theme.colors.accentForeground};
-                            `} />
-                          )}
-                        </span>
-                        <Typography.Body as="span" css={css`
-                          font-weight: ${theme.typography.fontWeight.medium};
-                          font-size: 15px;
-                        `}>
-                          {model.name}
-                        </Typography.Body>
-                        {isCurrent && (
-                          <Badge variant="default" css={css`font-size: ${theme.typography.fontSize.xs};`}>
-                            Current
-                          </Badge>
-                        )}
-                        {model.isDefault && (
-                          <Badge variant="default" css={css`
-                            font-size: ${theme.typography.fontSize.xs};
-                            background: ${theme.colors.accent}15;
-                            color: ${theme.colors.accent};
-                          `}>
-                            Default
-                          </Badge>
-                        )}
-                      </div>
-                      <div css={css`
-                        margin-left: 24px;
-                        font-size: 13px;
-                        color: ${theme.colors.text.secondary};
-                        line-height: 1.4;
-                      `}>
-                        {formatTokens(model.contextWindow)} context · {formatTokens(model.maxOutputTokens)} max output
-                      </div>
-                      <div css={css`
-                        margin-left: 24px;
-                        font-size: 13px;
-                        color: ${theme.colors.text.secondary};
-                        line-height: 1.4;
-                      `}>
-                        <span css={css`color: ${theme.colors.text.primary};`}>{formatPrice(model.inputPricePer1M)}</span> input /{' '}
-                        <span css={css`color: ${theme.colors.text.primary};`}>{formatPrice(model.outputPricePer1M)}</span> output per 1M tokens
-                      </div>
-                      {(model.supportsVision || model.supportsThinking) && (
-                        <div css={css`
-                          margin-left: 24px;
-                          margin-top: ${theme.spacing[1]};
-                          display: flex;
-                          gap: ${theme.spacing[1]};
-                        `}>
-                          {model.supportsVision && (
-                            <span css={css`
-                              font-size: 12px;
-                              padding: 1px ${theme.spacing[1.5]};
-                              background: ${theme.colors.background.elevated};
-                              border-radius: ${theme.borderRadius.sm};
-                              color: ${theme.colors.text.hint};
-                            `}>
-                              Vision
-                            </span>
-                          )}
-                          {model.supportsThinking && (
-                            <span css={css`
-                              font-size: 12px;
-                              padding: 1px ${theme.spacing[1.5]};
-                              background: ${theme.colors.background.elevated};
-                              border-radius: ${theme.borderRadius.sm};
-                              color: ${theme.colors.text.hint};
-                            `}>
-                              Thinking
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* All Claude models (collapsible with search) */}
-            {claudeNonRecommended.length > 0 && (
-              <div css={css`
-                border: 1px solid ${theme.colors.border.light};
-                border-radius: ${theme.borderRadius.md};
-                overflow: hidden;
-              `}>
-                <div css={css`
-                  padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                  background: ${theme.colors.background.elevated};
-                  border-bottom: ${showAllClaudeModels || claudeModelSearch ? `1px solid ${theme.colors.border.light}` : 'none'};
-                  display: flex;
-                  align-items: center;
-                  justify-content: space-between;
-                  gap: ${theme.spacing[2]};
-                `}>
-                  <button
-                    onClick={() => { setShowAllClaudeModels(!showAllClaudeModels); setClaudeModelSearch(''); }}
-                    css={css`
-                      display: flex;
-                      align-items: center;
-                      gap: ${theme.spacing[1.5]};
-                      background: transparent;
-                      cursor: pointer;
-                      padding: 0;
-                      color: ${theme.colors.text.secondary};
-                      &:hover { color: ${theme.colors.text.primary}; }
-                    `}
-                  >
-                    {showAllClaudeModels || claudeModelSearch ? <CaretDown size={12} /> : <CaretRight size={12} />}
-                    <Typography.SmallBody css={css`
-                      font-weight: ${theme.typography.fontWeight.semibold};
-                      color: inherit;
-                    `}>
-                      All Models ({claudeNonRecommended.length})
-                    </Typography.SmallBody>
-                  </button>
-
-                  {(showAllClaudeModels || claudeModelSearch) && (
-                    <div css={css`
-                      position: relative;
-                      flex: 1;
-                      max-width: 240px;
-                    `}>
-                      <MagnifyingGlass size={14} css={css`
-                        position: absolute;
-                        left: ${theme.spacing[2]};
-                        top: 50%;
-                        transform: translateY(-50%);
-                        color: ${theme.colors.text.hint};
-                        pointer-events: none;
-                      `} />
-                      <input
-                        type="text"
-                        value={claudeModelSearch}
-                        onChange={(e) => setClaudeModelSearch(e.target.value)}
-                        placeholder="Search models..."
-                        css={css`
-                          width: 100%;
-                          padding: ${theme.spacing[1.5]} ${theme.spacing[3]} ${theme.spacing[1.5]} 2rem;
-                          border: 1px solid ${theme.colors.border.default};
-                          border-radius: ${theme.borderRadius.md};
-                          background: ${theme.colors.background.default};
-                          color: ${theme.colors.text.primary};
-                          font-size: 13px;
-                          outline: none;
-                          &:focus {
-                            border-color: ${theme.colors.accent};
-                          }
-                          &::placeholder {
-                            color: ${theme.colors.text.hint};
-                          }
-                        `}
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {(showAllClaudeModels || claudeModelSearch) && (() => {
-                  const visible = filteredClaudeNonRec.slice(0, MAX_VISIBLE_ALL);
-                  const overflow = filteredClaudeNonRec.length - visible.length;
-                  return (
-                    <>
-                      {visible.length === 0 && claudeModelSearch && (
-                        <div css={css`
-                          padding: ${theme.spacing[4]};
-                          text-align: center;
-                          color: ${theme.colors.text.hint};
-                          font-size: 13px;
-                        `}>
-                          No models matching &quot;{claudeModelSearch}&quot;
-                        </div>
-                      )}
-
-                      {visible.map((model, idx) => {
-                        const isCurrent = model.id === activeModel;
-                        return (
-                          <div
-                            key={model.id}
-                            onClick={() => handleModelClick(model)}
-                            css={css`
-                              padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                              cursor: pointer;
-                              transition: background 150ms ease-out;
-                              ${idx > 0 ? `border-top: 1px solid ${theme.colors.border.light};` : ''}
-                              ${isCurrent ? `
-                                background: ${theme.colors.accent}0a;
-                                border-left: 2px solid ${theme.colors.accent};
-                                padding-left: calc(${theme.spacing[4]} - 2px);
-                              ` : `
-                                border-left: 2px solid transparent;
-                                padding-left: calc(${theme.spacing[4]} - 2px);
-                                &:hover {
-                                  background: ${theme.colors.accent}05;
-                                }
-                              `}
-                            `}
-                          >
-                            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                              <span css={css`
-                                width: 16px;
-                                height: 16px;
-                                border-radius: 50%;
-                                border: 2px solid ${isCurrent ? theme.colors.accent : theme.colors.border.default};
-                                display: flex;
-                                align-items: center;
-                                justify-content: center;
-                                flex-shrink: 0;
-                                transition: all 150ms ease-out;
-                                ${isCurrent ? `background: ${theme.colors.accent};` : ''}
-                              `}>
-                                {isCurrent && (
-                                  <span css={css`
-                                    width: 5px;
-                                    height: 5px;
-                                    border-radius: 50%;
-                                    background: ${theme.colors.accentForeground};
-                                  `} />
-                                )}
-                              </span>
-                              <Typography.SmallBody css={css`
-                                font-weight: ${theme.typography.fontWeight.medium};
-                              `}>
-                                {model.name}
-                              </Typography.SmallBody>
-                              {isCurrent && (
-                                <Badge variant="default" css={css`font-size: 11px;`}>
-                                  Current
-                                </Badge>
-                              )}
-                              {model.contextWindow > 0 && (
-                                <span css={css`
-                                  font-size: 12px;
-                                  color: ${theme.colors.text.hint};
-                                  margin-left: auto;
-                                `}>
-                                  {formatTokens(model.contextWindow)} · {formatPrice(model.inputPricePer1M)}/{formatPrice(model.outputPricePer1M)}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-
-                      {overflow > 0 && (
-                        <div css={css`
-                          padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                          border-top: 1px solid ${theme.colors.border.light};
-                          font-size: 12px;
-                          color: ${theme.colors.text.hint};
-                          text-align: center;
-                        `}>
-                          and {overflow} more matching...
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            )}
-          </div>
-        )}
-          </motion.div>
-        )}
-        </AnimatePresence>
-      </div>
-
-      {/* Divider between provider groups */}
-      <div css={css`border-top: 1px solid ${theme.colors.border.light};`} />
-
-      {/* ============ Codex Provider Group ============ */}
-      <div>
-        {/* Provider header row — clickable to expand/collapse */}
-        <button
-          onClick={() => setExpandedProviderGroup(expandedProviderGroup === 'codex' ? 'claude' : 'codex')}
-          css={css`
-            width: 100%;
-            display: flex;
-            align-items: center;
-            gap: ${theme.spacing[2]};
-            margin-bottom: ${expandedProviderGroup === 'codex' ? theme.spacing[2] : '0'};
-            padding: 0;
-            background: transparent;
-            cursor: pointer;
-            border: none;
-            text-align: left;
-          `}
-        >
-          {expandedProviderGroup === 'codex' ? <CaretDown size={12} css={css`color: ${theme.colors.text.hint};`} /> : <CaretRight size={12} css={css`color: ${theme.colors.text.hint};`} />}
-          <span css={css`
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: ${hasCredentials('codex') ? theme.colors.success.main : theme.colors.text.disabled};
-            flex-shrink: 0;
-          `} />
-          <Typography.Body as="span" css={css`
-            font-weight: ${theme.typography.fontWeight.semibold};
-          `}>
-            Codex
-          </Typography.Body>
-          {activeProvider === 'codex' && (
-            <Badge variant="default" css={css`
-              font-size: ${theme.typography.fontSize.xs};
-              background: ${theme.colors.accent}15;
-              color: ${theme.colors.accent};
-            `}>
-              Active
-            </Badge>
-          )}
-          {!hasCredentials('codex') && (
-            <span
-              onClick={(e) => { e.stopPropagation(); toggleCredentialCard('codex'); }}
-              css={css`
-                margin-left: auto;
-                font-size: 13px;
-                color: ${theme.colors.accent};
-                cursor: pointer;
-                &:hover { text-decoration: underline; }
-              `}
-            >
-              Set up credentials
-            </span>
-          )}
-        </button>
-
-        <AnimatePresence initial={false}>
-        {expandedProviderGroup === 'codex' && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            css={css`overflow: hidden;`}
-          >
-        {!hasCredentials('codex') ? (
-          <div css={css`
-            padding: ${theme.spacing[3]} ${theme.spacing[4]};
-            border: 1px solid ${theme.colors.border.light};
-            border-radius: ${theme.borderRadius.md};
-            text-align: center;
-          `}>
-            <Typography.SmallBody color="secondary">
-              Set up Codex credentials below to select a model.
-            </Typography.SmallBody>
-          </div>
-        ) : (
-          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-            {/* Recommended Codex models */}
-            {codexRecommended.length > 0 && (
-              <div css={css`
-                border: 1px solid ${theme.colors.border.light};
-                border-radius: ${theme.borderRadius.md};
-                overflow: hidden;
-              `}>
-                <div css={css`
-                  padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                  background: ${theme.colors.background.elevated};
-                  border-bottom: 1px solid ${theme.colors.border.light};
-                `}>
-                  <Typography.SmallBody css={css`
-                    font-weight: ${theme.typography.fontWeight.semibold};
-                    color: ${theme.colors.text.primary};
-                  `}>
-                    Recommended
-                  </Typography.SmallBody>
-                </div>
-
-                {codexRecommended.map((model, idx) => {
-                  const isCurrent = model.id === activeModel;
-                  return (
-                    <div
-                      key={model.id}
-                      onClick={() => handleModelClick(model)}
-                      css={css`
-                        padding: ${theme.spacing[3]} ${theme.spacing[4]};
-                        cursor: pointer;
-                        transition: background 150ms ease-out;
-                        position: relative;
-                        ${idx > 0 ? `border-top: 1px solid ${theme.colors.border.light};` : ''}
-                        ${isCurrent ? `
-                          background: ${theme.colors.accent}0a;
-                          border-left: 2px solid ${theme.colors.accent};
-                          padding-left: calc(${theme.spacing[4]} - 2px);
-                        ` : `
-                          border-left: 2px solid transparent;
-                          padding-left: calc(${theme.spacing[4]} - 2px);
-                          &:hover {
-                            background: ${theme.colors.accent}05;
-                          }
-                        `}
-                      `}
-                    >
-                      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; margin-bottom: ${theme.spacing[1]};`}>
-                        <span css={css`
-                          width: 18px;
-                          height: 18px;
-                          border-radius: 50%;
-                          border: 2px solid ${isCurrent ? theme.colors.accent : theme.colors.border.default};
-                          display: flex;
-                          align-items: center;
-                          justify-content: center;
-                          flex-shrink: 0;
-                          transition: all 150ms ease-out;
-                          ${isCurrent ? `background: ${theme.colors.accent};` : ''}
-                        `}>
-                          {isCurrent && (
-                            <span css={css`
-                              width: 6px;
-                              height: 6px;
-                              border-radius: 50%;
-                              background: ${theme.colors.accentForeground};
-                            `} />
-                          )}
-                        </span>
-                        <Typography.Body as="span" css={css`
-                          font-weight: ${theme.typography.fontWeight.medium};
-                          font-size: 15px;
-                        `}>
-                          {model.name}
-                        </Typography.Body>
-                        {isCurrent && (
-                          <Badge variant="default" css={css`font-size: ${theme.typography.fontSize.xs};`}>
-                            Current
-                          </Badge>
-                        )}
-                        {model.isDefault && (
-                          <Badge variant="default" css={css`
-                            font-size: ${theme.typography.fontSize.xs};
-                            background: ${theme.colors.accent}15;
-                            color: ${theme.colors.accent};
-                          `}>
-                            Default
-                          </Badge>
-                        )}
-                      </div>
-                      <div css={css`
-                        margin-left: 24px;
-                        font-size: 13px;
-                        color: ${theme.colors.text.secondary};
-                        line-height: 1.4;
-                      `}>
-                        {formatTokens(model.contextWindow)} context · {formatTokens(model.maxOutputTokens)} max output
-                      </div>
-                      <div css={css`
-                        margin-left: 24px;
-                        font-size: 13px;
-                        color: ${theme.colors.text.secondary};
-                        line-height: 1.4;
-                      `}>
-                        <span css={css`color: ${theme.colors.text.primary};`}>{formatPrice(model.inputPricePer1M)}</span> input /{' '}
-                        <span css={css`color: ${theme.colors.text.primary};`}>{formatPrice(model.outputPricePer1M)}</span> output per 1M tokens
-                      </div>
-                      {(model.supportsVision || model.supportsThinking) && (
-                        <div css={css`
-                          margin-left: 24px;
-                          margin-top: ${theme.spacing[1]};
-                          display: flex;
-                          gap: ${theme.spacing[1]};
-                        `}>
-                          {model.supportsVision && (
-                            <span css={css`
-                              font-size: 12px;
-                              padding: 1px ${theme.spacing[1.5]};
-                              background: ${theme.colors.background.elevated};
-                              border-radius: ${theme.borderRadius.sm};
-                              color: ${theme.colors.text.hint};
-                            `}>
-                              Vision
-                            </span>
-                          )}
-                          {model.supportsThinking && (
-                            <span css={css`
-                              font-size: 12px;
-                              padding: 1px ${theme.spacing[1.5]};
-                              background: ${theme.colors.background.elevated};
-                              border-radius: ${theme.borderRadius.sm};
-                              color: ${theme.colors.text.hint};
-                            `}>
-                              Thinking
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* All Codex models (collapsible with search) */}
-            {codexNonRecommended.length > 0 && (
-              <div css={css`
-                border: 1px solid ${theme.colors.border.light};
-                border-radius: ${theme.borderRadius.md};
-                overflow: hidden;
-              `}>
-                <div css={css`
-                  padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                  background: ${theme.colors.background.elevated};
-                  border-bottom: ${showAllCodexModels || codexModelSearch ? `1px solid ${theme.colors.border.light}` : 'none'};
-                  display: flex;
-                  align-items: center;
-                  justify-content: space-between;
-                  gap: ${theme.spacing[2]};
-                `}>
-                  <button
-                    onClick={() => { setShowAllCodexModels(!showAllCodexModels); setCodexModelSearch(''); }}
-                    css={css`
-                      display: flex;
-                      align-items: center;
-                      gap: ${theme.spacing[1.5]};
-                      background: transparent;
-                      cursor: pointer;
-                      padding: 0;
-                      color: ${theme.colors.text.secondary};
-                      &:hover { color: ${theme.colors.text.primary}; }
-                    `}
-                  >
-                    {showAllCodexModels || codexModelSearch ? <CaretDown size={12} /> : <CaretRight size={12} />}
-                    <Typography.SmallBody css={css`
-                      font-weight: ${theme.typography.fontWeight.semibold};
-                      color: inherit;
-                    `}>
-                      All Models ({codexNonRecommended.length})
-                    </Typography.SmallBody>
-                  </button>
-
-                  {(showAllCodexModels || codexModelSearch) && (
-                    <div css={css`
-                      position: relative;
-                      flex: 1;
-                      max-width: 240px;
-                    `}>
-                      <MagnifyingGlass size={14} css={css`
-                        position: absolute;
-                        left: ${theme.spacing[2]};
-                        top: 50%;
-                        transform: translateY(-50%);
-                        color: ${theme.colors.text.hint};
-                        pointer-events: none;
-                      `} />
-                      <input
-                        type="text"
-                        value={codexModelSearch}
-                        onChange={(e) => setCodexModelSearch(e.target.value)}
-                        placeholder="Search models..."
-                        css={css`
-                          width: 100%;
-                          padding: ${theme.spacing[1.5]} ${theme.spacing[3]} ${theme.spacing[1.5]} 2rem;
-                          border: 1px solid ${theme.colors.border.default};
-                          border-radius: ${theme.borderRadius.md};
-                          background: ${theme.colors.background.default};
-                          color: ${theme.colors.text.primary};
-                          font-size: 13px;
-                          outline: none;
-                          &:focus {
-                            border-color: ${theme.colors.accent};
-                          }
-                          &::placeholder {
-                            color: ${theme.colors.text.hint};
-                          }
-                        `}
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {(showAllCodexModels || codexModelSearch) && (() => {
-                  const visible = filteredCodexNonRec.slice(0, MAX_VISIBLE_ALL);
-                  const overflow = filteredCodexNonRec.length - visible.length;
-                  return (
-                    <>
-                      {visible.length === 0 && codexModelSearch && (
-                        <div css={css`
-                          padding: ${theme.spacing[4]};
-                          text-align: center;
-                          color: ${theme.colors.text.hint};
-                          font-size: 13px;
-                        `}>
-                          No models matching &quot;{codexModelSearch}&quot;
-                        </div>
-                      )}
-
-                      {visible.map((model, idx) => {
-                        const isCurrent = model.id === activeModel;
-                        return (
-                          <div
-                            key={model.id}
-                            onClick={() => handleModelClick(model)}
-                            css={css`
-                              padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                              cursor: pointer;
-                              transition: background 150ms ease-out;
-                              ${idx > 0 ? `border-top: 1px solid ${theme.colors.border.light};` : ''}
-                              ${isCurrent ? `
-                                background: ${theme.colors.accent}0a;
-                                border-left: 2px solid ${theme.colors.accent};
-                                padding-left: calc(${theme.spacing[4]} - 2px);
-                              ` : `
-                                border-left: 2px solid transparent;
-                                padding-left: calc(${theme.spacing[4]} - 2px);
-                                &:hover {
-                                  background: ${theme.colors.accent}05;
-                                }
-                              `}
-                            `}
-                          >
-                            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                              <span css={css`
-                                width: 16px;
-                                height: 16px;
-                                border-radius: 50%;
-                                border: 2px solid ${isCurrent ? theme.colors.accent : theme.colors.border.default};
-                                display: flex;
-                                align-items: center;
-                                justify-content: center;
-                                flex-shrink: 0;
-                                transition: all 150ms ease-out;
-                                ${isCurrent ? `background: ${theme.colors.accent};` : ''}
-                              `}>
-                                {isCurrent && (
-                                  <span css={css`
-                                    width: 5px;
-                                    height: 5px;
-                                    border-radius: 50%;
-                                    background: ${theme.colors.accentForeground};
-                                  `} />
-                                )}
-                              </span>
-                              <Typography.SmallBody css={css`
-                                font-weight: ${theme.typography.fontWeight.medium};
-                              `}>
-                                {model.name}
-                              </Typography.SmallBody>
-                              {isCurrent && (
-                                <Badge variant="default" css={css`font-size: 11px;`}>
-                                  Current
-                                </Badge>
-                              )}
-                              {model.contextWindow > 0 && (
-                                <span css={css`
-                                  font-size: 12px;
-                                  color: ${theme.colors.text.hint};
-                                  margin-left: auto;
-                                `}>
-                                  {formatTokens(model.contextWindow)} · {formatPrice(model.inputPricePer1M)}/{formatPrice(model.outputPricePer1M)}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-
-                      {overflow > 0 && (
-                        <div css={css`
-                          padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                          border-top: 1px solid ${theme.colors.border.light};
-                          font-size: 12px;
-                          color: ${theme.colors.text.hint};
-                          text-align: center;
-                        `}>
-                          and {overflow} more matching...
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            )}
-          </div>
-        )}
-          </motion.div>
-        )}
-        </AnimatePresence>
-      </div>
-
-      {/* ============ Reasoning Effort ============ */}
-      <div css={css`
-        ${!activeModelSupportsThinking ? 'opacity: 0.45; pointer-events: none;' : ''}
-      `}>
-        <Typography.Body as="div" css={css`
-          font-weight: ${theme.typography.fontWeight.semibold};
-          margin-bottom: ${theme.spacing[1]};
-        `}>
-          Reasoning Effort
-        </Typography.Body>
-        <Typography.SmallBody as="div" css={css`
-          color: ${theme.colors.text.secondary};
-          margin-bottom: ${theme.spacing[2]};
-        `}>
-          {activeModelSupportsThinking
-            ? activeProvider === 'claude'
-              ? 'Controls how much the model thinks before responding. Max is Claude-only.'
-              : 'Controls how much the model thinks before responding.'
-            : 'Not supported by the current model.'}
-        </Typography.SmallBody>
-        <div css={css`
-          display: flex;
-          border: 1px solid ${theme.colors.border.default};
-          border-radius: ${theme.borderRadius.md};
-          overflow: hidden;
-        `}>
-          {[
-            { value: null, label: 'Default' },
-            { value: 'low' as const, label: 'Low' },
-            { value: 'medium' as const, label: 'Medium' },
-            { value: 'high' as const, label: 'High' },
-            ...(activeProvider === 'claude' ? [{ value: 'max' as const, label: 'Max' }] : []),
-          ].map((effort, idx) => {
-            const isSelected = (systemSettings?.reasoningEffort ?? null) === effort.value;
-            return (
-              <button
-                key={effort.label}
-                onClick={() => {
-                  updateSettingsMutation.mutate({ reasoningEffort: effort.value });
-                }}
-                css={css`
-                  flex: 1;
-                  padding: ${theme.spacing[2]} ${theme.spacing[2]};
-                  cursor: pointer;
-                  transition: all 150ms ease-out;
-                  font-size: ${theme.typography.fontSize.sm};
-                  font-weight: ${theme.typography.fontWeight.medium};
-                  ${idx > 0 ? `border-left: 1px solid ${theme.colors.border.default};` : ''}
-                  ${isSelected ? `
-                    background: ${theme.colors.accent}15;
-                    color: ${theme.colors.accent};
-                  ` : `
-                    background: transparent;
-                    color: ${theme.colors.text.secondary};
-                    &:hover {
-                      background: ${theme.colors.background.elevated};
-                      color: ${theme.colors.text.primary};
-                    }
-                  `}
-                `}
-              >
-                {effort.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ============ Credentials ============ */}
-      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-        <div>
-          <Typography.Body as="div" css={css`
-            font-weight: ${theme.typography.fontWeight.semibold};
-            margin-bottom: ${theme.spacing[1]};
-          `}>
-            Credentials
-          </Typography.Body>
-          <Typography.SmallBody color="secondary">
-            API keys and authentication for each provider.
-          </Typography.SmallBody>
-        </div>
-
-        {/* Claude credential card */}
-        <div css={css`
-          border: 1px solid ${theme.colors.border.light};
-          border-radius: ${theme.borderRadius.md};
-          overflow: hidden;
-        `}>
-          <button
-            onClick={() => toggleCredentialCard('claude')}
-            css={css`
-              width: 100%;
-              padding: ${theme.spacing[3]} ${theme.spacing[4]};
-              display: flex;
-              align-items: center;
-              gap: ${theme.spacing[2]};
-              background: transparent;
-              cursor: pointer;
-              border: none;
-              text-align: left;
-            `}
-          >
-            <span css={css`
-              width: 8px;
-              height: 8px;
-              border-radius: 50%;
-              background: ${hasCredentials('claude') ? theme.colors.success.main : theme.colors.text.disabled};
-              flex-shrink: 0;
-            `} />
-            <Typography.SmallBody css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
-              Claude
-            </Typography.SmallBody>
-            <Badge variant="default" css={css`font-size: 11px;`}>
-              {hasCredentials('claude') ? 'Connected' : 'Not configured'}
-            </Badge>
-            <span css={css`margin-left: auto; color: ${theme.colors.text.hint};`}>
-              {credentialsExpandedProvider === 'claude' ? <CaretDown size={12} /> : <CaretRight size={12} />}
-            </span>
-          </button>
-          <AnimatePresence>
-            {credentialsExpandedProvider === 'claude' && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                css={css`overflow: hidden;`}
-              >
-                <div css={css`
-                  padding: ${theme.spacing[3]} ${theme.spacing[4]};
-                  border-top: 1px solid ${theme.colors.border.light};
-                  display: flex;
-                  flex-direction: column;
-                  gap: ${theme.spacing[3]};
-                `}>
-                  {/* CLI signed-in state */}
-                  {claudeCliAvailable && (
-                    <div css={css`
-                      padding: ${theme.spacing[3]};
-                      border-radius: ${theme.borderRadius.sm};
-                      border: 1px solid ${theme.colors.success.main}33;
-                      background: ${theme.colors.success.main}08;
-                      display: flex;
-                      align-items: center;
-                      justify-content: space-between;
-                      gap: ${theme.spacing[3]};
-                    `}>
-                      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                        <CheckCircle size={18} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                        <div>
-                          <Typography.SmallBody as="div">Claude is signed in</Typography.SmallBody>
-                          <Typography.Caption as="div" color="hint">Claude Code CLI authenticated</Typography.Caption>
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleSignOut('claude')}
-                        loading={claudeLogoutMutation.isPending}
-                        css={css`flex-shrink: 0;`}
-                      >
-                        <SignOut size={14} css={css`margin-right: ${theme.spacing[1]};`} />
-                        Sign out
-                      </Button>
-                    </div>
-                  )}
-
-                  {/* CLI installed, not authenticated */}
-                  {claudeCliInstalled && !claudeCliAvailable && (
-                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                      {claudeOAuthStatus === 'idle' && (
-                        <div css={css`
-                          display: flex;
-                          align-items: center;
-                          justify-content: space-between;
-                          padding: ${theme.spacing[3]};
-                          border: 1px solid ${theme.colors.border.light};
-                          border-radius: ${theme.borderRadius.sm};
-                          gap: ${theme.spacing[2]};
-                        `}>
-                          <div>
-                            <Typography.SmallBody as="div">Claude Sign In</Typography.SmallBody>
-                            <Typography.Caption as="div" color="hint">Recommended. Opens a browser to sign in.</Typography.Caption>
-                          </div>
-                          <Button size="sm" onClick={handleClaudeOAuthStart} loading={claudeInitiateMutation.isPending}>
-                            Sign in
-                          </Button>
-                        </div>
-                      )}
-
-                      {claudeOAuthStatus === 'pending' && (
-                        <div css={css`
-                          padding: ${theme.spacing[3]};
-                          border: 1px solid ${theme.colors.border.default};
-                          border-radius: ${theme.borderRadius.sm};
-                          display: flex;
-                          flex-direction: column;
-                          gap: ${theme.spacing[3]};
-                        `}>
-                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                            <CircleNotch
-                              size={14}
-                              css={css`
-                                color: ${theme.colors.text.hint};
-                                animation: spin 1s linear infinite;
-                                @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-                              `}
-                            />
-                            <Typography.SmallBody as="div" color="secondary">
-                              Complete sign-in in your browser...
-                            </Typography.SmallBody>
-                          </div>
-                          <Button variant="ghost" size="sm" onClick={handleClaudeOAuthCancel}>
-                            Cancel
-                          </Button>
-                        </div>
-                      )}
-
-                      {claudeOAuthStatus === 'success' && (
-                        <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
-                          display: flex; align-items: center; gap: ${theme.spacing[2]};
-                          padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                          background: ${theme.colors.success.main}0d;
-                          border-radius: ${theme.borderRadius.sm};
-                        `}>
-                          <CheckCircle size={16} weight="fill" /> Signed in with Claude
-                        </Typography.SmallBody>
-                      )}
-
-                      {claudeOAuthStatus === 'error' && (
-                        <div css={css`
-                          display: flex; align-items: center; justify-content: space-between;
-                          padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                          background: ${theme.colors.error.main}0d;
-                          border-radius: ${theme.borderRadius.sm};
-                        `}>
-                          <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
-                            <XCircle size={16} weight="fill" /> {claudeOAuthMessage || 'Failed'}
-                          </Typography.SmallBody>
-                          <Button variant="ghost" size="sm" onClick={() => { setClaudeOAuthStatus('idle'); setClaudeOAuthSession(null); }}>
-                            Retry
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Claude OAuth (non-CLI) */}
-                  {!claudeCliInstalled && (
-                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                      {claudeOAuthStatus === 'idle' && (
-                        <div css={css`
-                          display: flex;
-                          align-items: center;
-                          justify-content: space-between;
-                          padding: ${theme.spacing[3]};
-                          border: 1px solid ${theme.colors.border.light};
-                          border-radius: ${theme.borderRadius.sm};
-                          gap: ${theme.spacing[2]};
-                        `}>
-                          <div>
-                            <Typography.SmallBody as="div">Claude Sign In</Typography.SmallBody>
-                            <Typography.Caption as="div" color="hint">Use your Claude subscription (Pro/Max)</Typography.Caption>
-                          </div>
-                          <Button size="sm" onClick={handleClaudeOAuthStart} loading={claudeInitiateMutation.isPending}>
-                            Sign in
-                          </Button>
-                        </div>
-                      )}
-
-                      {claudeOAuthStatus === 'pending' && (
-                        <div css={css`
-                          padding: ${theme.spacing[3]};
-                          border: 1px solid ${theme.colors.border.default};
-                          border-radius: ${theme.borderRadius.sm};
-                          display: flex;
-                          flex-direction: column;
-                          gap: ${theme.spacing[3]};
-                        `}>
-                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                            <CircleNotch
-                              size={14}
-                              css={css`
-                                color: ${theme.colors.text.hint};
-                                animation: spin 1s linear infinite;
-                                @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-                              `}
-                            />
-                            <Typography.SmallBody as="div" color="secondary">
-                              Complete sign-in in your browser...
-                            </Typography.SmallBody>
-                          </div>
-                          <Button variant="ghost" size="sm" onClick={handleClaudeOAuthCancel}>
-                            Cancel
-                          </Button>
-                        </div>
-                      )}
-
-                      {claudeOAuthStatus === 'success' && (
-                        <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
-                          display: flex; align-items: center; gap: ${theme.spacing[2]};
-                          padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                          background: ${theme.colors.success.main}0d;
-                          border-radius: ${theme.borderRadius.sm};
-                        `}>
-                          <CheckCircle size={16} weight="fill" /> Signed in with Claude
-                        </Typography.SmallBody>
-                      )}
-
-                      {claudeOAuthStatus === 'error' && (
-                        <div css={css`
-                          display: flex; align-items: center; justify-content: space-between;
-                          padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                          background: ${theme.colors.error.main}0d;
-                          border-radius: ${theme.borderRadius.sm};
-                        `}>
-                          <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
-                            <XCircle size={16} weight="fill" /> {claudeOAuthMessage || 'Failed'}
-                          </Typography.SmallBody>
-                          <Button variant="ghost" size="sm" onClick={() => { setClaudeOAuthStatus('idle'); setClaudeOAuthSession(null); }}>
-                            Retry
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* API key / OAuth token input */}
-                  <div css={css`display: flex; gap: ${theme.spacing[2]}; align-items: flex-end;`}>
-                    <div css={css`flex: 1;`}>
-                      <Input
-                        label="API Key or OAuth Token"
-                        type={showKey ? 'text' : 'password'}
-                        value={credentialInput}
-                        onChange={(e) => { setCredentialInput((e.target as HTMLInputElement).value); setValidateResult(null); }}
-                        placeholder={hasCredentials('claude') ? '********' : 'sk-ant-api03-... or sk-ant-oat01-...'}
-                        rightElement={
-                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[1.5]};`}>
-                            {inferredType && credentialInput.length > 8 && (
-                              <Typography.Caption color="hint" css={css`
-                                background: ${theme.colors.background.elevated};
-                                padding: 1px ${theme.spacing[1]};
-                                border-radius: ${theme.borderRadius.sm};
-                                white-space: nowrap;
-                              `}>
-                                {inferredType}
-                              </Typography.Caption>
-                            )}
-                            <Tooltip content="Encrypted at rest and injected securely at runtime" position="top" align="right">
-                              <ShieldCheck size={16} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                            </Tooltip>
-                            <button
-                              onClick={() => setShowKey(!showKey)}
-                              css={css`
-                                cursor: pointer; padding: 0; color: ${theme.colors.text.hint};
-                                &:hover { color: ${theme.colors.text.primary}; }
-                              `}
-                            >
-                              {showKey ? <EyeSlash size={16} /> : <Eye size={16} />}
-                            </button>
-                          </div>
-                        }
-                      />
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() => handleValidateAndSave('claude')}
-                      loading={validateMutation.isPending || saveKeyMutation.isPending}
-                      disabled={!credentialInput.trim()}
-                    >
-                      Validate & Save
-                    </Button>
-                  </div>
-                  {validateResult && (
-                    <Typography.Caption as="div" color={validateResult.valid ? theme.colors.success.main : theme.colors.error.main}>
-                      {validateResult.message}
-                    </Typography.Caption>
-                  )}
-
-                  {hasCredentials('claude') && (
-                    <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemove('claude')}
-                        loading={removeKeyMutation.isPending}
-                      >
-                        <Trash size={14} css={css`margin-right: ${theme.spacing[1]};`} />
-                        Remove credentials
-                      </Button>
-                    </div>
-                  )}
-
-                  <Typography.Caption as="div" color="disabled" css={css`
-                    display: flex; align-items: center; gap: ${theme.spacing[1.5]};
-                  `}>
-                    <ShieldCheck size={12} css={css`flex-shrink: 0;`} />
-                    <span>Encrypted at rest. Never leaves your instance.</span>
-                  </Typography.Caption>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* Codex credential card */}
-        <div css={css`
-          border: 1px solid ${theme.colors.border.light};
-          border-radius: ${theme.borderRadius.md};
-          overflow: hidden;
-        `}>
-          <button
-            onClick={() => toggleCredentialCard('codex')}
-            css={css`
-              width: 100%;
-              padding: ${theme.spacing[3]} ${theme.spacing[4]};
-              display: flex;
-              align-items: center;
-              gap: ${theme.spacing[2]};
-              background: transparent;
-              cursor: pointer;
-              border: none;
-              text-align: left;
-            `}
-          >
-            <span css={css`
-              width: 8px;
-              height: 8px;
-              border-radius: 50%;
-              background: ${hasCredentials('codex') ? theme.colors.success.main : theme.colors.text.disabled};
-              flex-shrink: 0;
-            `} />
-            <Typography.SmallBody css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
-              Codex
-            </Typography.SmallBody>
-            <Badge variant="default" css={css`font-size: 11px;`}>
-              {hasCredentials('codex') ? 'Connected' : 'Not configured'}
-            </Badge>
-            <span css={css`margin-left: auto; color: ${theme.colors.text.hint};`}>
-              {credentialsExpandedProvider === 'codex' ? <CaretDown size={12} /> : <CaretRight size={12} />}
-            </span>
-          </button>
-          <AnimatePresence>
-            {credentialsExpandedProvider === 'codex' && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                css={css`overflow: hidden;`}
-              >
-                <div css={css`
-                  padding: ${theme.spacing[3]} ${theme.spacing[4]};
-                  border-top: 1px solid ${theme.colors.border.light};
-                  display: flex;
-                  flex-direction: column;
-                  gap: ${theme.spacing[3]};
-                `}>
-                  {/* CLI signed-in state */}
-                  {codexCliAvailable && (
-                    <div css={css`
-                      padding: ${theme.spacing[3]};
-                      border-radius: ${theme.borderRadius.sm};
-                      border: 1px solid ${theme.colors.success.main}33;
-                      background: ${theme.colors.success.main}08;
-                      display: flex;
-                      align-items: center;
-                      justify-content: space-between;
-                      gap: ${theme.spacing[3]};
-                    `}>
-                      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                        <CheckCircle size={18} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                        <div>
-                          <Typography.SmallBody as="div">Codex is signed in</Typography.SmallBody>
-                          <Typography.Caption as="div" color="hint">Codex CLI authenticated</Typography.Caption>
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleSignOut('codex')}
-                        loading={codexCliLogoutMutation.isPending}
-                        css={css`flex-shrink: 0;`}
-                      >
-                        <SignOut size={14} css={css`margin-right: ${theme.spacing[1]};`} />
-                        Sign out
-                      </Button>
-                    </div>
-                  )}
-
-                  {/* CLI installed, not authenticated */}
-                  {codexCliInstalled && !codexCliAvailable && (
-                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                      {codexCliAuthStatus === 'idle' && (
-                        <div css={css`
-                          display: flex;
-                          align-items: center;
-                          justify-content: space-between;
-                          padding: ${theme.spacing[3]};
-                          border: 1px solid ${theme.colors.border.light};
-                          border-radius: ${theme.borderRadius.sm};
-                          gap: ${theme.spacing[2]};
-                        `}>
-                          <div>
-                            <Typography.SmallBody as="div">ChatGPT Sign In</Typography.SmallBody>
-                            <Typography.Caption as="div" color="hint">Recommended. Opens a browser to sign in.</Typography.Caption>
-                          </div>
-                          <Button size="sm" onClick={handleCodexCliAuthStart} loading={codexCliInitiateMutation.isPending}>
-                            Sign in
-                          </Button>
-                        </div>
-                      )}
-
-                      {codexCliAuthStatus === 'pending' && (
-                        <div css={css`
-                          padding: ${theme.spacing[3]};
-                          border: 1px solid ${theme.colors.border.default};
-                          border-radius: ${theme.borderRadius.sm};
-                          display: flex;
-                          flex-direction: column;
-                          gap: ${theme.spacing[3]};
-                        `}>
-                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                            <CircleNotch
-                              size={14}
-                              css={css`
-                                color: ${theme.colors.text.hint};
-                                animation: spin 1s linear infinite;
-                                @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-                              `}
-                            />
-                            <Typography.SmallBody as="div" color="secondary">
-                              Complete sign-in in your browser...
-                            </Typography.SmallBody>
-                          </div>
-                          <Button variant="ghost" size="sm" onClick={handleCodexCliAuthCancel}>
-                            Cancel
-                          </Button>
-                        </div>
-                      )}
-
-                      {codexCliAuthStatus === 'success' && (
-                        <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
-                          display: flex; align-items: center; gap: ${theme.spacing[2]};
-                          padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                          background: ${theme.colors.success.main}0d;
-                          border-radius: ${theme.borderRadius.sm};
-                        `}>
-                          <CheckCircle size={16} weight="fill" /> Signed in with ChatGPT
-                        </Typography.SmallBody>
-                      )}
-
-                      {codexCliAuthStatus === 'error' && (
-                        <div css={css`
-                          display: flex; align-items: center; justify-content: space-between;
-                          padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                          background: ${theme.colors.error.main}0d;
-                          border-radius: ${theme.borderRadius.sm};
-                        `}>
-                          <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
-                            <XCircle size={16} weight="fill" /> {codexCliAuthMessage || 'Failed'}
-                          </Typography.SmallBody>
-                          <Button variant="ghost" size="sm" onClick={() => { setCodexCliAuthStatus('idle'); setCodexCliAuthSession(null); }}>
-                            Retry
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Codex device-code OAuth */}
-                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                    {codexOAuthStatus === 'idle' && (
-                      <div css={css`
-                        display: flex;
-                        align-items: center;
-                        justify-content: space-between;
-                        padding: ${theme.spacing[3]};
-                        border: 1px solid ${theme.colors.border.light};
-                        border-radius: ${theme.borderRadius.sm};
-                        gap: ${theme.spacing[2]};
-                      `}>
-                        <div>
-                          <Typography.SmallBody as="div">ChatGPT Device Code</Typography.SmallBody>
-                          <Typography.Caption as="div" color="hint">Use your ChatGPT subscription via device code</Typography.Caption>
-                        </div>
-                        <Button size="sm" variant="secondary" onClick={handleCodexOAuthStart} loading={codexInitiateMutation.isPending}>
-                          Sign in
-                        </Button>
-                      </div>
-                    )}
-
-                    {codexOAuthStatus === 'pending' && codexOAuthData && (
-                      <div css={css`
-                        padding: ${theme.spacing[3]};
-                        border: 1px solid ${theme.colors.border.default};
-                        border-radius: ${theme.borderRadius.sm};
-                        display: flex;
-                        flex-direction: column;
-                        gap: ${theme.spacing[3]};
-                      `}>
-                        <Typography.SmallBody as="div" color="secondary">
-                          Open{' '}
-                          <a
-                            href={codexOAuthData.verificationUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            css={css`color: ${theme.colors.text.primary}; font-weight: ${theme.typography.fontWeight.medium}; text-decoration: none; &:hover { text-decoration: underline; }`}
-                          >
-                            {codexOAuthData.verificationUrl} <ArrowSquareOut size={12} css={css`vertical-align: middle;`} />
-                          </a>{' '}
-                          and enter:
-                        </Typography.SmallBody>
-                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                          <Typography.Subtitle as="code" css={css`
-                            font-weight: ${theme.typography.fontWeight.semibold};
-                            letter-spacing: 0.12em;
-                            background: ${theme.colors.background.elevated};
-                            padding: ${theme.spacing[1.5]} ${theme.spacing[3]};
-                            border-radius: ${theme.borderRadius.sm};
-                            border: 1px solid ${theme.colors.border.default};
-                          `}>
-                            {codexOAuthData.userCode}
-                          </Typography.Subtitle>
-                          <button
-                            onClick={() => handleCopyCode(codexOAuthData.userCode)}
-                            css={css`
-                              display: flex; align-items: center; gap: ${theme.spacing[0.5]};
-                              font-size: ${theme.typography.fontSize.xs};
-                              color: ${codeCopied ? theme.colors.success.main : theme.colors.text.hint};
-                              cursor: pointer; padding: ${theme.spacing[1]};
-                              &:hover { color: ${codeCopied ? theme.colors.success.main : theme.colors.text.primary}; }
-                            `}
-                          >
-                            {codeCopied ? <CheckCircle size={12} /> : <Copy size={12} />}
-                            {codeCopied ? 'Copied' : 'Copy'}
-                          </button>
-                        </div>
-                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                          <CircleNotch
-                            size={14}
-                            css={css`
-                              color: ${theme.colors.text.hint};
-                              animation: spin 1s linear infinite;
-                              @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-                            `}
-                          />
-                          <Typography.Caption color="hint">Waiting...</Typography.Caption>
-                          {codexCountdown > 0 && (
-                            <Typography.Caption color="disabled" css={css`margin-left: auto;`}>
-                              {formatCountdown(codexCountdown)}
-                            </Typography.Caption>
-                          )}
-                        </div>
-                        <Button variant="ghost" size="sm" onClick={handleCodexOAuthCancel}>
-                          Cancel
-                        </Button>
-                      </div>
-                    )}
-
-                    {codexOAuthStatus === 'success' && (
-                      <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
-                        display: flex; align-items: center; gap: ${theme.spacing[2]};
-                        padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                        background: ${theme.colors.success.main}0d;
-                        border-radius: ${theme.borderRadius.sm};
-                      `}>
-                        <CheckCircle size={16} weight="fill" /> Signed in with ChatGPT
-                      </Typography.SmallBody>
-                    )}
-
-                    {(codexOAuthStatus === 'error' || codexOAuthStatus === 'expired') && (
-                      <div css={css`
-                        display: flex; align-items: center; justify-content: space-between;
-                        padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                        background: ${theme.colors.error.main}0d;
-                        border-radius: ${theme.borderRadius.sm};
-                      `}>
-                        <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
-                          <XCircle size={16} weight="fill" /> {codexOAuthMessage || 'Failed'}
-                        </Typography.SmallBody>
-                        <Button variant="ghost" size="sm" onClick={() => { setCodexOAuthStatus('idle'); setCodexOAuthSession(null); setCodexOAuthData(null); }}>
-                          Retry
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* API key input */}
-                  <div css={css`display: flex; gap: ${theme.spacing[2]}; align-items: flex-end;`}>
-                    <div css={css`flex: 1;`}>
-                      <Input
-                        label="API Key"
-                        type={showKey ? 'text' : 'password'}
-                        value={credentialInput}
-                        onChange={(e) => { setCredentialInput((e.target as HTMLInputElement).value); setValidateResult(null); }}
-                        placeholder={hasCredentials('codex') ? '********' : 'sk-proj-...'}
-                        rightElement={
-                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[1.5]};`}>
-                            <Tooltip content="Encrypted at rest and injected securely at runtime" position="top" align="right">
-                              <ShieldCheck size={16} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                            </Tooltip>
-                            <button
-                              onClick={() => setShowKey(!showKey)}
-                              css={css`
-                                cursor: pointer; padding: 0; color: ${theme.colors.text.hint};
-                                &:hover { color: ${theme.colors.text.primary}; }
-                              `}
-                            >
-                              {showKey ? <EyeSlash size={16} /> : <Eye size={16} />}
-                            </button>
-                          </div>
-                        }
-                      />
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() => handleValidateAndSave('codex')}
-                      loading={validateMutation.isPending || saveKeyMutation.isPending}
-                      disabled={!credentialInput.trim()}
-                    >
-                      Validate & Save
-                    </Button>
-                  </div>
-                  {validateResult && (
-                    <Typography.Caption as="div" color={validateResult.valid ? theme.colors.success.main : theme.colors.error.main}>
-                      {validateResult.message}
-                    </Typography.Caption>
-                  )}
-
-                  {hasCredentials('codex') && (
-                    <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemove('codex')}
-                        loading={removeKeyMutation.isPending}
-                      >
-                        <Trash size={14} css={css`margin-right: ${theme.spacing[1]};`} />
-                        Remove credentials
-                      </Button>
-                    </div>
-                  )}
-
-                  <Typography.Caption as="div" color="disabled" css={css`
-                    display: flex; align-items: center; gap: ${theme.spacing[1.5]};
-                  `}>
-                    <ShieldCheck size={12} css={css`flex-shrink: 0;`} />
-                    <span>Encrypted at rest. Never leaves your instance.</span>
-                  </Typography.Caption>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </div>
-    </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
 
 
 // ============================================================================
@@ -5914,7 +3784,6 @@ export function SettingsPage() {
     switch (activeSection) {
       case 'heartbeat': return <HeartbeatSection />;
       case 'cortex_provider': return <CortexProviderSection />;
-      case 'provider': return <ProviderSection />;
       case 'channels': return <ChannelsSection />;
       case 'plugins': return <PluginsSection />;
       case 'passwords': return <PasswordsSection />;

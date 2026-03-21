@@ -21,6 +21,8 @@ import {
   Gear,
   MagnifyingGlass,
   ArrowsClockwise,
+  Lightbulb,
+  Eye,
 } from '@phosphor-icons/react';
 import { trpc } from '../../utils/trpc';
 import { useHeartbeatStore } from '../../store/heartbeat-store';
@@ -88,7 +90,7 @@ interface AgentTimelineProps {
 // Event category mapping
 // ============================================================================
 
-type EventCategory = 'session' | 'input' | 'thinking' | 'tool' | 'response' | 'error' | 'complete' | 'execute' | 'compaction';
+type EventCategory = 'session' | 'input' | 'thinking' | 'tool' | 'response' | 'error' | 'complete' | 'execute' | 'compaction' | 'phase';
 
 function getEventCategory(eventType: string): EventCategory {
   switch (eventType) {
@@ -102,6 +104,13 @@ function getEventCategory(eventType: string): EventCategory {
     case 'thinking_start':
     case 'thinking_end':
       return 'thinking';
+    case 'thought_start':
+    case 'thought_end':
+    case 'agentic_start':
+    case 'agentic_end':
+    case 'reflect_start':
+    case 'reflect_end':
+      return 'phase';
     case 'tool_call_start':
     case 'tool_call_end':
     case 'tool_error':
@@ -150,6 +159,8 @@ function getCategoryColor(category: EventCategory, theme: ReturnType<typeof useT
       return theme.colors.accent;
     case 'execute':
       return isLight ? '#2D8A6E' : '#4ECBA0';
+    case 'phase':
+      return isLight ? '#7A6B94' : '#B8A9D4';
     case 'compaction':
       return isLight ? '#7A6B94' : '#9B8CB5';
   }
@@ -168,6 +179,12 @@ function getEventIcon(eventType: string) {
     case 'message_injected': return ChatText;
     case 'thinking_start':
     case 'thinking_end':  return Brain;
+    case 'thought_start':
+    case 'thought_end':   return Lightbulb;
+    case 'agentic_start':
+    case 'agentic_end':   return Lightning;
+    case 'reflect_start':
+    case 'reflect_end':   return Eye;
     case 'tool_call_start':
     case 'tool_call_end': return Wrench;
     case 'tool_error':    return WarningCircle;
@@ -203,6 +220,12 @@ function getEventLabel(eventType: string, data?: Record<string, unknown>): strin
     case 'message_injected': return 'Message Injected';
     case 'thinking_start': return 'Thinking...';
     case 'thinking_end':   return 'Thinking Complete';
+    case 'thought_start':  return 'Thought Phase';
+    case 'thought_end':    return 'Thought Complete';
+    case 'agentic_start':  return 'Agentic Loop';
+    case 'agentic_end':    return 'Agentic Loop Complete';
+    case 'reflect_start':  return 'Reflect Phase';
+    case 'reflect_end':    return 'Reflect Complete';
     case 'tool_call_start':return 'Tool Call';
     case 'tool_call_end':  return 'Tool Done';
     case 'tool_error':     return 'Tool Error';
@@ -390,6 +413,32 @@ function getPreviewContent(event: TimelineEvent): string {
       return '';
     case 'thinking_end':
       return truncate(str(d['content']), 80);
+    case 'thought_start':
+      return '';
+    case 'thought_end': {
+      if (d['failed']) return 'failed';
+      const content = str(d['content']);
+      return content ? truncate(content, 80) : '';
+    }
+    case 'agentic_start':
+      return [d['provider'], d['model']].filter(Boolean).join(' / ');
+    case 'agentic_end': {
+      const reason = str(d['reason']) || 'completed';
+      return reason;
+    }
+    case 'reflect_start':
+      return '';
+    case 'reflect_end': {
+      if (d['failed']) return 'failed';
+      const parts: string[] = [];
+      const emoCount = d['emotionDeltaCount'] as number ?? 0;
+      const decCount = d['decisionCount'] as number ?? 0;
+      const memCount = d['memoryCandidateCount'] as number ?? 0;
+      if (emoCount > 0) parts.push(`${emoCount} emotion${emoCount > 1 ? 's' : ''}`);
+      if (decCount > 0) parts.push(`${decCount} decision${decCount > 1 ? 's' : ''}`);
+      if (memCount > 0) parts.push(`${memCount} memor${memCount > 1 ? 'ies' : 'y'}`);
+      return parts.length > 0 ? parts.join(', ') : 'no changes';
+    }
     case 'tool_call_start': {
       const toolName = str(d['toolName']);
       const input = (d['toolInput'] ?? d['input']) as Record<string, unknown> | undefined;
@@ -600,6 +649,7 @@ function getDurationBadgeColor(ms: number, theme: Theme) {
 function shouldShowDuration(eventType: string): boolean {
   return [
     'thinking_end', 'tool_call_end', 'session_end', 'tick_output',
+    'thought_end', 'agentic_end', 'reflect_end',
     'execute_reply_sent', 'execute_transaction_complete', 'execute_decisions_complete',
     'execute_memory_complete', 'execute_complete',
   ].includes(eventType);
@@ -611,6 +661,9 @@ function computeEventDuration(event: TimelineEvent, allEvents: TimelineEvent[]):
     tool_call_end: 'tool_call_start',
     session_end: 'session_start',
     response_end: 'response_start',
+    thought_end: 'thought_start',
+    agentic_end: 'agentic_start',
+    reflect_end: 'reflect_start',
   };
 
   if (event.eventType === 'tick_output') {
@@ -656,7 +709,7 @@ function computeEventDuration(event: TimelineEvent, allEvents: TimelineEvent[]):
 // ============================================================================
 
 function hasExpandableDetail(eventType: string): boolean {
-  return !['thinking_start', 'response_start'].includes(eventType);
+  return !['thinking_start', 'response_start', 'thought_start', 'agentic_start', 'reflect_start'].includes(eventType);
 }
 
 // ============================================================================

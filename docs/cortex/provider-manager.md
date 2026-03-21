@@ -492,28 +492,18 @@ interface CortexAgentConfig {
 Internally, CortexAgent unwraps the `CortexModel` to get the pi-ai `Model` and passes `getApiKey` through to pi-agent-core:
 
 ```typescript
-class CortexAgent {
-  constructor(config: CortexAgentConfig) {
-    const piModel = unwrapModel(config.model);
-
-    this.agent = new Agent({
-      initialState: {
-        model: piModel,
-        systemPrompt: '',
-      },
-      getApiKey: config.getApiKey,
-    });
-  }
+const agent = await CortexAgent.create({
+  model,
+  getApiKey: (provider) => credService.resolveApiKey(provider),
+  initialBasePrompt: 'You are the application agent.',
+});
 
   /**
    * Switch to a different model at runtime.
    * Conversation history is preserved. The getApiKey callback
    * handles the new provider automatically.
    */
-  setModel(model: CortexModel): void {
-    this.agent.setModel(unwrapModel(model));
-  }
-}
+agent.setModel(model);
 ```
 
 ## Package Structure

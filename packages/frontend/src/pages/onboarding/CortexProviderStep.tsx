@@ -1,12 +1,11 @@
 /** @jsxImportSource @emotion/react */
-import { css, useTheme } from '@emotion/react';
+import { css, keyframes, useTheme } from '@emotion/react';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   CheckCircle,
   XCircle,
-  CircleNotch,
   Copy,
   ArrowSquareOut,
   Eye,
@@ -15,7 +14,7 @@ import {
   ShieldCheck,
   SignOut,
 } from '@phosphor-icons/react';
-import { Button, Typography, Tooltip, Select } from '../../components/ui';
+import { Button, Typography, Tooltip, Select, Slider } from '../../components/ui';
 import { useOnboardingStore } from '../../store';
 import { OnboardingNav } from './OnboardingNav';
 import { trpc } from '../../utils/trpc';
@@ -45,7 +44,7 @@ const OAUTH_CARDS: ProviderCardInfo[] = [
 export function CortexProviderStep() {
   const theme = useTheme();
   const navigate = useNavigate();
-  const { markStepComplete, setCurrentStep } = useOnboardingStore();
+  const { markStepComplete, setCurrentStep, setCortexProvider } = useOnboardingStore();
 
   // Status query
   const { data: statusData } = trpc.cortexProvider.getStatus.useQuery();
@@ -74,9 +73,22 @@ export function CortexProviderStep() {
   const [customApiKey, setCustomApiKey] = useState('');
   const [customValidation, setCustomValidation] = useState<'idle' | 'validating' | 'success' | 'error'>('idle');
 
+  // OAuth prompt state (for manual paste flows in Docker/headless)
+  const [oauthPromptMessage, setOauthPromptMessage] = useState<string | null>(null);
+  const [oauthPromptValue, setOauthPromptValue] = useState('');
+
   // Connected provider info
   const [connectedProvider, setConnectedProvider] = useState<string | null>(null);
   const [connectedMethod, setConnectedMethod] = useState<string | null>(null);
+  const [connectedDisplayName, setConnectedDisplayName] = useState<string | null>(null);
+  const [connectedRefreshable, setConnectedRefreshable] = useState(false);
+
+  // Model selection (shown after successful auth)
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+
+  // Context window limit (advanced)
+  const [advancedExpanded, setAdvancedExpanded] = useState(false);
+  const [selectedContextLimit, setSelectedContextLimit] = useState<number | null | 'unset'>('unset');
 
   // Mutations
   const initiateOAuthMutation = trpc.cortexProvider.initiateOAuth.useMutation();
@@ -86,7 +98,9 @@ export function CortexProviderStep() {
   const saveCustomMutation = trpc.cortexProvider.saveCustomEndpoint.useMutation();
   const testCustomMutation = trpc.cortexProvider.testCustomEndpoint.useMutation();
   const setActiveProviderMutation = trpc.cortexProvider.setActiveProvider.useMutation();
+  const oauthRespondMutation = trpc.cortexProvider.oauthRespond.useMutation();
   const removeCredentialMutation = trpc.cortexProvider.removeCredential.useMutation();
+  const setContextLimitMutation = trpc.cortexProvider.setContextWindowLimit.useMutation();
 
   const utils = trpc.useUtils();
 
@@ -99,16 +113,24 @@ export function CortexProviderStep() {
       if (event.type === 'auth_url') {
         setOauthAuthUrl(event.url);
         if (event.deviceCode) setOauthDeviceCode(event.deviceCode);
+      } else if (event.type === 'prompt') {
+        // OAuth flow needs user input (e.g., paste redirect URL in Docker)
+        setOauthPromptMessage(event.message);
+        setOauthPromptValue('');
       } else if (event.type === 'success') {
         setOauthState('success');
         setConnectedProvider(oauthProvider);
         setConnectedMethod('oauth');
+        setConnectedDisplayName(event.meta?.displayName ?? null);
+        setConnectedRefreshable(event.meta?.refreshable ?? false);
         setOauthAuthUrl(null);
         setOauthDeviceCode(null);
+        setOauthPromptMessage(null);
         utils.cortexProvider.getStatus.invalidate();
       } else if (event.type === 'error') {
         setOauthState('error');
         setOauthError(event.message);
+        setOauthPromptMessage(null);
       }
     },
   });
@@ -251,6 +273,13 @@ export function CortexProviderStep() {
     );
   }, [customBaseUrl, customModelId, customApiKey, testCustomMutation, saveCustomMutation, utils.cortexProvider.getStatus]);
 
+  const handleOAuthPromptSubmit = useCallback(() => {
+    if (!oauthPromptValue.trim()) return;
+    oauthRespondMutation.mutate({ response: oauthPromptValue.trim() });
+    setOauthPromptMessage(null);
+    setOauthPromptValue('');
+  }, [oauthPromptValue, oauthRespondMutation]);
+
   const handleCopyCode = useCallback(async (code: string) => {
     try {
       await navigator.clipboard.writeText(code);
@@ -261,7 +290,42 @@ export function CortexProviderStep() {
     }
   }, []);
 
-  const handleContinue = useCallback(() => {
+  const handleContinue = useCallback(async () => {
+    // Ensure active provider is registered. The OAuth/API key save flow
+    // already sets the curated default model. Only call setActiveProvider
+    // for env var detection where no save mutation ran.
+    const provider = connectedProvider ?? statusData?.provider;
+    if (provider && !statusData?.model) {
+      try {
+        // Use the selected model from the picker, or fall back to curated default
+        const model = selectedModel ?? statusData?.model;
+        if (model) {
+          await setActiveProviderMutation.mutateAsync({ provider, model });
+          setCortexProvider(provider, model);
+        }
+      } catch {
+        // If setActiveProvider fails (already set by a save mutation), continue anyway
+      }
+    }
+    // If a model was explicitly selected via the picker, apply it
+    if (selectedModel && connectedProvider) {
+      try {
+        await setActiveProviderMutation.mutateAsync({ provider: connectedProvider, model: selectedModel });
+        setCortexProvider(connectedProvider, selectedModel);
+      } catch {
+        // Already set, continue
+      }
+    }
+
+    // Save context window limit if the user explicitly changed it
+    if (selectedContextLimit !== 'unset') {
+      try {
+        await setContextLimitMutation.mutateAsync({ limit: selectedContextLimit });
+      } catch {
+        // Non-critical, continue anyway
+      }
+    }
+
     markStepComplete('agent_provider');
 
     // If persona is already finalized (restored from save), skip to main app
@@ -273,11 +337,30 @@ export function CortexProviderStep() {
 
     setCurrentStep('identity');
     navigate('/onboarding/identity');
-  }, [markStepComplete, setCurrentStep, navigate, persona?.isFinalized]);
+  }, [markStepComplete, setCurrentStep, navigate, persona?.isFinalized, connectedProvider, statusData?.provider, statusData?.model, setActiveProviderMutation, setCortexProvider, selectedModel, selectedContextLimit, setContextLimitMutation]);
 
   const handleBack = () => navigate('/onboarding/welcome');
 
   // ── Render ──
+
+  // Fetch model list for the connected provider
+  const { data: connectedModels } = trpc.cortexProvider.listModels.useQuery(
+    { provider: connectedProvider! },
+    { enabled: !!connectedProvider }
+  );
+
+  // Initialize model selection from the backend's curated default
+  useEffect(() => {
+    if (connectedModels && connectedModels.length > 0 && !selectedModel) {
+      // Use the model the backend already set (curated default), or first in list
+      const activeModel = statusData?.model;
+      if (activeModel && connectedModels.some(m => m.id === activeModel)) {
+        setSelectedModel(activeModel);
+      } else {
+        setSelectedModel(connectedModels[0]?.id ?? null);
+      }
+    }
+  }, [connectedModels, selectedModel, statusData?.model]);
 
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
@@ -314,18 +397,48 @@ export function CortexProviderStep() {
             >
               {/* Connected state */}
               {isConnected && (
-                <div css={css`display: flex; align-items: center; justify-content: space-between;`}>
-                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-                    <CheckCircle size={20} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                    <div>
-                      <Typography.SmallBodyAlt>{card.name}</Typography.SmallBodyAlt>
-                      <Typography.Caption color="hint">Connected</Typography.Caption>
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+                  <div css={css`display: flex; align-items: center; justify-content: space-between;`}>
+                    <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+                      <CheckCircle size={20} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
+                      <div>
+                        <Typography.SmallBodyAlt>{card.name}</Typography.SmallBodyAlt>
+                        {connectedDisplayName ? (
+                          <Typography.Caption color="hint">
+                            {connectedDisplayName}{connectedRefreshable ? ' · Auto-refreshing' : ''}
+                          </Typography.Caption>
+                        ) : (
+                          <Typography.Caption color="hint">Connected</Typography.Caption>
+                        )}
+                      </div>
                     </div>
+                    <Button variant="ghost" size="sm" onClick={() => handleSignOut(card.id)}>
+                      <SignOut size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+                      Sign out
+                    </Button>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => handleSignOut(card.id)}>
-                    <SignOut size={14} css={css`margin-right: ${theme.spacing[1]};`} />
-                    Sign out
-                  </Button>
+
+                  {/* Model picker (inline with the connected card) */}
+                  {connectedModels && connectedModels.length > 0 && (
+                    <div css={css`
+                      display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};
+                      padding-top: ${theme.spacing[2]};
+                      border-top: 1px solid ${theme.colors.border.default};
+                    `}>
+                      <Select
+                        label="Model"
+                        value={selectedModel ?? ''}
+                        onChange={(value) => setSelectedModel(value)}
+                        options={connectedModels.map((m) => ({
+                          value: m.id,
+                          label: m.name || m.id,
+                        }))}
+                      />
+                      <Typography.Caption color="hint">
+                        You can change this later in Settings.
+                      </Typography.Caption>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -391,12 +504,39 @@ export function CortexProviderStep() {
                     </Typography.Caption>
                   )}
 
+                  {/* Prompt input for manual paste flows (Docker/headless) */}
+                  {oauthPromptMessage && (
+                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                      <Typography.Caption color="secondary">{oauthPromptMessage}</Typography.Caption>
+                      <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
+                        <input
+                          type="text"
+                          value={oauthPromptValue}
+                          onChange={(e) => setOauthPromptValue(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleOAuthPromptSubmit(); }}
+                          placeholder="Paste here..."
+                          css={css`
+                            flex: 1;
+                            padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                            background: ${theme.colors.background.paper};
+                            border: 1px solid ${theme.colors.border.default};
+                            border-radius: ${theme.borderRadius.default};
+                            color: ${theme.colors.text.primary};
+                            font-size: ${theme.typography.fontSize.sm};
+                            outline: none;
+                            &:focus { border-color: ${theme.colors.border.focus}; }
+                            &::placeholder { color: ${theme.colors.text.hint}; }
+                          `}
+                        />
+                        <Button variant="primary" size="sm" onClick={handleOAuthPromptSubmit} disabled={!oauthPromptValue.trim()}>
+                          Submit
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
                   <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                    <CircleNotch size={14} css={css`
-                      color: ${theme.colors.text.hint};
-                      animation: spin 1s linear infinite;
-                      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-                    `} />
+                    <BreathingDots color={theme.colors.text.hint} />
                     <Typography.Caption color="secondary">Waiting for authorization...</Typography.Caption>
                   </div>
 
@@ -466,9 +606,9 @@ export function CortexProviderStep() {
         <button
           onClick={() => setApiKeyExpanded(!apiKeyExpanded)}
           css={css`
-            display: flex; align-items: center; gap: ${theme.spacing[1]};
+            display: flex; align-items: flex-start; gap: ${theme.spacing[1.5]};
             padding: 0; background: none; border: none; cursor: pointer;
-            font-size: ${theme.typography.fontSize.sm}; font-family: inherit;
+            text-align: left; font-family: inherit;
             color: ${theme.colors.text.hint};
             &:hover { color: ${theme.colors.text.secondary}; }
           `}
@@ -476,8 +616,17 @@ export function CortexProviderStep() {
           <CaretRight size={12} css={css`
             transition: transform 150ms ease;
             transform: rotate(${apiKeyExpanded ? '90deg' : '0deg'});
+            margin-top: 3px;
+            flex-shrink: 0;
           `} />
-          Use an API key instead
+          <div>
+            <span css={css`font-size: ${theme.typography.fontSize.sm}; display: block;`}>
+              Use an API key instead
+            </span>
+            <span css={css`font-size: ${theme.typography.fontSize.xs}; opacity: 0.7; display: block; margin-top: 1px;`}>
+              OpenAI, Mistral, Groq, xAI, and 10+ more providers
+            </span>
+          </div>
         </button>
 
         <AnimatePresence>
@@ -619,9 +768,9 @@ export function CortexProviderStep() {
         <button
           onClick={() => setCustomExpanded(!customExpanded)}
           css={css`
-            display: flex; align-items: center; gap: ${theme.spacing[1]};
+            display: flex; align-items: flex-start; gap: ${theme.spacing[1.5]};
             padding: 0; background: none; border: none; cursor: pointer;
-            font-size: ${theme.typography.fontSize.sm}; font-family: inherit;
+            text-align: left; font-family: inherit;
             color: ${theme.colors.text.hint};
             &:hover { color: ${theme.colors.text.secondary}; }
           `}
@@ -629,8 +778,17 @@ export function CortexProviderStep() {
           <CaretRight size={12} css={css`
             transition: transform 150ms ease;
             transform: rotate(${customExpanded ? '90deg' : '0deg'});
+            margin-top: 3px;
+            flex-shrink: 0;
           `} />
-          Configure a custom endpoint
+          <div>
+            <span css={css`font-size: ${theme.typography.fontSize.sm}; display: block;`}>
+              Configure a custom endpoint
+            </span>
+            <span css={css`font-size: ${theme.typography.fontSize.xs}; opacity: 0.7; display: block; margin-top: 1px;`}>
+              Self-hosted models like Ollama, vLLM, or LM Studio
+            </span>
+          </div>
         </button>
 
         <AnimatePresence>
@@ -751,6 +909,96 @@ export function CortexProviderStep() {
         </AnimatePresence>
       </div>
 
+      {/* Advanced: Context window limit */}
+      {connectedProvider && connectedModels && connectedModels.length > 0 && (() => {
+        const activeModel = connectedModels.find(m => m.id === selectedModel);
+        const modelMax = activeModel?.contextWindow ?? 200_000;
+        const MIN_CW = 16_384;
+        const DEFAULT_CW_LIMIT = 100_000;
+        const defaultLimit = Math.min(DEFAULT_CW_LIMIT, modelMax);
+        const rawLimit = selectedContextLimit === 'unset' ? defaultLimit : selectedContextLimit;
+        const sliderVal = Math.max(MIN_CW, Math.min(rawLimit ?? defaultLimit, modelMax));
+        const pct = Math.round((sliderVal / modelMax) * 100);
+
+        const formatTokens = (t: number) => {
+          if (t >= 1_000_000) return `${(t / 1_000_000).toFixed(1)}M`;
+          return `${Math.round(t / 1000)}K`;
+        };
+
+        return (
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+            <button
+              onClick={() => setAdvancedExpanded(!advancedExpanded)}
+              css={css`
+                display: flex; align-items: center; gap: ${theme.spacing[1.5]};
+                padding: 0; background: none; border: none; cursor: pointer;
+                text-align: left; font-family: inherit;
+                color: ${theme.colors.text.hint};
+                &:hover { color: ${theme.colors.text.secondary}; }
+              `}
+            >
+              <CaretRight size={12} css={css`
+                transition: transform 150ms ease;
+                transform: rotate(${advancedExpanded ? '90deg' : '0deg'});
+                flex-shrink: 0;
+              `} />
+              <span css={css`font-size: ${theme.typography.fontSize.sm};`}>
+                Advanced
+              </span>
+            </button>
+
+            <AnimatePresence>
+              {advancedExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  css={css`overflow: hidden;`}
+                >
+                  <div css={css`
+                    display: flex; flex-direction: column; gap: ${theme.spacing[3]};
+                    padding: ${theme.spacing[4]};
+                    border-radius: ${theme.borderRadius.md};
+                    border: 1px solid ${theme.colors.border.default};
+                    background: ${theme.colors.background.elevated};
+                  `}>
+                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                      <Typography.SmallBodyAlt>Context Usage</Typography.SmallBodyAlt>
+                      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[4]};`}>
+                        <div css={css`flex: 1;`}>
+                          <Slider
+                            value={sliderVal}
+                            onChange={(tokens) => {
+                              setSelectedContextLimit(tokens);
+                            }}
+                            min={MIN_CW}
+                            max={modelMax}
+                            step={1000}
+                            leftLabel={formatTokens(MIN_CW)}
+                            rightLabel={formatTokens(modelMax)}
+                            showNeutral={false}
+                          />
+                        </div>
+                        <Typography.SmallBodyAlt as="span" css={css`
+                          white-space: nowrap;
+                          min-width: 100px;
+                        `}>
+                          {`${pct}% · ${formatTokens(sliderVal)}`}
+                        </Typography.SmallBodyAlt>
+                      </div>
+                      <Typography.Caption color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+                        Limits how much of the model's context window is used. Lower values reduce token costs. Default is {formatTokens(defaultLimit)}.
+                      </Typography.Caption>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        );
+      })()}
+
       {/* Navigation */}
       <OnboardingNav
         onBack={handleBack}
@@ -759,5 +1007,33 @@ export function CortexProviderStep() {
         continueTooltip={!canContinue ? 'Connect an AI provider to continue' : undefined}
       />
     </div>
+  );
+}
+
+// ============================================================================
+// BreathingDots — organic waiting indicator (brand: breathing over blinking)
+// ============================================================================
+
+function BreathingDots({ color }: { color: string }) {
+  const breathe = keyframes`
+    0%, 100% { opacity: 0.3; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1); }
+  `;
+  return (
+    <span css={css`display: inline-flex; gap: 4px; align-items: center;`}>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          css={css`
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: ${color};
+            animation: ${breathe} 1.8s ease-in-out infinite;
+            animation-delay: ${i * 0.25}s;
+          `}
+        />
+      ))}
+    </span>
   );
 }

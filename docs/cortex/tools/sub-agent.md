@@ -102,7 +102,9 @@ Foreground sub-agents can be implicitly cancelled if the parent's own loop is ab
 Multiple background sub-agents can run simultaneously. The concurrency limit is configurable on the `CortexAgent`:
 
 ```typescript
-const agent = new CortexAgent({
+const agent = await CortexAgent.create({
+  model,
+  workingDirectory,
   maxConcurrentSubAgents: 4,  // default
   // ...
 });

@@ -538,10 +538,10 @@ function createCortexAgent(settings: SystemSettings): CortexAgent {
   }
 
   // Create agent with getApiKey callback
-  const agent = new CortexAgent({
+  const agent = await CortexAgent.create({
     model,
     getApiKey: (provider) => credService.resolveApiKey(provider),
-    // ... tools, contextManager, budgetGuards, etc.
+    // ... tools, budgetGuards, etc.
   });
 
   // Listen for provider changes from settings UI
