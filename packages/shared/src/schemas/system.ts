@@ -10,7 +10,6 @@ import {
   timestampSchema,
   channelTypeSchema,
   permissionTierSchema,
-  agentProviderSchema,
 } from './common.js';
 
 // ============================================================================
@@ -77,14 +76,11 @@ export const contactChannelSchema = z.object({
 export const systemSettingsSchema = z.object({
   heartbeatIntervalMs: z.number().int().positive().default(300000),
   sessionWarmthMs: z.number().int().positive().default(900000),
-  sessionContextBudget: z.number().positive().max(1).default(0.7),
   thoughtRetentionDays: z.number().int().positive().default(14),
   experienceRetentionDays: z.number().int().positive().default(14),
   emotionHistoryRetentionDays: z.number().int().positive().default(14),
   agentLogRetentionDays: z.number().int().positive().default(7),
   taskRunRetentionDays: z.number().int().positive().default(7),
-  defaultAgentProvider: agentProviderSchema.default('claude'),
-  defaultModel: z.string().nullable().optional(),
   goalApprovalMode: z
     .enum(['always_approve', 'auto_approve', 'full_autonomy'])
     .default('always_approve'),
@@ -93,7 +89,6 @@ export const systemSettingsSchema = z.object({
   sleepStartHour: z.number().int().min(0).max(23).default(22),
   sleepEndHour: z.number().int().min(0).max(23).default(7),
   sleepTickIntervalMs: z.number().int().positive().default(1800000),
-  reasoningEffort: z.enum(['low', 'medium', 'high', 'max']).nullable().default(null),
   memoryPoolMaxSize: z.number().int().min(100).default(40000),
   telemetryEnabled: z.boolean().default(true),
   // Autosave system
@@ -111,6 +106,7 @@ export const systemSettingsSchema = z.object({
   cortexProvider: z.string().nullable().default(null),
   cortexModel: z.string().nullable().default(null),
   cortexThinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']).default('off'),
+  cortexContextWindowLimit: z.number().int().min(16_384).nullable().default(null),
   utilityModel: z.string().default('default'),
 });
 

@@ -149,6 +149,7 @@ export interface AnimusEventMap {
   'cortex:provider-changed': { provider: string; model: string };
   'cortex:thinking-level-changed': { level: string };
   'cortex:provider-removed': Record<string, never>;
+  'cortex:context-limit-changed': { limit: number | null };
   'cortex:auth-failed': { provider?: string; message: string };
 
   // System

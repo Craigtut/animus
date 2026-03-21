@@ -45,9 +45,18 @@ export const agentEventTypeSchema = z.enum([
   'response_end',
   'turn_end',
   'error',
+  'compaction',
+  'compaction_error',
   'tick_input',
   'tick_output',
   'message_injected',
+  // Cortex pipeline phase events
+  'thought_start',
+  'thought_end',
+  'agentic_start',
+  'agentic_end',
+  'reflect_start',
+  'reflect_end',
   // Execute phase observability events
   'execute_start',
   'execute_reply_sent',

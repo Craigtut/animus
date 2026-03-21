@@ -245,6 +245,20 @@ export type AgentEvent = z.infer<typeof agentEventSchema>;
 export type AgentUsage = z.infer<typeof agentUsageSchema>;
 
 // ============================================================================
+// Phase Usage (per-phase cache visibility for Context Inspector)
+// ============================================================================
+
+export interface PhaseUsage {
+  phase: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
+  model: string | null;
+}
+
+// ============================================================================
 // Usage & Budget
 // ============================================================================
 
@@ -428,6 +442,47 @@ export interface ContextSection {
   reason?: string;
   category: ContextSectionCategory;
   tokenCount: number;
+}
+
+// ============================================================================
+// Cortex Context Snapshot (context inspector, shared with frontend)
+// ============================================================================
+
+/** A single named section with content and token estimate */
+export interface ContextSnapshotSection {
+  name: string;
+  content: string;
+  tokenCount: number;
+  category?: string;
+}
+
+/** Snapshot of all context sent to the LLM for a given tick */
+export interface CortexContextSnapshot {
+  /** Consumer/Animus system prompt sections (persona, emotions, etc.) */
+  consumerSystemPrompt: ContextSnapshotSection[];
+  /** Cortex operational system prompt sections (rules, tools, environment) */
+  cortexSystemPrompt: ContextSnapshotSection[];
+  /** Named context slots (dynamic, currently 9) */
+  slots: ContextSnapshotSection[];
+  /** Conversation history metadata (not full content) */
+  conversationHistory: {
+    messageCount: number;
+    totalTokens: number;
+    hasSummary: boolean;
+    summaryTokens: number | null;
+    oldestMessageTimestamp: string | null;
+  };
+  /** Ephemeral per-tick context (full content) */
+  ephemeral: ContextSnapshotSection[];
+  /** The trigger/user message for this tick */
+  triggerMessage: {
+    content: string;
+    tokenCount: number;
+  };
+  /** Model context window size for budget visualization */
+  contextWindow: number;
+  /** Total tokens across all sections */
+  totalTokens: number;
 }
 
 // ============================================================================
