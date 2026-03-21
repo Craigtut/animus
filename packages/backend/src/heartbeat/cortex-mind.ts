@@ -20,13 +20,26 @@ import {
   ProviderManager,
   zodToTypebox,
   unwrapModel,
+  ReadRegistry,
+  CwdTracker,
+  createReadTool,
+  createWriteTool,
+  createEditTool,
+  createGlobTool,
+  createGrepTool,
+  createBashTool,
+  createTaskOutputTool,
+  createWebFetchTool,
   type AgentTextOutput,
+  type CortexEvent,
   type ClassifiedError,
   type CompactionTarget,
   type CompactionResult,
   type CortexModel,
   type McpStdioConfig,
   type McpHttpConfig,
+  resolveCacheRetention,
+  type PiModel,
 } from '@animus-labs/cortex';
 
 import { getSystemDb, getHeartbeatDb, getContactsDb, getMessagesDb, getMemoryDb, getPersonaDb, getAgentLogsDb } from '../db/index.js';
@@ -105,7 +118,7 @@ export interface MutableMindToolContext {
  */
 export interface MutableCompactionContext {
   gathered: GatherResult | null;
-  agentManager: import('@animus-labs/agents').AgentManager | null;
+  completeFn: ((context: { systemPrompt: string; messages: Array<{ role: string; content: string }> }) => Promise<string>) | null;
   compiledPersona: string | null;
 }
 
@@ -117,7 +130,7 @@ export function createCortexMindState(): CortexMindState {
     toolContext: { current: null },
     initialized: false,
     conversationHistoryCheckpoint: null,
-    compactionContext: { gathered: null, agentManager: null, compiledPersona: null },
+    compactionContext: { gathered: null, completeFn: null, compiledPersona: null },
   };
 }
 
@@ -139,10 +152,16 @@ export function buildMindToolContext(
   let conversationId = '';
   if (gathered.contact && gathered.trigger.channel) {
     const channel = (gathered.trigger.channel || 'web') as import('@animus-labs/shared').ChannelType;
-    const conv = messageStore.getConversationByContactAndChannel(
+    let conv = messageStore.getConversationByContactAndChannel(
       msgDb, gathered.contact.id, channel
     );
-    if (conv) conversationId = conv.id;
+    if (!conv) {
+      conv = messageStore.createConversation(msgDb, {
+        contactId: gathered.contact.id,
+        channel,
+      });
+    }
+    conversationId = conv.id;
   }
 
   const cDb = getContactsDb();
@@ -264,12 +283,21 @@ function buildPermissionResolver(
 /**
  * AgentTool interface from pi-agent-core (minimal contract).
  * Defined inline to avoid hard dependency on pi-agent-core types.
+ *
+ * IMPORTANT: pi-agent-core calls execute(toolCallId, params, signal?, onUpdate?)
+ * where params is the validated arguments object, NOT the first parameter.
  */
+interface AgentToolResult {
+  content: Array<{ type: string; text: string }>;
+  details?: unknown;
+}
+
 interface AgentTool {
   name: string;
+  label?: string;
   description: string;
   parameters: unknown; // TypeBox TSchema
-  execute: (args: unknown) => Promise<unknown>;
+  execute: (toolCallId: string, params: unknown, signal?: AbortSignal) => Promise<AgentToolResult>;
 }
 
 /**
@@ -309,15 +337,18 @@ async function buildAnimusTools(
 
     const tool: AgentTool = {
       name: toolName,
+      label: toolName,
       description: def.description,
       parameters,
-      execute: async (args: unknown): Promise<unknown> => {
+      // pi-agent-core calls: execute(toolCallId, params, signal?, onUpdate?)
+      // params is the validated arguments object (2nd parameter)
+      execute: async (_toolCallId: string, params: unknown): Promise<AgentToolResult> => {
         const ctx = toolContextRef.current;
         if (!ctx) {
-          return { content: [{ type: 'text', text: 'No tool context available. This is a system error.' }], isError: true };
+          throw new Error('No tool context available. This is a system error.');
         }
 
-        const result: ToolResult = await executeTool(toolName, args, ctx);
+        const result: ToolResult = await executeTool(toolName, params, ctx);
 
         // Convert ToolResult to the format pi-agent-core expects
         if (result.isError) {
@@ -328,10 +359,12 @@ async function buildAnimusTools(
           throw new Error(errorText || 'Tool execution failed');
         }
 
-        return result.content
-          .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-          .map(c => c.text)
-          .join('\n');
+        return {
+          content: result.content
+            .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+            .map(c => ({ type: 'text' as const, text: c.text })),
+          details: {},
+        };
       },
     };
 
@@ -354,29 +387,31 @@ async function buildAnimusTools(
  */
 export async function createCortexMind(
   state: CortexMindState,
-): Promise<CortexAgent> {
+): Promise<CortexAgent | null> {
   // If already created, return existing
   if (state.agent) {
     return state.agent;
   }
 
-  // Initialize ProviderManager
-  state.providerManager = new ProviderManager();
+  // Initialize ProviderManager (needed even before agent creation for model listing)
+  if (!state.providerManager) {
+    state.providerManager = new ProviderManager();
+  }
 
   // Read provider/model settings from system_settings
   const sysDb = getSystemDb();
   const settings = systemStore.getSystemSettings(sysDb);
 
   // Determine provider and model from cortex-specific settings.
-  // If no cortex provider is configured, skip cortex initialization entirely.
-  // The user must configure a provider via onboarding or settings first.
+  // If no cortex provider is configured, return null. The agent will be
+  // created later when the user configures a provider via onboarding or settings.
   const settingsAny = settings as Record<string, unknown>;
   const provider = settingsAny['cortexProvider'] as string | undefined | null;
   const modelId = settingsAny['cortexModel'] as string | undefined | null;
 
   if (!provider || !modelId) {
-    log.info('No cortex provider configured. Skipping CortexAgent initialization (legacy mind will be used).');
-    return state;
+    log.info('No cortex provider configured. CortexAgent will be created when a provider is set up.');
+    return null;
   }
 
   log.info(`Creating CortexAgent: provider=${provider}, model=${modelId}`);
@@ -395,8 +430,36 @@ export async function createCortexMind(
     return credService.resolveApiKey(providerName);
   };
 
-  // Build tools
+  // Build Animus tools (send_message, read_memory, etc.)
   const animusTools = await buildAnimusTools(state.toolContext);
+
+  // Build cortex built-in tools (Read, Write, Edit, Glob, Grep, Bash, WebFetch, TaskOutput)
+  const workingDir = join(DATA_DIR, 'workspace');
+  const readRegistry = new ReadRegistry();
+  const cwdTracker = new CwdTracker(workingDir);
+
+  // Lazy reference to the CortexAgent for tools that need it (WebFetch, Bash).
+  // The agent is created after the tools, so we use a mutable ref that gets
+  // assigned once CortexAgent.create() returns below.
+  let cortexAgentRef: CortexAgent | null = null;
+  const lazyUtilityComplete = async (context: unknown) => {
+    if (!cortexAgentRef) throw new Error('CortexAgent not yet initialized');
+    return cortexAgentRef.utilityComplete(context as { systemPrompt: string; messages: Array<{ role: string; content: string }> });
+  };
+
+  const builtInTools = [
+    createReadTool({ readRegistry }),
+    createWriteTool({ readRegistry }),
+    createEditTool({ readRegistry }),
+    createGlobTool({ defaultCwd: workingDir }),
+    createGrepTool({ defaultCwd: workingDir }),
+    createBashTool({ cwdTracker, utilityComplete: lazyUtilityComplete }),
+    createWebFetchTool({ utilityComplete: lazyUtilityComplete }),
+    createTaskOutputTool(),
+  ] as unknown as AgentTool[];
+
+  const allTools = [...builtInTools, ...animusTools];
+  log.info(`Built ${builtInTools.length} built-in tools + ${animusTools.length} Animus tools = ${allTools.length} total`);
 
   // Build permission resolver
   const permissionResolver = buildPermissionResolver(state.toolContext);
@@ -407,7 +470,7 @@ export async function createCortexMind(
 
   const cortexAgent = await CortexAgent.create({
     model: piModel as Record<string, unknown>,
-    workingDirectory: join(DATA_DIR, 'workspace'),
+    workingDirectory: workingDir,
     getApiKey,
     slots: [...MIND_SLOT_NAMES],
     workingTags: { enabled: true },
@@ -415,10 +478,19 @@ export async function createCortexMind(
       maxTurns: (settingsAny['cortexMaxTurns'] as number | undefined) ?? 50,
       maxCost: (settingsAny['cortexMaxCostPerTick'] as number | undefined) ?? 1.0,
     },
+    contextWindowLimit: (settingsAny['cortexContextWindowLimit'] as number | null | undefined) ?? null,
     resolvePermission: permissionResolver,
-    tools: animusTools,
-    systemPrompt: '', // Set later via buildSystemPrompt
+    tools: allTools,
   });
+
+  // Assign the lazy ref so tools can access utilityComplete
+  cortexAgentRef = cortexAgent;
+
+  // Resolve initial cache retention based on provider and heartbeat interval
+  const heartbeatIntervalMs = (settingsAny['heartbeatIntervalMs'] as number | undefined) ?? 300_000;
+  const initialCacheRetention = resolveCacheRetention(provider, heartbeatIntervalMs);
+  cortexAgent.setCacheRetention(initialCacheRetention);
+  log.info(`Cache retention: ${initialCacheRetention} (provider=${provider}, interval=${heartbeatIntervalMs}ms)`);
 
   // Wire event handlers
   wireEventHandlers(cortexAgent, state);
@@ -504,13 +576,42 @@ function wireEventHandlers(
     }
   });
 
-  // Log turn completions
-  cortexAgent.onTurnComplete((output: AgentTextOutput) => {
-    if (output.userFacing) {
-      const preview = output.userFacing.length > 120
-        ? output.userFacing.substring(0, 120) + '...'
-        : output.userFacing;
-      log.info(`Turn complete: "${preview}"`);
+  // Log turn completions with tool call and working tag detail
+  cortexAgent.getEventBridge().on('turn_end', (event: CortexEvent) => {
+    const textOutput = event.textOutput;
+
+    // Extract tool names from the assistant message in the raw pi event
+    const piEvent = event.data as Record<string, unknown> | undefined;
+    const message = piEvent?.['message'] as Record<string, unknown> | undefined;
+    const contentBlocks = Array.isArray(message?.['content']) ? message!['content'] as Array<Record<string, unknown>> : [];
+    const toolNames = contentBlocks
+      .filter((b) => b['type'] === 'tool_use' || b['type'] === 'toolCall')
+      .map((b) => (b['name'] as string) || (b['toolName'] as string) || 'unknown');
+
+    const parts: string[] = [];
+
+    if (toolNames.length > 0) {
+      parts.push(`tools=[${toolNames.join(', ')}]`);
+    }
+
+    if (textOutput?.working) {
+      const workingPreview = textOutput.working.length > 200
+        ? textOutput.working.substring(0, 200) + '...'
+        : textOutput.working;
+      parts.push(`working="${workingPreview}"`);
+    }
+
+    if (textOutput?.userFacing) {
+      const userPreview = textOutput.userFacing.length > 120
+        ? textOutput.userFacing.substring(0, 120) + '...'
+        : textOutput.userFacing;
+      parts.push(`userFacing="${userPreview}"`);
+    }
+
+    if (parts.length > 0) {
+      log.info(`Turn: ${parts.join(' | ')}`);
+    } else if (!toolNames.length && !textOutput?.userFacing) {
+      log.info('Turn: (empty)');
     }
   });
 
@@ -542,9 +643,9 @@ function wireCompactionHandlers(
   // history is compacted. This ensures watermarks advance before re-seeding.
   // -----------------------------------------------------------------------
   cortexAgent.onBeforeCompaction(async (_target: CompactionTarget) => {
-    const { gathered, agentManager, compiledPersona } = state.compactionContext;
+    const { gathered, completeFn, compiledPersona } = state.compactionContext;
 
-    if (!gathered || !agentManager || !compiledPersona) {
+    if (!gathered || !completeFn || !compiledPersona) {
       log.warn('onBeforeCompaction: no compaction context available, skipping observational memory flush');
       return;
     }
@@ -555,7 +656,7 @@ function wireCompactionHandlers(
       const eventBus = getEventBus();
       await processAllStreams({
         deps: {
-          agentManager,
+          completeFn,
           memoryDb: getMemoryDb(),
           compiledPersona,
           eventBus,
@@ -607,6 +708,11 @@ function wireCompactionHandlers(
   // -----------------------------------------------------------------------
   // Compaction error handler
   // -----------------------------------------------------------------------
+  // Wire debug logging for compaction diagnostics
+  cortexAgent.getCompactionManager().setDebugLog((msg: string) => {
+    log.debug(`[Compaction] ${msg}`);
+  });
+
   cortexAgent.onCompactionError((error: Error) => {
     log.error('Compaction failed:', error);
 
@@ -620,7 +726,7 @@ function wireCompactionHandlers(
       if (sessions) {
         agentLogStore.insertEvent(agentLogsDb, {
           sessionId: sessions.id,
-          eventType: 'compaction_error' as string,
+          eventType: 'compaction_error',
           data: {
             error: error.message,
             stack: error.stack?.substring(0, 500),
@@ -657,7 +763,7 @@ function logCompactionEvent(result: CompactionResult): void {
 
     const event = agentLogStore.insertEvent(agentLogsDb, {
       sessionId: session.id,
-      eventType: 'compaction' as string,
+      eventType: 'compaction',
       data: {
         tokensBefore: result.tokensBefore,
         tokensAfter: result.tokensAfter,
@@ -812,7 +918,7 @@ function injectMessagesIntoHistory(
 
   // Build injection messages in the agent's format
   const injectionMessages = turns.map(t => ({
-    role: t.role as string,
+    role: t.role,
     content: t.content,
   }));
 
@@ -839,11 +945,11 @@ function injectMessagesIntoHistory(
 export function updateCompactionContext(
   state: CortexMindState,
   gathered: GatherResult,
-  agentManager: import('@animus-labs/agents').AgentManager | null,
+  completeFn: ((context: { systemPrompt: string; messages: Array<{ role: string; content: string }> }) => Promise<string>) | null,
   compiledPersona: string | null,
 ): void {
   state.compactionContext.gathered = gathered;
-  state.compactionContext.agentManager = agentManager;
+  state.compactionContext.completeFn = completeFn;
   state.compactionContext.compiledPersona = compiledPersona;
 }
 
@@ -852,7 +958,7 @@ export function updateCompactionContext(
  */
 export function clearCompactionContext(state: CortexMindState): void {
   state.compactionContext.gathered = null;
-  state.compactionContext.agentManager = null;
+  state.compactionContext.completeFn = null;
   state.compactionContext.compiledPersona = null;
 }
 
@@ -880,7 +986,7 @@ function wireProviderChangeListeners(
       }
       const newModel = await state.providerManager.resolveModel(provider, modelId);
       state.model = newModel;
-      const piModel = unwrapModel(newModel);
+      const piModel = unwrapModel(newModel) as PiModel;
       cortexAgent.setModel(piModel);
       log.info(`CortexAgent model updated to ${provider}/${modelId}`);
     } catch (err) {
@@ -891,6 +997,11 @@ function wireProviderChangeListeners(
   eventBus.on('cortex:thinking-level-changed', ({ level }) => {
     log.info(`Thinking level changed to "${level}"`);
     cortexAgent.setThinkingLevel(level);
+  });
+
+  eventBus.on('cortex:context-limit-changed', ({ limit }) => {
+    log.info(`Context window limit changed to ${limit === null ? 'unlimited' : limit}`);
+    cortexAgent.setContextWindowLimit(limit);
   });
 
   eventBus.on('cortex:provider-removed', async () => {
@@ -939,15 +1050,12 @@ async function connectPluginMcpServers(cortexAgent: CortexAgent): Promise<void> 
     try {
       const transportConfig = convertPluginMcpConfig(serverConfig as Record<string, unknown>);
       if (transportConfig) {
-        await mcpManager.connect(namespacedKey, transportConfig);
+        await cortexAgent.connectMcpServer(namespacedKey, transportConfig);
       }
     } catch (err) {
       log.warn(`Failed to connect plugin MCP server "${namespacedKey}": ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-
-  // Merge MCP-discovered tools with built-in tools on the agent
-  cortexAgent.refreshTools();
 }
 
 /**
@@ -1017,7 +1125,7 @@ function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
           const transportConfig = convertPluginMcpConfig(serverConfig as Record<string, unknown>);
           if (transportConfig) {
             log.info(`Connecting plugin MCP server: ${namespacedKey}`);
-            await mcpManager.connect(namespacedKey, transportConfig);
+            await cortexAgent.connectMcpServer(namespacedKey, transportConfig);
           }
         } catch (err) {
           log.warn(`Failed to connect plugin MCP server "${namespacedKey}" on ${action}: ${err instanceof Error ? err.message : String(err)}`);
@@ -1032,6 +1140,7 @@ function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
           skillRegistry.addSkill({
             path: skillMdPath,
             source: `plugin:${pluginName}`,
+            variables: { PLUGIN_ROOT: loaded.absolutePath },
           });
           log.info(`Registered plugin skill: ${skill.name} (source: plugin:${pluginName})`);
         }
@@ -1043,7 +1152,7 @@ function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
         if (connState.serverName.startsWith(`${pluginName}__`)) {
           try {
             log.info(`Disconnecting plugin MCP server: ${connState.serverName}`);
-            await mcpManager.disconnect(connState.serverName);
+            await cortexAgent.disconnectMcpServer(connState.serverName);
           } catch (err) {
             log.warn(`Failed to disconnect plugin MCP server "${connState.serverName}" on ${action}: ${err instanceof Error ? err.message : String(err)}`);
           }
@@ -1060,13 +1169,6 @@ function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
       }
     }
 
-    // Re-merge tools after MCP connections changed
-    cortexAgent.refreshTools();
-
-    // Rebuild system prompt so the LLM sees updated tool/plugin/skill context.
-    // Skill registry changes affect the load_skill tool description, which is
-    // part of the system prompt.
-    rebuildSystemPromptForPluginChange(cortexAgent);
   });
 
   // Plugin config updated: reconnect MCP servers (config may have changed credentials)
@@ -1081,7 +1183,7 @@ function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
     for (const state of states) {
       if (state.serverName.startsWith(`${pluginName}__`)) {
         try {
-          await mcpManager.disconnect(state.serverName);
+          await cortexAgent.disconnectMcpServer(state.serverName);
         } catch {
           // Best-effort disconnect
         }
@@ -1096,61 +1198,13 @@ function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
         const transportConfig = convertPluginMcpConfig(serverConfig as Record<string, unknown>);
         if (transportConfig) {
           log.info(`Reconnecting plugin MCP server after config update: ${namespacedKey}`);
-          await mcpManager.connect(namespacedKey, transportConfig);
+          await cortexAgent.connectMcpServer(namespacedKey, transportConfig);
         }
       } catch (err) {
         log.warn(`Failed to reconnect plugin MCP server "${namespacedKey}" after config update: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-
-    // Re-merge tools after MCP reconnection
-    cortexAgent.refreshTools();
-
-    // Rebuild system prompt so the LLM sees updated tool/plugin context
-    rebuildSystemPromptForPluginChange(cortexAgent);
   });
-}
-
-/**
- * Rebuild the system prompt after plugin changes.
- *
- * Plugin install/uninstall/config changes may affect the tool list
- * visible to the LLM. The system prompt includes tool descriptions,
- * so it must be rebuilt when the available tools change.
- *
- * Uses the current system prompt's consumer content (everything before
- * the Cortex operational sections) to rebuild without losing persona
- * or domain context.
- */
-function rebuildSystemPromptForPluginChange(cortexAgent: CortexAgent): void {
-  try {
-    // The current system prompt starts with consumer content followed by
-    // Cortex operational sections. rebuildSystemPrompt extracts the consumer
-    // portion. Since we don't have direct access to the original consumer
-    // prompt, we trigger a rebuild with the existing content. The consumer
-    // (pipeline) sets the system prompt during GATHER; between ticks, we
-    // re-trigger buildSystemPrompt with the last known consumer prompt.
-    // For now, we use the fact that rebuildSystemPrompt will re-append the
-    // operational sections (which include tool listings).
-    const currentPrompt = cortexAgent.getCurrentSystemPrompt();
-    if (currentPrompt) {
-      // Find the first Cortex operational section marker
-      const sectionMarker = '# Response Delivery';
-      const systemRulesMarker = '# System Rules';
-      let splitIdx = currentPrompt.indexOf(sectionMarker);
-      if (splitIdx < 0) {
-        splitIdx = currentPrompt.indexOf(systemRulesMarker);
-      }
-      if (splitIdx > 0) {
-        // Extract consumer content (everything before the first Cortex section)
-        const consumerPrompt = currentPrompt.substring(0, splitIdx).trimEnd();
-        cortexAgent.rebuildSystemPrompt(consumerPrompt);
-        log.debug('System prompt rebuilt after plugin change');
-      }
-    }
-  } catch (err) {
-    log.warn('Failed to rebuild system prompt after plugin change:', err);
-  }
 }
 
 // ============================================================================
@@ -1187,6 +1241,7 @@ function loadPluginSkillsAtStartup(cortexAgent: CortexAgent): void {
       skillRegistry.addSkill({
         path: skillMdPath,
         source: `plugin:${pluginInfo.name}`,
+        variables: { PLUGIN_ROOT: loaded.absolutePath },
       });
       skillCount++;
     }
@@ -1194,8 +1249,6 @@ function loadPluginSkillsAtStartup(cortexAgent: CortexAgent): void {
 
   if (skillCount > 0) {
     log.info(`Loaded ${skillCount} plugin skills into SkillRegistry at startup`);
-    // Rebuild system prompt so the load_skill tool description includes all skills
-    rebuildSystemPromptForPluginChange(cortexAgent);
   }
 }
 

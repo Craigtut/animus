@@ -1,37 +1,19 @@
 /**
- * Credential Service -- detection, loading, saving, and validation of provider credentials.
+ * Credential Service -- loading, saving, and management of provider credentials.
  *
- * Central module for managing agent provider authentication across multiple methods:
- * API keys, OAuth tokens, CLI detection, and Codex ChatGPT OAuth.
- *
- * Auth detection and validation are delegated to auth providers in @animus-labs/agents.
- * This service retains: environment loading, DB persistence, and env var management.
+ * Central module for managing credentials: environment loading, DB persistence,
+ * and env var management. Legacy auth provider detection has been removed
+ * (replaced by Cortex's CortexCredentialService).
  */
 
 import type Database from 'better-sqlite3';
 import * as systemStore from '../db/stores/system-store.js';
 import { createLogger } from '../lib/logger.js';
 import { isUnsealed } from '../lib/vault-manager.js';
-import {
-  ClaudeAuthProvider,
-  CodexAuthProvider,
-  inferCredentialType as inferType,
-  ensureClaudeOnboardingFile as ensureOnboarding,
-  type CredentialType,
-  type ProviderAuthStatus,
-} from '@animus-labs/agents';
-import { createCredentialStore } from './credential-store-adapter.js';
-
-export type { CredentialType };
-export type { ProviderAuthStatus };
-
-// Re-export for backend consumers
-export const ensureClaudeOnboardingFile = ensureOnboarding;
 
 const log = createLogger('Credentials', 'server');
 
-// Re-export types that other backend files use
-export type { ProviderAuthMethod } from '@animus-labs/agents';
+export type CredentialType = 'api_key' | 'oauth_token' | 'codex_oauth' | 'cli_detected';
 
 export interface ValidationResult {
   valid: boolean;
@@ -45,11 +27,19 @@ export interface CredentialLoadSummary {
 }
 
 // ============================================================================
-// Credential Type Inference (delegates to agents package)
+// Credential Type Inference
 // ============================================================================
 
 export function inferCredentialType(provider: string, key: string): CredentialType {
-  return inferType(provider, key);
+  if (provider === 'claude') {
+    if (key.startsWith('sk-ant-')) return 'api_key';
+    return 'api_key';
+  }
+  if (provider === 'codex') {
+    if (key.startsWith('sk-')) return 'api_key';
+    return 'api_key';
+  }
+  return 'api_key';
 }
 
 // ============================================================================
@@ -136,10 +126,6 @@ export function saveCredential(
     process.env[envVar] = key;
   }
 
-  if (provider === 'claude') {
-    ensureClaudeOnboardingFile();
-  }
-
   return { credentialType: type };
 }
 
@@ -191,83 +177,4 @@ export function removeCredential(
   }
 
   systemStore.deleteCredential(db, provider, credentialType);
-}
-
-// ============================================================================
-// Detection (delegates to adapter auth providers)
-// ============================================================================
-
-const claudeAuth = new ClaudeAuthProvider();
-const codexAuth = new CodexAuthProvider();
-
-/**
- * Detect available authentication methods for all providers.
- * Delegates to auth providers in @animus-labs/agents, then cleans up
- * stale DB records based on the reported status.
- */
-export async function detectProviderAuth(
-  db: Database.Database,
-): Promise<ProviderAuthStatus[]> {
-  const store = createCredentialStore(db);
-
-  const [claude, codex] = await Promise.all([
-    claudeAuth.detectAuth(store),
-    codexAuth.detectAuth(store),
-  ]);
-
-  // Clean up stale cli_detected records based on adapter detection results
-  cleanupStaleCli(db, claude);
-  cleanupStaleCli(db, codex);
-
-  return [claude, codex];
-}
-
-/**
- * If the auth provider reports CLI is not available, and we have a stale
- * cli_detected record in the DB, clean it up.
- */
-function cleanupStaleCli(db: Database.Database, status: ProviderAuthStatus): void {
-  const cliMethod = status.methods.find((m) => m.method === 'cli');
-  if (cliMethod && !cliMethod.available) {
-    try {
-      const hasStaleCli = systemStore.getCredentialMetadata(db, status.provider)
-        .some((m) => m.credentialType === 'cli_detected');
-      if (hasStaleCli) {
-        log.info(`${status.provider} CLI no longer authenticated, removing stale cli_detected credential`);
-        systemStore.deleteCredential(db, status.provider, 'cli_detected');
-        const sentinelVar = status.provider === 'claude' ? 'CLAUDE_CLI_CONFIGURED' : 'CODEX_CLI_CONFIGURED';
-        delete process.env[sentinelVar];
-      }
-    } catch {
-      // Ignore
-    }
-  }
-}
-
-// ============================================================================
-// Validation (delegates to adapter auth providers)
-// ============================================================================
-
-/**
- * Validate a credential against the provider's API.
- */
-export async function validateCredential(
-  provider: string,
-  key: string,
-  credentialType: CredentialType,
-): Promise<ValidationResult> {
-  try {
-    if (provider === 'claude') {
-      return await claudeAuth.validateCredential!(key, credentialType);
-    }
-    if (provider === 'codex') {
-      return await codexAuth.validateCredential!(key);
-    }
-    return { valid: false, message: `Unknown provider: ${provider}` };
-  } catch (err) {
-    return {
-      valid: false,
-      message: err instanceof Error ? err.message : 'Validation failed',
-    };
-  }
 }

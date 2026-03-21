@@ -13,7 +13,7 @@ import {
   getMessagesDb,
   closeDatabases,
 } from '../../db/index.js';
-import { stopHeartbeat, getVectorStore } from '../../heartbeat/index.js';
+import { stopHeartbeat, resetCortexAgent, getVectorStore } from '../../heartbeat/index.js';
 import * as heartbeatStore from '../../db/stores/heartbeat-store.js';
 import { MEDIA_DIR } from '../routes/media.js';
 import { DATA_DIR } from '../../utils/env.js';
@@ -79,7 +79,13 @@ export const dataRouter = router({
 
       // Re-seed emotion state to baselines
       hbDb.exec('UPDATE emotion_state SET intensity = baseline');
+
+      // Clear cortex conversation history checkpoint
+      heartbeatStore.updateConversationHistory(hbDb, null);
     })();
+
+    // Destroy and recreate the CortexAgent with clean state
+    await resetCortexAgent();
 
     return { success: true, cleared: 'heartbeat' };
   }),
@@ -121,6 +127,10 @@ export const dataRouter = router({
       });
 
       hbDb.exec('UPDATE emotion_state SET intensity = baseline');
+
+      // Clear cortex conversation history checkpoint so the agent
+      // starts fresh and doesn't carry over the previous persona's context
+      heartbeatStore.updateConversationHistory(hbDb, null);
     })();
 
     // Clear memory
@@ -144,6 +154,10 @@ export const dataRouter = router({
       msgDb.exec('DELETE FROM conversations');
     })();
     clearMediaFiles();
+
+    // Destroy and recreate the CortexAgent so it doesn't carry
+    // stale conversation history from the previous session in memory
+    await resetCortexAgent();
 
     return { success: true, cleared: 'heartbeat+memory+messages' };
   }),
@@ -176,8 +190,9 @@ export const dataRouter = router({
       const { waitForActiveOps } = await import('../../memory/observational-memory/index.js');
       await waitForActiveOps(10_000);
 
-      // 2. Stop heartbeat (ends mind session, cancels sub-agents, stops task scheduler)
+      // 2. Stop heartbeat and destroy CortexAgent (clears in-memory messages)
       await stopHeartbeat();
+      await resetCortexAgent(); // Destroys agent so stale messages don't survive the wipe
 
       // 3. Stop all channel child processes
       const { getChannelManager } = await import('../../channels/channel-manager.js');
@@ -211,7 +226,7 @@ export const dataRouter = router({
 
       // 8. Selectively delete data directory contents, preserving
       //    secrets (server identity), models, voices, and saves
-      const PRESERVE = new Set(['.secrets', 'models', 'voices', 'saves']);
+      const PRESERVE = new Set(['.secrets', 'models', 'voices', 'saves', 'logs']);
 
       try {
         const entries = fs.readdirSync(DATA_DIR, { withFileTypes: true });

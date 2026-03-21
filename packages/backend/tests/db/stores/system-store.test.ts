@@ -160,7 +160,6 @@ describe('system-store', () => {
     it('returns default settings', () => {
       const settings = systemStore.getSystemSettings(db);
       expect(settings.heartbeatIntervalMs).toBe(300000);
-      expect(settings.defaultAgentProvider).toBe('claude');
       expect(settings.goalApprovalMode).toBe('always_approve');
     });
 

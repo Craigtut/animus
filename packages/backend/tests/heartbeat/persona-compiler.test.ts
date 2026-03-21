@@ -153,11 +153,11 @@ describe('persona-compiler', () => {
   });
 
   describe('estimateTokens', () => {
-    it('estimates tokens based on word count', () => {
+    it('estimates tokens based on character count', () => {
       const text = 'hello world foo bar baz';
       const tokens = estimateTokens(text);
-      // 5 words * 1.3 = 6.5 => ceil = 7
-      expect(tokens).toBe(7);
+      // 23 chars / 4 = 5.75 => ceil = 6
+      expect(tokens).toBe(6);
     });
 
     it('returns 0 for empty string', () => {

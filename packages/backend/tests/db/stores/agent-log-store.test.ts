@@ -77,6 +77,99 @@ describe('agent-log-store', () => {
       expect(usage).toHaveLength(1);
       expect(usage[0]!.totalTokens).toBe(300);
     });
+
+    it('retrieves usage by tick number with per-phase records', () => {
+      const session = store.createSession(db, { provider: 'claude' });
+      store.insertUsage(db, {
+        sessionId: session.id,
+        inputTokens: 1000,
+        outputTokens: 200,
+        cacheReadTokens: 800,
+        cacheWriteTokens: 500,
+        totalTokens: 1200,
+        costUsd: 0.01,
+        model: 'claude-sonnet-4-5-20250929',
+        tickNumber: 42,
+        tickType: 'interval',
+        pipelinePhase: 'THOUGHT',
+      });
+      store.insertUsage(db, {
+        sessionId: session.id,
+        inputTokens: 2000,
+        outputTokens: 500,
+        cacheReadTokens: 1500,
+        cacheWriteTokens: 0,
+        totalTokens: 2500,
+        costUsd: 0.03,
+        model: 'claude-sonnet-4-5-20250929',
+        tickNumber: 42,
+        tickType: 'interval',
+        pipelinePhase: 'AGENTIC_LOOP',
+      });
+      store.insertUsage(db, {
+        sessionId: session.id,
+        inputTokens: 1200,
+        outputTokens: 150,
+        cacheReadTokens: 1000,
+        cacheWriteTokens: 0,
+        totalTokens: 1350,
+        costUsd: 0.008,
+        model: 'claude-sonnet-4-5-20250929',
+        tickNumber: 42,
+        tickType: 'interval',
+        pipelinePhase: 'REFLECT',
+      });
+
+      const usage = store.getUsageByTickNumber(db, 42);
+      expect(usage).toHaveLength(3);
+
+      expect(usage[0]!.pipelinePhase).toBe('THOUGHT');
+      expect(usage[0]!.cacheReadTokens).toBe(800);
+      expect(usage[0]!.cacheWriteTokens).toBe(500);
+      expect(usage[0]!.inputTokens).toBe(1000);
+
+      expect(usage[1]!.pipelinePhase).toBe('AGENTIC_LOOP');
+      expect(usage[1]!.cacheReadTokens).toBe(1500);
+      expect(usage[1]!.cacheWriteTokens).toBe(0);
+
+      expect(usage[2]!.pipelinePhase).toBe('REFLECT');
+      expect(usage[2]!.cacheReadTokens).toBe(1000);
+    });
+
+    it('returns empty array for tick number with no usage', () => {
+      const usage = store.getUsageByTickNumber(db, 9999);
+      expect(usage).toHaveLength(0);
+    });
+
+    it('does not include usage from other ticks', () => {
+      const session = store.createSession(db, { provider: 'claude' });
+      store.insertUsage(db, {
+        sessionId: session.id,
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+        model: 'claude-sonnet-4-5-20250929',
+        tickNumber: 10,
+        pipelinePhase: 'THOUGHT',
+      });
+      store.insertUsage(db, {
+        sessionId: session.id,
+        inputTokens: 200,
+        outputTokens: 80,
+        totalTokens: 280,
+        model: 'claude-sonnet-4-5-20250929',
+        tickNumber: 11,
+        pipelinePhase: 'THOUGHT',
+      });
+
+      const tick10Usage = store.getUsageByTickNumber(db, 10);
+      expect(tick10Usage).toHaveLength(1);
+      expect(tick10Usage[0]!.inputTokens).toBe(100);
+
+      const tick11Usage = store.getUsageByTickNumber(db, 11);
+      expect(tick11Usage).toHaveLength(1);
+      expect(tick11Usage[0]!.inputTokens).toBe(200);
+    });
   });
 
   describe('cleanup', () => {

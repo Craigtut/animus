@@ -9,7 +9,6 @@
  */
 
 import type Database from 'better-sqlite3';
-import type { AgentManager } from '@animus-labs/agents';
 import type { IEventBus, StreamType, Observation } from '@animus-labs/shared';
 import { estimateTokens, generateUUID } from '@animus-labs/shared';
 import { OBSERVATIONAL_MEMORY_CONFIG } from '../../config/observational-memory.config.js';
@@ -80,8 +79,14 @@ export async function waitForActiveOps(timeoutMs = 30_000): Promise<void> {
 // Types
 // ============================================================================
 
+/** Simple text-in/text-out completion function (backed by CortexAgent.utilityComplete) */
+export type CompleteFn = (context: {
+  systemPrompt: string;
+  messages: Array<{ role: string; content: string }>;
+}) => Promise<string>;
+
 export interface ObservationProcessorDeps {
-  agentManager: AgentManager;
+  completeFn: CompleteFn;
   memoryDb: Database.Database;
   compiledPersona: string;
   eventBus: IEventBus;
@@ -244,7 +249,7 @@ export async function processStream(params: {
 
     // Run observer
     const observerResult = await runObserver({
-      agentManager: deps.agentManager,
+      completeFn: deps.completeFn,
       streamType: stream,
       compiledPersona: deps.compiledPersona,
       batchItems,
@@ -352,7 +357,7 @@ async function runReflection(params: {
 
   try {
     const reflectorResult = await runReflector({
-      agentManager: deps.agentManager,
+      completeFn: deps.completeFn,
       streamType: stream,
       compiledPersona: deps.compiledPersona,
       observations: observationContent,

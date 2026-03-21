@@ -77,10 +77,13 @@ export function isHeadless(): boolean {
 export class CortexCredentialService {
   private providerManager: ProviderManager;
 
-  constructor(
-    private db: Database.Database,
-  ) {
+  constructor() {
     this.providerManager = new ProviderManager();
+  }
+
+  /** Get a fresh database handle each call (avoids stale handle after db reopen). */
+  private get db(): Database.Database {
+    return getSystemDb();
   }
 
   // ── Provider Manager Delegation ──
@@ -297,7 +300,7 @@ let instance: CortexCredentialService | null = null;
 
 export function getCortexCredentialService(): CortexCredentialService {
   if (!instance) {
-    instance = new CortexCredentialService(getSystemDb());
+    instance = new CortexCredentialService();
   }
   return instance;
 }

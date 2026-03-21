@@ -272,6 +272,13 @@ export function getSessionUsage(db: Database.Database, sessionId: string): Agent
   return rows.map((row) => snakeToCamel<AgentUsage>(row));
 }
 
+export function getUsageByTickNumber(db: Database.Database, tickNumber: number): AgentUsage[] {
+  const rows = db
+    .prepare('SELECT * FROM agent_usage WHERE tick_number = ? ORDER BY created_at')
+    .all(tickNumber) as Array<Record<string, unknown>>;
+  return rows.map((row) => snakeToCamel<AgentUsage>(row));
+}
+
 // ============================================================================
 // Tick Events (for Heartbeat Inspector)
 // ============================================================================
@@ -340,6 +347,29 @@ export function listTickEvents(
     }),
     total: totalRow.count,
   };
+}
+
+/**
+ * Get the context_snapshot event for a specific tick.
+ * Returns the parsed data if found, null otherwise.
+ */
+export function getTickContextSnapshot(
+  db: Database.Database,
+  tickNumber: number,
+): Record<string, unknown> | null {
+  const row = db
+    .prepare(
+      `SELECT * FROM agent_events
+       WHERE event_type = 'context_snapshot'
+         AND JSON_EXTRACT(data, '$.tickNumber') = ?
+       ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(tickNumber) as Record<string, unknown> | undefined;
+
+  if (!row) return null;
+  const e = snakeToCamel<AgentEvent>(row);
+  const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+  return data as Record<string, unknown>;
 }
 
 /**

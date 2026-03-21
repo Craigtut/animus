@@ -18,7 +18,7 @@ import {
   getAgentOrchestrator,
 } from '../../heartbeat/index.js';
 import { getEventBus } from '../../lib/event-bus.js';
-import type { HeartbeatState, EmotionState, Thought, Experience, TickDecision, EnergyBand, EnergyHistoryEntry, AgentEventType } from '@animus-labs/shared';
+import type { HeartbeatState, EmotionState, Thought, Experience, TickDecision, EnergyBand, EnergyHistoryEntry, AgentEventType, PhaseUsage } from '@animus-labs/shared';
 import * as systemStore from '../../db/stores/system-store.js';
 import * as personaStore from '../../db/stores/persona-store.js';
 import { getSystemDb } from '../../db/index.js';
@@ -569,6 +569,23 @@ export const heartbeatRouter = router({
         }
       }
 
+      // Get Cortex context snapshot (new system, null for legacy ticks)
+      const cortexContextSnapshot = agentLogStore.getTickContextSnapshot(agentLogsDb, tickNumber);
+
+      // Get per-phase usage records for cache visibility
+      const phaseUsageRecords = agentLogStore.getUsageByTickNumber(agentLogsDb, tickNumber);
+      const phaseUsage: PhaseUsage[] = phaseUsageRecords
+        .filter((u) => u.pipelinePhase != null)
+        .map((u) => ({
+          phase: u.pipelinePhase!,
+          inputTokens: u.inputTokens,
+          outputTokens: u.outputTokens,
+          cacheReadTokens: u.cacheReadTokens ?? 0,
+          cacheWriteTokens: u.cacheWriteTokens ?? 0,
+          costUsd: u.costUsd ?? 0,
+          model: u.model,
+        }));
+
       return {
         tickNumber,
         triggerType: inputData.triggerType,
@@ -586,6 +603,8 @@ export const heartbeatRouter = router({
         emotionHistory,
         decisions,
         usage,
+        phaseUsage,
+        cortexContextSnapshot,
         createdAt: tickInput.createdAt,
       };
     }),
@@ -594,9 +613,9 @@ export const heartbeatRouter = router({
    * Subscribe to tick input stored events (fires early, before LLM prompting).
    */
   onTickInputStored: protectedProcedure.subscription(() => {
-    return observable<{ tickNumber: number; triggerType: string; sessionState: string }>((emit) => {
+    return observable<{ tickNumber: number; triggerType: string }>((emit) => {
       const eventBus = getEventBus();
-      const handler = (data: { tickNumber: number; triggerType: string; sessionState: string }) => {
+      const handler = (data: { tickNumber: number; triggerType: string }) => {
         emit.next(data);
       };
       eventBus.on('tick:input_stored', handler);
@@ -613,7 +632,6 @@ export const heartbeatRouter = router({
     type TickStoredPayload = {
       tickNumber: number;
       triggerType: string;
-      sessionState: string;
       durationMs: number | null;
       createdAt: string;
     };

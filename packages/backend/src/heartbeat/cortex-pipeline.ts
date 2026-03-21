@@ -403,10 +403,12 @@ function generatePlaceholderThought(gathered: GatherResult): ThoughtResult {
   const activeEmotions = gathered.emotions.filter(e => e.intensity > 0.15);
   if (activeEmotions.length > 0) {
     const top = activeEmotions.sort((a, b) => b.intensity - a.intensity)[0];
-    return {
-      content: `A quiet interval passes. Feeling a thread of ${top.emotion} (${top.intensity.toFixed(2)}).`,
-      importance: 0.2,
-    };
+    if (top) {
+      return {
+        content: `A quiet interval passes. Feeling a thread of ${top.emotion} (${top.intensity.toFixed(2)}).`,
+        importance: 0.2,
+      };
+    }
   }
 
   return {
@@ -591,7 +593,17 @@ async function executeAgenticLoop(
       try {
         const history = cortexAgent.getConversationHistory();
         const badMsgs = history
-          .map((m: Record<string, unknown>, i: number) => ({ i, role: m['role'], hasContent: m['content'] !== undefined && m['content'] !== null, contentType: typeof m['content'], isArray: Array.isArray(m['content']), len: Array.isArray(m['content']) ? (m['content'] as unknown[]).length : -1 }))
+          .map((m, i) => {
+            const msg = m as unknown as Record<string, unknown>;
+            return {
+              i,
+              role: msg['role'],
+              hasContent: msg['content'] !== undefined && msg['content'] !== null,
+              contentType: typeof msg['content'],
+              isArray: Array.isArray(msg['content']),
+              len: Array.isArray(msg['content']) ? (msg['content'] as unknown[]).length : -1,
+            };
+          })
           .filter(m => !m.hasContent || (m.isArray && m.len === 0));
         if (badMsgs.length > 0) {
           log.error(`AGENTIC LOOP: ${badMsgs.length} malformed message(s) in history: ${JSON.stringify(badMsgs)}`);
@@ -964,7 +976,7 @@ function accumulatedToCortexUsage(acc: AccumulatedUsage): CortexUsage | null {
       cacheWrite: 0,
       total: acc.costTotal,
     },
-    model: acc.model,
+    ...(acc.model !== undefined && { model: acc.model }),
   };
 }
 
@@ -1088,7 +1100,7 @@ export async function executeCortexPipeline(
   // If the reply was already sent during the agentic loop (per-turn delivery),
   // clear output.reply so execute doesn't send a duplicate.
   if (loopResult.replySentEarly && output.reply) {
-    output.reply = undefined;
+    output.reply = null;
   }
 
   return {

@@ -34,21 +34,17 @@ export function updateSystemSettings(
   const mapping: Record<string, string> = {
     heartbeatIntervalMs: 'heartbeat_interval_ms',
     sessionWarmthMs: 'session_warmth_ms',
-    sessionContextBudget: 'session_context_budget',
     thoughtRetentionDays: 'thought_retention_days',
     experienceRetentionDays: 'experience_retention_days',
     emotionHistoryRetentionDays: 'emotion_history_retention_days',
     agentLogRetentionDays: 'agent_log_retention_days',
     taskRunRetentionDays: 'task_run_retention_days',
-    defaultAgentProvider: 'default_agent_provider',
-    defaultModel: 'default_model',
     goalApprovalMode: 'goal_approval_mode',
     energySystemEnabled: 'energy_system_enabled',
     telemetryEnabled: 'telemetry_enabled',
     sleepStartHour: 'sleep_start_hour',
     sleepEndHour: 'sleep_end_hour',
     sleepTickIntervalMs: 'sleep_tick_interval_ms',
-    reasoningEffort: 'reasoning_effort',
     memoryPoolMaxSize: 'memory_pool_max_size',
     autosaveEnabled: 'autosave_enabled',
     autosaveMaxCount: 'autosave_max_count',
@@ -62,6 +58,7 @@ export function updateSystemSettings(
     cortexProvider: 'cortex_provider',
     cortexModel: 'cortex_model',
     cortexThinkingLevel: 'cortex_thinking_level',
+    cortexContextWindowLimit: 'cortex_context_window_limit',
     utilityModel: 'utility_model',
   };
 
@@ -95,22 +92,25 @@ export interface CortexSettings {
   cortexProvider: string | null;
   cortexModel: string | null;
   cortexThinkingLevel: string;
+  cortexContextWindowLimit: number | null;
   utilityModel: string;
 }
 
 export function getCortexSettings(db: Database.Database): CortexSettings {
   const row = db.prepare(
-    'SELECT cortex_provider, cortex_model, cortex_thinking_level, utility_model FROM system_settings WHERE id = 1'
+    'SELECT cortex_provider, cortex_model, cortex_thinking_level, cortex_context_window_limit, utility_model FROM system_settings WHERE id = 1'
   ).get() as {
     cortex_provider: string | null;
     cortex_model: string | null;
     cortex_thinking_level: string | null;
+    cortex_context_window_limit: number | null;
     utility_model: string | null;
   } | undefined;
   return {
     cortexProvider: row?.cortex_provider ?? null,
     cortexModel: row?.cortex_model ?? null,
     cortexThinkingLevel: row?.cortex_thinking_level ?? 'off',
+    cortexContextWindowLimit: row?.cortex_context_window_limit ?? null,
     utilityModel: row?.utility_model ?? 'default',
   };
 }
@@ -125,6 +125,7 @@ export function updateCortexSettings(
     cortexProvider: 'cortex_provider',
     cortexModel: 'cortex_model',
     cortexThinkingLevel: 'cortex_thinking_level',
+    cortexContextWindowLimit: 'cortex_context_window_limit',
     utilityModel: 'utility_model',
   };
   for (const [camelKey, snakeKey] of Object.entries(mapping)) {

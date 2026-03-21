@@ -67,8 +67,8 @@ export const usageRouter = router({
         start,
         end,
         bucketMinutes,
-        tickType: input.tickType,
-        model: input.model,
+        ...(input.tickType !== undefined && { tickType: input.tickType }),
+        ...(input.model !== undefined && { model: input.model }),
       });
     }),
 

@@ -25,7 +25,7 @@ import { GoalSubsystem } from './goals/index.js';
 import { TaskSubsystem } from './tasks/index.js';
 import { AgentSubsystem } from './heartbeat/agent-subsystem.js';
 import { getAutosaveSubsystem } from './services/autosave-subsystem.js';
-import { loadCredentialsIntoEnv, ensureClaudeOnboardingFile } from './services/credential-service.js';
+import { loadCredentialsIntoEnv } from './services/credential-service.js';
 import { env, DATA_DIR } from './utils/env.js';
 import {
   loadVault,
@@ -137,45 +137,12 @@ async function main() {
     const { verifyEncryptionKey } = await import('./lib/encryption-service.js');
     verifyEncryptionKey(getSystemDb());
     credentialSummary = loadCredentialsIntoEnv(getSystemDb());
-    ensureClaudeOnboardingFile();
   } else {
     log.info('Vault is sealed or absent: skipping credential loading');
   }
 
-  // Route agents package logs through the backend logger so all output
-  // uses the same format (timestamps, level labels, file logging, categories).
-  const { setDefaultLogger, initModelRegistry } = await import('@animus-labs/agents');
-  const agentsLog = createLogger('Agents', 'agents');
-  setDefaultLogger({
-    debug(msg: string, ctx?: Record<string, unknown>) {
-      agentsLog.debug(ctx ? `${msg} ${JSON.stringify(ctx)}` : msg);
-    },
-    info(msg: string, ctx?: Record<string, unknown>) {
-      agentsLog.info(ctx ? `${msg} ${JSON.stringify(ctx)}` : msg);
-    },
-    warn(msg: string, ctx?: Record<string, unknown>) {
-      agentsLog.warn(ctx ? `${msg} ${JSON.stringify(ctx)}` : msg);
-    },
-    error(msg: string, ctx?: Record<string, unknown>) {
-      agentsLog.error(ctx ? `${msg} ${JSON.stringify(ctx)}` : msg);
-    },
-  });
-
-  // Initialize model registry with disk cache for LiteLLM pricing data
-  const modelRegistry = initModelRegistry({
-    cacheDir: path.join(DATA_DIR, 'cache'),
-    cacheTtlMs: 24 * 60 * 60 * 1000,
-  });
-  modelRegistry.refresh().then(
-    ({ updated, errors }) => {
-      if (errors.length > 0) {
-        log.warn('Model registry refresh had errors', { errors });
-      } else {
-        log.debug(`Model registry initialized (${modelRegistry.size} models, ${updated} pricing updates)`);
-      }
-    },
-    (err) => log.warn('Model registry refresh failed (local data still available)', { error: String(err) }),
-  );
+  // Model registry and provider management are handled by the Cortex package.
+  // See packages/cortex/src/provider-registry.ts for model resolution.
 
   // Create Fastify instance
   const fastify = Fastify({
@@ -455,7 +422,7 @@ async function main() {
     );
   }
 
-  const seededToolPermissions = seedToolPermissions(getSystemDb(), settings.defaultAgentProvider ?? 'claude', collectPluginTools());
+  const seededToolPermissions = seedToolPermissions(getSystemDb(), collectPluginTools());
 
   // Set up approval notifier (event bus listener for tool approval lifecycle)
   const { setupApprovalNotifier } = await import('./tools/approval-notifier.js');
@@ -464,21 +431,16 @@ async function main() {
 
   // Re-seed tool permissions when plugins change at runtime
   getEventBus().on('plugin:changed', () => {
-    const currentSettings = systemStore.getSystemSettings(getSystemDb());
-    const reseeded = seedToolPermissions(getSystemDb(), currentSettings.defaultAgentProvider ?? 'claude', collectPluginTools());
+    const reseeded = seedToolPermissions(getSystemDb(), collectPluginTools());
     log.info('Re-seeded tool permissions after plugin change');
     log.debug(`Tool permissions count after re-seed: ${reseeded}`);
   });
 
-  // Re-seed tool permissions when the agent provider changes at runtime.
-  // Without this, switching providers leaves stale SDK tools in the DB
-  // (e.g. Codex tools when switching to Claude) and the new provider's
-  // unique tools (Read, Glob, WebFetch, etc.) never get permission records.
+  // Re-seed tool permissions when the cortex provider changes at runtime.
   getEventBus().on('system:settings_updated', (payload) => {
-    if ('defaultAgentProvider' in payload) {
-      const provider = (payload as Record<string, unknown>)['defaultAgentProvider'] as string;
-      const reseeded = seedToolPermissions(getSystemDb(), provider, collectPluginTools());
-      log.info(`Re-seeded tool permissions after provider change to "${provider}"`);
+    if ('cortexProvider' in payload) {
+      const reseeded = seedToolPermissions(getSystemDb(), collectPluginTools());
+      log.info('Re-seeded tool permissions after cortex provider change');
       log.debug(`Tool permissions count after re-seed: ${reseeded}`);
     }
   });
@@ -566,7 +528,7 @@ async function main() {
     dbCount: DATABASE_COUNT,
     credentialsStored: credentialSummary.storedCount,
     cliDetectedProviders: credentialSummary.cliDetectedProviders,
-    modelDataCount: modelRegistry.size,
+    modelDataCount: 0,
     pluginsLoaded: pluginStats.loaded,
     pluginsEnabled: pluginStats.enabled,
     deployedSkills: pluginStats.deployedSkills,
@@ -587,7 +549,7 @@ async function main() {
 
   // Fire app_started telemetry event
   telemetry.captureAppStarted({
-    provider: settings.defaultAgentProvider ?? 'claude',
+    provider: settings.cortexProvider ?? 'unknown',
     channelCount: channelStats.installed,
     pluginCount: pluginStats.loaded,
   });

@@ -11,7 +11,7 @@
     "build:frontend": "node -e \"try{fs.cpSync('../frontend/dist','./dist/public',{recursive:true})}catch{console.log('Frontend not built yet')}\"",
     "start": "node --env-file-if-exists=../../.env dist/index.js",
     "sandbox": "tsx --env-file-if-exists=../../.env --conditions source src/sandbox/index.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
     "@animus-labs/agents": "*",

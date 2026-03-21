@@ -29,7 +29,11 @@ export function createTestSystemDb(): Database.Database {
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '019_telemetry.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '020_plugin_status.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '021_vault_created_by.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '013_default_model.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '014_reasoning_effort.sql'));
   applySql(db, path.join(MIGRATIONS_DIR, 'system', '023_cortex_settings.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '024_drop_legacy_agent_columns.sql'));
+  applySql(db, path.join(MIGRATIONS_DIR, 'system', '025_cleanup_sdk_tool_permissions.sql'));
   return db;
 }
 

@@ -21,8 +21,8 @@ import * as usageStore from '../db/stores/usage-store.js';
 import { expiresIn, now, clamp, builtInDecisionTypeSchema } from '@animus-labs/shared';
 import type { MindOutput, IEventBus, AgentEventType } from '@animus-labs/shared';
 
-import type { AgentManager } from '@animus-labs/agents';
 import type { MemoryManager } from '../memory/index.js';
+import type { CompleteFn } from '../memory/observational-memory/index.js';
 import { processAllStreams } from '../memory/observational-memory/index.js';
 import { OBSERVATIONAL_MEMORY_CONFIG } from '../config/observational-memory.config.js';
 import type { SeedManager } from '../goals/index.js';
@@ -46,10 +46,12 @@ export interface ExecuteOutputDeps {
   decisionDeps: DecisionExecutorDeps;
   memoryManager: MemoryManager | null;
   seedManager: SeedManager | null;
-  agentManager: AgentManager | null;
+  completeFn: CompleteFn | null;
   compiledPersona: CompiledPersona | null;
   tickQueue: TickQueue;
   deferredQueue: DeferredQueue;
+  /** CortexAgent for dynamic cache retention updates on interval changes. */
+  onIntervalChanged?: (newIntervalMs: number) => void;
 }
 
 // ============================================================================
@@ -337,8 +339,10 @@ export async function executeOutput(
       const newBand = getEnergyBand(after);
       if (newBand === 'sleeping' && prevBand !== 'sleeping') {
         deps.tickQueue.updateInterval(settings.sleepTickIntervalMs);
+        deps.onIntervalChanged?.(settings.sleepTickIntervalMs);
       } else if (prevBand === 'sleeping' && newBand !== 'sleeping' && !inSleepHours) {
         deps.tickQueue.updateInterval(settings.heartbeatIntervalMs);
+        deps.onIntervalChanged?.(settings.heartbeatIntervalMs);
       }
     }
 
@@ -487,13 +491,13 @@ export async function executeOutput(
   });
 
   // 8. Observational memory processing (async, non-blocking)
-  // Requires both agentManager and compiledPersona -- persona may be null on first boot
-  if (deps.agentManager && deps.compiledPersona) {
+  // Requires both completeFn and compiledPersona -- persona may be null on first boot
+  if (deps.completeFn && deps.compiledPersona) {
     try {
       // Fire-and-forget -- don't await, don't block next tick
       processAllStreams({
         deps: {
-          agentManager: deps.agentManager,
+          completeFn: deps.completeFn,
           memoryDb: getMemoryDb(),
           compiledPersona: deps.compiledPersona.compiledText,
           eventBus: eventBusRef,

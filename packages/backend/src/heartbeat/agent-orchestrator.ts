@@ -278,14 +278,14 @@ export class AgentOrchestrator {
    * completion via lifecycle hooks wired in wireCortexLifecycleHooks().
    */
   private async spawnCortexSubAgent(params: SpawnAgentParams): Promise<string> {
-    const taskId = generateUUID();
     const timestamp = now();
 
     // Check spawn budget
     const budget = this.checkSpawnBudget();
     if (!budget.allowed) {
+      const failedTaskId = generateUUID();
       this.taskStore.insertAgentTask({
-        id: taskId,
+        id: failedTaskId,
         tickNumber: params.tickNumber,
         sessionId: null,
         provider: 'cortex',
@@ -296,46 +296,43 @@ export class AgentOrchestrator {
         sourceChannel: params.channel,
         createdAt: timestamp,
       });
-      this.taskStore.updateAgentTask(taskId, {
+      this.taskStore.updateAgentTask(failedTaskId, {
         status: 'failed',
         error: 'Spawn budget exhausted',
         completedAt: timestamp,
       });
-      this.eventBus.emit('agent:rate_limited', { taskId, count: budget.count, limit: budget.limit });
+      this.eventBus.emit('agent:rate_limited', { taskId: failedTaskId, count: budget.count, limit: budget.limit });
       throw new Error(`Agent spawn budget exhausted (${budget.count}/${budget.limit} per hour)`);
     }
     this.spawnTimestamps.push(Date.now());
-
-    // Insert task record in the database before spawning
-    this.taskStore.insertAgentTask({
-      id: taskId,
-      tickNumber: params.tickNumber,
-      sessionId: null,
-      provider: 'cortex',
-      status: 'spawning',
-      taskType: params.taskType,
-      taskDescription: params.description,
-      contactId: params.contactId,
-      sourceChannel: params.channel,
-      createdAt: timestamp,
-    });
 
     try {
       const subAgentManager = this.cortexAgent!.getSubAgentManager();
 
       // Check concurrency limit
       if (!subAgentManager.canSpawn()) {
-        this.taskStore.updateAgentTask(taskId, {
-          status: 'failed',
-          error: `Cortex sub-agent concurrency limit reached (${subAgentManager.activeCount}/${subAgentManager.limit})`,
-          completedAt: now(),
-        });
         throw new Error(`Cortex sub-agent concurrency limit reached (${subAgentManager.activeCount}/${subAgentManager.limit})`);
       }
 
-      // Update to running
-      this.taskStore.updateAgentTask(taskId, {
+      const { taskId } = await this.cortexAgent!.spawnBackgroundSubAgent({
+        instructions: params.instructions,
+        systemPrompt: params.systemPrompt,
+      });
+
+      this.taskStore.insertAgentTask({
+        id: taskId,
+        tickNumber: params.tickNumber,
+        sessionId: null,
+        provider: 'cortex',
         status: 'running',
+        taskType: params.taskType,
+        taskDescription: params.description,
+        contactId: params.contactId,
+        sourceChannel: params.channel,
+        createdAt: timestamp,
+      });
+
+      this.taskStore.updateAgentTask(taskId, {
         startedAt: now(),
       });
 
@@ -346,28 +343,28 @@ export class AgentOrchestrator {
       }, timeoutMs);
       this.timeoutTimers.set(taskId, timer);
 
-      // Use the cortex agent's prompt() in the background. The SubAgentManager
-      // lifecycle hooks handle completion/failure tracking. For background
-      // sub-agents, we use cortex's SubAgent tool which creates an independent
-      // CortexAgent. For now, we delegate via the parent cortex agent's prompt
-      // by injecting a steering message that triggers the SubAgent tool. However,
-      // the more direct approach is to have the mind decide to use the SubAgent
-      // tool itself. Since the decision executor calls spawnAgent(), we spawn
-      // asynchronously and track via the task record.
-      // The SubAgent tool is invoked by the LLM, not by us directly. So here we
-      // just record the intent and let the cortex lifecycle hooks track it.
-      // The taskId we created is the orchestrator's tracking ID.
       log.info(`Cortex sub-agent spawn requested: ${taskId} (${params.taskType}: ${params.description.substring(0, 80)})`);
 
       return taskId;
     } catch (err) {
-      if (this.taskStore.getAgentTask(taskId)?.status === 'spawning') {
-        this.taskStore.updateAgentTask(taskId, {
-          status: 'failed',
-          error: err instanceof Error ? err.message : String(err),
-          completedAt: now(),
-        });
-      }
+      const failedTaskId = generateUUID();
+      this.taskStore.insertAgentTask({
+        id: failedTaskId,
+        tickNumber: params.tickNumber,
+        sessionId: null,
+        provider: 'cortex',
+        status: 'failed',
+        taskType: params.taskType,
+        taskDescription: params.description,
+        contactId: params.contactId,
+        sourceChannel: params.channel,
+        createdAt: timestamp,
+      });
+      this.taskStore.updateAgentTask(failedTaskId, {
+        status: 'failed',
+        error: err instanceof Error ? err.message : String(err),
+        completedAt: now(),
+      });
       throw err;
     }
   }

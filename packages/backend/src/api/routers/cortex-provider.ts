@@ -94,6 +94,7 @@ export const cortexProviderRouter = router({
       provider: settings.cortexProvider,
       model: settings.cortexModel,
       thinkingLevel: settings.cortexThinkingLevel,
+      contextWindowLimit: settings.cortexContextWindowLimit,
       ...status,
     };
   }),
@@ -421,6 +422,24 @@ export const cortexProviderRouter = router({
       });
 
       log.info(`Thinking level set to "${input.level}"`);
+      return { success: true };
+    }),
+
+  setContextWindowLimit: protectedProcedure
+    .input(z.object({
+      limit: z.number().int().min(16_384).nullable(),
+    }))
+    .mutation(({ input }) => {
+      const db = getSystemDb();
+      settingsStore.updateCortexSettings(db, {
+        cortexContextWindowLimit: input.limit,
+      });
+
+      getEventBus().emit('cortex:context-limit-changed', {
+        limit: input.limit,
+      });
+
+      log.info(`Context window limit set to ${input.limit === null ? 'unlimited' : input.limit}`);
       return { success: true };
     }),
 

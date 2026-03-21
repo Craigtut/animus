@@ -22,7 +22,7 @@ import {
   getDek,
 } from '../../lib/vault-manager.js';
 import { setDek } from '../../lib/encryption-service.js';
-import { loadCredentialsIntoEnv, ensureClaudeOnboardingFile } from '../../services/credential-service.js';
+import { loadCredentialsIntoEnv } from '../../services/credential-service.js';
 import { getSystemDb } from '../../db/index.js';
 import * as systemStore from '../../db/stores/system-store.js';
 import { COOKIE_OPTIONS } from '../../plugins/auth.js';
@@ -76,7 +76,6 @@ export const sealRouter = router({
       }
 
       loadCredentialsIntoEnv(db);
-      ensureClaudeOnboardingFile();
 
       // Start deferred subsystems (channels, plugins, heartbeat full mode)
       try {
@@ -234,7 +233,6 @@ export const sealRouter = router({
 
         // Load credentials now that the vault is unsealed
         loadCredentialsIntoEnv(db);
-        ensureClaudeOnboardingFile();
 
         // Start channels
         try {

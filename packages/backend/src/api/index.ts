@@ -18,14 +18,10 @@ import { onboardingRouter } from './routers/onboarding.js';
 import { personaRouter } from './routers/persona.js';
 import { channelsRouter } from './routers/channels.js';
 import { dataRouter } from './routers/data.js';
-import { providerRouter } from './routers/provider.js';
 import { memoryRouter } from './routers/memory.js';
 import { goalsRouter } from './routers/goals.js';
 import { tasksRouter } from './routers/tasks.js';
 import { agentLogsRouter } from './routers/agent-logs.js';
-import { codexAuthRouter } from './routers/codex-auth.js';
-import { claudeAuthRouter } from './routers/claude-auth.js';
-import { codexCliAuthRouter } from './routers/codex-cli-auth.js';
 import { pluginsRouter } from './routers/plugins.js';
 import { savesRouter } from './routers/saves.js';
 import { toolsRouter } from './routers/tools.js';
@@ -34,7 +30,6 @@ import { downloadsRouter } from './routers/downloads.js';
 import { pluginOAuthRouter } from './routers/plugin-oauth.js';
 import { vaultRouter } from './routers/vault.js';
 import { sealRouter } from './routers/seal.js';
-import { sdkRouter } from './routers/sdk.js';
 import { usageRouter } from './routers/usage.js';
 import { cortexProviderRouter } from './routers/cortex-provider.js';
 
@@ -56,10 +51,6 @@ export const appRouter = router({
   persona: personaRouter,
   channels: channelsRouter,
   data: dataRouter,
-  provider: providerRouter,
-  codexAuth: codexAuthRouter,
-  claudeAuth: claudeAuthRouter,
-  codexCliAuth: codexCliAuthRouter,
   memory: memoryRouter,
   goals: goalsRouter,
   tasks: tasksRouter,
@@ -72,7 +63,6 @@ export const appRouter = router({
   pluginOAuth: pluginOAuthRouter,
   vault: vaultRouter,
   seal: sealRouter,
-  sdk: sdkRouter,
   usage: usageRouter,
   cortexProvider: cortexProviderRouter,
 });

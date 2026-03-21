@@ -8,9 +8,8 @@
  * See docs/architecture/observational-memory.md — The Observer Agent.
  */
 
-import type { AgentManager } from '@animus-labs/agents';
-import type { SessionUsage } from '@animus-labs/agents';
 import { estimateTokens } from '@animus-labs/shared';
+import type { CompleteFn } from './index.js';
 import type { StreamType } from '../../config/observational-memory.config.js';
 import { OBSERVATIONAL_MEMORY_CONFIG } from '../../config/observational-memory.config.js';
 import { createLogger } from '../../lib/logger.js';
@@ -198,7 +197,7 @@ export function parseObserverOutput(rawOutput: string): { observations: string }
 // ============================================================================
 
 export interface RunObserverParams {
-  agentManager: AgentManager;
+  completeFn: CompleteFn;
   streamType: StreamType;
   compiledPersona: string;
   batchItems: string[];
@@ -209,58 +208,32 @@ export interface RunObserverParams {
 export interface RunObserverResult {
   observations: string;
   tokenCount: number;
-  usage: SessionUsage;
 }
 
 /**
- * Run a full observer cycle: create cold session, prompt, parse, end session.
+ * Run a full observer cycle: send a single completion, parse the result.
+ * Uses the utility (cheap) model via CortexAgent.utilityComplete().
  */
 export async function runObserver(params: RunObserverParams): Promise<RunObserverResult> {
-  const { agentManager, streamType, compiledPersona, batchItems, existingObservations, config } = params;
+  const { completeFn, streamType, compiledPersona, batchItems, existingObservations } = params;
 
   const systemPrompt = buildObserverSystemPrompt(streamType, compiledPersona);
   const userMessage = buildObserverUserMessage(batchItems, existingObservations);
 
-  // Resolve provider: prefer user's configured default, fall back to first available
-  const configuredProviders = agentManager.getConfiguredProviders();
-  if (configuredProviders.length === 0) {
-    throw new Error('No agent providers configured');
-  }
-  const provider = configuredProviders[0]!;
+  log.debug(`Running observer for ${streamType} stream`);
 
-  // Graceful degradation: skip if no session slots available
-  if (!agentManager.canCreateSession()) {
-    log.warn(`Skipping ${streamType} observation — no session slots available`);
-    return { observations: '', tokenCount: 0, usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } };
-  }
-
-  log.debug(`Creating observer session for ${streamType} stream (provider: ${provider}, model: ${config.model})`);
-
-  const session = await agentManager.createSession({
-    provider,
-    model: config.model,
-    temperature: config.observer.temperature,
-    maxOutputTokens: config.observer.maxOutputTokens,
+  const content = await completeFn({
     systemPrompt,
-    permissions: {
-      executionMode: 'plan',
-      approvalLevel: 'none',
-    },
+    messages: [{ role: 'user', content: userMessage }],
   });
 
-  try {
-    const response = await session.prompt(userMessage);
-    const parsed = parseObserverOutput(response.content);
-    const tokenCount = estimateTokens(parsed.observations);
+  const parsed = parseObserverOutput(content);
+  const tokenCount = estimateTokens(parsed.observations);
 
-    log.debug(`Observer produced ${tokenCount} tokens for ${streamType} stream`);
+  log.debug(`Observer produced ${tokenCount} tokens for ${streamType} stream`);
 
-    return {
-      observations: parsed.observations,
-      tokenCount,
-      usage: response.usage,
-    };
-  } finally {
-    await session.end();
-  }
+  return {
+    observations: parsed.observations,
+    tokenCount,
+  };
 }

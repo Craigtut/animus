@@ -986,7 +986,7 @@ function excluded(
 /**
  * Build the system prompt manifest for a cold session.
  */
-function buildSystemPromptManifest(
+export function buildSystemPromptManifest(
   compiledPersona: CompiledPersona,
   options?: {
     energySystemEnabled?: boolean;
@@ -1013,7 +1013,9 @@ function buildSystemPromptManifest(
     included('memory_instructions', 'Your Memory', MEMORY_INSTRUCTIONS, 'system'),
     included('goal_guidance', 'Your Goals', GOAL_GUIDANCE, 'system'),
     included('log_awareness', 'Log Awareness', LOG_AWARENESS, 'system'),
-    included('datetime', 'Date & Time', buildDateTimeAwareness(options?.timezone), 'system'),
+    // Date/time is in ephemeral context (buildEphemeralSections), NOT the system
+    // prompt. Placing it here would change the system prompt every minute,
+    // invalidating the prefix cache for all content after it (slots, history).
   );
 
   return manifest;

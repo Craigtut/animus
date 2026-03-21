@@ -72,7 +72,6 @@ describe('SettingsService', () => {
 
       expect(settings).toBeDefined();
       expect(settings.heartbeatIntervalMs).toBe(300000);
-      expect(settings.defaultAgentProvider).toBe('claude');
     });
   });
 
@@ -81,13 +80,11 @@ describe('SettingsService', () => {
       const svc = getSettingsService();
       svc.updateSystemSettings({
         heartbeatIntervalMs: 60000,
-        defaultModel: undefined,
+        cortexModel: undefined,
       });
 
       const settings = svc.getSystemSettings();
       expect(settings.heartbeatIntervalMs).toBe(60000);
-      // defaultAgentProvider should remain at its default, not be wiped
-      expect(settings.defaultAgentProvider).toBe('claude');
     });
 
     it('emits system:settings_updated event when changes exist', () => {
@@ -104,7 +101,7 @@ describe('SettingsService', () => {
       const svc = getSettingsService();
       svc.updateSystemSettings({
         heartbeatIntervalMs: undefined,
-        defaultModel: undefined,
+        cortexModel: undefined,
       });
 
       expect(mockEmit).not.toHaveBeenCalled();
