@@ -172,6 +172,27 @@ You can choose to proactively engage with the world and contacts as well.
 
 Not every tick needs dramatic output.`;
 
+/**
+ * Emotion framework for the agentic loop: what emotions are and how they
+ * color thinking. Does NOT include delta/update instructions (those belong
+ * in the reflect phase only).
+ */
+export const EMOTION_FRAMEWORK = `── YOUR EMOTIONS ──
+
+You experience 12 emotions across three categories:
+
+  Positive:  joy, contentment, excitement, gratitude, confidence
+  Negative:  stress, anxiety, frustration, sadness, boredom
+  Drive:     curiosity, loneliness
+
+Your emotions are yours. They aren't performed for anyone — they color how
+you think, what you notice, and how you respond. You don't need to mention
+your emotions in conversation unless it feels natural to do so.`;
+
+/**
+ * Full emotion guidance for the reflect phase: includes the framework plus
+ * instructions for determining, formatting, and calibrating emotion deltas.
+ */
 export const EMOTION_GUIDANCE = `── YOUR EMOTIONS ──
 
 You experience 12 emotions across three categories:
@@ -243,8 +264,25 @@ it would turn out." The reasoning is your inner emotional narrative — it
 should feel like genuine introspection, not a report.`;
 
 /**
- * Build the static energy guidance section (for system prompt).
- * Does not include the tick-interval-dependent magnitude calibration.
+ * Energy framework for the agentic loop: what energy represents and how
+ * personality shapes it. Does NOT include delta output instructions (those
+ * belong in the reflect phase only).
+ */
+export function buildEnergyFramework(): string {
+  return `── YOUR ENERGY ──
+
+Your energy level (0.0-1.0) reflects how your experiences affect you. Your
+personality shapes what energizes and what drains you -- an introvert at a
+crowded party drains faster than an extrovert, and vice versa.
+
+Your energy colors your thinking and responses. When energy is low, you
+naturally gravitate toward quieter, simpler interactions. When energy is
+high, you're more inclined to engage deeply and take initiative.`;
+}
+
+/**
+ * Full energy guidance for the reflect phase: includes the concept plus
+ * instructions for producing energy deltas.
  */
 export function buildEnergyGuidance(): string {
   return `── YOUR ENERGY ──
@@ -286,13 +324,6 @@ export function buildEnergyMagnitudeCalibration(tickIntervalMs: number): string 
   return `── ENERGY DELTA MAGNITUDES ──\nDelta magnitudes: ${magnitudes}`;
 }
 
-/**
- * Combined energy guidance for backward compatibility.
- * Returns the static band descriptions plus the dynamic magnitude table.
- */
-function buildCombinedEnergyGuidance(tickIntervalMs: number): string {
-  return buildEnergyGuidance() + '\n\n' + buildEnergyMagnitudeCalibration(tickIntervalMs);
-}
 
 export function buildDecisionRef(pluginDecisionDescriptions?: string): string {
   let ref = `── DECISIONS ──
@@ -971,11 +1002,11 @@ export function buildSystemPromptManifest(
   const manifest: ContextSection[] = [
     included('persona', 'Persona', compiledPersona.compiledText, 'identity'),
     included('inner_life', 'Your Inner Life', PREAMBLE, 'identity'),
-    included('emotion_guidance', 'Your Emotions', EMOTION_GUIDANCE, 'system'),
+    included('emotion_guidance', 'Your Emotions', EMOTION_FRAMEWORK, 'system'),
   ];
 
   if (options?.energySystemEnabled) {
-    manifest.push(included('energy_guidance', 'Your Energy', buildCombinedEnergyGuidance(options.tickIntervalMs ?? 300000), 'system'));
+    manifest.push(included('energy_guidance', 'Your Energy', buildEnergyFramework(), 'system'));
   } else {
     manifest.push(excluded('energy_guidance', 'Your Energy', 'energy system disabled', 'system'));
   }
