@@ -177,12 +177,54 @@ describe('Grep tool', () => {
     expect(text).toContain('target line');
   });
 
-  it('indicates it is using the fallback engine', async () => {
+  it('reports whether ripgrep or fallback engine was used', async () => {
     fs.writeFileSync(path.join(tmpDir, 'file.ts'), 'test\n');
 
     const result = await grepTool.execute({ pattern: 'test' });
 
-    expect(result.details.usingFallback).toBe(true);
+    // usingFallback is false when rg is available, true otherwise
+    expect(typeof result.details.usingFallback).toBe('boolean');
+  });
+
+  it('applies default head_limit of 250', async () => {
+    // Create 5 files with matching content
+    for (let i = 0; i < 5; i++) {
+      fs.writeFileSync(path.join(tmpDir, `file${i}.ts`), 'findme\n');
+    }
+
+    const result = await grepTool.execute({ pattern: 'findme' });
+
+    // All 5 should be returned (under 250 limit)
+    const text = (result.content[0] as { type: 'text'; text: string }).text;
+    for (let i = 0; i < 5; i++) {
+      expect(text).toContain(`file${i}.ts`);
+    }
+    expect(result.details.truncated).toBe(false);
+  });
+
+  it('supports explicit head_limit=0 for unlimited results', async () => {
+    for (let i = 0; i < 5; i++) {
+      fs.writeFileSync(path.join(tmpDir, `unlimited${i}.ts`), 'target\n');
+    }
+
+    const result = await grepTool.execute({ pattern: 'target', head_limit: 0 });
+
+    const text = (result.content[0] as { type: 'text'; text: string }).text;
+    for (let i = 0; i < 5; i++) {
+      expect(text).toContain(`unlimited${i}.ts`);
+    }
+  });
+
+  it('handles dash-prefixed patterns', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'dashes.ts'), 'foo --bar baz\n');
+
+    const result = await grepTool.execute({
+      pattern: '--bar',
+      output_mode: 'content',
+    });
+
+    const text = (result.content[0] as { type: 'text'; text: string }).text;
+    expect(text).toContain('--bar');
   });
 
   describe('gitignore support', () => {

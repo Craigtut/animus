@@ -177,4 +177,125 @@ describe('Read tool', () => {
     expect(text).toContain('of 100 total');
     expect(result.details.truncatedLines).toBe(true);
   });
+
+  // -----------------------------------------------------------------------
+  // Device path blocking
+  // -----------------------------------------------------------------------
+
+  describe('device path blocking', () => {
+    it('blocks /dev/zero', async () => {
+      const result = await readTool.execute({ file_path: '/dev/zero' });
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).toContain('would block or produce infinite output');
+    });
+
+    it('blocks /dev/random', async () => {
+      const result = await readTool.execute({ file_path: '/dev/random' });
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).toContain('would block or produce infinite output');
+    });
+
+    it('blocks /dev/stdin', async () => {
+      const result = await readTool.execute({ file_path: '/dev/stdin' });
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).toContain('would block or produce infinite output');
+    });
+
+    it('blocks /dev/tty', async () => {
+      const result = await readTool.execute({ file_path: '/dev/tty' });
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).toContain('would block or produce infinite output');
+    });
+
+    it('blocks /proc/self/fd/0', async () => {
+      const result = await readTool.execute({ file_path: '/proc/self/fd/0' });
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).toContain('would block or produce infinite output');
+    });
+
+    it('blocks /proc/123/fd/1', async () => {
+      const result = await readTool.execute({ file_path: '/proc/123/fd/1' });
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      expect(text).toContain('would block or produce infinite output');
+    });
+
+    it('allows /dev/null (not blocked)', async () => {
+      const result = await readTool.execute({ file_path: '/dev/null' });
+      const text = (result.content[0] as { type: 'text'; text: string }).text;
+      // /dev/null is empty, should not trigger device blocking
+      expect(text).not.toContain('would block');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // File-unchanged dedup
+  // -----------------------------------------------------------------------
+
+  describe('file-unchanged dedup', () => {
+    it('returns unchanged stub on re-read of same file', async () => {
+      const filePath = path.join(tmpDir, 'stable.txt');
+      fs.writeFileSync(filePath, 'hello world\n');
+
+      // First read: returns content
+      const first = await readTool.execute({ file_path: filePath });
+      const firstText = (first.content[0] as { type: 'text'; text: string }).text;
+      expect(firstText).toContain('hello world');
+
+      // Second read (same file, same range): returns stub
+      const second = await readTool.execute({ file_path: filePath });
+      const secondText = (second.content[0] as { type: 'text'; text: string }).text;
+      expect(secondText).toContain('File unchanged since last read');
+    });
+
+    it('returns full content when file is modified between reads', async () => {
+      const filePath = path.join(tmpDir, 'changing.txt');
+      fs.writeFileSync(filePath, 'version 1\n');
+
+      // First read
+      await readTool.execute({ file_path: filePath });
+
+      // Modify the file (need to change mtime)
+      // Touch the file with a different timestamp
+      const futureTime = Date.now() + 2000;
+      fs.utimesSync(filePath, futureTime / 1000, futureTime / 1000);
+
+      // Second read: file changed, should return full content
+      const second = await readTool.execute({ file_path: filePath });
+      const secondText = (second.content[0] as { type: 'text'; text: string }).text;
+      expect(secondText).toContain('version 1');
+      expect(secondText).not.toContain('unchanged');
+    });
+
+    it('returns full content when different range is requested', async () => {
+      const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`);
+      const filePath = path.join(tmpDir, 'multirange.txt');
+      fs.writeFileSync(filePath, lines.join('\n'));
+
+      // Read lines 1-10
+      await readTool.execute({ file_path: filePath, offset: 1, limit: 10 });
+
+      // Read lines 20-30 (different range): should return full content
+      const second = await readTool.execute({ file_path: filePath, offset: 20, limit: 10 });
+      const secondText = (second.content[0] as { type: 'text'; text: string }).text;
+      expect(secondText).toContain('line 20');
+      expect(secondText).not.toContain('unchanged');
+    });
+
+    it('does not dedup after registry is cleared', async () => {
+      const filePath = path.join(tmpDir, 'cleared.txt');
+      fs.writeFileSync(filePath, 'content\n');
+
+      // First read
+      await readTool.execute({ file_path: filePath });
+
+      // Clear registry (simulates new agentic loop)
+      registry.clear();
+
+      // Second read: no dedup, returns full content
+      const second = await readTool.execute({ file_path: filePath });
+      const secondText = (second.content[0] as { type: 'text'; text: string }).text;
+      expect(secondText).toContain('content');
+      expect(secondText).not.toContain('unchanged');
+    });
+  });
 });

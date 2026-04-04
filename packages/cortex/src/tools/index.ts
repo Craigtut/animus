@@ -8,6 +8,7 @@
 
 // Shared infrastructure
 export { ReadRegistry } from './shared/read-registry.js';
+export type { ReadState } from './shared/read-registry.js';
 export { CwdTracker } from './shared/cwd-tracker.js';
 
 // Tool factories

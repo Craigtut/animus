@@ -52,6 +52,42 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml',
 };
 
+/**
+ * Device files that would hang the process: infinite output or blocking input.
+ * Checked by path only (no I/O).
+ */
+const BLOCKED_DEVICE_PATHS = new Set([
+  // Infinite output
+  '/dev/zero',
+  '/dev/random',
+  '/dev/urandom',
+  '/dev/full',
+  // Blocks waiting for input
+  '/dev/stdin',
+  '/dev/tty',
+  '/dev/console',
+  // Nonsensical to read
+  '/dev/stdout',
+  '/dev/stderr',
+  // fd aliases for stdin/stdout/stderr
+  '/dev/fd/0',
+  '/dev/fd/1',
+  '/dev/fd/2',
+]);
+
+function isBlockedDevicePath(filePath: string): boolean {
+  if (BLOCKED_DEVICE_PATHS.has(filePath)) return true;
+  // /proc/self/fd/0-2 and /proc/<pid>/fd/0-2 are Linux aliases for stdio
+  if (
+    filePath.startsWith('/proc/') &&
+    (filePath.endsWith('/fd/0') ||
+      filePath.endsWith('/fd/1') ||
+      filePath.endsWith('/fd/2'))
+  )
+    return true;
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Details type
 // ---------------------------------------------------------------------------
@@ -177,6 +213,21 @@ export function createReadTool(config: ReadToolConfig): {
       const offset = params.offset ?? 1;
       const limit = params.limit ?? DEFAULT_LIMIT;
 
+      // Block device paths that would hang (infinite output or blocking input)
+      if (isBlockedDevicePath(filePath)) {
+        return {
+          content: [{ type: 'text', text: `Cannot read '${params.file_path}': this device file would block or produce infinite output.` }],
+          details: {
+            filePath,
+            totalLines: 0,
+            byteSize: 0,
+            truncated: false,
+            truncatedLines: false,
+            truncatedChars: false,
+          },
+        };
+      }
+
       // Check if path exists
       let stat: fs.Stats;
       try {
@@ -235,7 +286,7 @@ export function createReadTool(config: ReadToolConfig): {
         const mimeType = IMAGE_MIME_TYPES[ext] ?? 'application/octet-stream';
         const base64 = buffer.toString('base64');
 
-        readRegistry.markRead(filePath);
+        readRegistry.markRead(filePath, { timestamp: stat.mtimeMs });
 
         return {
           content: [{ type: 'image', data: base64, mimeType }],
@@ -265,6 +316,28 @@ export function createReadTool(config: ReadToolConfig): {
         };
       }
 
+      // File-unchanged dedup: if we already read this exact range and the
+      // file hasn't changed on disk, return a stub. The earlier Read result
+      // is still in context, so re-sending wastes tokens.
+      const existingState = readRegistry.getState(filePath);
+      if (existingState && existingState.offset !== undefined) {
+        const rangeMatch =
+          existingState.offset === offset && existingState.limit === limit;
+        if (rangeMatch && stat.mtimeMs === existingState.timestamp) {
+          return {
+            content: [{ type: 'text', text: `[File unchanged since last read: ${filePath}]` }],
+            details: {
+              filePath,
+              totalLines: 0,
+              byteSize: stat.size,
+              truncated: false,
+              truncatedLines: false,
+              truncatedChars: false,
+            },
+          };
+        }
+      }
+
       // Read the raw buffer
       const buffer = await fs.promises.readFile(filePath);
 
@@ -290,7 +363,7 @@ export function createReadTool(config: ReadToolConfig): {
 
       // Handle empty file
       if (totalLines === 0 || (totalLines === 1 && allLines[0] === '')) {
-        readRegistry.markRead(filePath);
+        readRegistry.markRead(filePath, { timestamp: stat.mtimeMs, offset, limit });
         return {
           content: [{ type: 'text', text: `[File is empty: ${filePath}]` }],
           details: {
@@ -315,7 +388,7 @@ export function createReadTool(config: ReadToolConfig): {
       // Format with line numbers
       const formatted = formatWithLineNumbers(selectedLines, startIdx + 1);
 
-      readRegistry.markRead(filePath);
+      readRegistry.markRead(filePath, { timestamp: stat.mtimeMs, offset, limit });
 
       let text = formatted;
       if (truncatedLines) {
