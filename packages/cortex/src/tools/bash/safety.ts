@@ -547,10 +547,8 @@ const UNIX_OBFUSCATION_PATTERNS: ObfuscationPattern[] = [
   { pattern: /#.*['"].*\n/, description: 'Comment/quote desync pattern' },
   { pattern: /'[^']*\n[^']*'/, description: 'Embedded newlines in single-quoted strings' },
   { pattern: /[|;&]\s*$/, description: 'Incomplete command (trailing pipe or semicolon)' },
-  // IFS manipulation
-  { pattern: /\bIFS\s*=/, description: 'IFS variable manipulation' },
-  // /proc access
-  { pattern: /\/proc\/[^/]*\/environ/, description: 'Access to process environment via /proc' },
+  // NOTE: IFS manipulation and /proc access are handled by dedicated
+  // quote-aware validators below (checkIfsInjection, checkProcSysAccess).
 ];
 
 /**
@@ -580,6 +578,444 @@ function stripQuotedContent(command: string): string {
     return `${quote}${quote}`;
   });
 }
+
+// ---------------------------------------------------------------------------
+// Quote State Machine (shared utility for quote-aware validators)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-character quote context. Describes the quoting state at a given position.
+ */
+export type QuoteContext = 'none' | 'single' | 'double' | 'backtick' | 'escaped';
+
+/**
+ * Analyze the quoting context of each character in a shell command.
+ * Returns an array of QuoteContext values, one per character, indicating
+ * whether that position is inside single quotes, double quotes, backticks,
+ * escaped, or unquoted. Handles nested escapes correctly (e.g., `\"` inside
+ * double quotes keeps the next character as "double", not "escaped").
+ */
+export function analyzeQuoteState(command: string): QuoteContext[] {
+  const states: QuoteContext[] = new Array(command.length);
+  let context: 'none' | 'single' | 'double' | 'backtick' = 'none';
+  // Track the context to return to when a backtick closes (for backtick-in-double-quote)
+  let returnContext: 'none' | 'double' = 'none';
+
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!;
+
+    if (context === 'single') {
+      // Inside single quotes, only a closing single quote ends the context.
+      // No escape processing at all inside single quotes.
+      if (ch === "'") {
+        states[i] = 'none';
+        context = 'none';
+      } else {
+        states[i] = 'single';
+      }
+      continue;
+    }
+
+    if (context === 'double') {
+      // Inside double quotes, backslash only escapes: $, `, ", \, and newline.
+      if (ch === '\\' && i + 1 < command.length) {
+        const next = command[i + 1]!;
+        if ('$`"\\'.includes(next) || next === '\n') {
+          states[i] = 'escaped';
+          states[i + 1] = 'escaped';
+          i++; // skip the escaped character
+          continue;
+        }
+      }
+      if (ch === '"') {
+        states[i] = 'none';
+        context = 'none';
+      } else if (ch === '`') {
+        // Backticks nest inside double quotes. Track return context so we
+        // resume double-quote context when the backtick closes.
+        states[i] = 'backtick';
+        returnContext = 'double';
+        context = 'backtick';
+      } else {
+        states[i] = 'double';
+      }
+      continue;
+    }
+
+    if (context === 'backtick') {
+      if (ch === '\\' && i + 1 < command.length) {
+        states[i] = 'escaped';
+        states[i + 1] = 'escaped';
+        i++;
+        continue;
+      }
+      if (ch === '`') {
+        states[i] = returnContext === 'double' ? 'double' : 'none';
+        context = returnContext;
+        returnContext = 'none';
+      } else {
+        states[i] = 'backtick';
+      }
+      continue;
+    }
+
+    // context === 'none' (unquoted)
+    if (ch === '\\' && i + 1 < command.length) {
+      states[i] = 'escaped';
+      states[i + 1] = 'escaped';
+      i++;
+      continue;
+    }
+
+    if (ch === "'") {
+      states[i] = 'single'; // the quote character itself is "in" single-quote context
+      context = 'single';
+      continue;
+    }
+
+    if (ch === '"') {
+      states[i] = 'double';
+      context = 'double';
+      continue;
+    }
+
+    if (ch === '`') {
+      states[i] = 'backtick';
+      context = 'backtick';
+      continue;
+    }
+
+    states[i] = 'none';
+  }
+
+  return states;
+}
+
+/**
+ * Extract the unquoted portions of a command using the quote state machine.
+ * Returns a string where quoted characters are replaced with spaces (preserving
+ * positions) so that regex matches on the result correspond to unquoted regions.
+ */
+function getUnquotedText(command: string, states: QuoteContext[]): string {
+  const chars: string[] = [];
+  for (let i = 0; i < command.length; i++) {
+    chars.push(states[i] === 'none' ? command[i]! : ' ');
+  }
+  return chars.join('');
+}
+
+// ---------------------------------------------------------------------------
+// Validator 2: Enhanced IFS Injection
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect IFS variable manipulation in unquoted context.
+ * `IFS=` inside quotes is harmless (just a string literal).
+ * Unquoted `IFS=` is a shell variable assignment that can enable attacks.
+ */
+export function checkIfsInjection(command: string, states: QuoteContext[]): SafetyCheckResult {
+  const unquoted = getUnquotedText(command, states);
+  if (/\bIFS\s*=/.test(unquoted)) {
+    return {
+      allowed: false,
+      reason: 'Obfuscation pattern detected: IFS variable manipulation',
+    };
+  }
+  return { allowed: true };
+}
+
+// ---------------------------------------------------------------------------
+// Validator 3: Enhanced proc/sys Access
+// ---------------------------------------------------------------------------
+
+/**
+ * Sensitive paths under /proc and /sys that can be used for exfiltration
+ * or system introspection attacks.
+ */
+const PROC_SYS_PATTERNS: RegExp[] = [
+  // /proc exfiltration vectors
+  /\/proc\/[^/]*\/environ/,
+  /\/proc\/[^/]*\/cmdline/,
+  /\/proc\/[^/]*\/maps/,
+  /\/proc\/[^/]*\/mem\b/,
+  /\/proc\/[^/]*\/fd\//,
+  /\/proc\/[^/]*\/exe\b/,
+  /\/proc\/[^/]*\/cwd\b/,
+  /\/proc\/[^/]*\/root\b/,
+  /\/proc\/[^/]*\/mountinfo/,
+  /\/proc\/[^/]*\/status/,
+  // /sys sensitive paths
+  /\/sys\/class\/net\b/,
+  /\/sys\/kernel\//,
+  /\/sys\/firmware\//,
+  /\/sys\/fs\/cgroup\//,
+];
+
+/**
+ * Detect access to sensitive /proc and /sys paths in unquoted context.
+ * Quoted references (e.g., `echo "/proc/self/environ"`) are harmless string
+ * literals. Unquoted references indicate actual filesystem access attempts.
+ */
+export function checkProcSysAccess(command: string, states: QuoteContext[]): SafetyCheckResult {
+  const unquoted = getUnquotedText(command, states);
+  for (const pattern of PROC_SYS_PATTERNS) {
+    if (pattern.test(unquoted)) {
+      return {
+        allowed: false,
+        reason: 'Obfuscation pattern detected: Access to sensitive /proc or /sys path',
+      };
+    }
+  }
+  return { allowed: true };
+}
+
+// ---------------------------------------------------------------------------
+// Validator 4: jq system() Blocking
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect jq command abuse: system() calls, @sh filter for shell injection,
+ * and -n with module imports that could load malicious jq modules.
+ */
+export function checkJqAbuse(command: string): SafetyCheckResult {
+  // Only check commands that invoke jq
+  if (!/\bjq\b/.test(command)) {
+    return { allowed: true };
+  }
+
+  // Block jq filters containing system( -- executes shell commands from jq
+  // Use dotAll (s) flag so multi-line jq filters are caught
+  if (/\bjq\b.*\bsystem\s*\(/s.test(command)) {
+    return {
+      allowed: false,
+      reason: 'Obfuscation pattern detected: jq system() call can execute arbitrary shell commands',
+    };
+  }
+
+  // Block @sh filter used for shell injection
+  if (/\bjq\b.*@sh\b/s.test(command)) {
+    return {
+      allowed: false,
+      reason: 'Obfuscation pattern detected: jq @sh filter can be used for shell injection',
+    };
+  }
+
+  // Block jq -n with import/include (module loading)
+  if (/\bjq\b\s+.*-n\b.*\b(import|include)\b/s.test(command) || /\bjq\b\s+.*\b(import|include)\b.*-n\b/s.test(command)) {
+    return {
+      allowed: false,
+      reason: 'Obfuscation pattern detected: jq module import with -n flag',
+    };
+  }
+
+  return { allowed: true };
+}
+
+// ---------------------------------------------------------------------------
+// Validator 5: ANSI-C Quoting Detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect ANSI-C quoting ($'...') with hex or octal escape sequences that
+ * encode potentially dangerous content. Simple escapes like $'\n' and $'\t'
+ * are legitimate and allowed.
+ */
+export function checkAnsiCQuoting(command: string): SafetyCheckResult {
+  // Match $'...' patterns. We need to find all ANSI-C quoted strings and
+  // check if they contain hex (\xHH) or octal (\0NNN or \NNN with 3 digits) escapes.
+  const ansiCPattern = /\$'([^'\\]*(?:\\.[^'\\]*)*)'/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = ansiCPattern.exec(command)) !== null) {
+    const content = match[1] ?? '';
+
+    // Check for hex escapes (\xHH)
+    const hasHex = /\\x[0-9a-fA-F]{2}/.test(content);
+    // Check for octal escapes (\0NNN or \NNN where N are 3 octal digits)
+    const hasOctal = /\\0[0-7]{1,3}/.test(content) || /\\[1-3][0-7]{2}/.test(content);
+
+    if (hasHex || hasOctal) {
+      return {
+        allowed: false,
+        reason: 'Obfuscation pattern detected: ANSI-C quoting with hex/octal escapes can encode hidden commands',
+      };
+    }
+  }
+
+  return { allowed: true };
+}
+
+// ---------------------------------------------------------------------------
+// Validator 6: Enhanced Heredoc Validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect heredoc patterns and validate their content. Unquoted heredoc
+ * delimiters (<<EOF) allow variable expansion and command substitution in
+ * the body, which can be used for injection. Quoted delimiters (<<'EOF')
+ * are treated as literal text and are safe.
+ */
+export function checkHeredocInjection(command: string): SafetyCheckResult {
+  // Match heredoc operators: <<[-]?DELIMITER or <<[-]?"DELIMITER" or <<[-]?'DELIMITER'
+  // We look for the delimiter, then try to find the body if it is inline (multi-line command).
+  const heredocPattern = /<<-?\s*(["']?)(\w+)\1/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = heredocPattern.exec(command)) !== null) {
+    const quoteChar = match[1] ?? '';
+    const delimiter = match[2] ?? '';
+    const isQuoted = quoteChar !== '';
+
+    if (isQuoted || !delimiter) {
+      // Quoted heredocs are safe (no expansion), skip
+      continue;
+    }
+
+    // For unquoted heredocs, check if the body (text after the delimiter line
+    // and before the closing delimiter) contains injection patterns.
+    const afterMatch = command.substring(match.index + match[0].length);
+
+    // The body starts after a newline following the heredoc operator
+    const newlineIdx = afterMatch.indexOf('\n');
+    if (newlineIdx === -1) continue; // no body present in the command string
+
+    const bodyAndRest = afterMatch.substring(newlineIdx + 1);
+    const closingPattern = new RegExp(`^${delimiter}\\s*$`, 'm');
+    const closingMatch = closingPattern.exec(bodyAndRest);
+    const body = closingMatch ? bodyAndRest.substring(0, closingMatch.index) : bodyAndRest;
+
+    // Check the heredoc body for injection patterns
+    const injectionPatterns = [
+      /\$\(/, // command substitution
+      /`[^`]+`/, // backtick command substitution
+      /\$\{.*[^}]*\}/, // parameter expansion with manipulation
+    ];
+
+    for (const pattern of injectionPatterns) {
+      if (pattern.test(body)) {
+        return {
+          allowed: false,
+          reason: 'Obfuscation pattern detected: Unquoted heredoc with command substitution in body',
+        };
+      }
+    }
+  }
+
+  return { allowed: true };
+}
+
+// ---------------------------------------------------------------------------
+// Validator 7: Brace Expansion Detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect brace expansion patterns ({a,b} or {1..N}) in unquoted context
+ * that target suspicious paths or combine with dangerous commands.
+ */
+export function checkBraceExpansion(command: string, states: QuoteContext[]): SafetyCheckResult {
+  const unquoted = getUnquotedText(command, states);
+
+  // Find {x,y} patterns in unquoted text. Only flag when combined with
+  // destructive commands or when referencing sensitive system paths.
+  // Benign patterns like `diff {old,new}/config.ts` should pass.
+  const commaExpansion = /\{[^}]*,[^}]*\}/g;
+  let match: RegExpExecArray | null;
+
+  // Extract leading command for context-aware decisions
+  const firstToken = unquoted.trim().split(/\s+/)[0] ?? '';
+  const destructiveCommands = ['rm', 'chmod', 'chown', 'mv', 'rmdir', 'dd', 'shred'];
+
+  while ((match = commaExpansion.exec(unquoted)) !== null) {
+    const content = match[0];
+    // Flag if expansion references sensitive paths
+    if (/\betc\b|passwd|shadow|authorized_keys|\bssh\b|\bproc\b|\bsys\b/.test(content)) {
+      return {
+        allowed: false,
+        reason: 'Obfuscation pattern detected: Brace expansion referencing sensitive paths',
+      };
+    }
+    // Flag if any element starts with absolute path AND command is destructive
+    if (/\{\/|,\s*\//.test(content) && destructiveCommands.includes(firstToken.toLowerCase())) {
+      return {
+        allowed: false,
+        reason: 'Obfuscation pattern detected: Brace expansion with absolute paths in destructive command',
+      };
+    }
+  }
+
+  // Check for range expansion {N..M} combined with dangerous commands.
+  // Look at the first token of the overall command to determine context.
+  const rangeExpansion = /\{[^}]*\.\.[^}]*\}/g;
+  if (rangeExpansion.test(unquoted)) {
+    // Extract the leading command name from the unquoted text
+    const firstToken = unquoted.trim().split(/\s+/)[0] ?? '';
+    const destructiveCommands = ['rm', 'chmod', 'chown', 'mv', 'cp'];
+    if (destructiveCommands.includes(firstToken.toLowerCase())) {
+      return {
+        allowed: false,
+        reason: 'Obfuscation pattern detected: Brace range expansion with destructive command',
+      };
+    }
+  }
+
+  return { allowed: true };
+}
+
+// ---------------------------------------------------------------------------
+// Validator 8: Enhanced Escaped Character Detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect escape chains and printf hex/octal patterns that can hide dangerous
+ * commands from string-level pattern matching.
+ */
+export function checkEnhancedEscapes(command: string, states: QuoteContext[]): SafetyCheckResult {
+  // Detect double-backslash before shell operators in unquoted context.
+  // In "echo hello\\;rm", the state machine marks both backslashes as escaped
+  // (the first escapes the second), leaving ";" as unquoted (none). We look
+  // for an escaped pair where the raw characters are both backslashes, followed
+  // immediately by an unquoted shell operator.
+  const shellOps = new Set([';', '&', '|']);
+  for (let i = 0; i + 2 < command.length; i++) {
+    if (
+      states[i] === 'escaped' &&
+      states[i + 1] === 'escaped' &&
+      command[i] === '\\' &&
+      command[i + 1] === '\\' &&
+      states[i + 2] === 'none' &&
+      shellOps.has(command[i + 2]!)
+    ) {
+      return {
+        allowed: false,
+        reason: 'Obfuscation pattern detected: Double-escaped shell operator (live operator hidden behind escape chain)',
+      };
+    }
+  }
+
+  // Detect printf with hex/octal that spells dangerous commands.
+  // We look for printf calls with multiple escape sequences.
+  const printfMatch = command.match(/\bprintf\s+(['"])((?:\\x[0-9a-fA-F]{2}|\\[0-7]{3}){3,})\1/);
+  if (printfMatch) {
+    return {
+      allowed: false,
+      reason: 'Obfuscation pattern detected: printf with encoded character sequences',
+    };
+  }
+
+  // Also catch printf with %b and hex/octal in a variable
+  if (/\bprintf\s+['"]?%b['"]?\s+.*(?:\\x[0-9a-fA-F]{2}|\\[0-7]{3}){3,}/.test(command)) {
+    return {
+      allowed: false,
+      reason: 'Obfuscation pattern detected: printf %b with encoded character sequences',
+    };
+  }
+
+  return { allowed: true };
+}
+
+// ---------------------------------------------------------------------------
+// Main obfuscation check
+// ---------------------------------------------------------------------------
 
 /**
  * Check a command for obfuscation and injection patterns.
@@ -639,6 +1075,38 @@ export function checkObfuscation(command: string): SafetyCheckResult {
       };
     }
   }
+
+  // --- Enhanced validators (quote-state-machine-powered) ---
+
+  const quoteStates = analyzeQuoteState(command);
+
+  // Validator 2: Enhanced IFS injection (quote-aware)
+  const ifsResult = checkIfsInjection(command, quoteStates);
+  if (!ifsResult.allowed) return ifsResult;
+
+  // Validator 3: Enhanced proc/sys access (quote-aware)
+  const procResult = checkProcSysAccess(command, quoteStates);
+  if (!procResult.allowed) return procResult;
+
+  // Validator 4: jq system() blocking
+  const jqResult = checkJqAbuse(command);
+  if (!jqResult.allowed) return jqResult;
+
+  // Validator 5: ANSI-C quoting detection
+  const ansiCResult = checkAnsiCQuoting(command);
+  if (!ansiCResult.allowed) return ansiCResult;
+
+  // Validator 6: Enhanced heredoc validation
+  const heredocResult = checkHeredocInjection(command);
+  if (!heredocResult.allowed) return heredocResult;
+
+  // Validator 7: Brace expansion detection
+  const braceResult = checkBraceExpansion(command, quoteStates);
+  if (!braceResult.allowed) return braceResult;
+
+  // Validator 8: Enhanced escaped character detection
+  const escapeResult = checkEnhancedEscapes(command, quoteStates);
+  if (!escapeResult.allowed) return escapeResult;
 
   return { allowed: true };
 }

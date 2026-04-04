@@ -14,6 +14,14 @@ import {
   checkScriptPreflight,
   checkAutoModeClassifier,
   runSafetyChecks,
+  analyzeQuoteState,
+  checkIfsInjection,
+  checkProcSysAccess,
+  checkJqAbuse,
+  checkAnsiCQuoting,
+  checkHeredocInjection,
+  checkBraceExpansion,
+  checkEnhancedEscapes,
 } from '../../../src/tools/bash/safety.js';
 
 describe('Bash safety layers', () => {
@@ -584,6 +592,483 @@ describe('Bash safety layers', () => {
       );
       expect(result.allowed).toBe(false);
       expect(result.reason).toContain('not yet implemented');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Validator 1: Quote State Machine
+  // -----------------------------------------------------------------------
+  describe('analyzeQuoteState', () => {
+    it('marks unquoted text as none', () => {
+      const states = analyzeQuoteState('hello');
+      expect(states.every((s) => s === 'none')).toBe(true);
+    });
+
+    it('marks single-quoted content as single', () => {
+      const states = analyzeQuoteState("echo 'hello'");
+      // 'hello' starts at index 5
+      expect(states[4]).toBe('none'); // space before quote
+      expect(states[5]).toBe('single'); // opening quote
+      expect(states[6]).toBe('single'); // h
+      expect(states[10]).toBe('single'); // o
+      expect(states[11]).toBe('none'); // closing quote exits single-quote context
+    });
+
+    it('marks double-quoted content as double', () => {
+      const states = analyzeQuoteState('echo "hello"');
+      expect(states[5]).toBe('double'); // opening quote
+      expect(states[6]).toBe('double'); // h
+      expect(states[11]).toBe('none'); // closing quote exits double-quote context
+    });
+
+    it('handles escaped characters in unquoted context', () => {
+      const states = analyzeQuoteState('echo \\;ls');
+      expect(states[5]).toBe('escaped'); // backslash
+      expect(states[6]).toBe('escaped'); // semicolon (escaped)
+      expect(states[7]).toBe('none'); // l
+    });
+
+    it('handles escaped characters inside double quotes', () => {
+      const states = analyzeQuoteState('echo "hello\\"world"');
+      expect(states[5]).toBe('double'); // opening "
+      expect(states[11]).toBe('escaped'); // backslash
+      expect(states[12]).toBe('escaped'); // escaped "
+      expect(states[13]).toBe('double'); // w (still inside double quotes)
+      expect(states[18]).toBe('none'); // closing " exits double-quote context
+    });
+
+    it('does not process escapes inside single quotes', () => {
+      const states = analyzeQuoteState("echo '\\n'");
+      // Inside single quotes, backslash is literal
+      expect(states[6]).toBe('single'); // backslash is just single-quoted
+      expect(states[7]).toBe('single'); // n is just single-quoted
+    });
+
+    it('handles backtick context', () => {
+      const states = analyzeQuoteState('echo `date`');
+      expect(states[5]).toBe('backtick'); // opening backtick
+      expect(states[6]).toBe('backtick'); // d
+      expect(states[9]).toBe('backtick'); // e (last char inside backtick)
+      expect(states[10]).toBe('none'); // closing backtick exits context
+    });
+
+    it('handles empty string', () => {
+      const states = analyzeQuoteState('');
+      expect(states).toEqual([]);
+    });
+
+    it('handles adjacent quoted strings', () => {
+      const states = analyzeQuoteState("'a'\"b\"");
+      expect(states[0]).toBe('single'); // '
+      expect(states[1]).toBe('single'); // a
+      expect(states[2]).toBe('none'); // closing '
+      expect(states[3]).toBe('double'); // opening "
+      expect(states[4]).toBe('double'); // b
+      expect(states[5]).toBe('none'); // closing "
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Validator 2: Enhanced IFS Injection
+  // -----------------------------------------------------------------------
+  describe('checkIfsInjection', () => {
+    it('blocks unquoted IFS assignment', () => {
+      const cmd = 'IFS=: read -ra arr <<< "$PATH"';
+      const result = checkIfsInjection(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('IFS');
+    });
+
+    it('blocks IFS with eval pattern', () => {
+      const cmd = 'IFS=:; cmd=$PATH; eval $cmd';
+      const result = checkIfsInjection(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+    });
+
+    it('allows IFS inside double quotes (harmless string)', () => {
+      const cmd = 'echo "IFS=foo"';
+      const result = checkIfsInjection(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(true);
+    });
+
+    it('allows IFS inside single quotes', () => {
+      const cmd = "echo 'IFS=bar'";
+      const result = checkIfsInjection(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(true);
+    });
+
+    it('blocks IFS with spaces around equals', () => {
+      const cmd = 'IFS = /';
+      const result = checkIfsInjection(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+    });
+
+    it('integration: checkObfuscation blocks unquoted IFS', () => {
+      expect(checkObfuscation('IFS=/ cmd').allowed).toBe(false);
+    });
+
+    it('integration: checkObfuscation allows quoted IFS', () => {
+      expect(checkObfuscation('echo "IFS=foo"').allowed).toBe(true);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Validator 3: Enhanced proc/sys Access
+  // -----------------------------------------------------------------------
+  describe('checkProcSysAccess', () => {
+    it('blocks /proc/self/environ in unquoted context', () => {
+      const cmd = 'cat /proc/self/environ';
+      const result = checkProcSysAccess(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('/proc');
+    });
+
+    it('blocks /proc/self/cmdline', () => {
+      const cmd = 'cat /proc/self/cmdline';
+      const result = checkProcSysAccess(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+    });
+
+    it('blocks /proc/<pid>/maps', () => {
+      const cmd = 'cat /proc/1234/maps';
+      const result = checkProcSysAccess(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+    });
+
+    it('blocks /proc/<pid>/mem', () => {
+      const cmd = 'dd if=/proc/self/mem of=dump bs=1 skip=0';
+      const result = checkProcSysAccess(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+    });
+
+    it('blocks /proc/<pid>/fd/', () => {
+      const cmd = 'ls /proc/self/fd/';
+      const result = checkProcSysAccess(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+    });
+
+    it('blocks /sys/kernel/ access', () => {
+      const cmd = 'cat /sys/kernel/hostname';
+      const result = checkProcSysAccess(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+    });
+
+    it('blocks /sys/firmware/ access', () => {
+      const cmd = 'cat /sys/firmware/acpi/tables/DSDT';
+      const result = checkProcSysAccess(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+    });
+
+    it('allows /proc/self/environ inside double quotes (string literal)', () => {
+      const cmd = 'echo "/proc/self/environ"';
+      const result = checkProcSysAccess(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(true);
+    });
+
+    it('allows /proc/self/environ inside single quotes', () => {
+      const cmd = "echo '/proc/self/environ'";
+      const result = checkProcSysAccess(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(true);
+    });
+
+    it('integration: checkObfuscation blocks unquoted /proc access', () => {
+      expect(checkObfuscation('cat /proc/self/cmdline').allowed).toBe(false);
+    });
+
+    it('integration: checkObfuscation allows quoted /proc reference', () => {
+      expect(checkObfuscation('echo "/proc/self/environ"').allowed).toBe(true);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Validator 4: jq system() Blocking
+  // -----------------------------------------------------------------------
+  describe('checkJqAbuse', () => {
+    it('allows normal jq usage', () => {
+      expect(checkJqAbuse('jq ".name" file.json').allowed).toBe(true);
+    });
+
+    it('allows jq with common filters', () => {
+      expect(checkJqAbuse('jq ".[] | select(.age > 30)" data.json').allowed).toBe(true);
+    });
+
+    it('allows jq piped from other commands', () => {
+      expect(checkJqAbuse('cat file.json | jq ".items"').allowed).toBe(true);
+    });
+
+    it('blocks jq system() call', () => {
+      const result = checkJqAbuse('jq \'system("rm -rf /")\' file.json');
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('jq system()');
+    });
+
+    it('blocks jq @sh filter', () => {
+      const result = checkJqAbuse('jq \'@sh "echo \\(.name)"\' file.json');
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('@sh');
+    });
+
+    it('blocks jq -n with import', () => {
+      const result = checkJqAbuse('jq -n \'import "evil" as $e; $e::run\'');
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('module import');
+    });
+
+    it('blocks jq -n with include', () => {
+      const result = checkJqAbuse('jq -n \'include "evil"; run\'');
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('module import');
+    });
+
+    it('allows commands without jq', () => {
+      expect(checkJqAbuse('echo system').allowed).toBe(true);
+    });
+
+    it('integration: checkObfuscation blocks jq system()', () => {
+      expect(checkObfuscation('jq \'system("whoami")\' input.json').allowed).toBe(false);
+    });
+
+    it('integration: checkObfuscation allows normal jq', () => {
+      expect(checkObfuscation('jq ".name" package.json').allowed).toBe(true);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Validator 5: ANSI-C Quoting Detection
+  // -----------------------------------------------------------------------
+  describe('checkAnsiCQuoting', () => {
+    it('allows simple ANSI-C escapes like $\'\\n\'', () => {
+      expect(checkAnsiCQuoting("echo $'\\n'").allowed).toBe(true);
+    });
+
+    it('allows simple ANSI-C escapes like $\'\\t\'', () => {
+      expect(checkAnsiCQuoting("echo $'\\t'").allowed).toBe(true);
+    });
+
+    it('allows $\'\\a\' (bell)', () => {
+      expect(checkAnsiCQuoting("echo $'\\a'").allowed).toBe(true);
+    });
+
+    it('blocks hex escape sequences in ANSI-C quoting', () => {
+      // $'\x72\x6d' spells "rm"
+      const result = checkAnsiCQuoting("$'\\x72\\x6d' -rf /");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('ANSI-C');
+    });
+
+    it('blocks octal escape sequences in ANSI-C quoting', () => {
+      // $'\0162\0155' spells "rm" in octal
+      const result = checkAnsiCQuoting("$'\\0162\\0155' -rf /");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('ANSI-C');
+    });
+
+    it('allows commands without ANSI-C quoting', () => {
+      expect(checkAnsiCQuoting('echo hello').allowed).toBe(true);
+    });
+
+    it('integration: checkObfuscation blocks hex ANSI-C quoting', () => {
+      expect(checkObfuscation("$'\\x72\\x6d' -rf /").allowed).toBe(false);
+    });
+
+    it('integration: checkObfuscation allows $\'\\n\' usage', () => {
+      expect(checkObfuscation("echo $'line1\\nline2'").allowed).toBe(true);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Validator 6: Enhanced Heredoc Validation
+  // -----------------------------------------------------------------------
+  describe('checkHeredocInjection', () => {
+    it('allows quoted heredoc (no expansion)', () => {
+      const cmd = "cat <<'EOF'\nsome text\nEOF";
+      expect(checkHeredocInjection(cmd).allowed).toBe(true);
+    });
+
+    it('allows double-quoted heredoc delimiter (no expansion)', () => {
+      const cmd = 'cat <<"EOF"\nsome text\nEOF';
+      expect(checkHeredocInjection(cmd).allowed).toBe(true);
+    });
+
+    it('allows unquoted heredoc with static content', () => {
+      const cmd = 'cat <<EOF\nhello world\nEOF';
+      expect(checkHeredocInjection(cmd).allowed).toBe(true);
+    });
+
+    it('blocks unquoted heredoc with command substitution $(...)', () => {
+      const cmd = 'cat <<EOF\n$(whoami)\nEOF';
+      const result = checkHeredocInjection(cmd);
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('heredoc');
+    });
+
+    it('blocks unquoted heredoc with backtick substitution', () => {
+      const cmd = 'cat <<EOF\n`whoami`\nEOF';
+      const result = checkHeredocInjection(cmd);
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('heredoc');
+    });
+
+    it('blocks unquoted heredoc with parameter expansion', () => {
+      const cmd = 'cat <<EOF\n${HOME}\nEOF';
+      const result = checkHeredocInjection(cmd);
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('heredoc');
+    });
+
+    it('allows heredoc without body (no newline)', () => {
+      const cmd = 'cat <<EOF';
+      expect(checkHeredocInjection(cmd).allowed).toBe(true);
+    });
+
+    it('integration: checkObfuscation allows quoted heredoc', () => {
+      // Note: the existing heredoc pattern in UNIX_OBFUSCATION_PATTERNS catches
+      // heredocs with "bash" in the body. This test uses a safe body.
+      const cmd = "cat <<'EOF'\nsafe text\nEOF";
+      expect(checkObfuscation(cmd).allowed).toBe(true);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Validator 7: Brace Expansion Detection
+  // -----------------------------------------------------------------------
+  describe('checkBraceExpansion', () => {
+    it('allows benign brace expansion (echo {1..5})', () => {
+      const cmd = 'echo {1..5}';
+      const result = checkBraceExpansion(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(true);
+    });
+
+    it('allows quoted brace expansion', () => {
+      const cmd = 'echo "{a,b}"';
+      const result = checkBraceExpansion(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(true);
+    });
+
+    it('allows simple comma expansion without paths', () => {
+      const cmd = 'echo {hello,world}';
+      const result = checkBraceExpansion(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(true);
+    });
+
+    it('blocks brace expansion with sensitive paths', () => {
+      const cmd = 'rm {file,/etc/shadow}';
+      const result = checkBraceExpansion(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('sensitive paths');
+    });
+
+    it('blocks brace expansion with absolute paths in destructive command', () => {
+      const cmd = 'rm {/tmp/a,/var/b}';
+      const result = checkBraceExpansion(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('absolute paths');
+    });
+
+    it('allows brace expansion with relative paths in non-destructive command', () => {
+      const cmd = 'diff {old,new}/config.ts';
+      const result = checkBraceExpansion(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(true);
+    });
+
+    it('allows cp with relative brace expansion', () => {
+      const cmd = 'cp src/{foo,bar}.ts dist/';
+      const result = checkBraceExpansion(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(true);
+    });
+
+    it('blocks brace expansion referencing sensitive paths', () => {
+      const cmd = 'cat {config,passwd}';
+      const result = checkBraceExpansion(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('sensitive paths');
+    });
+
+    it('blocks range expansion with rm', () => {
+      const cmd = 'rm file{1..100}';
+      const result = checkBraceExpansion(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('destructive command');
+    });
+
+    it('allows range expansion with echo', () => {
+      const cmd = 'echo {1..10}';
+      const result = checkBraceExpansion(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(true);
+    });
+
+    it('integration: checkObfuscation blocks path brace expansion', () => {
+      expect(checkObfuscation('cat {/etc/passwd,/etc/shadow}').allowed).toBe(false);
+    });
+
+    it('integration: checkObfuscation allows quoted brace expansion', () => {
+      expect(checkObfuscation('echo "{a,b}"').allowed).toBe(true);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Validator 8: Enhanced Escaped Character Detection
+  // -----------------------------------------------------------------------
+  describe('checkEnhancedEscapes', () => {
+    it('blocks double-escaped semicolons (\\\\;)', () => {
+      const cmd = 'echo hello\\\\;rm -rf /';
+      const result = checkEnhancedEscapes(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('escape chain');
+    });
+
+    it('blocks double-escaped pipe (\\\\|)', () => {
+      const cmd = 'echo test\\\\|evil';
+      const result = checkEnhancedEscapes(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+    });
+
+    it('blocks printf with hex sequences', () => {
+      // printf '\x72\x6d\x20\x2d\x72\x66' encodes "rm -rf"
+      const cmd = "printf '\\x72\\x6d\\x20\\x2d\\x72\\x66'";
+      const result = checkEnhancedEscapes(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('printf');
+    });
+
+    it('blocks printf with octal sequences', () => {
+      const cmd = "printf '\\162\\155\\040\\055\\162\\146'";
+      const result = checkEnhancedEscapes(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('printf');
+    });
+
+    it('blocks printf %b with hex sequences', () => {
+      const cmd = 'printf "%b" "\\x72\\x6d\\x20\\x2d\\x72\\x66"';
+      const result = checkEnhancedEscapes(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('printf');
+    });
+
+    it('allows normal printf usage', () => {
+      const cmd = "printf 'hello %s\\n' world";
+      const result = checkEnhancedEscapes(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(true);
+    });
+
+    it('allows single backslash escapes (caught by existing validators)', () => {
+      const cmd = 'echo hello world';
+      const result = checkEnhancedEscapes(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(true);
+    });
+
+    it('allows double-escaped operators inside quotes', () => {
+      const cmd = 'echo "test\\\\;safe"';
+      const result = checkEnhancedEscapes(cmd, analyzeQuoteState(cmd));
+      expect(result.allowed).toBe(true);
+    });
+
+    it('integration: checkObfuscation blocks printf hex encoding', () => {
+      expect(checkObfuscation("printf '\\x72\\x6d\\x20\\x2d\\x72\\x66'").allowed).toBe(false);
+    });
+
+    it('integration: checkObfuscation allows normal printf', () => {
+      expect(checkObfuscation("printf 'Hello %s\\n' world").allowed).toBe(true);
     });
   });
 });
