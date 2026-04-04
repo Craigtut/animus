@@ -13,6 +13,7 @@
 
 import * as child_process from 'node:child_process';
 import * as fs from 'node:fs';
+import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import { Type, type Static } from '@sinclair/typebox';
 import type { ToolContentDetails } from '../types.js';
@@ -125,6 +126,7 @@ export interface GrepToolConfig {
 // ---------------------------------------------------------------------------
 
 let resolvedRgPath: string | false | undefined;
+const require = createRequire(import.meta.url);
 
 /**
  * Get the path to the bundled ripgrep binary from @vscode/ripgrep.

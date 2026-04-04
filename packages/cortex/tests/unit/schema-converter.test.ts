@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
+import { z as z3 } from 'zod/v3';
 import { zodToTypebox } from '../../src/schema-converter.js';
 
 describe('zodToTypebox', () => {
@@ -24,6 +25,20 @@ describe('zodToTypebox', () => {
     const zodSchema = z.string();
     const result = await zodToTypebox(zodSchema);
     expect(result.type).toBe('string');
+  });
+
+  it('converts a Zod v3 schema via zod-to-json-schema', async () => {
+    const zodSchema = z3.object({
+      legacy: z3.string(),
+      count: z3.number(),
+    });
+
+    const result = await zodToTypebox(zodSchema);
+
+    expect(result.type).toBe('object');
+    expect(result.properties.legacy).toEqual({ type: 'string' });
+    expect(result.properties.count).toEqual({ type: 'number' });
+    expect(result.required).toEqual(expect.arrayContaining(['legacy', 'count']));
   });
 
   it('converts a Zod number schema', async () => {

@@ -7,6 +7,7 @@ describe('WebFetch tool', () => {
 
   beforeEach(() => {
     webFetchTool = createWebFetchTool({});
+    vi.spyOn(dns, 'lookup').mockResolvedValue({ address: '93.184.216.34', family: 4 } as never);
   });
 
   afterEach(() => {
@@ -274,8 +275,7 @@ describe('WebFetch tool', () => {
   // S2: DNS rebinding prevention
   describe('DNS rebinding prevention', () => {
     it('blocks domains that resolve to private IPs', async () => {
-      // Mock dns.lookup to return a loopback IP
-      vi.spyOn(dns, 'lookup').mockResolvedValue({ address: '127.0.0.1', family: 4 } as never);
+      vi.mocked(dns.lookup).mockResolvedValue({ address: '127.0.0.1', family: 4 } as never);
 
       const result = await webFetchTool.execute({
         url: 'https://evil-rebind.example.com/api',
@@ -288,7 +288,7 @@ describe('WebFetch tool', () => {
     });
 
     it('blocks domains that resolve to 10.x.x.x', async () => {
-      vi.spyOn(dns, 'lookup').mockResolvedValue({ address: '10.0.0.1', family: 4 } as never);
+      vi.mocked(dns.lookup).mockResolvedValue({ address: '10.0.0.1', family: 4 } as never);
 
       const result = await webFetchTool.execute({
         url: 'https://attacker.com/ssrf',
@@ -301,7 +301,7 @@ describe('WebFetch tool', () => {
     });
 
     it('allows domains that resolve to public IPs', async () => {
-      vi.spyOn(dns, 'lookup').mockResolvedValue({ address: '93.184.216.34', family: 4 } as never);
+      vi.mocked(dns.lookup).mockResolvedValue({ address: '93.184.216.34', family: 4 } as never);
       vi.spyOn(globalThis, 'fetch').mockResolvedValue(
         new Response('<html><body>Public content</body></html>', {
           status: 200,

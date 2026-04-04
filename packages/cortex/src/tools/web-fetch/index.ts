@@ -47,7 +47,7 @@ export interface WebFetchDetails {
 const REQUEST_TIMEOUT = 30_000;
 const DEFAULT_MAX_PER_LOOP = 20;
 const MAX_CONTENT_TOKENS = 25_000; // approximate token limit for summarization
-const USER_AGENT = 'AnimusCortex/1.0 (web-fetch tool)';
+const USER_AGENT = 'Cortex/1.0 (web-fetch tool)';
 
 /**
  * Hostname strings that always resolve to private/local addresses.
