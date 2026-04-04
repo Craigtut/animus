@@ -481,8 +481,10 @@ export interface CortexContextSnapshot {
   };
   /** Model context window size for budget visualization */
   contextWindow: number;
-  /** Total tokens across all sections */
+  /** Total tokens across all sections (estimated via chars/4) */
   totalTokens: number;
+  /** Actual input tokens from the first agentic loop turn (from API response) */
+  firstTurnActualInputTokens?: number;
 }
 
 // ============================================================================

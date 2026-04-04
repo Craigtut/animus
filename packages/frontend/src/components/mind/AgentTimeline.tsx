@@ -3,7 +3,6 @@ import { css, useTheme } from '@emotion/react';
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  ArrowLeft,
   CaretDown,
   Play,
   Stop,
@@ -19,7 +18,6 @@ import {
   PaperPlaneRight,
   Database,
   Gear,
-  MagnifyingGlass,
   ArrowsClockwise,
   Lightbulb,
   Eye,
@@ -82,8 +80,6 @@ interface TickUsage {
 
 interface AgentTimelineProps {
   tickNumber: number;
-  onBack: () => void;
-  onInspectContext?: () => void;
 }
 
 // ============================================================================
@@ -1039,7 +1035,7 @@ function ToolInputDetail({ toolName, input }: { toolName: string; input: Record<
 // Event Detail Content
 // ============================================================================
 
-function EventDetail({ event, allEvents, onInspectContext }: { event: TimelineEvent; allEvents: TimelineEvent[]; onInspectContext?: (() => void) | undefined }) {
+function EventDetail({ event, allEvents }: { event: TimelineEvent; allEvents: TimelineEvent[] }) {
   const theme = useTheme();
   const d = event.data;
 
@@ -1086,36 +1082,6 @@ function EventDetail({ event, allEvents, onInspectContext }: { event: TimelineEv
       const trigger = str(d['triggerType']);
       return (
         <div>
-          {onInspectContext != null && (
-            <div css={css`margin-bottom: ${theme.spacing[3]};`}>
-              <button
-                onClick={(e) => { e.stopPropagation(); onInspectContext(); }}
-                css={css`
-                  display: inline-flex;
-                  align-items: center;
-                  gap: ${theme.spacing[1]};
-                  font-size: ${theme.typography.fontSize.xs};
-                  font-weight: ${theme.typography.fontWeight.medium};
-                  color: ${theme.colors.text.secondary};
-                  border: 1px solid ${theme.colors.border.default};
-                  padding: ${theme.spacing[1]} ${theme.spacing[2]};
-                  border-radius: ${theme.borderRadius.sm};
-                  cursor: pointer;
-                  transition: all ${theme.transitions.micro};
-                  background: transparent;
-
-                  &:hover {
-                    color: ${theme.colors.text.primary};
-                    border-color: ${theme.colors.border.focus};
-                    background: ${theme.colors.background.elevated};
-                  }
-                `}
-              >
-                <MagnifyingGlass size={12} />
-                Inspect Context
-              </button>
-            </div>
-          )}
           <DetailField label="TRIGGER">
             <Badge label={trigger || ''} color={triggerColor(trigger, theme)} />
           </DetailField>
@@ -1464,13 +1430,11 @@ function TimelineEventRow({
   allEvents,
   index,
   isLive,
-  onInspectContext,
 }: {
   event: TimelineEvent;
   allEvents: TimelineEvent[];
   index: number;
   isLive: boolean;
-  onInspectContext?: (() => void) | undefined;
 }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
@@ -1648,7 +1612,7 @@ function TimelineEventRow({
                 border: 1px solid ${theme.colors.border.light};
               `}
             >
-              <EventDetail event={event} allEvents={allEvents} onInspectContext={onInspectContext} />
+              <EventDetail event={event} allEvents={allEvents} />
             </motion.div>
           </motion.div>
         )}
@@ -2167,7 +2131,7 @@ function TimelineSkeleton() {
 // AgentTimeline (Main Component)
 // ============================================================================
 
-export function AgentTimeline({ tickNumber, onBack, onInspectContext }: AgentTimelineProps) {
+export function AgentTimeline({ tickNumber }: AgentTimelineProps) {
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -2279,30 +2243,15 @@ export function AgentTimeline({ tickNumber, onBack, onInspectContext }: AgentTim
     }
   }, [allEvents.length, isLive, autoScroll]);
 
-  // Escape key to go back
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onBack();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [onBack]);
-
   // Loading state
   if (isLoading) {
-    return (
-      <div>
-        <BackButton onBack={onBack} />
-        <TimelineSkeleton />
-      </div>
-    );
+    return <TimelineSkeleton />;
   }
 
   // Error state
   if (isError) {
     return (
       <div>
-        <BackButton onBack={onBack} />
         <div css={css`
           display: flex;
           flex-direction: column;
@@ -2358,41 +2307,38 @@ export function AgentTimeline({ tickNumber, onBack, onInspectContext }: AgentTim
         : `Tick #${tickNumber} is running.`;
 
     return (
-      <div>
-        <BackButton onBack={onBack} />
-        <div css={css`
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: ${theme.spacing[3]};
-          padding: 4rem 0;
+      <div css={css`
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: ${theme.spacing[3]};
+        padding: 4rem 0;
+      `}>
+        <motion.div
+          animate={{ opacity: [0.3, 0.8, 0.3] }}
+          transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+          css={css`
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: ${theme.colors.accent};
+          `}
+        />
+        <span css={css`
+          font-family: ${theme.typography.fontFamily.serif};
+          font-size: 16px;
+          font-style: italic;
+          color: ${theme.colors.text.hint};
         `}>
-          <motion.div
-            animate={{ opacity: [0.3, 0.8, 0.3] }}
-            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-            css={css`
-              width: 12px;
-              height: 12px;
-              border-radius: 50%;
-              background: ${theme.colors.accent};
-            `}
-          />
-          <span css={css`
-            font-family: ${theme.typography.fontFamily.serif};
-            font-size: 16px;
-            font-style: italic;
-            color: ${theme.colors.text.hint};
-          `}>
-            {stageLabel}
-          </span>
-          <span css={css`
-            font-family: ${theme.typography.fontFamily.sans};
-            font-size: 14px;
-            color: ${theme.colors.text.secondary};
-          `}>
-            {stageDetail}
-          </span>
-        </div>
+          {stageLabel}
+        </span>
+        <span css={css`
+          font-family: ${theme.typography.fontFamily.sans};
+          font-size: 14px;
+          color: ${theme.colors.text.secondary};
+        `}>
+          {stageDetail}
+        </span>
       </div>
     );
   }
@@ -2401,7 +2347,6 @@ export function AgentTimeline({ tickNumber, onBack, onInspectContext }: AgentTim
   if (!timeline) {
     return (
       <div>
-        <BackButton onBack={onBack} />
         <div css={css`
           display: flex;
           flex-direction: column;
@@ -2434,8 +2379,6 @@ export function AgentTimeline({ tickNumber, onBack, onInspectContext }: AgentTim
 
   return (
     <div ref={containerRef} onScroll={isLive ? handleScroll : undefined}>
-      <BackButton onBack={onBack} />
-
       {/* Header */}
       <TimelineHeader timeline={timeline} />
 
@@ -2461,7 +2404,6 @@ export function AgentTimeline({ tickNumber, onBack, onInspectContext }: AgentTim
             allEvents={allEvents}
             index={i}
             isLive={liveEvents.some((le) => le.id === event.id)}
-            onInspectContext={event.eventType === 'tick_input' ? onInspectContext : undefined}
           />
         ))}
 
@@ -2561,32 +2503,3 @@ function TimelineHeader({ timeline }: { timeline: TickTimeline }) {
   );
 }
 
-// ============================================================================
-// BackButton (local copy)
-// ============================================================================
-
-function BackButton({ onBack }: { onBack: () => void }) {
-  const theme = useTheme();
-  return (
-    <button
-      onClick={onBack}
-      css={css`
-        display: flex;
-        align-items: center;
-        gap: ${theme.spacing[1]};
-        font-family: ${theme.typography.fontFamily.sans};
-        font-size: 14px;
-        color: ${theme.colors.text.secondary};
-        cursor: pointer;
-        padding: ${theme.spacing[1]} 0;
-        margin-bottom: ${theme.spacing[4]};
-        transition: color 150ms ease-out;
-
-        &:hover { color: ${theme.colors.text.primary}; }
-      `}
-    >
-      <ArrowLeft size={14} />
-      Back to ticks
-    </button>
-  );
-}

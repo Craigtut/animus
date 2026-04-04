@@ -237,6 +237,8 @@ export interface PipelineResult {
   replyTurnsSent: number;
   /** Ephemeral sections used in the agentic loop (for context snapshot) */
   ephemeralSections: EphemeralSection[];
+  /** First agentic loop turn's actual total input tokens (for context inspector correction) */
+  firstTurnInputTokens: number | null;
 }
 
 /** Configuration for a pipeline run */
@@ -1029,7 +1031,20 @@ export async function executeCortexPipeline(
 
   // Set up usage accumulation for the agentic loop (may span multiple turns)
   const loopUsageAcc = createUsageAccumulator();
+  let firstTurnInputTokens: number | null = null;
   const loopUsageUnsub = config.cortexAgent.getEventBridge().on('turn_end', (event: CortexEvent) => {
+    // Capture the first turn's total input separately for context inspector correction
+    if (firstTurnInputTokens === null) {
+      const piEvent = event.data as Record<string, unknown> | undefined;
+      const message = piEvent?.['message'] as Record<string, unknown> | undefined;
+      const usage = message?.['usage'] as Record<string, unknown> | undefined;
+      if (usage) {
+        const input = typeof usage['input'] === 'number' ? usage['input'] : 0;
+        const cacheRead = typeof usage['cacheRead'] === 'number' ? usage['cacheRead'] : 0;
+        const cacheWrite = typeof usage['cacheWrite'] === 'number' ? usage['cacheWrite'] : 0;
+        firstTurnInputTokens = input + cacheRead + cacheWrite;
+      }
+    }
     accumulateUsageFromTurnEnd(loopUsageAcc, event);
   });
 
@@ -1059,6 +1074,7 @@ export async function executeCortexPipeline(
       allThoughts: thought ? [thought] : [],
       replyTurnsSent: loopResult.replyTurnsSent,
       ephemeralSections: loopResult.ephemeralSections,
+      firstTurnInputTokens,
     };
   }
 
@@ -1110,6 +1126,7 @@ export async function executeCortexPipeline(
     allThoughts: thought ? [thought] : [],
     replyTurnsSent: loopResult.replyTurnsSent,
     ephemeralSections: loopResult.ephemeralSections,
+    firstTurnInputTokens,
   };
 }
 

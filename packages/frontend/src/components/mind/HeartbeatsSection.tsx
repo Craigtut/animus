@@ -657,6 +657,91 @@ function BackButton({ onBack }: { onBack: () => void }) {
 // Main export
 // ============================================================================
 
+// ============================================================================
+// Detail Pill Tabs
+// ============================================================================
+
+type DetailTab = 'timeline' | 'context';
+
+function DetailPillTabs({
+  activeTab,
+  onChange,
+}: {
+  activeTab: DetailTab;
+  onChange: (tab: DetailTab) => void;
+}) {
+  const theme = useTheme();
+  const tabs: Array<{ key: DetailTab; label: string }> = [
+    { key: 'timeline', label: 'Timeline' },
+    { key: 'context', label: 'Context' },
+  ];
+
+  return (
+    <div css={css`
+      display: flex;
+      align-items: center;
+      gap: ${theme.spacing[1]};
+      margin-bottom: ${theme.spacing[4]};
+      padding: ${theme.spacing[1]} ${theme.spacing[1.5]};
+      border-radius: ${theme.borderRadius.full};
+      background: ${theme.mode === 'light'
+        ? 'rgba(0, 0, 0, 0.03)'
+        : 'rgba(255, 255, 255, 0.04)'};
+      width: fit-content;
+    `}>
+      {tabs.map((tab) => {
+        const isActive = activeTab === tab.key;
+        return (
+          <button
+            key={tab.key}
+            onClick={() => onChange(tab.key)}
+            css={css`
+              position: relative;
+              padding: ${theme.spacing[1]} ${theme.spacing[3]};
+              border-radius: ${theme.borderRadius.full};
+              font-family: ${theme.typography.fontFamily.sans};
+              font-size: ${theme.typography.fontSize.sm};
+              font-weight: ${isActive
+                ? theme.typography.fontWeight.semibold
+                : theme.typography.fontWeight.normal};
+              color: ${theme.colors.text.primary};
+              opacity: ${isActive ? 1 : 0.55};
+              cursor: pointer;
+              background: none;
+              border: none;
+              transition: opacity ${theme.transitions.fast};
+
+              &:hover { opacity: ${isActive ? 1 : 0.8}; }
+            `}
+          >
+            {tab.label}
+            {isActive && (
+              <motion.div
+                layoutId="detail-tab-dot"
+                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                css={css`
+                  position: absolute;
+                  bottom: -2px;
+                  left: 50%;
+                  transform: translateX(-50%);
+                  width: 4px;
+                  height: 4px;
+                  border-radius: 50%;
+                  background: ${theme.colors.accent};
+                `}
+              />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ============================================================================
+// Main export
+// ============================================================================
+
 export function HeartbeatsSection() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -665,7 +750,6 @@ export function HeartbeatsSection() {
   const { viewMode, selectedTick } = useMemo(() => {
     const subPath = location.pathname.replace('/mind/heartbeats', '').replace(/^\//, '');
     if (subPath) {
-      // Check for /context suffix first
       const contextMatch = subPath.match(/^(\d+)\/context$/);
       if (contextMatch) {
         const tickNum = parseInt(contextMatch[1]!, 10);
@@ -681,6 +765,8 @@ export function HeartbeatsSection() {
     return { viewMode: 'list' as const, selectedTick: null };
   }, [location.pathname]);
 
+  const activeTab: DetailTab = viewMode === 'context' ? 'context' : 'timeline';
+
   const handleSelect = (tickNumber: number) => {
     navigate(`/mind/heartbeats/${tickNumber}`);
   };
@@ -689,14 +775,13 @@ export function HeartbeatsSection() {
     navigate('/mind/heartbeats');
   };
 
-  const handleInspectContext = (tickNumber: number) => {
-    navigate(`/mind/heartbeats/${tickNumber}/context`);
-  };
-
-  const handleBackFromContext = () => {
-    if (selectedTick != null) {
-      navigate(`/mind/heartbeats/${selectedTick}`);
-    }
+  const handleTabChange = (tab: DetailTab) => {
+    if (selectedTick == null) return;
+    navigate(
+      tab === 'context'
+        ? `/mind/heartbeats/${selectedTick}/context`
+        : `/mind/heartbeats/${selectedTick}`,
+    );
   };
 
   return (
@@ -711,16 +796,6 @@ export function HeartbeatsSection() {
         >
           <TickList onSelect={handleSelect} />
         </motion.div>
-      ) : viewMode === 'context' && selectedTick != null ? (
-        <motion.div
-          key={`context-${selectedTick}`}
-          initial={{ opacity: 0, x: 12 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -12 }}
-          transition={{ duration: 0.15 }}
-        >
-          <ContextInspector tickNumber={selectedTick} onBack={handleBackFromContext} />
-        </motion.div>
       ) : selectedTick != null ? (
         <motion.div
           key={`detail-${selectedTick}`}
@@ -729,7 +804,13 @@ export function HeartbeatsSection() {
           exit={{ opacity: 0, x: -12 }}
           transition={{ duration: 0.15 }}
         >
-          <AgentTimeline tickNumber={selectedTick} onBack={handleBack} onInspectContext={() => handleInspectContext(selectedTick)} />
+          <BackButton onBack={handleBack} />
+          <DetailPillTabs activeTab={activeTab} onChange={handleTabChange} />
+          {activeTab === 'timeline' ? (
+            <AgentTimeline tickNumber={selectedTick} />
+          ) : (
+            <ContextInspector tickNumber={selectedTick} />
+          )}
         </motion.div>
       ) : null}
     </AnimatePresence>

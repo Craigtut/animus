@@ -2,9 +2,9 @@
 import { css, useTheme } from '@emotion/react';
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, CaretDown, CaretRight } from '@phosphor-icons/react';
+import { CaretDown, CaretRight } from '@phosphor-icons/react';
 import { trpc } from '../../utils/trpc';
-import { Typography } from '../ui';
+import { Typography, Tooltip } from '../ui';
 import { Badge } from './HeartbeatsSection';
 import type {
   ContextSection,
@@ -54,11 +54,29 @@ interface BudgetSegment {
   color: string;
 }
 
-function TokenBudgetBar({ snapshot }: { snapshot: CortexContextSnapshot }) {
+/** Apply correction ratio to an estimated token count */
+function correctedTokens(estimate: number, ratio: number | null): number {
+  if (ratio == null) return estimate;
+  return Math.round(estimate * ratio);
+}
+
+/** Tooltip text explaining token estimation */
+function estimateTooltip(ratio: number | null, rawEstimate?: number): string {
+  if (ratio != null && rawEstimate != null) {
+    return `Estimated via chars/4, then proportionally scaled to match API-reported usage. Raw estimate: ~${rawEstimate.toLocaleString()}`;
+  }
+  if (ratio != null) {
+    return 'Estimated via chars/4, then proportionally scaled to match API-reported usage.';
+  }
+  return 'Estimated using character count / 4. Actual usage not yet available.';
+}
+
+function TokenBudgetBar({ snapshot, correctionRatio }: { snapshot: CortexContextSnapshot; correctionRatio: number | null }) {
   const theme = useTheme();
   const contextWindow = snapshot.contextWindow || 1;
-  const pct = (tokens: number) => Math.max((tokens / contextWindow) * 100, 0.3);
-  const usagePct = Math.round((snapshot.totalTokens / contextWindow) * 100);
+  const displayTotal = correctedTokens(snapshot.totalTokens, correctionRatio);
+  const usagePct = Math.round((displayTotal / contextWindow) * 100);
+  const pct = (tokens: number) => Math.max((correctedTokens(tokens, correctionRatio) / contextWindow) * 100, 0.3);
 
   const segments: BudgetSegment[] = [
     {
@@ -103,13 +121,21 @@ function TokenBudgetBar({ snapshot }: { snapshot: CortexContextSnapshot }) {
         margin-bottom: ${theme.spacing[2]};
       `}>
         <Typography.Caption color="hint">Context Budget</Typography.Caption>
-        <span css={css`
-          font-family: ${theme.typography.fontFamily.mono};
-          font-size: ${theme.typography.fontSize.xs};
-          color: ${theme.colors.text.secondary};
-        `}>
-          ~{snapshot.totalTokens.toLocaleString()} / {contextWindow.toLocaleString()} ({usagePct}%)
-        </span>
+        <Tooltip
+          content={estimateTooltip(correctionRatio, snapshot.totalTokens)}
+          maxWidth={280}
+          position="bottom"
+        >
+          <span css={css`
+            font-family: ${theme.typography.fontFamily.mono};
+            font-size: ${theme.typography.fontSize.xs};
+            color: ${theme.colors.text.secondary};
+            cursor: help;
+            border-bottom: 1px dotted ${theme.colors.text.hint};
+          `}>
+            ~{displayTotal.toLocaleString()} / {contextWindow.toLocaleString()} ({usagePct}%)
+          </span>
+        </Tooltip>
       </div>
 
       {/* Stacked bar */}
@@ -126,7 +152,7 @@ function TokenBudgetBar({ snapshot }: { snapshot: CortexContextSnapshot }) {
           seg.tokens > 0 && (
             <div
               key={seg.label}
-              title={`${seg.label}: ~${seg.tokens.toLocaleString()} tok`}
+              title={`${seg.label}: ~${correctedTokens(seg.tokens, correctionRatio).toLocaleString()} tok`}
               css={css`
                 width: ${pct(seg.tokens)}%;
                 background: ${seg.color};
@@ -146,31 +172,34 @@ function TokenBudgetBar({ snapshot }: { snapshot: CortexContextSnapshot }) {
         margin-top: ${theme.spacing[2]};
       `}>
         {segments.filter(s => s.tokens > 0).map((seg) => (
-          <div key={seg.label} css={css`
-            display: flex;
-            align-items: center;
-            gap: ${theme.spacing[1]};
-          `}>
+          <Tooltip key={seg.label} content={estimateTooltip(correctionRatio, seg.tokens)} maxWidth={280}>
             <div css={css`
-              width: 8px;
-              height: 8px;
-              border-radius: 2px;
-              background: ${seg.color};
-            `} />
-            <span css={css`
-              font-size: ${theme.typography.fontSize.xs};
-              color: ${theme.colors.text.hint};
+              display: flex;
+              align-items: center;
+              gap: ${theme.spacing[1]};
+              cursor: help;
             `}>
-              {seg.label}
-            </span>
-            <span css={css`
-              font-family: ${theme.typography.fontFamily.mono};
-              font-size: ${theme.typography.fontSize.xs};
-              color: ${theme.colors.text.hint};
-            `}>
-              ~{seg.tokens.toLocaleString()}
-            </span>
-          </div>
+              <div css={css`
+                width: 8px;
+                height: 8px;
+                border-radius: 2px;
+                background: ${seg.color};
+              `} />
+              <span css={css`
+                font-size: ${theme.typography.fontSize.xs};
+                color: ${theme.colors.text.hint};
+              `}>
+                {seg.label}
+              </span>
+              <span css={css`
+                font-family: ${theme.typography.fontFamily.mono};
+                font-size: ${theme.typography.fontSize.xs};
+                color: ${theme.colors.text.hint};
+              `}>
+                ~{correctedTokens(seg.tokens, correctionRatio).toLocaleString()}
+              </span>
+            </div>
+          </Tooltip>
         ))}
       </div>
     </div>
@@ -183,7 +212,7 @@ function TokenBudgetBar({ snapshot }: { snapshot: CortexContextSnapshot }) {
 
 type CacheStatus = 'cached' | 'partial' | 'uncached' | undefined;
 
-function SnapshotCard({ section, cacheStatus }: { section: ContextSnapshotSection; cacheStatus?: CacheStatus }) {
+function SnapshotCard({ section, cacheStatus, correctionRatio }: { section: ContextSnapshotSection; cacheStatus?: CacheStatus; correctionRatio?: number | null }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
   const hasContent = section.content.length > 0;
@@ -239,13 +268,17 @@ function SnapshotCard({ section, cacheStatus }: { section: ContextSnapshotSectio
         )}
         <span css={css`flex: 1;`} />
         {hasContent && (
-          <span css={css`
-            font-family: ${theme.typography.fontFamily.mono};
-            font-size: ${theme.typography.fontSize.xs};
-            color: ${theme.colors.text.hint};
-          `}>
-            ~{section.tokenCount.toLocaleString()} tok
-          </span>
+          <Tooltip content={estimateTooltip(correctionRatio ?? null, section.tokenCount)} maxWidth={280}>
+            <span css={css`
+              font-family: ${theme.typography.fontFamily.mono};
+              font-size: ${theme.typography.fontSize.xs};
+              color: ${theme.colors.text.hint};
+              cursor: help;
+              border-bottom: 1px dotted ${theme.colors.border.light};
+            `}>
+              ~{correctedTokens(section.tokenCount, correctionRatio ?? null).toLocaleString()} tok
+            </span>
+          </Tooltip>
         )}
         {cacheStatus && (
           <span
@@ -334,12 +367,14 @@ function SectionGroup({
   title,
   color,
   tokenCount,
+  correctionRatio,
   defaultExpanded = false,
   children,
 }: {
   title: string;
   color: string;
   tokenCount: number;
+  correctionRatio?: number | null;
   defaultExpanded?: boolean;
   children: React.ReactNode;
 }) {
@@ -381,13 +416,17 @@ function SectionGroup({
           {title}
         </span>
         <span css={css`flex: 1;`} />
-        <span css={css`
-          font-family: ${theme.typography.fontFamily.mono};
-          font-size: ${theme.typography.fontSize.xs};
-          color: ${theme.colors.text.hint};
-        `}>
-          ~{tokenCount.toLocaleString()} tok
-        </span>
+        <Tooltip content={estimateTooltip(correctionRatio ?? null, tokenCount)} maxWidth={280}>
+          <span css={css`
+            font-family: ${theme.typography.fontFamily.mono};
+            font-size: ${theme.typography.fontSize.xs};
+            color: ${theme.colors.text.hint};
+            cursor: help;
+            border-bottom: 1px dotted ${theme.colors.border.light};
+          `}>
+            ~{correctedTokens(tokenCount, correctionRatio ?? null).toLocaleString()} tok
+          </span>
+        </Tooltip>
         <motion.span
           animate={{ rotate: expanded ? 90 : 0 }}
           transition={{ duration: 0.15 }}
@@ -422,7 +461,7 @@ function SectionGroup({
 // Conversation History Card (metadata only)
 // ============================================================================
 
-function ConversationHistoryCard({ snapshot }: { snapshot: CortexContextSnapshot }) {
+function ConversationHistoryCard({ snapshot, correctionRatio }: { snapshot: CortexContextSnapshot; correctionRatio?: number | null }) {
   const theme = useTheme();
   const h = snapshot.conversationHistory;
 
@@ -451,13 +490,17 @@ function ConversationHistoryCard({ snapshot }: { snapshot: CortexContextSnapshot
           Conversation History
         </span>
         <span css={css`flex: 1;`} />
-        <span css={css`
-          font-family: ${theme.typography.fontFamily.mono};
-          font-size: ${theme.typography.fontSize.xs};
-          color: ${theme.colors.text.hint};
-        `}>
-          ~{h.totalTokens.toLocaleString()} tok
-        </span>
+        <Tooltip content={estimateTooltip(correctionRatio ?? null, h.totalTokens)} maxWidth={280}>
+          <span css={css`
+            font-family: ${theme.typography.fontFamily.mono};
+            font-size: ${theme.typography.fontSize.xs};
+            color: ${theme.colors.text.hint};
+            cursor: help;
+            border-bottom: 1px dotted ${theme.colors.border.light};
+          `}>
+            ~{correctedTokens(h.totalTokens, correctionRatio ?? null).toLocaleString()} tok
+          </span>
+        </Tooltip>
       </div>
 
       <div css={css`
@@ -483,7 +526,7 @@ function ConversationHistoryCard({ snapshot }: { snapshot: CortexContextSnapshot
             font-size: ${theme.typography.fontSize.sm};
             color: ${h.hasSummary ? '#C4943A' : theme.colors.text.primary};
           `}>
-            {h.hasSummary ? `Yes (~${h.summaryTokens?.toLocaleString()} tok)` : 'No'}
+            {h.hasSummary ? `Yes (~${correctedTokens(h.summaryTokens ?? 0, correctionRatio ?? null).toLocaleString()} tok)` : 'No'}
           </span>
         </div>
         {h.oldestMessageTimestamp && (
@@ -931,6 +974,13 @@ function CortexContextView({
   const slotTokens = snapshot.slots.reduce((s, x) => s + x.tokenCount, 0);
   const ephemeralTokens = snapshot.ephemeral.reduce((s, x) => s + x.tokenCount, 0);
 
+  // Compute correction ratio: actual first-turn API tokens / estimated tokens
+  // Uses firstTurnActualInputTokens from the snapshot (single turn, not accumulated)
+  const correctionRatio = useMemo<number | null>(() => {
+    if (!snapshot.firstTurnActualInputTokens || snapshot.totalTokens === 0) return null;
+    return snapshot.firstTurnActualInputTokens / snapshot.totalTokens;
+  }, [snapshot.firstTurnActualInputTokens, snapshot.totalTokens]);
+
   // Compute per-section cache status from agentic loop cache_read_tokens
   const cacheMap = useMemo(
     () => computeCacheBoundary(snapshot, phaseUsage),
@@ -939,16 +989,17 @@ function CortexContextView({
 
   return (
     <>
-      <TokenBudgetBar snapshot={snapshot} />
+      <TokenBudgetBar snapshot={snapshot} correctionRatio={correctionRatio} />
 
       {/* 1. Consumer System Prompt */}
       <SectionGroup
         title="Consumer System Prompt"
         color={GROUP_COLORS.consumerSystem}
         tokenCount={consumerTokens}
+        correctionRatio={correctionRatio}
       >
         {snapshot.consumerSystemPrompt.map((section, i) => (
-          <SnapshotCard key={i} section={section} cacheStatus={cacheMap.get(`consumer:${section.name}`)} />
+          <SnapshotCard key={i} section={section} cacheStatus={cacheMap.get(`consumer:${section.name}`)} correctionRatio={correctionRatio} />
         ))}
       </SectionGroup>
 
@@ -957,9 +1008,10 @@ function CortexContextView({
         title="Cortex System Prompt"
         color={GROUP_COLORS.cortexSystem}
         tokenCount={cortexTokens}
+        correctionRatio={correctionRatio}
       >
         {snapshot.cortexSystemPrompt.map((section, i) => (
-          <SnapshotCard key={i} section={section} cacheStatus={cacheMap.get(`cortex:${section.name}`)} />
+          <SnapshotCard key={i} section={section} cacheStatus={cacheMap.get(`cortex:${section.name}`)} correctionRatio={correctionRatio} />
         ))}
       </SectionGroup>
 
@@ -968,25 +1020,27 @@ function CortexContextView({
         title="Context Slots"
         color={GROUP_COLORS.slots}
         tokenCount={slotTokens}
+        correctionRatio={correctionRatio}
         defaultExpanded
       >
         {snapshot.slots.map((section, i) => (
-          <SnapshotCard key={i} section={section} cacheStatus={cacheMap.get(`slot:${section.name}`)} />
+          <SnapshotCard key={i} section={section} cacheStatus={cacheMap.get(`slot:${section.name}`)} correctionRatio={correctionRatio} />
         ))}
       </SectionGroup>
 
       {/* 4. Conversation History (metadata card, not collapsible group) */}
-      <ConversationHistoryCard snapshot={snapshot} />
+      <ConversationHistoryCard snapshot={snapshot} correctionRatio={correctionRatio} />
 
       {/* 5. Ephemeral Context */}
       <SectionGroup
         title="Ephemeral Context"
         color={GROUP_COLORS.ephemeral}
         tokenCount={ephemeralTokens}
+        correctionRatio={correctionRatio}
         defaultExpanded
       >
         {snapshot.ephemeral.map((section, i) => (
-          <SnapshotCard key={i} section={section} cacheStatus={cacheMap.get(`ephemeral:${section.name}`)} />
+          <SnapshotCard key={i} section={section} cacheStatus={cacheMap.get(`ephemeral:${section.name}`)} correctionRatio={correctionRatio} />
         ))}
       </SectionGroup>
 
@@ -995,6 +1049,7 @@ function CortexContextView({
         title="Trigger Message"
         color={theme.colors.accent}
         tokenCount={snapshot.triggerMessage.tokenCount}
+        correctionRatio={correctionRatio}
         defaultExpanded
       >
         <SnapshotCard
@@ -1004,6 +1059,7 @@ function CortexContextView({
             tokenCount: snapshot.triggerMessage.tokenCount,
           }}
           cacheStatus={cacheMap.get('__trigger__')}
+          correctionRatio={correctionRatio}
         />
       </SectionGroup>
 
@@ -1268,10 +1324,8 @@ function LegacyContextView({
 
 export function ContextInspector({
   tickNumber,
-  onBack,
 }: {
   tickNumber: number;
-  onBack: () => void;
 }) {
   const theme = useTheme();
 
@@ -1324,12 +1378,9 @@ export function ContextInspector({
 
   if (!data) {
     return (
-      <div>
-        <BackButton onBack={onBack} />
-        <Typography.Body serif italic color="hint" css={css`text-align: center; padding: 4rem 0;`}>
-          Tick #{tickNumber} not found.
-        </Typography.Body>
-      </div>
+      <Typography.Body serif italic color="hint" css={css`text-align: center; padding: 4rem 0;`}>
+        Tick #{tickNumber} not found.
+      </Typography.Body>
     );
   }
 
@@ -1337,14 +1388,6 @@ export function ContextInspector({
 
   return (
     <div>
-      <BackButton onBack={onBack} />
-
-      <div css={css`margin-bottom: ${theme.spacing[4]};`}>
-        <Typography.Subtitle color="primary">
-          Context Inspector: Tick #{tickNumber}
-        </Typography.Subtitle>
-      </div>
-
       {cortexSnapshot ? (
         <CortexContextView snapshot={cortexSnapshot} phaseUsage={phaseUsage} />
       ) : hasLegacy ? (
@@ -1361,31 +1404,3 @@ export function ContextInspector({
   );
 }
 
-// ============================================================================
-// Back Button
-// ============================================================================
-
-function BackButton({ onBack }: { onBack: () => void }) {
-  const theme = useTheme();
-  return (
-    <button
-      onClick={onBack}
-      css={css`
-        display: flex;
-        align-items: center;
-        gap: ${theme.spacing[1]};
-        font-size: ${theme.typography.fontSize.sm};
-        color: ${theme.colors.text.secondary};
-        cursor: pointer;
-        padding: ${theme.spacing[1]} 0;
-        margin-bottom: ${theme.spacing[4]};
-        transition: color ${theme.transitions.micro};
-
-        &:hover { color: ${theme.colors.text.primary}; }
-      `}
-    >
-      <ArrowLeft size={14} />
-      Back to timeline
-    </button>
-  );
-}

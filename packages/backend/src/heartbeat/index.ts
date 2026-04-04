@@ -215,6 +215,7 @@ function buildContextSnapshot(
   ephemeralSections: EphemeralSection[],
   triggerPrompt: string,
   timezone?: string,
+  firstTurnInputTokens?: number | null,
 ): CortexContextSnapshot {
   // Consumer system prompt sections (persona, emotions, energy, etc.)
   const consumerManifest = buildSystemPromptManifest(compiledPersona, {
@@ -337,6 +338,7 @@ function buildContextSnapshot(
     triggerMessage,
     contextWindow,
     totalTokens,
+    ...(firstTurnInputTokens != null ? { firstTurnActualInputTokens: firstTurnInputTokens } : {}),
   };
 }
 
@@ -607,6 +609,7 @@ async function cortexMindQuery(
           pipelineResult.ephemeralSections,
           triggerPrompt,
           gathered.aiTimezone ?? undefined,
+          pipelineResult.firstTurnInputTokens,
         );
         logContextSnapshot(logSid, tickNumber, snapshot);
       } catch (err) {
