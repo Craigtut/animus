@@ -25,7 +25,7 @@ import { isUnsealed } from '../lib/vault-manager.js';
 import { getTelemetryService } from '../services/telemetry-service.js';
 import { getBudgetService } from '../services/budget-service.js';
 import { now } from '@animus-labs/shared';
-import type { HeartbeatState, MindOutput, CortexContextSnapshot, ContextSnapshotSection } from '@animus-labs/shared';
+import type { HeartbeatState, MindOutput } from '@animus-labs/shared';
 import { resolveCacheRetention } from '@animus-labs/cortex';
 
 import type { VectorStore } from '../memory/index.js';
@@ -34,7 +34,8 @@ import type { GoalSubsystem } from '../goals/goal-subsystem.js';
 import type { AgentSubsystem } from './agent-subsystem.js';
 
 import { TickQueue, type QueuedTick } from './tick-queue.js';
-import { type TriggerContext, type CompiledContext, buildMindContext, buildSystemPrompt, buildSystemPromptManifest, buildTriggerSection } from './context-builder.js';
+import { type TriggerContext, type CompiledContext, buildMindContext, buildSystemPrompt, buildTriggerSection } from './context-builder.js';
+import { buildAgenticSnapshot, logPhaseSnapshot } from './context-snapshot.js';
 import { computeBaselines, type PersonaDimensions } from './emotion-engine.js';
 import { getEnergyBand } from './energy-engine.js';
 import { compilePersona, type PersonaConfig, type CompiledPersona } from './persona-compiler.js';
@@ -195,179 +196,8 @@ function logTickInput(params: {
 }
 
 // ============================================================================
-// Cortex Context Snapshot
+// Legacy context snapshot functions removed — replaced by context-snapshot.ts
 // ============================================================================
-
-/** Rough token estimator — chars / 4 (matches shared and cortex packages) */
-function estimateTokens(text: string): number {
-  if (!text) return 0;
-  return Math.ceil(text.length / 4);
-}
-
-/**
- * Build a CortexContextSnapshot for the context inspector.
- * Called after the pipeline completes so ephemeral sections are available.
- */
-function buildContextSnapshot(
-  cortexAgent: import('@animus-labs/cortex').CortexAgent,
-  compiledPersona: CompiledPersona,
-  gathered: GatherResult,
-  ephemeralSections: EphemeralSection[],
-  triggerPrompt: string,
-  timezone?: string,
-  firstTurnInputTokens?: number | null,
-): CortexContextSnapshot {
-  // Consumer system prompt sections (persona, emotions, energy, etc.)
-  const consumerManifest = buildSystemPromptManifest(compiledPersona, {
-    energySystemEnabled: gathered.energySystemEnabled ?? false,
-    tickIntervalMs: gathered.tickIntervalMs,
-    ...(timezone ? { timezone } : {}),
-  });
-  const consumerSystemPrompt: ContextSnapshotSection[] = consumerManifest
-    .filter(s => s.included)
-    .map(s => ({
-      name: s.title,
-      content: s.content ?? '',
-      tokenCount: s.tokenCount,
-      category: s.category,
-    }));
-
-  // Cortex operational system prompt sections
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- cortex dist may be stale
-  const cortexSections: Array<{ name: string; content: string }> = (cortexAgent as any).getSystemPromptSections?.() ?? [];
-  const cortexSystemPrompt: ContextSnapshotSection[] = cortexSections.map((s: { name: string; content: string }) => ({
-    name: s.name,
-    content: s.content,
-    tokenCount: estimateTokens(s.content),
-    category: 'system',
-  }));
-
-  // Context slots (dynamic, iterate whatever slots exist)
-  const cm = cortexAgent.getContextManager();
-  const slots: ContextSnapshotSection[] = MIND_SLOT_NAMES.map(name => {
-    const content = cm.getSlot(name) ?? '';
-    return {
-      name,
-      content,
-      tokenCount: estimateTokens(content),
-      category: 'state',
-    };
-  });
-
-  // Conversation history metadata
-  const history = cortexAgent.getConversationHistory();
-  let historyTokens = 0;
-  let oldestTimestamp: string | null = null;
-  let hasSummary = false;
-  let summaryTokens: number | null = null;
-
-  for (const msg of history) {
-    const text = typeof msg.content === 'string'
-      ? msg.content
-      : JSON.stringify(msg.content);
-    historyTokens += estimateTokens(text);
-  }
-
-  // Detect compaction summary: first message in history with role=assistant
-  // that starts with a summary marker pattern
-  if (history.length > 0) {
-    const first = history[0]!;
-    const firstText = typeof first.content === 'string'
-      ? first.content
-      : JSON.stringify(first.content);
-    // Compaction summaries are typically assistant messages containing "Summary of"
-    // or "Previous conversation" markers
-    if (first.role === 'assistant' && (
-      firstText.includes('Summary of') ||
-      firstText.includes('Previous conversation') ||
-      firstText.includes('[Conversation summary')
-    )) {
-      hasSummary = true;
-      summaryTokens = estimateTokens(firstText);
-    }
-  }
-
-  if (history.length > 0) {
-    // Try to extract timestamp from earliest message if available
-    const firstMsg = history[0] as unknown as Record<string, unknown>;
-    if (typeof firstMsg['timestamp'] === 'string') {
-      oldestTimestamp = firstMsg['timestamp'];
-    }
-  }
-
-  // Ephemeral sections
-  const ephemeral: ContextSnapshotSection[] = ephemeralSections.map(s => ({
-    name: s.name,
-    content: s.content,
-    tokenCount: estimateTokens(s.content),
-    category: 'state',
-  }));
-
-  // Trigger message
-  const triggerMessage = {
-    content: triggerPrompt,
-    tokenCount: estimateTokens(triggerPrompt),
-  };
-
-  // Context window from CompactionManager
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- cortex dist may be stale
-  const compactionMgr = (cortexAgent as any).getCompactionManager?.();
-  const contextWindow: number = compactionMgr?.contextWindow ?? 0;
-
-  // Total tokens
-  const totalTokens =
-    consumerSystemPrompt.reduce((sum, s) => sum + s.tokenCount, 0) +
-    cortexSystemPrompt.reduce((sum, s) => sum + s.tokenCount, 0) +
-    slots.reduce((sum, s) => sum + s.tokenCount, 0) +
-    historyTokens +
-    ephemeral.reduce((sum, s) => sum + s.tokenCount, 0) +
-    triggerMessage.tokenCount;
-
-  return {
-    consumerSystemPrompt,
-    cortexSystemPrompt,
-    slots,
-    conversationHistory: {
-      messageCount: history.length,
-      totalTokens: historyTokens,
-      hasSummary,
-      summaryTokens,
-      oldestMessageTimestamp: oldestTimestamp,
-    },
-    ephemeral,
-    triggerMessage,
-    contextWindow,
-    totalTokens,
-    ...(firstTurnInputTokens != null ? { firstTurnActualInputTokens: firstTurnInputTokens } : {}),
-  };
-}
-
-/**
- * Log a CortexContextSnapshot as a context_snapshot event in agent_logs.db.
- */
-function logContextSnapshot(
-  logSessionId: string,
-  tickNumber: number,
-  snapshot: CortexContextSnapshot,
-): void {
-  const agentLogsDb = getAgentLogsDb();
-  const event = agentLogStore.insertEvent(agentLogsDb, {
-    sessionId: logSessionId,
-    eventType: 'context_snapshot' as import('@animus-labs/shared').AgentEventType,
-    data: {
-      tickNumber,
-      ...snapshot,
-    },
-  });
-  const eventBus = getEventBus();
-  eventBus.emit('agent:event:logged', {
-    id: event.id,
-    sessionId: event.sessionId,
-    eventType: event.eventType,
-    data: event.data,
-    createdAt: event.createdAt,
-  });
-}
 
 // ============================================================================
 // Pipeline: Stage 2 -- MIND QUERY
@@ -567,6 +397,10 @@ async function cortexMindQuery(
   try {
     // Run the 5-phase cortex pipeline (THOUGHT, AGENTIC LOOP, REFLECT)
     ctx.currentPhase.value = 'gather';
+    // Read debug mode setting for context snapshot capture
+    const currentSettings = systemStore.getSystemSettings(getSystemDb());
+    const contextDebugMode = currentSettings.contextDebugMode;
+
     const pipelineResult = await executeCortexPipeline(
       {
         cortexAgent,
@@ -580,6 +414,7 @@ async function cortexMindQuery(
         model: cortexMind.model
           ? String((cortexMind.model as unknown as Record<string, unknown>)['id'] ?? 'cortex')
           : 'cortex',
+        contextDebugMode,
       },
       ctx.currentPhase,
       pendingInjections,
@@ -597,21 +432,25 @@ async function cortexMindQuery(
     cortexMind.toolContext.current = null;
     clearCompactionContext(cortexMind);
 
-    // Log context snapshot for the inspector
+    // Log agentic loop context snapshot (replaces the old single-snapshot approach)
     const logSid = ctx.logSessionId?.() ?? null;
     if (logSid) {
       try {
         const triggerPrompt = buildTriggerSection(gathered.trigger);
-        const snapshot = buildContextSnapshot(
+        const agenticSnap = buildAgenticSnapshot({
           cortexAgent,
-          ctx.compiledPersona,
+          compiledPersona: ctx.compiledPersona,
           gathered,
-          pipelineResult.ephemeralSections,
+          ephemeralSections: pipelineResult.ephemeralSections,
           triggerPrompt,
-          gathered.aiTimezone ?? undefined,
-          pipelineResult.firstTurnInputTokens,
-        );
-        logContextSnapshot(logSid, tickNumber, snapshot);
+          tickNumber,
+          debugMode: contextDebugMode,
+          timezone: gathered.aiTimezone ?? undefined,
+          firstTurnInputTokens: pipelineResult.firstTurnInputTokens,
+        });
+        if (agenticSnap) {
+          logPhaseSnapshot(logSid, tickNumber, agenticSnap);
+        }
       } catch (err) {
         log.warn('Failed to log context snapshot:', err);
       }

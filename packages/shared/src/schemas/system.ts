@@ -108,6 +108,8 @@ export const systemSettingsSchema = z.object({
   cortexThinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']).default('off'),
   cortexContextWindowLimit: z.number().int().min(16_384).nullable().default(null),
   utilityModel: z.string().default('default'),
+  // Debug: capture full context snapshots per pipeline phase
+  contextDebugMode: z.boolean().default(false),
 });
 
 export const updateSystemSettingsInputSchema = systemSettingsSchema.partial();

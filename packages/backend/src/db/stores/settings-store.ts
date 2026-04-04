@@ -21,6 +21,7 @@ export function getSystemSettings(db: Database.Database): SystemSettings {
     telemetryEnabled: intToBool(rest['telemetryEnabled'] as number),
     autosaveEnabled: intToBool(rest['autosaveEnabled'] as number),
     budgetThrottleEnabled: intToBool(rest['budgetThrottleEnabled'] as number),
+    contextDebugMode: intToBool(rest['contextDebugMode'] as number),
   } as SystemSettings;
 }
 
@@ -60,6 +61,7 @@ export function updateSystemSettings(
     cortexThinkingLevel: 'cortex_thinking_level',
     cortexContextWindowLimit: 'cortex_context_window_limit',
     utilityModel: 'utility_model',
+    contextDebugMode: 'context_debug_mode',
   };
 
   // Boolean fields need int conversion
@@ -68,6 +70,7 @@ export function updateSystemSettings(
     'telemetryEnabled',
     'autosaveEnabled',
     'budgetThrottleEnabled',
+    'contextDebugMode',
   ]);
 
   for (const [camelKey, snakeKey] of Object.entries(mapping)) {

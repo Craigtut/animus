@@ -3492,6 +3492,26 @@ function SystemSection() {
         </div>
       )}
 
+      {/* Developer */}
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+          Developer
+        </Typography.Subtitle>
+
+        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+          <Toggle
+            checked={settings?.contextDebugMode ?? false}
+            onChange={(checked: boolean) => {
+              updateSettingsMutation.mutate({ contextDebugMode: checked });
+            }}
+            label="Context debug mode"
+          />
+        </div>
+        <Typography.Caption as="p" color="hint" css={css`margin-top: -${theme.spacing[1]};`}>
+          Captures full context window breakdowns for each pipeline phase and agentic loop turn. Useful for debugging prompt assembly and cache performance. Increases storage.
+        </Typography.Caption>
+      </div>
+
       {/* Telemetry */}
       <TelemetryInline />
 

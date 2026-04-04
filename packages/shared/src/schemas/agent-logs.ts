@@ -57,6 +57,8 @@ export const agentEventTypeSchema = z.enum([
   'agentic_end',
   'reflect_start',
   'reflect_end',
+  // Context snapshot events
+  'phase_context_snapshot',
   // Execute phase observability events
   'execute_start',
   'execute_reply_sent',

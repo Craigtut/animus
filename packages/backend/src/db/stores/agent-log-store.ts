@@ -373,6 +373,30 @@ export function getTickContextSnapshot(
 }
 
 /**
+ * Get all per-phase context snapshots for a specific tick.
+ * Returns parsed snapshot data objects, each with a `phase` discriminator.
+ */
+export function getPhaseContextSnapshots(
+  db: Database.Database,
+  tickNumber: number,
+): Array<Record<string, unknown>> {
+  const rows = db
+    .prepare(
+      `SELECT * FROM agent_events
+       WHERE event_type = 'phase_context_snapshot'
+         AND JSON_EXTRACT(data, '$.tickNumber') = ?
+       ORDER BY created_at`
+    )
+    .all(tickNumber) as Array<Record<string, unknown>>;
+
+  return rows.map((row) => {
+    const e = snakeToCamel<AgentEvent>(row);
+    const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+    return data as Record<string, unknown>;
+  });
+}
+
+/**
  * Batch-fetch tick_output durations for a set of tick numbers in a single query.
  * Returns a Map keyed by tick number with { durationMs } values.
  */

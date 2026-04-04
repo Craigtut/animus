@@ -701,14 +701,50 @@ export const heartbeatRouter = router({
       const rawOutput = tickOutputData?.['rawOutput'] as Record<string, unknown> | undefined;
       const reply = (rawOutput?.['reply'] as { content: string; contactId: string; channel: string; replyToMessageId?: string; tone?: string } | null) ?? null;
 
-      // Get usage from agent_usage for this session
+      // Get per-phase usage records (for phase-grouped timeline token display)
+      const phaseUsageRecords = agentLogStore.getUsageByTickNumber(agentLogsDb, tickNumber);
+
+      // Aggregate usage across ALL phases for the header summary.
+      // Each phase (thought, agentic_loop, reflect) stores its own usage record.
+      // Input tokens from pi-ai are the NON-cached portion only; the actual context
+      // window at each call is input + cacheRead. We report both so the frontend
+      // can display context size accurately.
       let usage = null;
-      if (sessionId) {
-        const usages = agentLogStore.getSessionUsage(agentLogsDb, sessionId);
-        if (usages.length > 0) {
-          usage = usages[usages.length - 1]!;
+      if (phaseUsageRecords.length > 0) {
+        let inputTokens = 0;
+        let outputTokens = 0;
+        let cacheReadTokens = 0;
+        let cacheWriteTokens = 0;
+        let totalTokens = 0;
+        let costUsd = 0;
+        for (const u of phaseUsageRecords) {
+          inputTokens += u.inputTokens;
+          outputTokens += u.outputTokens;
+          cacheReadTokens += u.cacheReadTokens ?? 0;
+          cacheWriteTokens += u.cacheWriteTokens ?? 0;
+          totalTokens += u.totalTokens;
+          costUsd += u.costUsd ?? 0;
         }
+        usage = { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, totalTokens, costUsd };
       }
+      const phaseUsage: PhaseUsage[] = phaseUsageRecords
+        .filter((u) => u.pipelinePhase != null)
+        .map((u) => ({
+          phase: u.pipelinePhase!,
+          inputTokens: u.inputTokens,
+          outputTokens: u.outputTokens,
+          cacheReadTokens: u.cacheReadTokens ?? 0,
+          cacheWriteTokens: u.cacheWriteTokens ?? 0,
+          costUsd: u.costUsd ?? 0,
+          model: u.model,
+        }));
+
+      // Get context window size for budget visualization
+      const contextSnapshot = agentLogStore.getTickContextSnapshot(agentLogsDb, tickNumber);
+      const contextWindow = contextSnapshot?.['contextWindow'] as number | null ?? null;
+
+      // Get per-phase context snapshots (if debug mode captured them)
+      const phaseSnapshots = agentLogStore.getPhaseContextSnapshots(agentLogsDb, tickNumber);
 
       return {
         tickNumber,
@@ -727,6 +763,9 @@ export const heartbeatRouter = router({
           reply,
         },
         usage,
+        phaseUsage,
+        contextWindow,
+        phaseSnapshots,
       };
     }),
 

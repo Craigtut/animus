@@ -29,6 +29,13 @@ import type { CompiledPersona } from './persona-compiler.js';
 import { isNonResponse, type CognitiveSnapshot, createEmptySnapshot, snapshotToMindOutput, safeMindOutput } from './cognitive-tools.js';
 import { MIND_SLOT_NAMES } from './cortex-mind.js';
 import {
+  buildThoughtSnapshot,
+  buildAgenticSnapshot,
+  buildReflectSnapshot,
+  buildTurnDelta,
+  logPhaseSnapshot,
+} from './context-snapshot.js';
+import {
   buildTriggerSection,
   getReplyGuidance,
   buildChannelCapabilities,
@@ -255,6 +262,8 @@ export interface PipelineConfig {
   contactId: string | null;
   /** Model identifier string for usage records. */
   model: string;
+  /** Whether to capture full context snapshots per phase (debug mode). */
+  contextDebugMode: boolean;
 }
 
 // ============================================================================
@@ -313,6 +322,22 @@ async function executeThought(
       'Record your inner thought for this moment.',
       cortexAgent.getCacheRetention() ? { cacheRetention: cortexAgent.getCacheRetention()! } : undefined,
     );
+
+    // Capture per-phase context snapshot (always lightweight, full content in debug mode)
+    try {
+      const snapshot = buildThoughtSnapshot({
+        cortexAgent,
+        thoughtSystemPrompt,
+        phaseMessages,
+        tickNumber: config.tickNumber,
+        debugMode: config.contextDebugMode,
+      });
+      if (snapshot && config.logSessionId) {
+        logPhaseSnapshot(config.logSessionId, config.tickNumber, snapshot);
+      }
+    } catch (err) {
+      log.warn('Failed to capture thought context snapshot:', err);
+    }
 
     let thought: ThoughtResult;
     if (result) {
@@ -721,6 +746,25 @@ async function executeReflect(
         excludeSlots: ['credentials'],
       });
 
+      // Capture per-phase context snapshot (only on first attempt)
+      if (attempt === 0) {
+        try {
+          const snapshot = buildReflectSnapshot({
+            cortexAgent,
+            reflectSystemPrompt,
+            phaseMessages,
+            currentTickTurns,
+            tickNumber: config.tickNumber,
+            debugMode: config.contextDebugMode,
+          });
+          if (snapshot && config.logSessionId) {
+            logPhaseSnapshot(config.logSessionId, config.tickNumber, snapshot);
+          }
+        } catch (err) {
+          log.warn('Failed to capture reflect context snapshot:', err);
+        }
+      }
+
       // REFLECT uses the primary model (same as agentic loop), not the utility model.
       // Uses tool-call-as-structured-output with the existing recordCognitiveStateSchema.
       const reflectSchema = await zodToTypebox(recordCognitiveStateSchema);
@@ -1032,6 +1076,8 @@ export async function executeCortexPipeline(
   // Set up usage accumulation for the agentic loop (may span multiple turns)
   const loopUsageAcc = createUsageAccumulator();
   let firstTurnInputTokens: number | null = null;
+  let turnDeltaIndex = 0;
+  let prevHistoryLen = preLoopHistoryLength;
   const loopUsageUnsub = config.cortexAgent.getEventBridge().on('turn_end', (event: CortexEvent) => {
     // Capture the first turn's total input separately for context inspector correction
     if (firstTurnInputTokens === null) {
@@ -1046,6 +1092,36 @@ export async function executeCortexPipeline(
       }
     }
     accumulateUsageFromTurnEnd(loopUsageAcc, event);
+
+    // Capture per-turn context delta (debug mode only)
+    if (config.contextDebugMode && config.logSessionId) {
+      turnDeltaIndex++;
+      try {
+        const piEvent = event.data as Record<string, unknown> | undefined;
+        const message = piEvent?.['message'] as Record<string, unknown> | undefined;
+        const usage = message?.['usage'] as Record<string, unknown> | undefined;
+        const turnUsage = {
+          inputTokens: typeof usage?.['input'] === 'number' ? usage['input'] : 0,
+          outputTokens: typeof usage?.['output'] === 'number' ? usage['output'] : 0,
+          cacheReadTokens: typeof usage?.['cacheRead'] === 'number' ? usage['cacheRead'] : 0,
+          cacheWriteTokens: typeof usage?.['cacheWrite'] === 'number' ? usage['cacheWrite'] : 0,
+        };
+        const delta = buildTurnDelta({
+          cortexAgent: config.cortexAgent,
+          turnNumber: turnDeltaIndex,
+          prevHistoryLength: prevHistoryLen,
+          turnUsage,
+          tickNumber: config.tickNumber,
+          debugMode: config.contextDebugMode,
+        });
+        if (delta) {
+          logPhaseSnapshot(config.logSessionId!, config.tickNumber, delta);
+        }
+        prevHistoryLen = config.cortexAgent.getConversationHistory().length;
+      } catch (err) {
+        log.warn(`Failed to capture turn delta #${turnDeltaIndex}:`, err);
+      }
+    }
   });
 
   const loopResult = await executeAgenticLoop(config, thought, pendingInjections);

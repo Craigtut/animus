@@ -237,6 +237,8 @@ function mapCortexEvent(event: CortexEvent, ctx: MapContext): MappedEvent | null
           ...(usage ? {
             inputTokens: usage['input'] ?? usage['inputTokens'] ?? 0,
             outputTokens: usage['output'] ?? usage['outputTokens'] ?? 0,
+            cacheReadTokens: usage['cacheRead'] ?? usage['cacheReadTokens'] ?? 0,
+            cacheWriteTokens: usage['cacheWrite'] ?? usage['cacheWriteTokens'] ?? 0,
             totalTokens: usage['totalTokens'] ?? 0,
             cost: usage['cost'] ?? null,
           } : {}),

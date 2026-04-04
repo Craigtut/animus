@@ -488,6 +488,125 @@ export interface CortexContextSnapshot {
 }
 
 // ============================================================================
+// Per-Phase Context Snapshots (debug context capture)
+// ============================================================================
+
+/** A single message as sent to the LLM (captured in debug mode only) */
+export interface MessageSnapshot {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  tokenCount: number;
+}
+
+/** Lightweight history metadata (always captured) */
+export interface HistorySnapshotMeta {
+  messageCount: number;
+  totalTokens: number;
+  hasSummary: boolean;
+  summaryTokens: number | null;
+  oldestMessageTimestamp: string | null;
+}
+
+/** Thought phase context snapshot */
+export interface ThoughtContextSnapshot {
+  phase: 'thought';
+  tickNumber: number;
+  /** Thought-specific system prompt sections (3 sections: instructions, persona, preamble) */
+  systemPrompt: ContextSnapshotSection[];
+  /** Context slots included (8 of 9, no credentials) */
+  slots: ContextSnapshotSection[];
+  /** Summarized conversation history metadata */
+  conversationHistory: HistorySnapshotMeta;
+  /** Ephemeral per-tick context sections */
+  ephemeral: ContextSnapshotSection[];
+  /** The thought generation prompt */
+  prompt: ContextSnapshotSection;
+  /** Model context window size */
+  contextWindow: number;
+  /** Total estimated tokens across all sections */
+  totalTokens: number;
+  /** Full message array (debug mode only) */
+  messages?: MessageSnapshot[] | undefined;
+}
+
+/** Agentic loop context snapshot (extends existing CortexContextSnapshot shape) */
+export interface AgenticContextSnapshot {
+  phase: 'agentic_loop';
+  tickNumber: number;
+  /** Consumer/Animus system prompt sections */
+  consumerSystemPrompt: ContextSnapshotSection[];
+  /** Cortex operational system prompt sections */
+  cortexSystemPrompt: ContextSnapshotSection[];
+  /** Named context slots */
+  slots: ContextSnapshotSection[];
+  /** Conversation history metadata */
+  conversationHistory: HistorySnapshotMeta;
+  /** Ephemeral per-tick context */
+  ephemeral: ContextSnapshotSection[];
+  /** The trigger/user message */
+  triggerMessage: { content: string; tokenCount: number };
+  /** Model context window size */
+  contextWindow: number;
+  /** Total estimated tokens */
+  totalTokens: number;
+  /** Actual input tokens from the first turn (from API) */
+  firstTurnActualInputTokens?: number | undefined;
+  /** Full message array at loop start (debug mode only) */
+  messages?: MessageSnapshot[] | undefined;
+}
+
+/** Per-turn delta within the agentic loop (debug mode only) */
+export interface AgenticTurnDelta {
+  phase: 'agentic_turn';
+  tickNumber: number;
+  turnNumber: number;
+  /** Number of new messages added since last turn */
+  newMessageCount: number;
+  /** Total conversation history messages at this turn */
+  totalHistoryMessages: number;
+  /** Total history tokens at this turn */
+  totalHistoryTokens: number;
+  /** Usage from this turn's API response */
+  turnUsage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+  };
+  /** The new messages added (debug mode only) */
+  newMessages?: MessageSnapshot[] | undefined;
+}
+
+/** Reflect phase context snapshot */
+export interface ReflectContextSnapshot {
+  phase: 'reflect';
+  tickNumber: number;
+  /** Reflect-specific system prompt sections (8 sections) */
+  systemPrompt: ContextSnapshotSection[];
+  /** Context slots included (8 of 9, no credentials) */
+  slots: ContextSnapshotSection[];
+  /** Current-tick agentic turn messages metadata */
+  currentTickTurns: { messageCount: number; totalTokens: number };
+  /** Ephemeral per-tick context sections */
+  ephemeral: ContextSnapshotSection[];
+  /** The reflect prompt */
+  prompt: ContextSnapshotSection;
+  /** Model context window size */
+  contextWindow: number;
+  /** Total estimated tokens */
+  totalTokens: number;
+  /** Full message array (debug mode only) */
+  messages?: MessageSnapshot[] | undefined;
+}
+
+/** Discriminated union of all phase context snapshots */
+export type PhaseContextSnapshot =
+  | ThoughtContextSnapshot
+  | AgenticContextSnapshot
+  | ReflectContextSnapshot
+  | AgenticTurnDelta;
+
+// ============================================================================
 // Distribution (Package System)
 // ============================================================================
 
