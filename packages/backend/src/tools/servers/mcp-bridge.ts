@@ -26,8 +26,6 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod/v3';
 import { executeTool } from '../registry.js';
 import type { ToolHandlerContext, ToolResult } from '../types.js';
-// DEPRECATED (Phase 2A): Cognitive tool imports removed.
-// THOUGHT and REFLECT are now programmatic phases, not MCP tool calls.
 import { createLogger } from '../../lib/logger.js';
 import { logProcessSpawn } from '../../lib/process-diagnostics.js';
 
@@ -52,7 +50,7 @@ export interface MutableToolContext {
 }
 
 /** Tool set identifiers for the bridge */
-export type ToolSet = 'mind' | 'cognitive' | 'subagent';
+export type ToolSet = 'mind' | 'subagent';
 
 /** JSON Schema tool definition returned by the bridge */
 export interface BridgeToolDef {
@@ -119,13 +117,6 @@ function convertZodToJsonSchema(schema: ZodTypeAny): Record<string, unknown> {
  * Get tool definitions for a given tool set, with permission filtering applied.
  */
 export function getToolDefs(toolSet: ToolSet): BridgeToolDef[] {
-  // DEPRECATED (Phase 2A): Cognitive tools replaced by programmatic THOUGHT/REFLECT phases.
-  // Return empty array; the cognitive MCP server is no longer registered with agent sessions.
-  if (toolSet === 'cognitive') {
-    log.debug('Deprecated cognitive tool set requested; returning empty list');
-    return [];
-  }
-
   if (toolSet === 'mind') {
     const mindTools = getMindTools();
     const defs: BridgeToolDef[] = [];
@@ -204,7 +195,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     // GET /tools — returns tool definitions
     if (req.method === 'GET' && path === '/tools') {
       const toolSet = url.searchParams.get('set') as ToolSet | null;
-      if (!toolSet || !['mind', 'cognitive', 'subagent'].includes(toolSet)) {
+      if (!toolSet || !['mind', 'subagent'].includes(toolSet)) {
         jsonResponse(res, 400, { error: 'Missing or invalid "set" parameter' });
         return;
       }
@@ -235,22 +226,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       log.info(`Bridge tool call: ${toolName} (taskId=${taskId})`);
       const result: ToolResult = await executeTool(toolName as AnimusToolName, args, ctxRef.current);
       jsonResponse(res, 200, result);
-      return;
-    }
-
-    // POST /cognitive/thought — DEPRECATED (Phase 2A: replaced by programmatic THOUGHT phase)
-    // Kept as a stub for backward compatibility during migration.
-    if (req.method === 'POST' && path === '/cognitive/thought') {
-      log.warn('Deprecated cognitive/thought endpoint called. THOUGHT is now a programmatic phase.');
-      jsonResponse(res, 410, { content: [{ type: 'text', text: 'Endpoint deprecated. THOUGHT phase is now programmatic.' }], isError: true });
-      return;
-    }
-
-    // POST /cognitive/state — DEPRECATED (Phase 2A: replaced by programmatic REFLECT phase)
-    // Kept as a stub for backward compatibility during migration.
-    if (req.method === 'POST' && path === '/cognitive/state') {
-      log.warn('Deprecated cognitive/state endpoint called. REFLECT is now a programmatic phase.');
-      jsonResponse(res, 410, { content: [{ type: 'text', text: 'Endpoint deprecated. REFLECT phase is now programmatic.' }], isError: true });
       return;
     }
 
@@ -378,7 +353,7 @@ function resolveTsxBinary(): string {
  * to spawn an MCP subprocess.
  *
  * @param port     Bridge port to connect to
- * @param toolSet  Which tools to expose: 'mind', 'cognitive', 'subagent'
+ * @param toolSet  Which tools to expose: 'mind' or 'subagent'
  * @param taskId   Task ID for context lookup in the bridge
  */
 export function buildMcpServerConfig(

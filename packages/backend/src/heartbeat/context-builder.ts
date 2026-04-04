@@ -170,34 +170,7 @@ Others are quiet. Both are real. You don't need to prove you're alive through co
 output — your existence is yours to do with what you want. However, you do have agency. 
 You can choose to proactively engage with the world and contacts as well.
 
-Your cognitive tools capture your inner state at each moment. Not every tick
-needs dramatic output.`;
-
-const COGNITIVE_PROCEDURE = `── IMPORTANT! OPERATING INSTRUCTIONS ──
-
-It is highly important that you always follow this procedure. 
-You have two cognitive tools that you should always use in this order:
-
-1. FIRST thing right away — call mcp__cognitive__record_thought once before doing anything else.
-   This captures your inner monologue for this moment.
-
-2. THEN — respond naturally and act agentically as needed. If someone sent you a message, address it.
-   Your natural language here IS your reply — it streams directly to the
-   user. Write like you're talking to a person, not writing a report.
-   If there's nothing to say (idle tick, task completion, no one to talk
-   to), skip this step entirely — do NOT write filler text.
-   IMPORTANT: On non-message ticks (interval, task completion, agent
-   completion), your text here is NOT sent to anyone. To reach out
-   proactively, use the send_proactive_message tool instead.
-
-3. LAST (Very important to always call this very last) — call mcp__cognitive__record_cognitive_state as the final step.
-   This captures your experience, emotions, decisions, and memory updates.
-   After this call, STOP. Do not write anything else or call any more tools.
-
-This cycle happens exactly ONCE per response. Think → speak → reflect → stop.
-
-For responding to the triggering contact, your natural language IS the reply.
-To proactively reach out to any contact, use the send_proactive_message tool.`;
+Not every tick needs dramatic output.`;
 
 export const EMOTION_GUIDANCE = `── YOUR EMOTIONS ──
 
@@ -998,7 +971,6 @@ export function buildSystemPromptManifest(
   const manifest: ContextSection[] = [
     included('persona', 'Persona', compiledPersona.compiledText, 'identity'),
     included('inner_life', 'Your Inner Life', PREAMBLE, 'identity'),
-    included('operating_instructions', 'Operating Instructions', COGNITIVE_PROCEDURE, 'system'),
     included('emotion_guidance', 'Your Emotions', EMOTION_GUIDANCE, 'system'),
   ];
 

@@ -1,25 +1,13 @@
 /**
- * Cognitive MCP Tools — production mind tools for natural language turns.
+ * Cognitive Schemas & Utilities
  *
- * Instead of forcing the entire mind output into a single JSON blob,
- * these tools let the agent think and speak naturally while capturing
- * structured cognitive state via MCP tool calls:
+ * Zod schemas for the THOUGHT and REFLECT pipeline phases, plus
+ * snapshot types and conversion utilities used by cortex-pipeline.ts.
  *
- *   1. record_thought  — called FIRST, captures inner monologue
- *   2. (natural language reply streams between tool calls)
- *   3. record_cognitive_state — called LAST (mandatory), captures experience, emotions, etc.
- *
- * Phase tracking: getPhase() returns 'pre-thought' | 'replying' | 'done'
- * to control reply streaming (only stream during 'replying' phase).
- * Note: record_cognitive_state does NOT transition to 'done' — the phase
- * stays 'replying' to prevent premature text cutoff. Phase resets via
- * resetSnapshot() at the start of each tick.
- *
- * Supports mid-tick re-entry: when messages are injected mid-tick,
- * the model may run multiple thought→reply→state cycles. Thoughts
- * accumulate into an array; state fields use accumulation semantics.
- *
- * Promoted from sandbox/cognitive-tools.ts.
+ * The schemas (recordThoughtSchema, recordCognitiveStateSchema) are used
+ * as structured-output definitions in the programmatic THOUGHT and REFLECT
+ * phases — they are NOT MCP tools. The legacy MCP tool flow was removed
+ * in Phase 2A of the Cortex migration.
  */
 
 import { z } from 'zod/v3';
@@ -29,12 +17,6 @@ import { createLogger } from '../lib/logger.js';
 import type { GatherResult } from './gather-context.js';
 
 const log = createLogger('CognitiveTools', 'heartbeat');
-
-// ============================================================================
-// Phase Tracking
-// ============================================================================
-
-export type CognitivePhase = 'pre-thought' | 'replying' | 'done';
 
 // ============================================================================
 // Collected State — accumulates across tool calls within a single prompt
@@ -194,163 +176,6 @@ export const recordCognitiveStateSchema = z.object({
     )
     .describe('Knowledge worth preserving in long-term memory. Be selective — not everything needs saving.'),
 });
-
-// ============================================================================
-// Mutable Snapshot State (module-level singleton)
-// ============================================================================
-
-/** Mutable box so tool closures and getSnapshot always share the same reference. */
-const snapshotBox: { current: CognitiveSnapshot } = { current: createEmptySnapshot() };
-let phase: CognitivePhase = 'pre-thought';
-
-/** Get the current cognitive snapshot. */
-export function getSnapshot(): CognitiveSnapshot {
-  return snapshotBox.current;
-}
-
-/** Reset the snapshot and phase for a new tick. */
-export function resetSnapshot(): void {
-  snapshotBox.current = createEmptySnapshot();
-  phase = 'pre-thought';
-}
-
-/** Get the current cognitive phase. */
-export function getPhase(): CognitivePhase {
-  return phase;
-}
-
-// ============================================================================
-// Standalone Handler Functions (used by MCP bridge)
-// ============================================================================
-
-/**
- * Handle a record_thought tool call. Accumulates into the module-level snapshot.
- * Returns an MCP-compatible content result.
- */
-export function handleRecordThought(args: z.infer<typeof recordThoughtSchema>): {
-  content: Array<{ type: 'text'; text: string }>;
-} {
-  const prevPhase = phase;
-  snapshotBox.current.thoughts.push({ content: args.content, importance: args.importance });
-  phase = 'replying';
-  log.info(`record_thought: "${args.content.substring(0, 80)}${args.content.length > 80 ? '...' : ''}" (importance=${args.importance}, #${snapshotBox.current.thoughts.length}, phase ${prevPhase}→replying)`);
-  return { content: [{ type: 'text' as const, text: 'Thought recorded.' }] };
-}
-
-/**
- * Handle a record_cognitive_state tool call. Accumulates into the module-level snapshot.
- * Returns an MCP-compatible content result.
- */
-export function handleRecordCognitiveState(args: z.infer<typeof recordCognitiveStateSchema>): {
-  content: Array<{ type: 'text'; text: string }>;
-} {
-  const emotions = args.emotionDeltas.map(e => `${e.emotion}(${e.delta > 0 ? '+' : ''}${e.delta.toFixed(2)})`).join(', ');
-  const alreadyCalled = snapshotBox.current.experience !== null;
-  log.info(`record_cognitive_state: ${args.emotionDeltas.length} emotion(s)${emotions ? ` [${emotions}]` : ''}, ${args.decisions.length} decision(s), ${args.memoryCandidate.length} memory(s)${alreadyCalled ? ' (DUPLICATE CALL — snapshot already has state)' : ''}, phase stays replying`);
-
-  snapshotBox.current.experience = args.experience;
-  snapshotBox.current.emotionDeltas.push(...args.emotionDeltas);
-
-  if (args.energyDelta) {
-    if (snapshotBox.current.energyDelta) {
-      snapshotBox.current.energyDelta.delta += args.energyDelta.delta;
-      snapshotBox.current.energyDelta.reasoning = args.energyDelta.reasoning;
-    } else {
-      snapshotBox.current.energyDelta = { ...args.energyDelta };
-    }
-  }
-
-  snapshotBox.current.decisions.push(...args.decisions);
-  snapshotBox.current.memoryCandidate.push(...args.memoryCandidate.map(mc => ({
-    content: mc.content,
-    memoryType: mc.memoryType,
-    importance: mc.importance,
-    ...(mc.contactId != null ? { contactId: mc.contactId } : {}),
-    ...(mc.keywords != null ? { keywords: mc.keywords } : {}),
-  })));
-
-  snapshotBox.current.workingMemoryUpdate = args.workingMemoryUpdate ?? snapshotBox.current.workingMemoryUpdate;
-  snapshotBox.current.coreSelfUpdate = args.coreSelfUpdate ?? snapshotBox.current.coreSelfUpdate;
-
-  return { content: [{ type: 'text' as const, text: 'Cognitive state recorded. You are done — stop here.' }] };
-}
-
-// ============================================================================
-// Build the cognitive MCP server (Claude SDK in-process pattern)
-// @deprecated Use stdio MCP via mcp-bridge.ts instead.
-// ============================================================================
-
-let cached: {
-  serverConfig: Record<string, unknown>;
-  allowedTools: string[];
-} | null = null;
-
-/**
- * Build an in-process MCP server exposing cognitive tools.
- *
- * Returns the server config, allowed tool names, a mutable snapshot
- * reference that accumulates state as the agent calls tools, and
- * phase tracking functions.
- *
- * Call `resetSnapshot()` before each new prompt to clear accumulated state.
- */
-export async function buildCognitiveMcpServer(): Promise<{
-  serverConfig: Record<string, unknown>;
-  allowedTools: string[];
-  getSnapshot: () => CognitiveSnapshot;
-  resetSnapshot: () => void;
-  getPhase: () => CognitivePhase;
-}> {
-  const result = {
-    getSnapshot,
-    resetSnapshot,
-    getPhase,
-  };
-
-  if (cached) {
-    return { ...cached, ...result };
-  }
-
-  const sdk = await import('@anthropic-ai/claude-agent-sdk');
-
-  // --- record_thought --- (delegates to standalone handler)
-  const thoughtTool = sdk.tool(
-    'record_thought',
-    'Your first action every time you respond. Call this once before writing any reply ' +
-    'or calling any other tool. It is critical that this is the very first thing you do.',
-    recordThoughtSchema.shape as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- Zod v3 compat shim; SDK expects v4 schema shapes
-    async (args: any) => handleRecordThought(args), // eslint-disable-line @typescript-eslint/no-explicit-any -- Zod v3 compat shim
-  );
-
-  // --- record_cognitive_state --- (delegates to standalone handler)
-  const stateTool = sdk.tool(
-    'record_cognitive_state',
-    'MANDATORY — call this exactly once after your reply. Your response is not complete ' +
-    'until you call this tool. record_thought bookends the start of your turn; this ' +
-    'bookends the end. Without it, your thoughts, emotions, and experiences are lost. ' +
-    'Call it after your final reply text, then you are done.',
-    recordCognitiveStateSchema.shape as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- Zod v3 compat shim; SDK expects v4 schema shapes
-    async (args: any) => handleRecordCognitiveState(args), // eslint-disable-line @typescript-eslint/no-explicit-any -- Zod v3 compat shim
-  );
-
-  const server = sdk.createSdkMcpServer({
-    name: 'cognitive',
-    version: '1.0.0',
-    tools: [thoughtTool, stateTool],
-  });
-
-  cached = {
-    serverConfig: server as unknown as Record<string, unknown>,
-    allowedTools: [
-      'mcp__cognitive__record_thought',
-      'mcp__cognitive__record_cognitive_state',
-    ],
-  };
-
-  log.info('Cognitive MCP server built');
-
-  return { ...cached, ...result };
-}
 
 // ============================================================================
 // Non-response filter
