@@ -1,6 +1,8 @@
 # Mind Migration to Cortex
 
 > **STATUS: RESEARCH** - Not yet implemented.
+>
+> **Note:** This is an Animus-specific integration doc. Cortex framework documentation (architecture, tools, compaction, skills, providers) lives in the [cortex-mono](https://github.com/Craigtut/cortex-mono) repository.
 
 This document describes how the mind (the heartbeat's persistent agent session) migrates from the current `@animus-labs/agents` abstraction to `@animus-labs/cortex`. This covers the new 5-phase pipeline, context slot configuration, and what changes in the backend.
 

@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@animus-labs/agents": "*",
-    "@animus-labs/cortex": "*",
+    "@animus-labs/cortex": "file:../../../../cortex-mono/packages/cortex",
     "@animus-labs/shared": "*",
     "@animus-labs/tts-native": "*",
     "@fastify/cookie": "^10.0.0",

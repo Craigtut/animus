@@ -1,6 +1,8 @@
 # Frontend Auth UX
 
 > **STATUS: RESEARCH** - Not yet implemented.
+>
+> **Note:** This is an Animus-specific integration doc. Cortex framework documentation (architecture, tools, compaction, skills, providers) lives in the [cortex-mono](https://github.com/Craigtut/cortex-mono) repository.
 
 The frontend UX for Cortex provider authentication, covering both the onboarding flow and the settings page. Designed around **progressive disclosure**: OAuth sign-in is the primary path for non-technical users, with API key entry and custom endpoint configuration available for power users at increasing depth.
 

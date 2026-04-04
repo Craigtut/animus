@@ -18,12 +18,13 @@ export default defineConfig({
     },
   },
   resolve: {
-    conditions: ['source'],
+    // Use explicit aliases instead of global conditions: ['source'] to prevent
+    // the source condition from resolving TypeScript files in transitive deps
+    // (e.g. eventsource-parser in cortex-mono's node_modules).
     alias: {
-      '@animus/shared': path.resolve(__dirname, 'packages/shared/src'),
-      '@animus/agents': path.resolve(__dirname, 'packages/agents/src'),
-      '@animus/backend': path.resolve(__dirname, 'packages/backend/src'),
-      '@animus/frontend': path.resolve(__dirname, 'packages/frontend/src'),
+      '@animus-labs/shared': path.resolve(__dirname, 'packages/shared/src'),
+      '@animus-labs/agents': path.resolve(__dirname, 'packages/agents/src'),
+      '@animus-labs/cortex': path.resolve(__dirname, '..', '..', 'cortex-mono', 'packages', 'cortex', 'src'),
     },
   },
 });

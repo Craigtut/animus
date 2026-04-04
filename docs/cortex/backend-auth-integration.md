@@ -1,6 +1,8 @@
 # Backend Auth Integration
 
 > **STATUS: RESEARCH** - Not yet implemented.
+>
+> **Note:** This is an Animus-specific integration doc. Cortex framework documentation (architecture, tools, compaction, skills, providers) lives in the [cortex-mono](https://github.com/Craigtut/cortex-mono) repository.
 
 How the Animus backend integrates with Cortex's `ProviderManager` and `CortexAgent` for authentication, credential management, and provider configuration. The backend owns all credential storage, encryption, and tRPC API surface. It never imports `@mariozechner/pi-ai` directly.
 

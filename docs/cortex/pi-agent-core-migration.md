@@ -29,8 +29,6 @@ See: **`cortex-architecture.md`**
 
 The heartbeat's mind loop is restructured from a 3-phase pipeline (GATHER → MIND QUERY → EXECUTE) to a 5-phase pipeline (GATHER → THOUGHT → AGENTIC LOOP → REFLECT → EXECUTE). Cognitive tools (`record_thought`, `record_cognitive_state`) are replaced with programmatic direct pi-ai calls that guarantee structured data capture.
 
-See: **`mind-migration.md`**
-
 ## Migration Phases
 
 ### Phase 0: Prep Refactors

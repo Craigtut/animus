@@ -6,9 +6,6 @@
     "composite": true,
     "jsx": "react-jsx",
     "baseUrl": ".",
-    "paths": {
-      "@animus-labs/cortex": ["../cortex/src"]
-    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "tests"],
