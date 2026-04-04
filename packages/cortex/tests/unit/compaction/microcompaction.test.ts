@@ -432,7 +432,7 @@ describe('MicrocompactionEngine', () => {
     });
   });
 
-  it('returns history unchanged below thresholds', () => {
+  it('returns history unchanged below thresholds', async () => {
     const history: AgentMessage[] = [
       makeToolUse('Read'),
       makeToolResult('content', 'Read'),
@@ -440,11 +440,11 @@ describe('MicrocompactionEngine', () => {
     ];
 
     // 30% usage, below 40% threshold
-    const result = engine.apply(history, 100_000, 30_000);
+    const result = await engine.apply(history, 100_000, 30_000);
     expect(result).toEqual(history);
   });
 
-  it('applies trimming at 40% threshold', () => {
+  it('applies trimming at 40% threshold', async () => {
     // Content must be longer than 2 * bookendSize (200 chars) to actually be bookended
     const longContent = 'A'.repeat(300);
     const history: AgentMessage[] = [
@@ -456,7 +456,7 @@ describe('MicrocompactionEngine', () => {
     ];
 
     // 45% usage, above 40% threshold
-    const result = engine.apply(history, 100_000, 45_000);
+    const result = await engine.apply(history, 100_000, 45_000);
 
     // The old tool result should be modified (bookended)
     const oldToolResult = extractTextContent(result[1]!);
@@ -464,7 +464,7 @@ describe('MicrocompactionEngine', () => {
     expect(oldToolResult).toContain('tokens trimmed');
   });
 
-  it('caches trim state between threshold crossings', () => {
+  it('caches trim state between threshold crossings', async () => {
     const history: AgentMessage[] = [
       makeToolUse('Read'),
       makeToolResult('content', 'Read'),
@@ -474,17 +474,17 @@ describe('MicrocompactionEngine', () => {
     ];
 
     // First call at 45% triggers computation
-    engine.apply(history, 100_000, 45_000);
+    await engine.apply(history, 100_000, 45_000);
     const firstState = engine.getCachedState();
     expect(firstState).not.toBeNull();
 
     // Second call at 45% should reuse cache
-    engine.apply(history, 100_000, 45_000);
+    await engine.apply(history, 100_000, 45_000);
     const secondState = engine.getCachedState();
     expect(secondState).toBe(firstState);
   });
 
-  it('recomputes when threshold advances', () => {
+  it('recomputes when threshold advances', async () => {
     const history: AgentMessage[] = [
       makeToolUse('Read'),
       makeToolResult('content', 'Read'),
@@ -494,35 +494,35 @@ describe('MicrocompactionEngine', () => {
     ];
 
     // First call at 45%
-    engine.apply(history, 100_000, 45_000);
+    await engine.apply(history, 100_000, 45_000);
     const firstLevel = engine.getCachedState()?.thresholdLevel;
 
     // Second call at 55% - should advance threshold
-    engine.apply(history, 100_000, 55_000);
+    await engine.apply(history, 100_000, 55_000);
     const secondLevel = engine.getCachedState()?.thresholdLevel;
 
     expect(secondLevel).toBeGreaterThan(firstLevel!);
   });
 
-  it('returns empty array for empty history', () => {
-    const result = engine.apply([], 100_000, 50_000);
+  it('returns empty array for empty history', async () => {
+    const result = await engine.apply([], 100_000, 50_000);
     expect(result).toEqual([]);
   });
 
-  it('returns history unchanged when contextWindow is 0', () => {
+  it('returns history unchanged when contextWindow is 0', async () => {
     const history = [makeUserMsg('hello')];
-    const result = engine.apply(history, 0, 0);
+    const result = await engine.apply(history, 0, 0);
     expect(result).toEqual(history);
   });
 
-  it('resets cache on resetCache()', () => {
+  it('resets cache on resetCache()', async () => {
     const history = [
       makeToolResult('content', 'Read'),
       makeAssistantMsg('analysis'),
       makeAssistantMsg('recent'),
     ];
 
-    engine.apply(history, 100_000, 45_000);
+    await engine.apply(history, 100_000, 45_000);
     expect(engine.getCachedState()).not.toBeNull();
 
     engine.resetCache();

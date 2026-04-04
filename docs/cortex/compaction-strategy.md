@@ -146,6 +146,8 @@ interface MicrocompactionConfig {
   preserveRecentTurns: number;         // default: 5
   extendedRetentionMultiplier: number; // default: 2 (for non-reproducible tools)
   toolCategories?: Record<string, 'rereadable' | 'non-reproducible' | 'ephemeral' | 'computational'>;
+  persistResult?: PersistResultFn;     // optional callback for disk persistence of cleared results
+  maxAggregateTurnTokens?: number;     // default: 150_000 (per-message aggregate cap)
 }
 ```
 
@@ -257,8 +259,15 @@ interface CompactionEvents {
   onPostCompaction: (result: CompactionResult) => void;
 
   // Fired if compaction fails (LLM error, timeout, etc.)
-  // Backend can decide whether to force a session restart.
   onCompactionError: (error: Error) => void;
+
+  // Fired when Layer 2 failed and Layer 3 (emergency truncation) was used as fallback.
+  // Context quality is degraded but the session continues.
+  onCompactionDegraded: (info: { layer2Failures: number; turnsDropped: number }) => void;
+
+  // Fired when all compaction layers have failed.
+  // Consumer should take recovery action (e.g., pause heartbeat, abort session).
+  onCompactionExhausted: (info: { error: Error; layer2Failures: number }) => void;
 }
 
 interface CompactionTarget {
@@ -450,11 +459,15 @@ interface CortexCompactionConfig {
     preserveRecentTurns: number;         // default: 5
     extendedRetentionMultiplier: number; // default: 2 (for non-reproducible tools)
     toolCategories?: Record<string, 'rereadable' | 'non-reproducible' | 'ephemeral' | 'computational'>;
+    persistResult?: PersistResultFn;     // optional: persist cleared results to disk
+    maxAggregateTurnTokens?: number;     // default: 150_000 (per-message aggregate cap)
   };
   compaction: {
     threshold: number;                   // default: 0.70 (70% of context window)
     preserveRecentTurns: number;         // default: 6 (last ~1-2 ticks, includes tool calls)
     customPrompt?: string;              // optional: custom summarization prompt
+    maxRetries?: number;                // default: 3 (Layer 2 retry attempts)
+    retryDelayMs?: number;              // default: 2000 (delay between retries)
   };
   failsafe: {
     threshold: number;                   // default: 0.90
@@ -570,3 +583,59 @@ Three layers of coverage, no duplication:
 - **Re-seeded messages** fill the gap between the watermark and the preserved tail
 - **Preserved tail** provides full-fidelity recent context including tool call/result pairs
 - **Summary** carries tool history, reasoning, and user instructions from the compacted region
+
+---
+
+## Circuit Breaker
+
+If Layer 2 (LLM summarization) fails, Cortex retries up to `maxRetries` times (default 3) with a configurable delay (`retryDelayMs`, default 2000ms) between attempts. This all happens mid-loop inside `applyInTransformContext`.
+
+**Failure cascade:**
+
+1. Layer 2 fails once: retry after delay.
+2. Layer 2 fails `maxRetries` times: fall through to Layer 3 (emergency truncation).
+3. Layer 3 succeeds: emit `onCompactionDegraded` with `{ layer2Failures, turnsDropped }`. The session continues but context quality is degraded.
+4. Layer 3 also fails (or tokens remain over budget): emit `onCompactionExhausted` with `{ error, layer2Failures }`. The consumer should take recovery action (e.g., pause heartbeat, abort session).
+
+A successful Layer 2 compaction resets the consecutive failure counter.
+
+**Configuration** (in `CompactionConfig`):
+- `maxRetries`: number (default 3)
+- `retryDelayMs`: number (default 2000)
+
+**Events** (registered via `CortexAgent.onCompactionDegraded()` / `onCompactionExhausted()`):
+- `onCompactionDegraded`: Layer 2 failed, Layer 3 was used as fallback
+- `onCompactionExhausted`: all compaction layers failed
+
+---
+
+## Disk Persistence for Cleared Tool Results
+
+When microcompaction clears or replaces a non-reproducible or computational tool result (at the `placeholder` or `clear` threshold), the original content can optionally be persisted to disk via a consumer-provided callback.
+
+**Motivation:** Non-reproducible results (WebFetch, Bash) cannot be re-fetched. Once cleared from the model's view, the content is lost. Disk persistence lets the agent Read the content back if it needs to reference it during the current session. The persisted files also survive Layer 2 compaction, which replaces the source transcript entirely.
+
+**Configuration** (in `MicrocompactionConfig`):
+- `persistResult`: `PersistResultFn` callback (optional). The consumer implements the I/O and returns the file path.
+
+**Behavior:**
+- When `persistResult` is set and a `placeholder` or `clear` action is applied to a non-reproducible or computational result, the callback is invoked with the full original content.
+- The replacement text includes the file path: `[Tool result persisted -- {toolName}: "{preview}" -- use Read on {path} for full content]`
+- Rereadable results (Read, Glob, Grep) are NOT persisted since the agent can re-invoke the tool.
+- If the callback throws, standard placeholder/clear text is used as fallback.
+
+---
+
+## Aggregate Per-Turn Token Budget
+
+In addition to the per-result insertion cap (`maxResultTokens`, default 50K), an aggregate cap limits the total tokens across all tool results in a single message.
+
+**Motivation:** A single agentic loop turn with many parallel tool calls (e.g., 10 file reads at 50K each = 500K) can overwhelm context before microcompaction evaluates.
+
+**Configuration** (in `MicrocompactionConfig`):
+- `maxAggregateTurnTokens`: number (default 150,000)
+
+**Behavior:**
+- After individual per-result caps are applied, the aggregate token count for all tool results in the message is computed.
+- If the aggregate exceeds `maxAggregateTurnTokens`, the largest results are bookended (head + tail) until the total is under budget.
+- If `persistResult` is configured, full content is persisted to disk before bookending, and the bookended text includes a reference to the persisted file.

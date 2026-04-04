@@ -23,9 +23,11 @@ import type {
   AdaptiveThresholdConfig,
   CompactionResult,
   CompactionTarget,
+  CompactionDegradedInfo,
+  CompactionExhaustedInfo,
 } from '../types.js';
 import { estimateTokens } from '../token-estimator.js';
-import { MicrocompactionEngine, MICROCOMPACTION_DEFAULTS, extractTextContent, isToolResultMessage, capToolResult } from './microcompaction.js';
+import { MicrocompactionEngine, MICROCOMPACTION_DEFAULTS, extractTextContent, isToolResultMessage, capToolResult, extractToolName, getToolCategory, applyBookend } from './microcompaction.js';
 import {
   runCompaction,
   shouldCompact,
@@ -183,6 +185,11 @@ export class CompactionManager {
   private postCompactionHandlers: PostCompactionHandler[] = [];
   private compactionErrorHandlers: CompactionErrorHandler[] = [];
   private compactionResultHandlers: Array<(result: CompactionResult) => void> = [];
+  private compactionDegradedHandlers: Array<(info: CompactionDegradedInfo) => void> = [];
+  private compactionExhaustedHandlers: Array<(info: CompactionExhaustedInfo) => void> = [];
+
+  /** Consecutive Layer 2 failure count for circuit breaker. Reset on success. */
+  private _consecutiveLayer2Failures = 0;
 
   /** LLM completion function, set by CortexAgent. */
   private completeFn: CompleteFn | null = null;
@@ -342,6 +349,20 @@ export class CompactionManager {
     this.compactionResultHandlers.push(handler);
   }
 
+  /**
+   * Register a handler called when Layer 2 failed and Layer 3 was used as fallback.
+   */
+  onCompactionDegraded(handler: (info: CompactionDegradedInfo) => void): void {
+    this.compactionDegradedHandlers.push(handler);
+  }
+
+  /**
+   * Register a handler called when all compaction layers have failed.
+   */
+  onCompactionExhausted(handler: (info: CompactionExhaustedInfo) => void): void {
+    this.compactionExhaustedHandlers.push(handler);
+  }
+
   // -----------------------------------------------------------------------
   // Insertion-time cap
   // -----------------------------------------------------------------------
@@ -366,8 +387,10 @@ export class CompactionManager {
    * @param messages - The source messages array (mutated in place)
    * @param slotCount - Number of slot messages to skip at the start
    */
-  applyInsertionCap(messages: AgentMessage[], slotCount: number): void {
+  async applyInsertionCap(messages: AgentMessage[], slotCount: number): Promise<void> {
     const config = this.microcompaction.getConfig();
+
+    // Phase 1: Individual per-result cap
     for (let i = slotCount; i < messages.length; i++) {
       const msg = messages[i]!;
       if (!isToolResultMessage(msg)) continue;
@@ -393,6 +416,70 @@ export class CompactionManager {
       if (modified) {
         messages[i] = { ...msg, content: newContent };
       }
+    }
+
+    // Phase 2: Aggregate per-message budget
+    const aggregateLimit = config.maxAggregateTurnTokens ?? 150_000;
+    if (aggregateLimit <= 0) return;
+
+    for (let i = slotCount; i < messages.length; i++) {
+      const msg = messages[i]!;
+      if (!isToolResultMessage(msg)) continue;
+      if (typeof msg.content === 'string') continue;
+
+      const parts = msg.content;
+      const partInfos: Array<{ index: number; tokens: number; text: string; toolName: string }> = [];
+      let totalTokens = 0;
+
+      for (let p = 0; p < parts.length; p++) {
+        const part = parts[p]!;
+        if (part.type === 'tool_result' && typeof part.text === 'string') {
+          const tokens = estimateTokens(part.text);
+          // Resolve tool name from the part itself (tool_result parts may have a name field)
+          const name = (typeof (part as Record<string, unknown>)['name'] === 'string'
+            ? (part as Record<string, unknown>)['name'] as string
+            : null) ?? extractToolName(msg) ?? 'unknown';
+          partInfos.push({ index: p, tokens, text: part.text, toolName: name });
+          totalTokens += tokens;
+        }
+      }
+
+      if (totalTokens <= aggregateLimit) continue;
+
+      const sorted = [...partInfos].sort((a, b) => b.tokens - a.tokens);
+      const newParts = [...parts];
+      let currentTotal = totalTokens;
+
+      for (const info of sorted) {
+        if (currentTotal <= aggregateLimit) break;
+        if (info.tokens <= config.maxResultTokens / 2) break;
+
+        const part = newParts[info.index]!;
+        let replacement: string;
+
+        if (config.persistResult) {
+          const category = getToolCategory(info.toolName, config.toolCategories);
+          try {
+            const path = await config.persistResult(info.text, {
+              toolName: info.toolName,
+              messageIndex: i,
+              category: category ?? 'rereadable',
+            });
+            const bookended = applyBookend(info.text, config.bookendSize, config.bookendSize, info.tokens);
+            replacement = `${bookended}\n\n[Full content persisted to ${path} -- use Read to access]`;
+          } catch {
+            replacement = applyBookend(info.text, config.bookendSize, config.bookendSize, info.tokens);
+          }
+        } else {
+          replacement = applyBookend(info.text, config.bookendSize, config.bookendSize, info.tokens);
+        }
+
+        const newTokens = estimateTokens(replacement);
+        currentTotal = currentTotal - info.tokens + newTokens;
+        newParts[info.index] = { ...part, text: replacement };
+      }
+
+      messages[i] = { ...msg, content: newParts };
     }
   }
 
@@ -448,7 +535,7 @@ export class CompactionManager {
     this._debugLog?.(`transformContext: historyLen=${history.length}, sessionTokens=${this._sessionTokenCount}, heuristic=${this.estimateContextTokens(context)}, currentTokens=${currentTokens}, ctxWindow=${this._contextWindow}`);
 
     // Layer 1: Microcompaction (always runs at threshold crossings)
-    history = this.microcompaction.apply(history, this._contextWindow, currentTokens);
+    history = await this.microcompaction.apply(history, this._contextWindow, currentTokens);
 
     // Layer 2: Conversation summarization (70% threshold)
     // Operates on the original transcript (agent.state.messages), not the
@@ -462,15 +549,24 @@ export class CompactionManager {
 
     this._debugLog?.(`Layer2: totalAfterMicro=${totalAfterMicro}, threshold=${effectiveThreshold}, ratio=${(totalAfterMicro / this._contextWindow).toFixed(3)}, completeFn=${!!this.completeFn}, srcAccessors=${!!getSourceHistory && !!setSourceHistory}, shouldCompact=${shouldCompact(totalAfterMicro, this._contextWindow, effectiveThreshold)}`);
 
+    let layer2Failed = false;
+    let lastLayer2Error: Error | undefined;
+
     if (
       this.completeFn &&
       getSourceHistory &&
       setSourceHistory &&
       shouldCompact(totalAfterMicro, this._contextWindow, effectiveThreshold)
     ) {
-      try {
-        const sourceHistory = getSourceHistory();
-        if (sourceHistory.length > 0) {
+      const maxRetries = this.config.compaction.maxRetries ?? 3;
+      const retryDelayMs = this.config.compaction.retryDelayMs ?? 2000;
+      let succeeded = false;
+
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const sourceHistory = getSourceHistory();
+          if (sourceHistory.length === 0) break;
+
           const { newHistory: compactedSource, result } = await runCompaction(
             sourceHistory,
             this.config.compaction,
@@ -482,14 +578,12 @@ export class CompactionManager {
             },
           );
 
-          // Update the source transcript
+          // Success: update state and reset failure counter
           setSourceHistory(compactedSource);
           this.microcompaction.resetCache();
-
-          // Update token count estimate
           this._sessionTokenCount = result.tokensAfter;
+          this._consecutiveLayer2Failures = 0;
 
-          // Emit result to CortexAgent event handlers
           for (const handler of this.compactionResultHandlers) {
             try {
               handler(result);
@@ -498,16 +592,28 @@ export class CompactionManager {
             }
           }
 
-          // Rebuild context from updated source: re-apply microcompaction
-          // on the now-shorter history
-          history = this.microcompaction.apply(
+          // Rebuild context from updated source
+          history = await this.microcompaction.apply(
             compactedSource,
             this._contextWindow,
             result.tokensAfter,
           );
+
+          succeeded = true;
+          break;
+        } catch (err) {
+          this._consecutiveLayer2Failures++;
+          lastLayer2Error = err instanceof Error ? err : new Error(String(err));
+          this._debugLog?.(`Layer2 attempt ${attempt}/${maxRetries} failed: ${lastLayer2Error.message}`);
+
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+          }
         }
-      } catch {
-        // Layer 2 failed, fall through to Layer 3
+      }
+
+      if (!succeeded) {
+        layer2Failed = true;
       }
     }
 
@@ -521,13 +627,49 @@ export class CompactionManager {
       const totalNow = slotTokens + postLayerTokens;
 
       if (shouldTruncate(totalNow, failsafeWindow, this.config.failsafe.threshold)) {
-        const result = emergencyTruncate(
+        const truncResult = emergencyTruncate(
           history,
           failsafeWindow,
           slotTokens,
           this.config.failsafe.threshold,
         );
-        history = result.newHistory;
+        history = truncResult.newHistory;
+
+        // Emit degraded event if Layer 3 was used as fallback for Layer 2 failure
+        if (layer2Failed) {
+          const failures = this._consecutiveLayer2Failures;
+          this._consecutiveLayer2Failures = 0;
+          for (const handler of this.compactionDegradedHandlers) {
+            try {
+              handler({
+                layer2Failures: failures,
+                turnsDropped: truncResult.turnsRemoved,
+              });
+            } catch {
+              // Swallow handler errors
+            }
+          }
+        }
+      } else if (layer2Failed) {
+        // Layer 2 failed but Layer 3 didn't need to run. If tokens are still
+        // over the Layer 2 budget, emit exhausted so the consumer can act.
+        const postTokens = this.estimateHistoryTokens(history);
+        const stillOverBudget = shouldCompact(slotTokens + postTokens, this._contextWindow, effectiveThreshold);
+
+        if (stillOverBudget) {
+          const failures = this._consecutiveLayer2Failures;
+          this._consecutiveLayer2Failures = 0;
+          for (const handler of this.compactionExhaustedHandlers) {
+            try {
+              handler({
+                error: lastLayer2Error ?? new Error('Layer 2 compaction failed'),
+                layer2Failures: failures,
+              });
+            } catch {
+              // Swallow handler errors
+            }
+          }
+        }
       }
     }
 
@@ -674,8 +816,11 @@ export class CompactionManager {
     this.postCompactionHandlers = [];
     this.compactionErrorHandlers = [];
     this.compactionResultHandlers = [];
+    this.compactionDegradedHandlers = [];
+    this.compactionExhaustedHandlers = [];
     this.completeFn = null;
     this._sessionTokenCount = 0;
+    this._consecutiveLayer2Failures = 0;
     this._lastInteractionTime = null;
   }
 

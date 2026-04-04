@@ -457,6 +457,13 @@ export class MicrocompactionEngine {
   }
 
   /**
+   * Whether a persist callback is configured.
+   */
+  get hasPersistCallback(): boolean {
+    return typeof this.config.persistResult === 'function';
+  }
+
+  /**
    * Get the current config (for testing/inspection).
    */
   getConfig(): MicrocompactionConfig {
@@ -474,16 +481,21 @@ export class MicrocompactionEngine {
    * Apply microcompaction to conversation history messages.
    * Called inside transformContext. Returns a new array; never modifies the input.
    *
+   * When a persistResult callback is configured, non-reproducible and computational
+   * tool results that are being cleared or replaced with a placeholder will be
+   * persisted to disk first, and the replacement text will include the file path
+   * so the agent can Read the content back if needed.
+   *
    * @param history - Conversation history messages (post-slot region)
    * @param contextWindow - Total context window size in tokens
    * @param currentTokens - Current estimated token count
    * @returns Potentially trimmed conversation history
    */
-  apply(
+  async apply(
     history: AgentMessage[],
     contextWindow: number,
     currentTokens: number,
-  ): AgentMessage[] {
+  ): Promise<AgentMessage[]> {
     if (contextWindow <= 0 || history.length === 0) {
       return history;
     }
@@ -513,13 +525,60 @@ export class MicrocompactionEngine {
     for (let i = 0; i < history.length; i++) {
       const action = this.cachedState.actions.get(i);
       if (action) {
-        result.push(applyTrimAction(history[i]!, action));
+        const persisted = await this.maybePersistBeforeTrim(history[i]!, action, i);
+        result.push(persisted);
       } else {
         result.push(history[i]!);
       }
     }
 
     return result;
+  }
+
+  /**
+   * If a persistResult callback is configured and the action is clearing a
+   * non-reproducible or computational result, persist the original content
+   * to disk and return a message with the file path reference.
+   * Otherwise, apply the standard trim action.
+   */
+  private async maybePersistBeforeTrim(
+    message: AgentMessage,
+    action: TrimAction,
+    messageIndex: number,
+  ): Promise<AgentMessage> {
+    // Only persist for destructive actions (placeholder/clear), not bookend/full
+    if (action.kind !== 'placeholder' && action.kind !== 'clear') {
+      return applyTrimAction(message, action);
+    }
+
+    // Only persist if callback exists
+    if (!this.config.persistResult) {
+      return applyTrimAction(message, action);
+    }
+
+    // Only persist non-reproducible and computational results
+    const toolName = extractToolName(message);
+    const category = toolName ? getToolCategory(toolName, this.config.toolCategories) : undefined;
+    if (category !== 'non-reproducible' && category !== 'computational') {
+      return applyTrimAction(message, action);
+    }
+
+    // Persist the original content to disk
+    const content = extractTextContent(message);
+    try {
+      const path = await this.config.persistResult(content, {
+        toolName: toolName ?? 'unknown',
+        messageIndex,
+        category,
+      });
+
+      const preview = content.slice(0, 80).replace(/\n/g, ' ').trim();
+      const persistedText = `[Tool result persisted -- ${toolName ?? 'unknown'}: "${preview}" -- use Read on ${path} for full content]`;
+      return { role: message.role, content: persistedText };
+    } catch {
+      // Persist failed, fall back to standard trim
+      return applyTrimAction(message, action);
+    }
   }
 
   /**

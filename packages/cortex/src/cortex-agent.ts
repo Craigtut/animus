@@ -42,6 +42,8 @@ import type {
   AgentTextOutput,
   CompactionResult,
   CompactionTarget,
+  CompactionDegradedInfo,
+  CompactionExhaustedInfo,
   McpTransportConfig,
   SkillConfig,
   LoadedSkill,
@@ -296,6 +298,8 @@ export class CortexAgent {
   private errorHandlers: Array<(error: ClassifiedError) => void> = [];
   private beforeCompactionHandlers: Array<(target: CompactionTarget) => Promise<void>> = [];
   private compactionErrorHandlers: Array<(error: Error) => void> = [];
+  private compactionDegradedHandlers: Array<(info: CompactionDegradedInfo) => void> = [];
+  private compactionExhaustedHandlers: Array<(info: CompactionExhaustedInfo) => void> = [];
   private turnCompleteHandlers: Array<(output: AgentTextOutput) => void> = [];
   private subAgentSpawnedHandlers: Array<(taskId: string, instructions: string) => void> = [];
   private subAgentCompletedHandlers: Array<(taskId: string, result: string, status: string, usage: unknown) => void> = [];
@@ -873,6 +877,14 @@ export class CortexAgent {
       if (!systemBlocks || systemBlocks.length === 0) return undefined;
       const cacheControl = systemBlocks[systemBlocks.length - 1]!['cache_control'];
       if (!cacheControl) return undefined;
+
+      // Strip cache_control from all system blocks except the last.
+      // OAuth tokens cause pi-ai to prepend an identity block with its own
+      // cache_control, consuming an extra breakpoint slot. Only the last
+      // system block (our actual system prompt) needs the breakpoint.
+      for (let i = 0; i < systemBlocks.length - 1; i++) {
+        delete systemBlocks[i]!['cache_control'];
+      }
 
       const messages = payload['messages'] as Array<Record<string, unknown>>;
       if (!messages) return undefined;
@@ -1488,6 +1500,26 @@ export class CortexAgent {
   }
 
   /**
+   * Register a handler called when Layer 2 compaction failed and Layer 3
+   * (emergency truncation) was used as fallback. The session continues
+   * but context quality is degraded.
+   */
+  onCompactionDegraded(handler: (info: CompactionDegradedInfo) => void): void {
+    this.compactionDegradedHandlers.push(handler);
+    this.compactionManager.onCompactionDegraded(handler);
+  }
+
+  /**
+   * Register a handler called when all compaction layers have failed.
+   * The consumer should take recovery action (e.g., pause heartbeat,
+   * abort the session, or notify the user).
+   */
+  onCompactionExhausted(handler: (info: CompactionExhaustedInfo) => void): void {
+    this.compactionExhaustedHandlers.push(handler);
+    this.compactionManager.onCompactionExhausted(handler);
+  }
+
+  /**
    * Register a handler for turn completion with parsed working tag output.
    */
   onTurnComplete(handler: (output: AgentTextOutput) => void): void {
@@ -1757,7 +1789,7 @@ export class CortexAgent {
       // This mutates agent.state.messages directly so that oversized tool
       // results are capped once at first observation, before any other
       // processing. See compaction-strategy.md (Tier 1).
-      this.compactionManager.applyInsertionCap(
+      await this.compactionManager.applyInsertionCap(
         this.agent.state.messages,
         slotCount,
       );
@@ -2393,6 +2425,8 @@ export class CortexAgent {
     this.errorHandlers = [];
     this.beforeCompactionHandlers = [];
     this.compactionErrorHandlers = [];
+    this.compactionDegradedHandlers = [];
+    this.compactionExhaustedHandlers = [];
     this.turnCompleteHandlers = [];
     this.subAgentSpawnedHandlers = [];
     this.subAgentCompletedHandlers = [];

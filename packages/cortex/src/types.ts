@@ -286,6 +286,19 @@ export type ToolCategory = 'rereadable' | 'non-reproducible' | 'ephemeral' | 'co
 /**
  * Microcompaction configuration: progressive tool result trimming.
  */
+/**
+ * Callback invoked when microcompaction persists a cleared tool result to disk.
+ * The consumer implements the actual I/O and returns the file path.
+ *
+ * @param content - The full original tool result content
+ * @param metadata - Information about the result being persisted
+ * @returns The file path where the content was saved
+ */
+export type PersistResultFn = (
+  content: string,
+  metadata: { toolName: string; messageIndex: number; category: ToolCategory },
+) => Promise<string>;
+
 export interface MicrocompactionConfig {
   /** Maximum tokens for a single tool result at insertion time. Default: 50000. */
   maxResultTokens: number;
@@ -301,6 +314,14 @@ export interface MicrocompactionConfig {
   extendedRetentionMultiplier: number;
   /** Tool name to category mapping. Unregistered tools default to standard retention. */
   toolCategories?: Record<string, ToolCategory>;
+  /**
+   * Callback to persist cleared non-reproducible tool results to disk.
+   * When set, cleared results include a file path reference the agent can Read.
+   * If not set, standard placeholder/clear text is used (no persistence).
+   */
+  persistResult?: PersistResultFn;
+  /** Maximum aggregate tokens for all tool results in a single turn. Default: 150000. */
+  maxAggregateTurnTokens?: number;
 }
 
 /**
@@ -313,6 +334,10 @@ export interface CompactionConfig {
   preserveRecentTurns: number;
   /** Custom summarization prompt. If provided, replaces the default prompt. */
   customPrompt?: string;
+  /** Maximum Layer 2 retry attempts before falling through to Layer 3. Default: 3. */
+  maxRetries?: number;
+  /** Delay in ms between Layer 2 retry attempts. Default: 2000. */
+  retryDelayMs?: number;
 }
 
 /**
@@ -406,6 +431,26 @@ export interface CompactionResult {
   summary: string;
 }
 
+/**
+ * Info passed to onCompactionDegraded when Layer 2 failed and Layer 3 was used.
+ */
+export interface CompactionDegradedInfo {
+  /** Number of consecutive Layer 2 failures (including this episode). */
+  layer2Failures: number;
+  /** Number of turns dropped by emergency truncation. */
+  turnsDropped: number;
+}
+
+/**
+ * Info passed to onCompactionExhausted when all compaction layers have failed.
+ */
+export interface CompactionExhaustedInfo {
+  /** The error from the last Layer 2 attempt. */
+  error: Error;
+  /** Number of consecutive Layer 2 failures. */
+  layer2Failures: number;
+}
+
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
@@ -422,6 +467,10 @@ export interface CortexEvents {
   onPostCompaction: (result: CompactionResult) => void;
   /** Fired when context compaction fails. */
   onCompactionError: (error: Error) => void;
+  /** Fired when Layer 2 compaction failed and Layer 3 (emergency truncation) was used as fallback. */
+  onCompactionDegraded: (info: CompactionDegradedInfo) => void;
+  /** Fired when all compaction layers have failed. Consumer should take recovery action. */
+  onCompactionExhausted: (info: CompactionExhaustedInfo) => void;
   /** Fired when an error is classified during the agentic loop. */
   onError: (error: ClassifiedError) => void;
   /** Fired at the end of each turn with parsed working tag output. */
