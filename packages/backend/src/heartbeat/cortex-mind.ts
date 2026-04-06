@@ -19,17 +19,6 @@ import {
   CortexAgent,
   ProviderManager,
   zodToTypebox,
-  unwrapModel,
-  ReadRegistry,
-  CwdTracker,
-  createReadTool,
-  createWriteTool,
-  createEditTool,
-  createGlobTool,
-  createGrepTool,
-  createBashTool,
-  createTaskOutputTool,
-  createWebFetchTool,
   type AgentTextOutput,
   type CortexEvent,
   type ClassifiedError,
@@ -39,7 +28,6 @@ import {
   type McpStdioConfig,
   type McpHttpConfig,
   resolveCacheRetention,
-  type PiModel,
 } from '@animus-labs/cortex';
 
 import { getSystemDb, getHeartbeatDb, getContactsDb, getMessagesDb, getMemoryDb, getPersonaDb, getAgentLogsDb } from '../db/index.js';
@@ -433,43 +421,18 @@ export async function createCortexMind(
   // Build Animus tools (send_message, read_memory, etc.)
   const animusTools = await buildAnimusTools(state.toolContext);
 
-  // Build cortex built-in tools (Read, Write, Edit, Glob, Grep, Bash, WebFetch, TaskOutput)
   const workingDir = join(DATA_DIR, 'workspace');
-  const readRegistry = new ReadRegistry();
-  const cwdTracker = new CwdTracker(workingDir);
-
-  // Lazy reference to the CortexAgent for tools that need it (WebFetch, Bash).
-  // The agent is created after the tools, so we use a mutable ref that gets
-  // assigned once CortexAgent.create() returns below.
-  let cortexAgentRef: CortexAgent | null = null;
-  const lazyUtilityComplete = async (context: unknown) => {
-    if (!cortexAgentRef) throw new Error('CortexAgent not yet initialized');
-    return cortexAgentRef.utilityComplete(context as { systemPrompt: string; messages: Array<{ role: string; content: string }> });
-  };
-
-  const builtInTools = [
-    createReadTool({ readRegistry }),
-    createWriteTool({ readRegistry }),
-    createEditTool({ readRegistry }),
-    createGlobTool({ defaultCwd: workingDir }),
-    createGrepTool({ defaultCwd: workingDir }),
-    createBashTool({ cwdTracker, utilityComplete: lazyUtilityComplete }),
-    createWebFetchTool({ utilityComplete: lazyUtilityComplete }),
-    createTaskOutputTool(),
-  ] as unknown as AgentTool[];
-
-  const allTools = [...builtInTools, ...animusTools];
-  log.info(`Built ${builtInTools.length} built-in tools + ${animusTools.length} Animus tools = ${allTools.length} total`);
+  log.info(`Built ${animusTools.length} Animus tools (built-in tools auto-registered by Cortex)`);
 
   // Build permission resolver
   const permissionResolver = buildPermissionResolver(state.toolContext);
 
   // Use CortexAgent.create() factory to construct the pi-agent-core Agent
   // internally, eliminating the need to import pi-agent-core in the backend.
-  const piModel = unwrapModel(model);
-
+  // Built-in tools (Read, Write, Edit, Glob, Grep, Bash, WebFetch, TaskOutput)
+  // are auto-registered by Cortex using workingDirectory.
   const cortexAgent = await CortexAgent.create({
-    model: piModel as Record<string, unknown>,
+    model,
     workingDirectory: workingDir,
     getApiKey,
     slots: [...MIND_SLOT_NAMES],
@@ -480,11 +443,8 @@ export async function createCortexMind(
     },
     contextWindowLimit: (settingsAny['cortexContextWindowLimit'] as number | null | undefined) ?? null,
     resolvePermission: permissionResolver,
-    tools: allTools,
+    tools: animusTools,
   });
-
-  // Assign the lazy ref so tools can access utilityComplete
-  cortexAgentRef = cortexAgent;
 
   // Resolve initial cache retention based on provider and heartbeat interval
   const heartbeatIntervalMs = (settingsAny['heartbeatIntervalMs'] as number | undefined) ?? 300_000;
@@ -986,8 +946,7 @@ function wireProviderChangeListeners(
       }
       const newModel = await state.providerManager.resolveModel(provider, modelId);
       state.model = newModel;
-      const piModel = unwrapModel(newModel) as PiModel;
-      cortexAgent.setModel(piModel);
+      cortexAgent.setModel(newModel);
       log.info(`CortexAgent model updated to ${provider}/${modelId}`);
     } catch (err) {
       log.error('Failed to switch model:', err);

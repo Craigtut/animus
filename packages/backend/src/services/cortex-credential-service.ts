@@ -24,6 +24,7 @@ import {
   type OAuthResult,
   type CustomModelConfig,
   type CortexModel,
+  type ApiKeyValidationResult,
 } from '@animus-labs/cortex';
 import * as credentialStore from '../db/stores/credential-store.js';
 import { isConfigured as isVaultUnsealed } from '../lib/encryption-service.js';
@@ -163,7 +164,7 @@ export class CortexCredentialService {
     log.info(`API key stored for provider "${provider}"`);
   }
 
-  async validateApiKey(provider: string, apiKey: string): Promise<boolean> {
+  async validateApiKey(provider: string, apiKey: string): Promise<ApiKeyValidationResult> {
     return this.providerManager.validateApiKey(provider, apiKey);
   }
 

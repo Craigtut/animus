@@ -315,10 +315,15 @@ export const cortexProviderRouter = router({
       apiKey: z.string().min(1),
     }))
     .mutation(async ({ input }) => {
-      const valid = await getCortexCredentialService().validateApiKey(
+      const result = await getCortexCredentialService().validateApiKey(
         input.provider, input.apiKey
       );
-      return { valid };
+      return {
+        valid: result.valid,
+        retryable: result.retryable,
+        status: result.status,
+        message: result.message,
+      };
     }),
 
   // ── Custom Endpoint ──
