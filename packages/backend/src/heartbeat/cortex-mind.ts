@@ -58,6 +58,7 @@ import type { GatherResult } from './gather-context.js';
 import { getChannelRouter } from '../channels/channel-router.js';
 import { getPluginManager } from '../plugins/index.js';
 import { join } from 'node:path';
+import { createToolResultPersistor, cleanupDereferencedPaths } from './tool-result-persistor.js';
 
 const log = createLogger('CortexMind', 'heartbeat');
 
@@ -405,6 +406,19 @@ export async function createCortexMind(
   // Build permission resolver
   const permissionResolver = buildPermissionResolver(state.toolContext);
 
+  // Tool result persistor: writes oversized tool results to
+  // data/tool-results/{tickNumber}/ and returns the path for Cortex to
+  // embed in the replacement message.
+  const persistResult = createToolResultPersistor({
+    getTickNumber: () => {
+      try {
+        return heartbeatStore.getHeartbeatState(getHeartbeatDb()).tickNumber;
+      } catch {
+        return 0;
+      }
+    },
+  });
+
   // Use CortexAgent.create() factory to construct the pi-agent-core Agent
   // internally, eliminating the need to import pi-agent-core in the backend.
   // Built-in tools (Read, Write, Edit, Glob, Grep, Bash, WebFetch, TaskOutput)
@@ -422,6 +436,7 @@ export async function createCortexMind(
     contextWindowLimit: (settingsAny['cortexContextWindowLimit'] as number | null | undefined) ?? null,
     resolvePermission: permissionResolver,
     tools: animusTools,
+    persistResult,
   });
 
   // Resolve initial cache retention based on provider and heartbeat interval
@@ -551,6 +566,23 @@ function wireEventHandlers(
     } else if (!toolNames.length && !textOutput?.userFacing) {
       log.info('Turn: (empty)');
     }
+  });
+
+  // Observation-driven tool-result cleanup: when messages containing
+  // persisted-result markers are compacted out of raw history, delete the
+  // files they reference (unless still referenced in the remaining tail).
+  cortexAgent.onObservation((event) => {
+    void (async () => {
+      try {
+        const remaining = cortexAgent.getConversationHistory();
+        const deleted = await cleanupDereferencedPaths(event.compactedMessages, remaining);
+        if (deleted > 0) {
+          log.info(`Tool-result GC: deleted ${deleted} dereferenced files after observation`);
+        }
+      } catch (err) {
+        log.warn('Tool-result GC failed after observation:', err);
+      }
+    })();
   });
 
   // Wire compaction lifecycle handlers (Items 2, 3, 4 from integration audit)

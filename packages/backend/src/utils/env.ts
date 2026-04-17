@@ -42,6 +42,8 @@ export const DB_AGENT_LOGS_PATH = path.join(DB_DIR, 'agent_logs.db');
 export const DB_CONTACTS_PATH = path.join(DB_DIR, 'contacts.db');
 export const LANCEDB_PATH = path.join(DB_DIR, 'lancedb');
 
+export const TOOL_RESULTS_DIR = path.join(DATA_DIR, 'tool-results');
+
 // ---------------------------------------------------------------------------
 // Environment schema (non-path configuration)
 // ---------------------------------------------------------------------------

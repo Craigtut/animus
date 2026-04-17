@@ -33,6 +33,7 @@ import { applyDelta } from './emotion-engine.js';
 import { getEnergyBand, isInSleepHours } from './energy-engine.js';
 import { logDecisionsInTransaction, executeDecisions, type DecisionExecutorDeps } from './decision-executor.js';
 import type { CompiledPersona } from './persona-compiler.js';
+import { cleanupOldToolResults } from './tool-result-persistor.js';
 import type { TickQueue } from './tick-queue.js';
 import { createLogger } from '../lib/logger.js';
 
@@ -524,6 +525,9 @@ export async function executeOutput(
   taskStore.cleanupOldTaskRuns(hbDb, settings.taskRunRetentionDays);
   heartbeatStore.expirePendingApprovals(hbDb);
   heartbeatStore.cleanupOldApprovals(hbDb, 7);
+  cleanupOldToolResults(settings.agentLogRetentionDays).catch(err =>
+    log.warn('Tool-result TTL sweep failed (non-fatal):', err),
+  );
 
   // 9a. Memory pool pruning -- interval ticks only
   if (gathered.trigger.type === 'interval' && deps.memoryManager) {
