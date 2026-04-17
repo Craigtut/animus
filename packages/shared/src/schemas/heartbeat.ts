@@ -42,7 +42,7 @@ export const heartbeatStateSchema = z.object({
   triggerType: triggerTypeSchema.nullable(),
   triggerContext: z.string().nullable(), // JSON
   mindSessionId: z.string().nullable(),
-  sessionTokenCount: z.number().int().nonnegative().default(0),
+  contextTokenCount: z.number().int().nonnegative().default(0),
   startedAt: timestampSchema,
   lastTickAt: timestampSchema.nullable(),
   nextTickAt: timestampSchema.nullable().default(null),

@@ -10,7 +10,7 @@ export function getHeartbeatState(db: Database.Database): HeartbeatState {
   const row = db
     .prepare(
       `SELECT tick_number, current_stage, session_state, trigger_type,
-              trigger_context, mind_session_id, session_token_count,
+              trigger_context, mind_session_id, context_token_count,
               started_at, last_tick_at, session_warm_since, is_running
        FROM heartbeat_state WHERE id = 1`
     )
@@ -30,7 +30,7 @@ export function updateHeartbeatState(
       | 'triggerType'
       | 'triggerContext'
       | 'mindSessionId'
-      | 'sessionTokenCount'
+      | 'contextTokenCount'
       | 'lastTickAt'
       | 'sessionWarmSince'
       | 'isRunning'
@@ -47,7 +47,7 @@ export function updateHeartbeatState(
     triggerType: 'trigger_type',
     triggerContext: 'trigger_context',
     mindSessionId: 'mind_session_id',
-    sessionTokenCount: 'session_token_count',
+    contextTokenCount: 'context_token_count',
     lastTickAt: 'last_tick_at',
     sessionWarmSince: 'session_warm_since',
     isRunning: 'is_running',

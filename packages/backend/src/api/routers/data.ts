@@ -72,7 +72,7 @@ export const dataRouter = router({
         triggerType: null,
         triggerContext: null,
         mindSessionId: null,
-        sessionTokenCount: 0,
+        contextTokenCount: 0,
         sessionWarmSince: null,
         isRunning: false,
       });
@@ -121,7 +121,7 @@ export const dataRouter = router({
         triggerType: null,
         triggerContext: null,
         mindSessionId: null,
-        sessionTokenCount: 0,
+        contextTokenCount: 0,
         sessionWarmSince: null,
         isRunning: false,
       });
