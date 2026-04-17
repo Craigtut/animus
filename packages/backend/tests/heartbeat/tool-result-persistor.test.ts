@@ -143,6 +143,24 @@ describe('cleanupDereferencedPaths', () => {
     expect(deleted).toBe(0);
   });
 
+  it('preserves paths echoed in the observation text', async () => {
+    const persist = mod.createToolResultPersistor({ getTickNumber: () => 6 });
+    const echoed = await persist('echo', { toolName: 'Bash', toolCallId: 'echoed' });
+    const orphan = await persist('orphan', { toolName: 'Bash', toolCallId: 'orphan' });
+
+    const compacted = [
+      { content: `[Result persisted: ${echoed} (10 chars, ~1 tokens)]` },
+      { content: `[Result persisted: ${orphan} (10 chars, ~1 tokens)]` },
+    ];
+    const observationText = `summary mentions [Result persisted: ${echoed} (10 chars, ~1 tokens) -- Bash]`;
+
+    const deleted = await mod.cleanupDereferencedPaths(compacted, [], observationText);
+    expect(deleted).toBe(1);
+
+    await expect(fs.access(echoed)).resolves.not.toThrow();
+    await expect(fs.access(orphan)).rejects.toThrow();
+  });
+
   it('tolerates already-missing files', async () => {
     const missing = path.join(envMod.TOOL_RESULTS_DIR, '99', 'Bash-missing.md');
     const deleted = await mod.cleanupDereferencedPaths(

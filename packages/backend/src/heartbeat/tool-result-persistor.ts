@@ -107,15 +107,19 @@ export function collectReferencedPaths(messages: AgentMessageLike[]): Set<string
   const found = new Set<string>();
   for (const msg of messages) {
     for (const text of extractTextFragments(msg)) {
-      for (const match of text.matchAll(PERSISTED_PATH_PATTERN)) {
-        const captured = match[1]?.trim();
-        if (captured && isUnderToolResultsDir(captured)) {
-          found.add(captured);
-        }
-      }
+      addPathsFromText(text, found);
     }
   }
   return found;
+}
+
+function addPathsFromText(text: string, into: Set<string>): void {
+  for (const match of text.matchAll(PERSISTED_PATH_PATTERN)) {
+    const captured = match[1]?.trim();
+    if (captured && isUnderToolResultsDir(captured)) {
+      into.add(captured);
+    }
+  }
 }
 
 function extractTextFragments(msg: AgentMessageLike): string[] {
@@ -139,18 +143,22 @@ function isUnderToolResultsDir(p: string): boolean {
 
 /**
  * Delete persisted-result files referenced ONLY in the compacted message
- * set. Paths still referenced in the remaining raw history are preserved.
+ * set. Paths still referenced in the remaining raw history OR in the
+ * observation text are preserved (the observer occasionally echoes path
+ * markers into its summary; the TTL sweep handles eventual cleanup).
  *
  * @returns the number of files deleted.
  */
 export async function cleanupDereferencedPaths(
   compactedMessages: AgentMessageLike[],
   remainingHistory: AgentMessageLike[],
+  observationText?: string,
 ): Promise<number> {
   const compactedPaths = collectReferencedPaths(compactedMessages);
   if (compactedPaths.size === 0) return 0;
 
   const stillReferenced = collectReferencedPaths(remainingHistory);
+  if (observationText) addPathsFromText(observationText, stillReferenced);
   let deleted = 0;
 
   for (const p of compactedPaths) {

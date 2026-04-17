@@ -575,7 +575,11 @@ function wireEventHandlers(
     void (async () => {
       try {
         const remaining = cortexAgent.getConversationHistory();
-        const deleted = await cleanupDereferencedPaths(event.compactedMessages, remaining);
+        const deleted = await cleanupDereferencedPaths(
+          event.compactedMessages,
+          remaining,
+          event.observations,
+        );
         if (deleted > 0) {
           log.info(`Tool-result GC: deleted ${deleted} dereferenced files after observation`);
         }
