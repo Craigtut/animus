@@ -6,7 +6,7 @@
  *
  * Key differences from the old mind-session.ts:
  * - Uses CortexAgent instead of AgentManager + IAgentSession
- * - Tools are registered as direct AgentTool objects (not MCP)
+ * - Tools are registered as direct CortexTool objects (not MCP)
  * - Context is managed via 9 named slots (not session system prompts)
  * - No warm/cold session state (always warm)
  * - No cognitive MCP tools (replaced by THOUGHT/REFLECT phases)
@@ -25,8 +25,10 @@ import {
   type CompactionTarget,
   type CompactionResult,
   type CortexModel,
+  type CortexTool,
   type McpStdioConfig,
   type McpHttpConfig,
+  type ToolContentDetails,
   resolveCacheRetention,
 } from '@animus-labs/cortex';
 
@@ -265,31 +267,11 @@ function buildPermissionResolver(
 }
 
 // ============================================================================
-// Build Animus Tools as AgentTool Objects
+// Build Animus Tools as CortexTool Objects
 // ============================================================================
 
 /**
- * AgentTool interface from pi-agent-core (minimal contract).
- * Defined inline to avoid hard dependency on pi-agent-core types.
- *
- * IMPORTANT: pi-agent-core calls execute(toolCallId, params, signal?, onUpdate?)
- * where params is the validated arguments object, NOT the first parameter.
- */
-interface AgentToolResult {
-  content: Array<{ type: string; text: string }>;
-  details?: unknown;
-}
-
-interface AgentTool {
-  name: string;
-  label?: string;
-  description: string;
-  parameters: unknown; // TypeBox TSchema
-  execute: (toolCallId: string, params: unknown, signal?: AbortSignal) => Promise<AgentToolResult>;
-}
-
-/**
- * Convert Animus tool definitions + handlers into AgentTool objects
+ * Convert Animus tool definitions + handlers into CortexTool objects
  * for registration with CortexAgent.
  *
  * Each tool wraps the existing handler from tools/handlers/ and converts
@@ -297,8 +279,8 @@ interface AgentTool {
  */
 async function buildAnimusTools(
   toolContextRef: MutableMindToolContext,
-): Promise<AgentTool[]> {
-  const tools: AgentTool[] = [];
+): Promise<CortexTool[]> {
+  const tools: CortexTool[] = [];
 
   for (const [name, def] of Object.entries(ANIMUS_TOOL_DEFS)) {
     const toolName = name as AnimusToolName;
@@ -323,14 +305,11 @@ async function buildAnimusTools(
       throw new Error(`Failed to convert schema for tool '${toolName}': ${msg}`);
     }
 
-    const tool: AgentTool = {
+    const tool: CortexTool = {
       name: toolName,
-      label: toolName,
       description: def.description,
       parameters,
-      // pi-agent-core calls: execute(toolCallId, params, signal?, onUpdate?)
-      // params is the validated arguments object (2nd parameter)
-      execute: async (_toolCallId: string, params: unknown): Promise<AgentToolResult> => {
+      execute: async (params: unknown): Promise<ToolContentDetails<unknown>> => {
         const ctx = toolContextRef.current;
         if (!ctx) {
           throw new Error('No tool context available. This is a system error.');
@@ -338,7 +317,6 @@ async function buildAnimusTools(
 
         const result: ToolResult = await executeTool(toolName, params, ctx);
 
-        // Convert ToolResult to the format pi-agent-core expects
         if (result.isError) {
           const errorText = result.content
             .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
@@ -359,7 +337,7 @@ async function buildAnimusTools(
     tools.push(tool);
   }
 
-  log.info(`Built ${tools.length} Animus tools as AgentTool objects`);
+  log.info(`Built ${tools.length} Animus tools as CortexTool objects`);
   return tools;
 }
 
