@@ -107,10 +107,9 @@ function mapCortexEvent(event: CortexEvent, ctx: MapContext): MappedEvent | null
   const piEvent = event.data as Record<string, unknown> | undefined;
 
   switch (event.type) {
-    case 'session_start':
-      // Pi-agent-core's agent_start maps to the AGENTIC LOOP phase start.
-      // The legacy "session_start" name is kept in the schema for the old path,
-      // but Cortex uses the phase-oriented naming.
+    case 'loop_start':
+      // Pi-agent-core's agent_start maps to loop_start via EventBridge.
+      // We store it as agentic_start for the pipeline timeline.
       return {
         eventType: 'agentic_start',
         data: {
@@ -119,7 +118,7 @@ function mapCortexEvent(event: CortexEvent, ctx: MapContext): MappedEvent | null
         },
       };
 
-    case 'session_end':
+    case 'loop_end':
       return {
         eventType: 'agentic_end',
         data: {
