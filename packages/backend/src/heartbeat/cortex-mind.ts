@@ -22,8 +22,6 @@ import {
   type AgentTextOutput,
   type CortexEvent,
   type ClassifiedError,
-  type CompactionTarget,
-  type CompactionResult,
   type CortexModel,
   type CortexTool,
   type McpStdioConfig,
@@ -53,8 +51,6 @@ import type { ChannelType } from '@animus-labs/shared';
 import { executeTool } from '../tools/registry.js';
 import type { ToolHandlerContext, ToolResult } from '../tools/types.js';
 import type { MemoryManager } from '../memory/index.js';
-import { processAllStreams } from '../memory/observational-memory/index.js';
-import { OBSERVATIONAL_MEMORY_CONFIG } from '../config/observational-memory.config.js';
 import type { GatherResult } from './gather-context.js';
 import { getChannelRouter } from '../channels/channel-router.js';
 import { getPluginManager } from '../plugins/index.js';
@@ -96,8 +92,6 @@ export interface CortexMindState {
   initialized: boolean;
   /** Conversation history checkpoint (serialized JSON) */
   conversationHistoryCheckpoint: string | null;
-  /** Mutable reference to the current tick's gathered context (for compaction handlers) */
-  compactionContext: MutableCompactionContext;
   /** Active thread session for this tick. Null = inner-life tick (no persistence). */
   activeSession: { contactId: string; channel: string } | null;
 }
@@ -106,17 +100,6 @@ export interface MutableMindToolContext {
   current: ToolHandlerContext | null;
 }
 
-/**
- * Mutable reference to per-tick data needed by compaction handlers.
- * Updated at the start of each cortexMindQuery; cleared after.
- * The onBeforeCompaction / onPostCompaction callbacks are registered once
- * at agent creation but need access to the current tick's data.
- */
-export interface MutableCompactionContext {
-  gathered: GatherResult | null;
-  completeFn: ((context: { systemPrompt: string; messages: Array<{ role: string; content: string }> }) => Promise<string>) | null;
-  compiledPersona: string | null;
-}
 
 export function createCortexMindState(): CortexMindState {
   return {
@@ -126,7 +109,6 @@ export function createCortexMindState(): CortexMindState {
     toolContext: { current: null },
     initialized: false,
     conversationHistoryCheckpoint: null,
-    compactionContext: { gathered: null, completeFn: null, compiledPersona: null },
     activeSession: null,
   };
 }
@@ -586,100 +568,21 @@ function wireEventHandlers(
     })();
   });
 
-  // Wire compaction lifecycle handlers (Items 2, 3, 4 from integration audit)
-  wireCompactionHandlers(cortexAgent, state);
+  // Wire compaction error handler and debug logging
+  wireCompactionHandlers(cortexAgent);
 }
 
 // ============================================================================
-// Compaction Lifecycle Handlers
+// Compaction Error Handler
 // ============================================================================
 
 /**
- * Wire onBeforeCompaction, onPostCompaction, and onCompactionError handlers.
+ * Wire compaction error handler and debug logging.
  *
- * These handlers use mutable references from state.compactionContext, which
- * is updated at the start of each cortexMindQuery in index.ts.
- *
- * See docs/cortex/compaction-strategy.md and docs/cortex/mind-migration.md
- * for the full design.
+ * In observational mode (the default), onBeforeCompaction and onPostCompaction
+ * do not fire. Only the error handler and debug logging remain useful.
  */
-function wireCompactionHandlers(
-  cortexAgent: CortexAgent,
-  state: CortexMindState,
-): void {
-  // -----------------------------------------------------------------------
-  // Item 2: onBeforeCompaction -> processAllStreams
-  //
-  // Synchronously run observational memory processing before conversation
-  // history is compacted. This ensures watermarks advance before re-seeding.
-  // -----------------------------------------------------------------------
-  cortexAgent.onBeforeCompaction(async (_target: CompactionTarget) => {
-    const { gathered, completeFn, compiledPersona } = state.compactionContext;
-
-    if (!gathered || !completeFn || !compiledPersona) {
-      log.warn('onBeforeCompaction: no compaction context available, skipping observational memory flush');
-      return;
-    }
-
-    log.info(`onBeforeCompaction: flushing observational memory (${_target.turnsToCompact} turns, ~${_target.estimatedTokens} tokens)`);
-
-    try {
-      const eventBus = getEventBus();
-      await processAllStreams({
-        deps: {
-          completeFn,
-          memoryDb: getMemoryDb(),
-          compiledPersona,
-          eventBus,
-        },
-        thoughts: gathered.thoughtContext.allFilteredItems,
-        experiences: gathered.experienceContext.allFilteredItems,
-        messages: gathered.messageContext?.allFilteredItems ?? [],
-        contactId: gathered.contact?.id ?? null,
-        config: OBSERVATIONAL_MEMORY_CONFIG,
-        ...(gathered.aiTimezone ? { timezone: gathered.aiTimezone } : {}),
-      });
-      log.info('onBeforeCompaction: observational memory flush complete');
-    } catch (err) {
-      log.warn('onBeforeCompaction: observational memory flush failed (continuing with compaction):', err);
-    }
-  });
-
-  // -----------------------------------------------------------------------
-  // Item 3: onPostCompaction -> re-seed from messages.db
-  //
-  // After compaction clears old conversation turns, re-seed the gap between
-  // the observation watermark and the preserved tail from messages.db.
-  // -----------------------------------------------------------------------
-  cortexAgent.onPostCompaction((result: CompactionResult) => {
-    const { gathered } = state.compactionContext;
-
-    log.info(
-      `onPostCompaction: ${result.turnsCompacted} turns compacted, ` +
-      `${result.tokensBefore} -> ${result.tokensAfter} tokens, ` +
-      `${result.turnsPreserved} turns preserved`
-    );
-
-    // Log compaction event to agent_logs.db (Item 4)
-    logCompactionEvent(result);
-
-    // Re-seed conversation history from messages.db
-    if (!gathered) {
-      log.warn('onPostCompaction: no gathered context, skipping message re-seeding');
-      return;
-    }
-
-    try {
-      reseedMessagesAfterCompaction(cortexAgent, gathered, result);
-    } catch (err) {
-      log.warn('onPostCompaction: message re-seeding failed:', err);
-    }
-  });
-
-  // -----------------------------------------------------------------------
-  // Compaction error handler
-  // -----------------------------------------------------------------------
-  // Wire debug logging for compaction diagnostics
+function wireCompactionHandlers(cortexAgent: CortexAgent): void {
   cortexAgent.getCompactionManager().setDebugLog((msg: string) => {
     log.debug(`[Compaction] ${msg}`);
   });
@@ -687,7 +590,6 @@ function wireCompactionHandlers(
   cortexAgent.onCompactionError((error: Error) => {
     log.error('Compaction failed:', error);
 
-    // Log the failure to agent_logs.db
     try {
       const agentLogsDb = getAgentLogsDb();
       const sessions = agentLogsDb
@@ -708,229 +610,6 @@ function wireCompactionHandlers(
       log.warn('Failed to log compaction_error event:', logErr);
     }
   });
-}
-
-/**
- * Log a compaction event to agent_logs.db with before/after metrics.
- * Surfaces in the tick timeline and allows debugging of context management.
- */
-function logCompactionEvent(result: CompactionResult): void {
-  try {
-    const agentLogsDb = getAgentLogsDb();
-
-    // Find the most recent session to attach the event to
-    const session = agentLogsDb
-      .prepare('SELECT id FROM agent_sessions ORDER BY started_at DESC LIMIT 1')
-      .get() as { id: string } | undefined;
-
-    if (!session) {
-      log.debug('No agent session found for compaction log entry');
-      return;
-    }
-
-    const summaryPreview = result.summary
-      ? result.summary.substring(0, 300) + (result.summary.length > 300 ? '...' : '')
-      : null;
-
-    const event = agentLogStore.insertEvent(agentLogsDb, {
-      sessionId: session.id,
-      eventType: 'compaction',
-      data: {
-        tokensBefore: result.tokensBefore,
-        tokensAfter: result.tokensAfter,
-        turnsCompacted: result.turnsCompacted,
-        turnsPreserved: result.turnsPreserved,
-        summaryTokens: result.summaryTokens,
-        summaryPreview,
-        oldestPreservedTimestamp: result.oldestPreservedTimestamp,
-      },
-    });
-
-    // Emit to frontend for real-time timeline updates
-    const eventBus = getEventBus();
-    eventBus.emit('agent:event:logged', {
-      id: event.id,
-      sessionId: event.sessionId,
-      eventType: event.eventType,
-      data: event.data,
-      createdAt: event.createdAt,
-    });
-
-    log.info(
-      `Compaction logged: ${result.tokensBefore} -> ${result.tokensAfter} tokens ` +
-      `(${result.turnsCompacted} turns compacted, ${result.summaryTokens} summary tokens)`
-    );
-  } catch (err) {
-    log.warn('Failed to log compaction event:', err);
-  }
-}
-
-/**
- * Re-seed conversation history from messages.db after compaction.
- *
- * Fills the gap between the observation watermark and the preserved tail.
- * The observation watermark is the newest message already compressed into
- * an observation summary (in slots). Messages newer than this watermark
- * need full representation in conversation history.
- *
- * See docs/cortex/mind-migration.md "Compaction Re-Seeding" for the full design.
- */
-function reseedMessagesAfterCompaction(
-  cortexAgent: CortexAgent,
-  gathered: GatherResult,
-  result: CompactionResult,
-): void {
-  const contactId = gathered.contact?.id;
-  if (!contactId) {
-    log.debug('No contact for re-seeding (non-message tick), skipping');
-    return;
-  }
-
-  const channel = gathered.trigger.channel;
-  if (!channel) {
-    log.debug('No channel for re-seeding, skipping');
-    return;
-  }
-
-  // Find the conversation for this contact + channel
-  const msgDb = getMessagesDb();
-  const conv = messageStore.getConversationByContactAndChannel(
-    msgDb, contactId, channel as ChannelType
-  );
-  if (!conv) {
-    log.debug('No conversation found for re-seeding');
-    return;
-  }
-
-  // Get the observation watermark for the message stream
-  const memDb = getMemoryDb();
-  const observation = memoryDbStore.getObservation(memDb, 'messages', contactId);
-  const watermark = observation?.lastRawTimestamp ?? null;
-
-  if (!watermark) {
-    // No observation watermark means no messages have been compressed yet.
-    // Re-seed all recent messages (up to budget).
-    log.debug('No observation watermark, re-seeding recent messages');
-    const recentMessages = messageStore.getRecentMessages(msgDb, conv.id, 50);
-    if (recentMessages.length > 0) {
-      injectMessagesIntoHistory(cortexAgent, recentMessages.reverse());
-    }
-    return;
-  }
-
-  const oldestPreserved = result.oldestPreservedTimestamp;
-  if (!oldestPreserved) {
-    // No preserved tail timestamp; re-seed everything after the watermark
-    const postWatermark = messageStore.getMessagesSince(msgDb, conv.id, watermark, 200);
-    if (postWatermark.length > 0) {
-      injectMessagesIntoHistory(cortexAgent, postWatermark.reverse());
-    }
-    return;
-  }
-
-  // Query the gap: messages after watermark but before the preserved tail
-  const gapMessages = messageStore.getMessagesInRange(
-    msgDb, conv.id, watermark, oldestPreserved, 200
-  );
-
-  if (gapMessages.length === 0) {
-    log.debug('No gap messages to re-seed');
-    return;
-  }
-
-  // Cap re-seeded messages by a rough token budget (4K tokens, ~3 chars per token)
-  const TOKEN_BUDGET = 4000;
-  const CHARS_PER_TOKEN = 3;
-  let charBudget = TOKEN_BUDGET * CHARS_PER_TOKEN;
-  const budgetedMessages = [];
-
-  for (const msg of gapMessages) {
-    const msgChars = (msg.content ?? '').length + 50; // 50 chars overhead for role/metadata
-    if (charBudget - msgChars < 0 && budgetedMessages.length > 0) break;
-    budgetedMessages.push(msg);
-    charBudget -= msgChars;
-  }
-
-  injectMessagesIntoHistory(cortexAgent, budgetedMessages);
-  log.info(`Re-seeded ${budgetedMessages.length} gap messages after compaction`);
-}
-
-/**
- * Format messages from messages.db as agent conversation turns and inject
- * them into the cortex agent's conversation history after the compaction
- * summary.
- */
-function injectMessagesIntoHistory(
-  cortexAgent: CortexAgent,
-  messages: import('@animus-labs/shared').Message[],
-): void {
-  if (messages.length === 0) return;
-
-  // Format as conversation turns for the agent
-  const turns: Array<{ role: 'user' | 'assistant'; content: string }> = [];
-
-  for (const msg of messages) {
-    const role = msg.direction === 'inbound' ? 'user' : 'assistant';
-    const content = msg.content ?? '';
-    if (!content.trim()) continue;
-    turns.push({ role, content });
-  }
-
-  if (turns.length === 0) return;
-
-  // The cortex agent provides restoreConversationHistory which replaces
-  // the entire history. We need to INSERT after the compaction summary.
-  // Get current history, find the summary, splice in re-seeded messages.
-  const currentHistory = cortexAgent.getConversationHistory();
-
-  // Find insertion point: after the compaction summary (first message),
-  // before the preserved tail
-  const insertionIndex = Math.min(1, currentHistory.length);
-
-  // Build injection messages in the agent's format
-  const injectionMessages = turns.map(t => ({
-    role: t.role,
-    content: t.content,
-  }));
-
-  // Splice into history
-  const updatedHistory = [
-    ...currentHistory.slice(0, insertionIndex),
-    ...injectionMessages,
-    ...currentHistory.slice(insertionIndex),
-  ];
-
-  cortexAgent.restoreConversationHistory(updatedHistory);
-  log.debug(`Injected ${turns.length} re-seeded messages at index ${insertionIndex}`);
-}
-
-// ============================================================================
-// Compaction Context Management
-// ============================================================================
-
-/**
- * Update the mutable compaction context for the current tick.
- * Called at the start of each cortexMindQuery so that the compaction
- * handlers (registered once at agent creation) can access per-tick data.
- */
-export function updateCompactionContext(
-  state: CortexMindState,
-  gathered: GatherResult,
-  completeFn: ((context: { systemPrompt: string; messages: Array<{ role: string; content: string }> }) => Promise<string>) | null,
-  compiledPersona: string | null,
-): void {
-  state.compactionContext.gathered = gathered;
-  state.compactionContext.completeFn = completeFn;
-  state.compactionContext.compiledPersona = compiledPersona;
-}
-
-/**
- * Clear the compaction context after the tick completes.
- */
-export function clearCompactionContext(state: CortexMindState): void {
-  state.compactionContext.gathered = null;
-  state.compactionContext.completeFn = null;
-  state.compactionContext.compiledPersona = null;
 }
 
 // ============================================================================
