@@ -22,7 +22,7 @@ import extractZip from 'extract-zip';
 import { saveManifestSchema } from '@animus-labs/shared';
 import type { SaveManifest, SaveInfo } from '@animus-labs/shared';
 import { DATA_DIR, LANCEDB_PATH } from '../utils/env.js';
-import { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb, getAgentLogsDb, getContactsDb } from '../db/index.js';
+import { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb, getAgentLogsDb, getContactsDb, getSessionsDb } from '../db/index.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('SaveService', 'saves');
@@ -51,7 +51,7 @@ export async function getArchivePath(saveId: string): Promise<string | null> {
   return null;
 }
 
-const DB_NAMES = ['persona', 'heartbeat', 'memory', 'messages', 'agent_logs', 'contacts'] as const;
+const DB_NAMES = ['persona', 'heartbeat', 'memory', 'messages', 'agent_logs', 'contacts', 'sessions'] as const;
 type DbName = (typeof DB_NAMES)[number];
 
 /** Read root package.json version. */
@@ -118,6 +118,7 @@ function getLiveDb(name: DbName): Database.Database {
     case 'messages': return getMessagesDb();
     case 'agent_logs': return getAgentLogsDb();
     case 'contacts': return getContactsDb();
+    case 'sessions': return getSessionsDb();
   }
 }
 
@@ -438,7 +439,7 @@ export async function importSave(fileBuffer: Buffer): Promise<SaveInfo> {
     }
 
     // Verify expected DB files exist (contacts.db is optional for old archives)
-    const OPTIONAL_DBS: ReadonlySet<string> = new Set(['contacts']);
+    const OPTIONAL_DBS: ReadonlySet<string> = new Set(['contacts', 'sessions']);
     for (const dbName of DB_NAMES) {
       try {
         await fs.access(path.join(extractDir, `${dbName}.db`));

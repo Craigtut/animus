@@ -11,10 +11,12 @@ import {
   getHeartbeatDb,
   getMemoryDb,
   getMessagesDb,
+  getSessionsDb,
   closeDatabases,
 } from '../../db/index.js';
 import { stopHeartbeat, resetCortexAgent, getVectorStore } from '../../heartbeat/index.js';
 import * as heartbeatStore from '../../db/stores/heartbeat-store.js';
+import * as sessionStore from '../../db/stores/session-store.js';
 import { MEDIA_DIR } from '../routes/media.js';
 import { DATA_DIR } from '../../utils/env.js';
 import { createLogger } from '../../lib/logger.js';
@@ -82,12 +84,18 @@ export const dataRouter = router({
 
       // Clear cortex conversation history checkpoint
       heartbeatStore.updateConversationHistory(hbDb, null);
+
+      // Clear stale tool approval requests (reference now-invalid tick contexts)
+      hbDb.exec('DELETE FROM tool_approval_requests');
     })();
+
+    // Clear all conversation thread sessions
+    sessionStore.deleteAllSessions(getSessionsDb());
 
     // Destroy and recreate the CortexAgent with clean state
     await resetCortexAgent();
 
-    return { success: true, cleared: 'heartbeat' };
+    return { success: true, cleared: 'heartbeat+sessions' };
   }),
 
   /**
@@ -131,15 +139,21 @@ export const dataRouter = router({
       // Clear cortex conversation history checkpoint so the agent
       // starts fresh and doesn't carry over the previous persona's context
       heartbeatStore.updateConversationHistory(hbDb, null);
+
+      hbDb.exec('DELETE FROM tool_approval_requests');
     })();
 
-    // Clear memory
+    // Clear memory (including orphaned observations)
     memDb.transaction(() => {
       memDb.exec('DELETE FROM working_memory');
       memDb.exec('DELETE FROM long_term_memories');
+      memDb.exec('DELETE FROM observations');
       // Reset core_self to empty
       memDb.exec("UPDATE core_self SET content = '' WHERE id = 1");
     })();
+
+    // Clear all conversation thread sessions
+    sessionStore.deleteAllSessions(getSessionsDb());
 
     // Clear LanceDB vector embeddings
     const vectorStore = getVectorStore();

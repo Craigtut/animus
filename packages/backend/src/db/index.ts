@@ -1,7 +1,7 @@
 /**
  * Database Module
  *
- * Manages seven SQLite databases:
+ * Manages eight SQLite databases:
  * - system.db: Users, settings, API keys, credentials (rarely reset)
  * - persona.db: Personality settings (separate lifecycle from system.db)
  * - heartbeat.db: Thoughts, experiences, emotions, goals, tasks (the "life state")
@@ -9,6 +9,7 @@
  * - messages.db: Conversations, messages, media (long-term history)
  * - agent_logs.db: SDK logs, events, token usage (frequent cleanup)
  * - contacts.db: Contacts, contact channels (backed up with AI state)
+ * - sessions.db: Per-(contact, channel) conversation thread state
  *
  * All DDL is managed via versioned .sql migration files.
  */
@@ -27,6 +28,7 @@ import {
   DB_MESSAGES_PATH,
   DB_AGENT_LOGS_PATH,
   DB_CONTACTS_PATH,
+  DB_SESSIONS_PATH,
 } from '../utils/env.js';
 import { createLogger } from '../lib/logger.js';
 import { runMigrations } from './migrate.js';
@@ -44,7 +46,8 @@ let memoryDb: Database.Database;
 let messagesDb: Database.Database;
 let agentLogsDb: Database.Database;
 let contactsDb: Database.Database;
-export const DATABASE_COUNT = 7;
+let sessionsDb: Database.Database;
+export const DATABASE_COUNT = 8;
 
 export function getSystemDb(): Database.Database {
   if (!systemDb) throw new Error('System database not initialized');
@@ -81,6 +84,11 @@ export function getContactsDb(): Database.Database {
   return contactsDb;
 }
 
+export function getSessionsDb(): Database.Database {
+  if (!sessionsDb) throw new Error('Sessions database not initialized');
+  return sessionsDb;
+}
+
 /**
  * Open a database, set WAL mode and enable foreign keys.
  */
@@ -106,6 +114,7 @@ export async function initializeDatabases(): Promise<void> {
   messagesDb = openDb(DB_MESSAGES_PATH);
   agentLogsDb = openDb(DB_AGENT_LOGS_PATH);
   contactsDb = openDb(DB_CONTACTS_PATH);
+  sessionsDb = openDb(DB_SESSIONS_PATH);
 
   // Run migrations — contacts.db first so tables exist before system.db drops them
   runMigrations(contactsDb, path.join(MIGRATIONS_DIR, 'contacts'), 'contacts.db');
@@ -115,6 +124,7 @@ export async function initializeDatabases(): Promise<void> {
   runMigrations(memoryDb, path.join(MIGRATIONS_DIR, 'memory'), 'memory.db');
   runMigrations(messagesDb, path.join(MIGRATIONS_DIR, 'messages'), 'messages.db');
   runMigrations(agentLogsDb, path.join(MIGRATIONS_DIR, 'agent-logs'), 'agent_logs.db');
+  runMigrations(sessionsDb, path.join(MIGRATIONS_DIR, 'sessions'), 'sessions.db');
 
   // One-time migration: copy finalized persona from system.db → persona.db
   migratePersonaFromSystem(systemDb, personaDb);
@@ -253,4 +263,5 @@ export function closeDatabases(): void {
   messagesDb?.close();
   agentLogsDb?.close();
   contactsDb?.close();
+  sessionsDb?.close();
 }
