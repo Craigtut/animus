@@ -29,6 +29,7 @@ import {
   type McpStdioConfig,
   type McpHttpConfig,
   type ToolContentDetails,
+  type ObservationalMemoryState,
   resolveCacheRetention,
 } from '@animus-labs/cortex';
 
@@ -1354,6 +1355,8 @@ export function loadSessionForTick(
 ): void {
   if (contactId && channel) {
     const session = sessionStore.getSession(getSessionsDb(), contactId, channel);
+
+    // Restore conversation history
     if (session?.conversationHistory) {
       try {
         const messages = JSON.parse(session.conversationHistory);
@@ -1367,6 +1370,18 @@ export function loadSessionForTick(
       cortexAgent.restoreConversationHistory([]);
       log.info(`New thread session for (${contactId}, ${channel})`);
     }
+
+    // Restore Cortex observational memory state (compaction tracking)
+    if (session?.cortexObservationalState) {
+      try {
+        const obsState = JSON.parse(session.cortexObservationalState) as ObservationalMemoryState;
+        cortexAgent.restoreObservationalMemoryState(obsState);
+        log.debug(`Restored observational state for (${contactId}, ${channel})`);
+      } catch (err) {
+        log.warn(`Failed to restore observational state for (${contactId}, ${channel}):`, err);
+      }
+    }
+
     state.activeSession = { contactId, channel };
   } else {
     cortexAgent.restoreConversationHistory([]);
@@ -1388,18 +1403,21 @@ function saveActiveSession(
   try {
     const { contactId, channel } = state.activeSession;
     const history = cortexAgent.getConversationHistory();
-    const serialized = JSON.stringify(history);
+    const serializedHistory = JSON.stringify(history);
+
+    const obsState = cortexAgent.getObservationalMemoryState();
+    const serializedObs = obsState ? JSON.stringify(obsState) : null;
 
     sessionStore.upsertSession(
       getSessionsDb(),
       contactId,
       channel,
-      serialized,
-      null,
+      serializedHistory,
+      serializedObs,
       history.length,
     );
 
-    state.conversationHistoryCheckpoint = serialized;
+    state.conversationHistoryCheckpoint = serializedHistory;
     log.info(`Session saved (${contactId}, ${channel}): ${history.length} messages`);
   } catch (err) {
     log.warn('Failed to save session:', err);
