@@ -595,19 +595,12 @@ async function executeAgenticLoop(
     pendingInjections.length = 0; // clear
   }
 
-  // Set cache retention env var for the agentic loop. Pi-ai reads
-  // PI_CACHE_RETENTION on every API call within the loop.
-  const prevCacheRetention = process.env['PI_CACHE_RETENTION'];
-  const loopCacheRetention = cortexAgent.getCacheRetention();
-  if (loopCacheRetention && loopCacheRetention !== 'none') {
-    process.env['PI_CACHE_RETENTION'] = loopCacheRetention;
-  } else {
-    delete process.env['PI_CACHE_RETENTION'];
-  }
+  const loopCacheRetention = cortexAgent.getCacheRetention() ?? undefined;
 
   try {
-    // Run the agentic loop
-    await cortexAgent.prompt(effectiveTickPrompt);
+    await cortexAgent.prompt(effectiveTickPrompt, {
+      ...(loopCacheRetention ? { cacheRetention: loopCacheRetention } : {}),
+    });
 
     // Clean up event handlers
     turnEndUnsub();
@@ -646,13 +639,6 @@ async function executeAgenticLoop(
       hadTurns: replyAccumulated.length > 0 || replyTurnsSent > 0,
       ephemeralSections: ephSections,
     };
-  } finally {
-    // Restore previous cache retention env var
-    if (prevCacheRetention !== undefined) {
-      process.env['PI_CACHE_RETENTION'] = prevCacheRetention;
-    } else {
-      delete process.env['PI_CACHE_RETENTION'];
-    }
   }
 }
 

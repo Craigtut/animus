@@ -266,15 +266,60 @@ function buildPermissionResolver(
  * Each tool wraps the existing handler from tools/handlers/ and converts
  * Zod schemas to TypeBox via zodToTypebox().
  */
+async function buildSingleAnimusTool(
+  toolName: AnimusToolName,
+  toolContextRef: MutableMindToolContext,
+): Promise<CortexTool | null> {
+  const def = ANIMUS_TOOL_DEFS[toolName];
+  if (!def) return null;
+
+  let parameters;
+  try {
+    parameters = await zodToTypebox(def.inputSchema as never);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn(`Failed to convert schema for tool '${toolName}': ${msg}`);
+    return null;
+  }
+
+  return {
+    name: toolName,
+    description: def.description,
+    parameters,
+    execute: async (params: unknown): Promise<ToolContentDetails<unknown>> => {
+      const ctx = toolContextRef.current;
+      if (!ctx) {
+        throw new Error('No tool context available. This is a system error.');
+      }
+
+      const result: ToolResult = await executeTool(toolName, params, ctx);
+
+      if (result.isError) {
+        const errorText = result.content
+          .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+          .map(c => c.text)
+          .join('\n');
+        throw new Error(errorText || 'Tool execution failed');
+      }
+
+      return {
+        content: result.content
+          .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+          .map(c => ({ type: 'text' as const, text: c.text })),
+        details: {},
+      };
+    },
+  };
+}
+
 async function buildAnimusTools(
   toolContextRef: MutableMindToolContext,
 ): Promise<CortexTool[]> {
   const tools: CortexTool[] = [];
 
-  for (const [name, def] of Object.entries(ANIMUS_TOOL_DEFS)) {
+  for (const [name] of Object.entries(ANIMUS_TOOL_DEFS)) {
     const toolName = name as AnimusToolName;
 
-    // Check if tool is enabled (not 'off')
     try {
       const sysDb = getSystemDb();
       const perm = getToolPermission(sysDb, toolName);
@@ -286,44 +331,8 @@ async function buildAnimusTools(
       // DB not ready yet; include the tool
     }
 
-    let parameters;
-    try {
-      parameters = await zodToTypebox(def.inputSchema as never);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Failed to convert schema for tool '${toolName}': ${msg}`);
-    }
-
-    const tool: CortexTool = {
-      name: toolName,
-      description: def.description,
-      parameters,
-      execute: async (params: unknown): Promise<ToolContentDetails<unknown>> => {
-        const ctx = toolContextRef.current;
-        if (!ctx) {
-          throw new Error('No tool context available. This is a system error.');
-        }
-
-        const result: ToolResult = await executeTool(toolName, params, ctx);
-
-        if (result.isError) {
-          const errorText = result.content
-            .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-            .map(c => c.text)
-            .join('\n');
-          throw new Error(errorText || 'Tool execution failed');
-        }
-
-        return {
-          content: result.content
-            .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-            .map(c => ({ type: 'text' as const, text: c.text })),
-          details: {},
-        };
-      },
-    };
-
-    tools.push(tool);
+    const tool = await buildSingleAnimusTool(toolName, toolContextRef);
+    if (tool) tools.push(tool);
   }
 
   log.info(`Built ${tools.length} Animus tools as CortexTool objects`);
@@ -690,6 +699,22 @@ function wireProviderChangeListeners(
     state.model = null;
 
     log.info('Heartbeat mind paused until a new provider is configured');
+  });
+
+  eventBus.on('tool:permission_changed', async ({ toolName, mode }: { toolName: string; mode: string }) => {
+    if (!(toolName in ANIMUS_TOOL_DEFS)) return;
+    const animusToolName = toolName as AnimusToolName;
+
+    if (mode === 'off') {
+      cortexAgent.removeConsumerTool(animusToolName);
+      log.info(`Tool "${toolName}" disabled, removed from CortexAgent`);
+    } else {
+      const tool = await buildSingleAnimusTool(animusToolName, state.toolContext);
+      if (tool) {
+        cortexAgent.addConsumerTool(tool);
+        log.info(`Tool "${toolName}" enabled (${mode}), added to CortexAgent`);
+      }
+    }
   });
 }
 
