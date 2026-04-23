@@ -612,10 +612,6 @@ function wireEventHandlers(
  * do not fire. Only the error handler and debug logging remain useful.
  */
 function wireCompactionHandlers(cortexAgent: CortexAgent): void {
-  cortexAgent.getCompactionManager().setDebugLog((msg: string) => {
-    log.debug(`[Compaction] ${msg}`);
-  });
-
   cortexAgent.onCompactionError((error: Error) => {
     log.error('Compaction failed:', error);
 
