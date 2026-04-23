@@ -59,6 +59,8 @@ import { getChannelRouter } from '../channels/channel-router.js';
 import { getPluginManager } from '../plugins/index.js';
 import { join } from 'node:path';
 import { createToolResultPersistor, cleanupDereferencedPaths } from './tool-result-persistor.js';
+import { getSessionsDb } from '../db/index.js';
+import * as sessionStore from '../db/stores/session-store.js';
 
 const log = createLogger('CortexMind', 'heartbeat');
 
@@ -95,6 +97,8 @@ export interface CortexMindState {
   conversationHistoryCheckpoint: string | null;
   /** Mutable reference to the current tick's gathered context (for compaction handlers) */
   compactionContext: MutableCompactionContext;
+  /** Active thread session for this tick. Null = inner-life tick (no persistence). */
+  activeSession: { contactId: string; channel: string } | null;
 }
 
 export interface MutableMindToolContext {
@@ -122,6 +126,7 @@ export function createCortexMindState(): CortexMindState {
     initialized: false,
     conversationHistoryCheckpoint: null,
     compactionContext: { gathered: null, completeFn: null, compiledPersona: null },
+    activeSession: null,
   };
 }
 
@@ -484,18 +489,9 @@ function wireEventHandlers(
 ): void {
   const eventBus = getEventBus();
 
-  // Checkpoint conversation history after each agentic loop
+  // Checkpoint conversation history to the active thread session
   cortexAgent.onLoopComplete(() => {
-    try {
-      const history = cortexAgent.getConversationHistory();
-      const serialized = JSON.stringify(history);
-      const hbDb = getHeartbeatDb();
-      heartbeatStore.updateConversationHistory(hbDb, serialized);
-      state.conversationHistoryCheckpoint = serialized;
-      log.info(`Conversation history checkpointed (${history.length} messages)`);
-    } catch (err) {
-      log.warn('Failed to checkpoint conversation history:', err);
-    }
+    saveActiveSession(cortexAgent, state);
   });
 
   // Route classified errors to EventBus
@@ -1341,12 +1337,81 @@ export function populateContextSlots(
 }
 
 // ============================================================================
-// Session Persistence
+// Session Persistence (per-thread)
 // ============================================================================
 
 /**
- * Restore conversation history from the last checkpoint.
- * Called on startup/restart.
+ * Load the conversation session for a tick's triggering (contact, channel).
+ *
+ * Thread ticks (contactId + channel present): load or create the session row.
+ * Inner-life ticks (no contactId): start with empty history, no write-back.
+ */
+export function loadSessionForTick(
+  cortexAgent: CortexAgent,
+  state: CortexMindState,
+  contactId: string | undefined | null,
+  channel: string | undefined | null,
+): void {
+  if (contactId && channel) {
+    const session = sessionStore.getSession(getSessionsDb(), contactId, channel);
+    if (session?.conversationHistory) {
+      try {
+        const messages = JSON.parse(session.conversationHistory);
+        cortexAgent.restoreConversationHistory(messages);
+        log.info(`Loaded thread session (${contactId}, ${channel}): ${messages.length} messages`);
+      } catch (err) {
+        log.warn(`Failed to parse session history for (${contactId}, ${channel}), starting fresh:`, err);
+        cortexAgent.restoreConversationHistory([]);
+      }
+    } else {
+      cortexAgent.restoreConversationHistory([]);
+      log.info(`New thread session for (${contactId}, ${channel})`);
+    }
+    state.activeSession = { contactId, channel };
+  } else {
+    cortexAgent.restoreConversationHistory([]);
+    state.activeSession = null;
+    log.debug('Inner-life tick: empty history, no session persistence');
+  }
+}
+
+/**
+ * Save the current session back to sessions.db.
+ * Called from onLoopComplete. No-op for inner-life ticks.
+ */
+function saveActiveSession(
+  cortexAgent: CortexAgent,
+  state: CortexMindState,
+): void {
+  if (!state.activeSession) return;
+
+  try {
+    const { contactId, channel } = state.activeSession;
+    const history = cortexAgent.getConversationHistory();
+    const serialized = JSON.stringify(history);
+
+    sessionStore.upsertSession(
+      getSessionsDb(),
+      contactId,
+      channel,
+      serialized,
+      null,
+      history.length,
+    );
+
+    state.conversationHistoryCheckpoint = serialized;
+    log.info(`Session saved (${contactId}, ${channel}): ${history.length} messages`);
+  } catch (err) {
+    log.warn('Failed to save session:', err);
+  }
+}
+
+/**
+ * Restore conversation history from heartbeat_state (legacy path).
+ * Used only during migration from the old single-session model.
+ * Once all sessions are in sessions.db, this becomes a no-op.
+ *
+ * @deprecated Use loadSessionForTick instead.
  */
 export function restoreConversationHistory(
   cortexAgent: CortexAgent,
@@ -1358,11 +1423,11 @@ export function restoreConversationHistory(
     if (checkpoint) {
       const messages = JSON.parse(checkpoint);
       cortexAgent.restoreConversationHistory(messages);
-      log.info(`Restored conversation history from checkpoint (${messages.length} messages)`);
+      log.info(`Restored conversation history from legacy checkpoint (${messages.length} messages)`);
       return true;
     }
 
-    log.info('No conversation history checkpoint found; starting fresh');
+    log.info('No legacy conversation history checkpoint; starting fresh');
     return false;
   } catch (err) {
     log.warn('Failed to restore conversation history:', err);

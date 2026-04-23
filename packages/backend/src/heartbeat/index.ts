@@ -57,6 +57,7 @@ import {
   populateContextSlots,
   MIND_SLOT_NAMES,
   restoreConversationHistory,
+  loadSessionForTick,
   buildMindToolContext as buildCortexToolContext,
   updatePreprocessorVariables,
   updateCompactionContext,
@@ -232,6 +233,15 @@ async function cortexMindQuery(
 
   const cortexMind = ctx.agents!.cortexMind;
   const cortexAgent = cortexMind.agent!;
+
+  // Load the conversation thread for this tick's (contact, channel) pair.
+  // Inner-life ticks (no contact) start with empty history and don't persist.
+  loadSessionForTick(
+    cortexAgent,
+    cortexMind,
+    gathered.trigger.contactId,
+    gathered.trigger.channel,
+  );
 
   // Ensure a log session exists for cortex ticks.
   // The legacy path creates this via attachSessionLogging() in getOrCreateMindSession(),
