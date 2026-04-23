@@ -89,7 +89,7 @@ Animus is built as a self-contained, self-hosted application. The guiding princi
 - ACID compliance
 - WAL mode for concurrent reads
 
-**Why seven separate SQLite databases?**
+**Why eight separate SQLite databases?**
 
 All databases live under `data/databases/` (see `docs/architecture/data-directory.md`).
 
@@ -511,7 +511,7 @@ function runMigrations(db: Database, migrationsDir: string): void {
 - Migration files are **append-only** — never edit or delete an applied migration
 - Each migration runs in a **transaction** — if it fails, nothing is applied (SQLite DDL is transactional)
 - Version numbers are extracted from the filename prefix (e.g., `001`, `002`)
-- The runner processes each of the seven databases independently
+- The runner processes each of the eight databases independently
 - Migrations are **forward-only** — no rollback support (if needed, write a new migration that reverses the change)
 
 **Startup sequence:**

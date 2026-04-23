@@ -237,7 +237,7 @@ Encryption keys are derived from your user password. On the desktop app, you'll 
 
 ## Database Management
 
-Animus uses seven SQLite databases stored under `data/databases/`, created automatically on first run:
+Animus uses eight SQLite databases stored under `data/databases/`, created automatically on first run:
 
 | Database | Location | Purpose | Lifecycle |
 |----------|----------|---------|-----------|

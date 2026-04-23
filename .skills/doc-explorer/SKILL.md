@@ -98,8 +98,7 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/cortex/mind-migration.md` | Mind pipeline migration: 5-phase pipeline (GATHER/THOUGHT/AGENTIC LOOP/REFLECT/EXECUTE), context slot configuration, ephemeral context sections, system prompt composition, session persistence (conversation_history checkpointing), warm/cold removal, event bridge, built-in tools, frontend changes, system prompt rebuild |
 | `docs/cortex/backend-auth-integration.md` | Backend auth integration: CortexCredentialService, credential storage (system.db), AES-256-GCM encryption, cortex-provider.ts tRPC router, getApiKey callback wiring, OAuth flow coordination, headless/Docker detection, Docker OAuth compatibility matrix (per-provider flow types), system_settings schema, event bus events, legacy auth coexistence |
 | `docs/cortex/frontend-auth-ux.md` | Frontend auth UX: progressive disclosure (OAuth > API key > custom endpoint), CortexProviderStep onboarding component, provider card states, headless device-code variant, settings page AI Provider section, model picker, thinking level, legacy SDK demotion, visual design notes |
-| `docs/cortex/cortex-integration-patterns.md` | Animus-specific Cortex consumption patterns: animus-mcp-server tool inventory (MIND_TOOL_NAMES), mcp-bridge shared infrastructure, observational memory compaction hooks (onBeforeCompaction/onPostCompaction, three-stream observer/reflector), error routing via event bus, model tier frontend configuration, AgentOrchestrator wrapping SubAgentManager, decision routing (update_agent/cancel_agent), stopHeartbeat() integration, event bridge mapping to AgentEventType |
-| `docs/cortex/pi-agent-core-migration.md` | Historical migration overview: why pi-agent-core, what changed, 6 migration phases, what stays the same, what gets deprecated |
+| `docs/cortex/upgrade-plan.md` | Cortex upgrade plan: phase tracking, architectural decisions (dual observation systems, session threading, recall callback), commit log, remaining work (phases 5-7) |
 
 ### Research (Planned/Exploratory)
 
@@ -197,8 +196,7 @@ Use this to quickly map user questions to the right docs:
 - **cortex, cortex agent, pi-agent-core, mind migration, 5-phase pipeline, THOUGHT phase, REFLECT phase** -> `docs/cortex/mind-migration.md` (Animus integration; framework docs in cortex-mono)
 - **cortex auth, cortex credentials, CortexCredentialService, cortex provider router, getApiKey callback, provider switching** -> `docs/cortex/backend-auth-integration.md`
 - **auth UX, onboarding auth, provider step, progressive disclosure, OAuth UX, API key UX, custom endpoint UX, settings provider** -> `docs/cortex/frontend-auth-ux.md`
-- **MCP tools, animus-mcp-server, mcp-bridge, MIND_TOOL_NAMES, observational memory compaction, error routing, model tier config, sub-agent orchestrator, AgentOrchestrator, update_agent, cancel_agent, stopHeartbeat** -> `docs/cortex/cortex-integration-patterns.md`
-- **pi-agent-core migration, migration phases, legacy agents, deprecated features** -> `docs/cortex/pi-agent-core-migration.md`
+- **cortex upgrade, session threading, dual observation, recall callback, tool result persistence, CortexTool contract** -> `docs/cortex/upgrade-plan.md`
 - **skill, skills, SKILL.md, compaction, MCP client, provider manager, working tags, context manager** -> Cortex framework docs (see cortex-mono repo)
 - **pi, pi-ai, transformContext, multi-provider** -> `docs/agents/pi/research/sdk-research.md`
 - **reflex, fast response, voice latency, dual path, Vercel AI SDK** -> `docs/research/reflex-system.md`

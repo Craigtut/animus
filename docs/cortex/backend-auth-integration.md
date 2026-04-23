@@ -1,6 +1,6 @@
 # Backend Auth Integration
 
-> **STATUS: RESEARCH** - Not yet implemented.
+> **STATUS: IMPLEMENTED** - `CortexCredentialService` and `cortex-provider.ts` tRPC router are live.
 >
 > **Note:** This is an Animus-specific integration doc. Cortex framework documentation (architecture, tools, compaction, skills, providers) lives in the [cortex-mono](https://github.com/Craigtut/cortex-mono) repository.
 

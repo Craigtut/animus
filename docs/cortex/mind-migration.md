@@ -1,6 +1,6 @@
 # Mind Migration to Cortex
 
-> **STATUS: RESEARCH** - Not yet implemented.
+> **STATUS: IMPLEMENTED** - The 5-phase pipeline is live. Session threading (per-contact+channel) added in the Cortex upgrade sprint (2026-04). See `upgrade-plan.md` for architectural decisions.
 >
 > **Note:** This is an Animus-specific integration doc. Cortex framework documentation (architecture, tools, compaction, skills, providers) lives in the [cortex-mono](https://github.com/Craigtut/cortex-mono) repository.
 
