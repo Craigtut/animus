@@ -1,6 +1,6 @@
 # Cortex Upgrade Plan
 
-**STATUS**: IN PROGRESS. Authored 2026-04-16, revised 2026-04-22 after phases 0-3 landed. Phases 0-3 are complete. Phases 5-7 remain.
+**STATUS**: COMPLETE. Authored 2026-04-16, all phases landed 2026-04-22.
 
 ---
 
@@ -14,9 +14,9 @@ Phase 1  Tool contract fix                    DONE
 Phase 2  Tool result persistence              DONE
 Phase 3  Session threading + Cortex state     DONE (7 sub-phases)
 Phase 4  (absorbed into Phase 3)
-Phase 5  Docs reconciliation                  PENDING
-Phase 6  Optional Cortex features             PENDING (deferrable)
-Phase 7  Back-pressure items on Cortex        PENDING (coordination)
+Phase 5  Docs reconciliation                  DONE
+Phase 6  Optional Cortex features             DONE (deferred tool loading + watchdog)
+Phase 7  Back-pressure items on Cortex        DONE
 ```
 
 ---
@@ -172,34 +172,44 @@ Bring `animus/docs/cortex/` and `animus/docs/architecture/observational-memory.m
 
 ---
 
-## Phase 6 — Optional Cortex features (PENDING, deferrable)
+## Phase 6 — Optional Cortex features (DONE)
 
 ### Deferred tool loading
 
-`deferredTools: { enabled: true, deferMcp: true }`. High value once plugin packs ship multiple MCP tools with large schemas. Low value today. Defer until plugin activity justifies it.
+`deferredTools: { enabled: true, deferMcp: true }` enabled by default. All plugin MCP tools deferred (schemas loaded via ToolSearch on demand). Animus built-in tools and Cortex built-in tools load eagerly.
 
 ### Prompt watchdog diagnostics
 
-`diagnostics.promptWatchdog.enabled: true` plumbing through settings. Enable behind a debug flag; do not default on.
+Gated by `cortexDiagnostics` boolean in system_settings (default false). Logs prompt lifecycle events when enabled.
 
 ### Per-tool threshold tuning
 
-`toolResultThresholds` overrides for specific MCP tools once we see patterns in tick detail. Use Cortex defaults for now.
+Deferred. Using Cortex defaults (25K general, 7.5K Bash) until evidence warrants tuning.
+
+- `2c91aee feat(cortex): enable deferred MCP tool loading and prompt watchdog diagnostics`
 
 ---
 
-## Phase 7 — Back-pressure items on Cortex (PENDING, coordination)
+## Phase 7 — Back-pressure items (DONE)
 
-Hacks in Animus that exist because Cortex doesn't expose the right hook. Track these for cleanup when cortex-mono can support a cleaner API.
+All four items resolved. Two required Cortex changes (committed to cortex-mono), two were Animus-only.
 
-1. **`process.env.PI_CACHE_RETENTION` env swap** (`cortex-pipeline.ts`). Ask Cortex for a per-call `cacheRetention` option on `prompt()` and `structuredComplete()`.
-2. **`(cortexAgent as any).agent.state.error` cast** (`cortex-pipeline.ts`). Ask Cortex for an `onSilentError` hook or `getLastError()` accessor.
-3. **Provider label hardcoded as `'claude'`** (`heartbeat/index.ts`). Widen `AgentProvider` DB column type to accept any Cortex provider string.
-4. **Tool permission changes don't refresh tools** (`cortex-mind.ts`). Plugin lifecycle is wired; tool-permission toggles are not. Add a tool-refresh listener on `tool:permission-changed` events.
+1. **Per-call cache retention**: Added `options?: { cacheRetention? }` to Cortex's `prompt()` method. Animus's env var swap hack deleted, replaced with clean per-call option.
+2. **Silent error recovery**: The cast was dead code. Cortex already surfaces silent errors by throwing from `prompt()` (cortex-agent.ts:735-741). Dead code deleted from Animus.
+3. **Provider label**: Added `'cortex'` to the `AgentProvider` enum. Hardcoded `'claude'` cast removed.
+4. **Dynamic tool permission refresh**: Added `addConsumerTool()`/`removeConsumerTool()` to Cortex's `CortexAgent`. Animus now listens to `tool:permission_changed` events and hot-swaps tools without restart.
+
+Cortex commit: `6e228b7 feat(cortex): add per-call cache retention on prompt() and dynamic tool add/remove`
+
+Animus commits:
+- `3e1319c fix(heartbeat): remove dead silent-error check, add cortex to AgentProvider`
+- `60b0f7f refactor(cortex): use per-call cache retention and wire dynamic tool permission refresh`
 
 ---
 
 ## Commit log (full)
+
+### Animus (`cortex-agent` branch)
 
 ```
 af0602f refactor(db): rename session_token_count to context_token_count
@@ -214,4 +224,15 @@ fd9c2f3 docs: update database count to 8 (sessions.db)
 1d36b67 feat(heartbeat): persist Cortex observational memory state per session
 5457461 refactor(heartbeat): remove dead compaction reseed dance and context threading
 f7cc661 feat(memory): add message embedding with LanceDB and recall callback for Cortex
+98edeb9 docs(cortex): update upgrade plan with completed phases and architectural decisions
+063620d docs: reconcile cortex docs with implemented state, remove stale files
+2c91aee feat(cortex): enable deferred MCP tool loading and prompt watchdog diagnostics
+3e1319c fix(heartbeat): remove dead silent-error check, add cortex to AgentProvider
+60b0f7f refactor(cortex): use per-call cache retention and wire dynamic tool permission refresh
+```
+
+### Cortex (`main` branch in cortex-mono)
+
+```
+6e228b7 feat(cortex): add per-call cache retention on prompt() and dynamic tool add/remove
 ```
