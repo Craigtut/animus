@@ -110,6 +110,8 @@ export const systemSettingsSchema = z.object({
   utilityModel: z.string().default('default'),
   // Debug: capture full context snapshots per pipeline phase
   contextDebugMode: z.boolean().default(false),
+  // Debug: enable Cortex prompt watchdog diagnostics (logs prompt lifecycle events)
+  cortexDiagnostics: z.boolean().default(false),
 });
 
 export const updateSystemSettingsInputSchema = systemSettingsSchema.partial();

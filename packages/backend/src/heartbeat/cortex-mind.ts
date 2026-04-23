@@ -418,6 +418,8 @@ export async function createCortexMind(
     ? { search: messageEmbedder.search.bind(messageEmbedder) }
     : undefined;
 
+  const cortexDiagnostics = settingsAny['cortexDiagnostics'] === true;
+
   const cortexAgent = await CortexAgent.create({
     model,
     workingDirectory: workingDir,
@@ -433,6 +435,16 @@ export async function createCortexMind(
     tools: animusTools,
     persistResult,
     compaction: recallConfig ? { observational: { recall: recallConfig } } : undefined,
+    deferredTools: { enabled: true, deferMcp: true },
+    ...(cortexDiagnostics ? {
+      diagnostics: {
+        promptWatchdog: {
+          enabled: true,
+          heartbeatIntervalMs: 1000,
+          abortWaitWarningMs: 2000,
+        },
+      },
+    } : {}),
   });
 
   // Resolve initial cache retention based on provider and heartbeat interval
