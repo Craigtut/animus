@@ -342,6 +342,7 @@ async function buildAnimusTools(
  */
 export async function createCortexMind(
   state: CortexMindState,
+  options?: { messageEmbedder?: import('../memory/message-embedder.js').MessageEmbedder | null },
 ): Promise<CortexAgent | null> {
   // If already created, return existing
   if (state.agent) {
@@ -411,6 +412,12 @@ export async function createCortexMind(
   // internally, eliminating the need to import pi-agent-core in the backend.
   // Built-in tools (Read, Write, Edit, Glob, Grep, Bash, WebFetch, TaskOutput)
   // are auto-registered by Cortex using workingDirectory.
+  // Build recall config if message embedder is available
+  const messageEmbedder = options?.messageEmbedder;
+  const recallConfig = messageEmbedder?.isReady()
+    ? { search: messageEmbedder.search.bind(messageEmbedder) }
+    : undefined;
+
   const cortexAgent = await CortexAgent.create({
     model,
     workingDirectory: workingDir,
@@ -425,6 +432,7 @@ export async function createCortexMind(
     resolvePermission: permissionResolver,
     tools: animusTools,
     persistResult,
+    compaction: recallConfig ? { observational: { recall: recallConfig } } : undefined,
   });
 
   // Resolve initial cache retention based on provider and heartbeat interval

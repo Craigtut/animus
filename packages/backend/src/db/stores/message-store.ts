@@ -151,6 +151,11 @@ function rowToMessage(row: Record<string, unknown>): Message {
   } as Message;
 }
 
+export function getMessageById(db: Database.Database, id: string): Message | null {
+  const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  return row ? rowToMessage(row) : null;
+}
+
 // ============================================================================
 // Delivery Tracking
 // ============================================================================

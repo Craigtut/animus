@@ -14,7 +14,7 @@ import {
   getSessionsDb,
   closeDatabases,
 } from '../../db/index.js';
-import { stopHeartbeat, resetCortexAgent, getVectorStore } from '../../heartbeat/index.js';
+import { stopHeartbeat, resetCortexAgent, getVectorStore, getMessageEmbedder } from '../../heartbeat/index.js';
 import * as heartbeatStore from '../../db/stores/heartbeat-store.js';
 import * as sessionStore from '../../db/stores/session-store.js';
 import { MEDIA_DIR } from '../routes/media.js';
@@ -155,10 +155,14 @@ export const dataRouter = router({
     // Clear all conversation thread sessions
     sessionStore.deleteAllSessions(getSessionsDb());
 
-    // Clear LanceDB vector embeddings
+    // Clear LanceDB vector embeddings (long-term memories + message embeddings)
     const vectorStore = getVectorStore();
     if (vectorStore?.isReady()) {
       await vectorStore.deleteAll();
+    }
+    const messageEmbedder = getMessageEmbedder();
+    if (messageEmbedder?.isReady()) {
+      await messageEmbedder.deleteAll();
     }
 
     // Clear messages, conversations, and media files

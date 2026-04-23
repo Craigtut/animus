@@ -821,6 +821,16 @@ export async function initializeHeartbeat(subsystems: {
   ctx.goals = subsystems.goals;
   ctx.agents = subsystems.agents;
 
+  // Embed messages asynchronously on intake for recall search
+  if (subsystems.memory.messageEmbedder) {
+    const embedder = subsystems.memory.messageEmbedder;
+    const handleEmbed = (msg: { id: string; content: string; createdAt: string }) => {
+      void embedder.embedMessage(msg);
+    };
+    getEventBus().on('message:received', handleEmbed);
+    getEventBus().on('message:sent', handleEmbed);
+  }
+
   // Recover from interrupted tick
   if (state.currentStage !== 'idle') {
     heartbeatStore.updateHeartbeatState(hbDb, {
@@ -837,7 +847,10 @@ export async function initializeHeartbeat(subsystems: {
   // when the user configures a provider through onboarding or settings.
   if (subsystems.agents.cortexMind.agent == null) {
     try {
-      const cortexAgent = await createCortexMind(subsystems.agents.cortexMind);
+      const cortexAgent = await createCortexMind(
+        subsystems.agents.cortexMind,
+        { messageEmbedder: subsystems.memory.messageEmbedder },
+      );
 
       if (cortexAgent) {
         // Agent created successfully — wire everything up
@@ -863,7 +876,10 @@ export async function initializeHeartbeat(subsystems: {
   getEventBus().on('cortex:provider-changed', async () => {
     if (subsystems.agents.cortexMind.agent) return; // Already initialized, model-switch handled by cortex-mind.ts
     try {
-      const cortexAgent = await createCortexMind(subsystems.agents.cortexMind);
+      const cortexAgent = await createCortexMind(
+        subsystems.agents.cortexMind,
+        { messageEmbedder: subsystems.memory.messageEmbedder },
+      );
       if (cortexAgent) {
         restoreConversationHistory(cortexAgent);
         if (subsystems.agents.agentOrchestrator) {
@@ -1065,6 +1081,10 @@ export function getMemoryManager(): import('../memory/index.js').MemoryManager |
   return ctx.memory?.memoryManager ?? null;
 }
 
+export function getMessageEmbedder(): import('../memory/message-embedder.js').MessageEmbedder | null {
+  return ctx.memory?.messageEmbedder ?? null;
+}
+
 /**
  * Update heartbeat interval (from settings change).
  */
@@ -1093,7 +1113,10 @@ export async function resetCortexAgent(): Promise<void> {
 
   // Recreate from scratch (reads provider/model from DB, starts fresh)
   try {
-    const cortexAgent = await createCortexMind(cortexMind);
+    const cortexAgent = await createCortexMind(
+      cortexMind,
+      { messageEmbedder: ctx.memory?.messageEmbedder },
+    );
     if (cortexAgent) {
       // Do NOT restore conversation history; the DB was just cleared
       if (ctx.agents?.agentOrchestrator) {
