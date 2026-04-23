@@ -609,35 +609,6 @@ async function executeAgenticLoop(
     // Run the agentic loop
     await cortexAgent.prompt(effectiveTickPrompt);
 
-    // Check for silent errors: pi-agent-core catches errors internally
-    // and resolves the promise normally, hiding the error in agent.state.error.
-    // Surface these so they're visible in the logs.
-    const agentState = (cortexAgent as unknown as { agent: { state: { error?: string } } }).agent?.state;
-    if (agentState?.error) {
-      log.error(`AGENTIC LOOP silent error (tick #${tickNumber}): ${agentState.error}`);
-
-      // Scan conversation history for malformed messages to help diagnose
-      try {
-        const history = cortexAgent.getConversationHistory();
-        const badMsgs = history
-          .map((m, i) => {
-            const msg = m as unknown as Record<string, unknown>;
-            return {
-              i,
-              role: msg['role'],
-              hasContent: msg['content'] !== undefined && msg['content'] !== null,
-              contentType: typeof msg['content'],
-              isArray: Array.isArray(msg['content']),
-              len: Array.isArray(msg['content']) ? (msg['content'] as unknown[]).length : -1,
-            };
-          })
-          .filter(m => !m.hasContent || (m.isArray && m.len === 0));
-        if (badMsgs.length > 0) {
-          log.error(`AGENTIC LOOP: ${badMsgs.length} malformed message(s) in history: ${JSON.stringify(badMsgs)}`);
-        }
-      } catch { /* diagnostic only */ }
-    }
-
     // Clean up event handlers
     turnEndUnsub();
     chunkUnsub();

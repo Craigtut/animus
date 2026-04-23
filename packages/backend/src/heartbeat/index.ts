@@ -248,10 +248,8 @@ async function cortexMindQuery(
   if (!ctx.logSessionId) {
     try {
       const agentLogsDb = getAgentLogsDb();
-      // Map cortex provider to AgentProvider (DB column is TEXT, accepts any string).
-      // Use 'claude' as the provider label since cortex is provider-agnostic.
       const session = agentLogStore.createSession(agentLogsDb, {
-        provider: 'claude' as import('@animus-labs/shared').AgentProvider,
+        provider: 'cortex',
         model: cortexMind.model ? String((cortexMind.model as unknown as Record<string, unknown>)['id'] ?? 'cortex') : 'cortex',
       });
       const sessionId = session.id;
