@@ -443,7 +443,6 @@ export const heartbeatRouter = router({
       interface TickInputData {
         tickNumber: number;
         triggerType: string;
-        sessionState: string;
         tokenBreakdown?: Record<string, number>;
       }
 
@@ -483,7 +482,6 @@ export const heartbeatRouter = router({
         return {
           tickNumber: data.tickNumber,
           triggerType: data.triggerType,
-          sessionState: data.sessionState,
           tokenBreakdown: data.tokenBreakdown,
           thoughtPreview: thoughtContent?.slice(0, 100) ?? null,
           durationMs: outData?.durationMs ?? null,
@@ -517,7 +515,6 @@ export const heartbeatRouter = router({
         tickNumber: number;
         triggerType: string;
         triggerContext: unknown;
-        sessionState: string;
         systemPrompt: string | null;
         userMessage: string;
         systemPromptManifest?: unknown[] | null;
@@ -590,7 +587,6 @@ export const heartbeatRouter = router({
         tickNumber,
         triggerType: inputData.triggerType,
         triggerContext: inputData.triggerContext,
-        sessionState: inputData.sessionState,
         systemPrompt,
         userMessage: inputData.userMessage,
         systemPromptManifest,
@@ -666,11 +662,9 @@ export const heartbeatRouter = router({
       const events = agentLogStore.getTimelineForTick(agentLogsDb, tickNumber);
       if (!events) return null;
 
-      // Extract triggerType and sessionState from tick_input event data
       const tickInputEvent = events.find((e) => e.eventType === 'tick_input');
       const tickInputData = tickInputEvent?.data as Record<string, unknown> | undefined;
       const triggerType = (tickInputData?.['triggerType'] as string) ?? 'unknown';
-      const sessionState = (tickInputData?.['sessionState'] as string) ?? 'unknown';
       const sessionId = tickInputEvent?.sessionId ?? '';
 
       // Check if tick is complete (has tick_output)
@@ -750,7 +744,6 @@ export const heartbeatRouter = router({
         tickNumber,
         sessionId,
         triggerType,
-        sessionState,
         isComplete,
         durationMs,
         createdAt: tickInputEvent?.createdAt ?? '',

@@ -183,22 +183,4 @@ describe('system-store', () => {
     });
   });
 
-  describe('personality settings (persona.db)', () => {
-    it('returns default personality', () => {
-      const ps = personaStore.getPersonalitySettings(personaDb);
-      expect(ps.name).toBe('Animus');
-      expect(ps.traits).toEqual([]);
-    });
-
-    it('updates personality', () => {
-      personaStore.updatePersonalitySettings(personaDb, {
-        name: 'Atlas',
-        traits: ['curious', 'empathetic'],
-      });
-      const ps = personaStore.getPersonalitySettings(personaDb);
-      expect(ps.name).toBe('Atlas');
-      expect(ps.traits).toEqual(['curious', 'empathetic']);
-    });
-  });
-
 });

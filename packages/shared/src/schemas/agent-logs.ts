@@ -53,10 +53,12 @@ export const agentEventTypeSchema = z.enum([
   // Cortex pipeline phase events
   'thought_start',
   'thought_end',
+  'thought_failed',
   'agentic_start',
   'agentic_end',
   'reflect_start',
   'reflect_end',
+  'reflect_failed',
   // Context snapshot events
   'phase_context_snapshot',
   // Execute phase observability events

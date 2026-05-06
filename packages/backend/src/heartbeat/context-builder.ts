@@ -988,7 +988,7 @@ function excluded(
 // ============================================================================
 
 /**
- * Build the system prompt manifest for a cold session.
+ * Build the system prompt manifest.
  */
 export function buildSystemPromptManifest(
   compiledPersona: CompiledPersona,
@@ -1025,7 +1025,7 @@ export function buildSystemPromptManifest(
 }
 
 /**
- * Build the full system prompt for a cold session.
+ * Build the full system prompt.
  */
 export function buildSystemPrompt(
   compiledPersona: CompiledPersona,

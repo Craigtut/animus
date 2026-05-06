@@ -9,9 +9,9 @@ import { snakeToCamel, intToBool } from '../utils.js';
 export function getHeartbeatState(db: Database.Database): HeartbeatState {
   const row = db
     .prepare(
-      `SELECT tick_number, current_stage, session_state, trigger_type,
-              trigger_context, mind_session_id, context_token_count,
-              started_at, last_tick_at, session_warm_since, is_running
+      `SELECT tick_number, current_stage, trigger_type,
+              trigger_context, context_token_count,
+              started_at, last_tick_at, is_running
        FROM heartbeat_state WHERE id = 1`
     )
     .get() as Record<string, unknown>;
@@ -26,13 +26,10 @@ export function updateHeartbeatState(
       HeartbeatState,
       | 'tickNumber'
       | 'currentStage'
-      | 'sessionState'
       | 'triggerType'
       | 'triggerContext'
-      | 'mindSessionId'
       | 'contextTokenCount'
       | 'lastTickAt'
-      | 'sessionWarmSince'
       | 'isRunning'
     >
   >
@@ -43,13 +40,10 @@ export function updateHeartbeatState(
   const mapping: Record<string, string> = {
     tickNumber: 'tick_number',
     currentStage: 'current_stage',
-    sessionState: 'session_state',
     triggerType: 'trigger_type',
     triggerContext: 'trigger_context',
-    mindSessionId: 'mind_session_id',
     contextTokenCount: 'context_token_count',
     lastTickAt: 'last_tick_at',
-    sessionWarmSince: 'session_warm_since',
     isRunning: 'is_running',
   };
 
@@ -64,31 +58,4 @@ export function updateHeartbeatState(
   if (fields.length === 0) return;
   values.push(1); // WHERE id = 1
   db.prepare(`UPDATE heartbeat_state SET ${fields.join(', ')} WHERE id = ?`).run(...values);
-}
-
-// ============================================================================
-// Conversation History (cortex session persistence)
-// ============================================================================
-
-/**
- * Get the serialized conversation history for crash recovery.
- * Returns null if no history has been checkpointed yet.
- */
-export function getConversationHistory(db: Database.Database): string | null {
-  const row = db
-    .prepare('SELECT conversation_history FROM heartbeat_state WHERE id = 1')
-    .get() as { conversation_history: string | null } | undefined;
-  return row?.conversation_history ?? null;
-}
-
-/**
- * Update the serialized conversation history.
- * Called after each tick to checkpoint the cortex agent's message array.
- * Pass null to clear the history (e.g., on session reset).
- */
-export function updateConversationHistory(
-  db: Database.Database,
-  history: string | null
-): void {
-  db.prepare('UPDATE heartbeat_state SET conversation_history = ? WHERE id = 1').run(history);
 }

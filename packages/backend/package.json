@@ -10,7 +10,6 @@
     "build": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node -e \"fs.cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\" && node -e \"fs.writeFileSync('dist/version.json',JSON.stringify({version:JSON.parse(fs.readFileSync('package.json','utf8')).version}))\" && npm run build:frontend",
     "build:frontend": "node -e \"try{fs.cpSync('../frontend/dist','./dist/public',{recursive:true})}catch{console.log('Frontend not built yet')}\"",
     "start": "node --env-file-if-exists=../../.env dist/index.js",
-    "sandbox": "tsx --env-file-if-exists=../../.env --conditions source src/sandbox/index.tsx",
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {

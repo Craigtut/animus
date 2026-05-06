@@ -24,7 +24,7 @@ const log = createLogger('PersonaService', 'heartbeat');
 // Types
 // ============================================================================
 
-type DraftFields = Partial<Omit<Persona, 'isFinalized' | 'communicationStyle'>>;
+type DraftFields = Partial<Omit<Persona, 'isFinalized'>>;
 
 // ============================================================================
 // Service

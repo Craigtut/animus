@@ -173,26 +173,13 @@ export const personaSchema = z.object({
   voiceId: z.string().nullable(),
   voiceSpeed: z.number().min(0.5).max(1.5).default(1.0),
   isFinalized: z.boolean(),
-  // Legacy field for backwards compat with old personalitySettings reads
-  communicationStyle: z.string().optional(),
 });
 
 export const personaDraftInputSchema = personaSchema
-  .omit({ isFinalized: true, communicationStyle: true })
+  .omit({ isFinalized: true })
   .partial()
   .extend({ name: z.string().min(1).optional() });
 
 export const personaUpdateInputSchema = personaSchema
-  .omit({ isFinalized: true, communicationStyle: true })
+  .omit({ isFinalized: true })
   .partial();
-
-/** @deprecated Use personaSchema. Kept for backwards compat with old settings router. */
-export const personalitySettingsSchema = z.object({
-  name: z.string().min(1),
-  traits: z.array(z.string()),
-  communicationStyle: z.string(),
-  values: z.array(z.string()),
-});
-
-export const updatePersonalitySettingsInputSchema =
-  personalitySettingsSchema.partial();

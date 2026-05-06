@@ -6,53 +6,8 @@
 
 import type Database from 'better-sqlite3';
 import { now } from '@animus-labs/shared';
-import type { PersonalitySettings, Persona } from '@animus-labs/shared';
+import type { Persona } from '@animus-labs/shared';
 import { intToBool } from '../utils.js';
-
-// ============================================================================
-// Personality Settings (singleton)
-// ============================================================================
-
-export function getPersonalitySettings(db: Database.Database): PersonalitySettings {
-  const row = db.prepare('SELECT * FROM personality_settings WHERE id = 1').get() as Record<
-    string,
-    unknown
-  >;
-  return {
-    name: row['name'] as string,
-    traits: JSON.parse(row['traits'] as string) as string[],
-    communicationStyle: row['communication_style'] as string,
-    values: JSON.parse(row['values'] as string) as string[],
-  };
-}
-
-export function updatePersonalitySettings(
-  db: Database.Database,
-  data: Partial<PersonalitySettings>
-): void {
-  const fields: string[] = [];
-  const values: unknown[] = [];
-  if (data.name !== undefined) {
-    fields.push('name = ?');
-    values.push(data.name);
-  }
-  if (data.traits !== undefined) {
-    fields.push('traits = ?');
-    values.push(JSON.stringify(data.traits));
-  }
-  if (data.communicationStyle !== undefined) {
-    fields.push('communication_style = ?');
-    values.push(data.communicationStyle);
-  }
-  if (data.values !== undefined) {
-    fields.push('"values" = ?');
-    values.push(JSON.stringify(data.values));
-  }
-  if (fields.length === 0) return;
-  fields.push('updated_at = ?');
-  values.push(now());
-  db.prepare(`UPDATE personality_settings SET ${fields.join(', ')} WHERE id = 1`).run(...values);
-}
 
 // ============================================================================
 // Persona (expanded personality_settings)
@@ -97,13 +52,12 @@ export function getPersona(db: Database.Database): Persona {
     voiceId: (row['voice_id'] as string) || null,
     voiceSpeed: (row['voice_speed'] as number) ?? 1.0,
     isFinalized: intToBool((row['is_finalized'] as number) || 0),
-    communicationStyle: (row['communication_style'] as string) || undefined,
   };
 }
 
 export function savePersonaDraft(
   db: Database.Database,
-  data: Partial<Omit<Persona, 'isFinalized' | 'communicationStyle'>>
+  data: Partial<Omit<Persona, 'isFinalized'>>
 ): void {
   const fields: string[] = [];
   const values: unknown[] = [];

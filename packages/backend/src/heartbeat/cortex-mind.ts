@@ -1,16 +1,8 @@
 /**
  * Cortex Mind Session
  *
- * Replaces the old AgentManager-based mind session (mind-session.ts) with
- * a CortexAgent-based session. This is the Phase 2A heartbeat integration.
- *
- * Key differences from the old mind-session.ts:
- * - Uses CortexAgent instead of AgentManager + IAgentSession
- * - Tools are registered as direct CortexTool objects (not MCP)
- * - Context is managed via 9 named slots (not session system prompts)
- * - No warm/cold session state (always warm)
- * - No cognitive MCP tools (replaced by THOUGHT/REFLECT phases)
- * - Permission gate via CortexAgent's resolvePermission callback
+ * CortexAgent lifecycle, context slot management, session persistence,
+ * tool/plugin wiring, and permission resolution for the heartbeat mind.
  *
  * See docs/cortex/mind-migration.md for the full design.
  */
@@ -56,6 +48,7 @@ import { getChannelRouter } from '../channels/channel-router.js';
 import { getPluginManager } from '../plugins/index.js';
 import { join } from 'node:path';
 import { createToolResultPersistor, cleanupDereferencedPaths } from './tool-result-persistor.js';
+import { buildCortexEnvOverrides } from './cortex-env.js';
 import { getSessionsDb } from '../db/index.js';
 import * as sessionStore from '../db/stores/session-store.js';
 
@@ -88,10 +81,6 @@ export interface CortexMindState {
   providerManager: ProviderManager | null;
   model: CortexModel | null;
   toolContext: MutableMindToolContext;
-  /** Whether the agent has been initialized (first prompt sent) */
-  initialized: boolean;
-  /** Conversation history checkpoint (serialized JSON) */
-  conversationHistoryCheckpoint: string | null;
   /** Active thread session for this tick. Null = inner-life tick (no persistence). */
   activeSession: { contactId: string; channel: string } | null;
 }
@@ -107,8 +96,6 @@ export function createCortexMindState(): CortexMindState {
     providerManager: null,
     model: null,
     toolContext: { current: null },
-    initialized: false,
-    conversationHistoryCheckpoint: null,
     activeSession: null,
   };
 }
@@ -200,7 +187,7 @@ function buildPermissionResolver(
     const args = (toolArgs ?? {}) as Record<string, unknown>;
 
     // Security: file deny list for file/shell tools
-    if (['Read', 'Write', 'Edit'].includes(toolName)) {
+    if (['Read', 'Write', 'Edit', 'UndoEdit'].includes(toolName)) {
       const filePath = args['file_path'] as string | undefined;
       if (filePath && isBlockedPath(filePath)) {
         log.warn(`Blocked agent access to restricted file: ${filePath}`);
@@ -345,9 +332,6 @@ async function buildAnimusTools(
 
 /**
  * Create and configure a CortexAgent instance for the mind session.
- *
- * This replaces getOrCreateMindSession() from the old mind-session.ts.
- * The CortexAgent is always warm; there is no cold/warm distinction.
  */
 export async function createCortexMind(
   state: CortexMindState,
@@ -403,6 +387,7 @@ export async function createCortexMind(
 
   // Build permission resolver
   const permissionResolver = buildPermissionResolver(state.toolContext);
+  const envOverrides = buildCortexEnvOverrides();
 
   // Tool result persistor: writes oversized tool results to
   // data/tool-results/{tickNumber}/ and returns the path for Cortex to
@@ -419,12 +404,27 @@ export async function createCortexMind(
 
   // Use CortexAgent.create() factory to construct the pi-agent-core Agent
   // internally, eliminating the need to import pi-agent-core in the backend.
-  // Built-in tools (Read, Write, Edit, Glob, Grep, Bash, WebFetch, TaskOutput)
+  // Built-in tools (Read, Write, Edit, UndoEdit, Glob, Grep, Bash, WebFetch, TaskOutput)
   // are auto-registered by Cortex using workingDirectory.
   // Build recall config if message embedder is available
   const messageEmbedder = options?.messageEmbedder;
   const recallConfig = messageEmbedder?.isReady()
-    ? { search: messageEmbedder.search.bind(messageEmbedder) }
+    ? {
+        search: (
+          query: string,
+          options?: { timeRange?: { start?: Date; end?: Date } },
+        ) => {
+          const searchOptions: import('../memory/message-embedder.js').MessageRecallSearchOptions = {};
+          const contactId = state.activeSession?.contactId || state.toolContext.current?.contactId || undefined;
+          const channel = state.activeSession?.channel || state.toolContext.current?.sourceChannel || undefined;
+
+          if (options?.timeRange) searchOptions.timeRange = options.timeRange;
+          if (contactId) searchOptions.contactId = contactId;
+          if (channel) searchOptions.channel = channel;
+
+          return messageEmbedder.search(query, searchOptions);
+        },
+      }
     : undefined;
 
   const cortexDiagnostics = settingsAny['cortexDiagnostics'] === true;
@@ -442,6 +442,7 @@ export async function createCortexMind(
     contextWindowLimit: (settingsAny['cortexContextWindowLimit'] as number | null | undefined) ?? null,
     resolvePermission: permissionResolver,
     tools: animusTools,
+    envOverrides,
     persistResult,
     compaction: recallConfig ? { observational: { recall: recallConfig } } : undefined,
     deferredTools: { enabled: true, deferMcp: true },
@@ -615,15 +616,15 @@ function wireCompactionHandlers(cortexAgent: CortexAgent): void {
   cortexAgent.onCompactionError((error: Error) => {
     log.error('Compaction failed:', error);
 
+    // Best-effort: log to the most recent per-tick session (compaction runs
+    // during the agentic loop, so the current tick's session is the newest).
     try {
       const agentLogsDb = getAgentLogsDb();
-      const sessions = agentLogsDb
-        .prepare('SELECT id FROM agent_sessions ORDER BY started_at DESC LIMIT 1')
-        .get() as { id: string } | undefined;
-
-      if (sessions) {
+      const { sessions } = agentLogStore.listSessions(agentLogsDb, { limit: 1 });
+      const latest = sessions[0];
+      if (latest) {
         agentLogStore.insertEvent(agentLogsDb, {
-          sessionId: sessions.id,
+          sessionId: latest.id,
           eventType: 'compaction_error',
           data: {
             error: error.message,
@@ -688,8 +689,7 @@ function wireProviderChangeListeners(
       log.warn('Failed to abort CortexAgent on provider removal:', err);
     }
 
-    // Null out the agent so hasCortexMind() returns false.
-    // The heartbeat will fall back to the legacy path or skip mind queries
+    // Null out the agent so the heartbeat skips mind queries
     // until a new provider is configured and createCortexMind is called again.
     state.agent = null;
     state.model = null;
@@ -1137,39 +1137,9 @@ function saveActiveSession(
       history.length,
     );
 
-    state.conversationHistoryCheckpoint = serializedHistory;
     log.info(`Session saved (${contactId}, ${channel}): ${history.length} messages`);
   } catch (err) {
     log.warn('Failed to save session:', err);
-  }
-}
-
-/**
- * Restore conversation history from heartbeat_state (legacy path).
- * Used only during migration from the old single-session model.
- * Once all sessions are in sessions.db, this becomes a no-op.
- *
- * @deprecated Use loadSessionForTick instead.
- */
-export function restoreConversationHistory(
-  cortexAgent: CortexAgent,
-): boolean {
-  try {
-    const hbDb = getHeartbeatDb();
-    const checkpoint = heartbeatStore.getConversationHistory(hbDb);
-
-    if (checkpoint) {
-      const messages = JSON.parse(checkpoint);
-      cortexAgent.restoreConversationHistory(messages);
-      log.info(`Restored conversation history from legacy checkpoint (${messages.length} messages)`);
-      return true;
-    }
-
-    log.info('No legacy conversation history checkpoint; starting fresh');
-    return false;
-  } catch (err) {
-    log.warn('Failed to restore conversation history:', err);
-    return false;
   }
 }
 
@@ -1191,5 +1161,4 @@ export async function destroyCortexMind(state: CortexMindState): Promise<void> {
   }
   state.providerManager = null;
   state.model = null;
-  state.initialized = false;
 }

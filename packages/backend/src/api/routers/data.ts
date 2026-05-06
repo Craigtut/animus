@@ -66,24 +66,16 @@ export const dataRouter = router({
       hbDb.exec('DELETE FROM agent_tasks');
       hbDb.exec('DELETE FROM tasks');
 
-      // Reset heartbeat state to initial values
       heartbeatStore.updateHeartbeatState(hbDb, {
         tickNumber: 0,
         currentStage: 'idle',
-        sessionState: 'cold',
         triggerType: null,
         triggerContext: null,
-        mindSessionId: null,
         contextTokenCount: 0,
-        sessionWarmSince: null,
         isRunning: false,
       });
 
-      // Re-seed emotion state to baselines
       hbDb.exec('UPDATE emotion_state SET intensity = baseline');
-
-      // Clear cortex conversation history checkpoint
-      heartbeatStore.updateConversationHistory(hbDb, null);
 
       // Clear stale tool approval requests (reference now-invalid tick contexts)
       hbDb.exec('DELETE FROM tool_approval_requests');
@@ -125,20 +117,13 @@ export const dataRouter = router({
       heartbeatStore.updateHeartbeatState(hbDb, {
         tickNumber: 0,
         currentStage: 'idle',
-        sessionState: 'cold',
         triggerType: null,
         triggerContext: null,
-        mindSessionId: null,
         contextTokenCount: 0,
-        sessionWarmSince: null,
         isRunning: false,
       });
 
       hbDb.exec('UPDATE emotion_state SET intensity = baseline');
-
-      // Clear cortex conversation history checkpoint so the agent
-      // starts fresh and doesn't carry over the previous persona's context
-      heartbeatStore.updateConversationHistory(hbDb, null);
 
       hbDb.exec('DELETE FROM tool_approval_requests');
     })();

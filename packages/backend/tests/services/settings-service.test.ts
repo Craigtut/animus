@@ -116,47 +116,6 @@ describe('SettingsService', () => {
   });
 
   // ==========================================================================
-  // Personality Settings
-  // ==========================================================================
-
-  describe('getPersonalitySettings', () => {
-    it('returns settings from the persona store', () => {
-      const svc = getSettingsService();
-      const settings = svc.getPersonalitySettings();
-
-      expect(settings).toBeDefined();
-      expect(settings.name).toBe('Animus');
-      expect(settings.traits).toEqual([]);
-    });
-  });
-
-  describe('updatePersonalitySettings', () => {
-    it('strips undefined values before persisting', () => {
-      const svc = getSettingsService();
-      svc.updatePersonalitySettings({
-        name: 'Nova',
-        traits: undefined,
-      });
-
-      const settings = svc.getPersonalitySettings();
-      expect(settings.name).toBe('Nova');
-      // traits should remain at default, not be wiped
-      expect(settings.traits).toEqual([]);
-    });
-
-    it('returns updated personality settings', () => {
-      const svc = getSettingsService();
-      const result = svc.updatePersonalitySettings({
-        name: 'Atlas',
-        traits: ['curious', 'empathetic'],
-      });
-
-      expect(result.name).toBe('Atlas');
-      expect(result.traits).toEqual(['curious', 'empathetic']);
-    });
-  });
-
-  // ==========================================================================
   // Log Categories
   // ==========================================================================
 

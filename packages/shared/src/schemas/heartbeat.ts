@@ -25,8 +25,6 @@ export const heartbeatStageSchema = z.enum([
   'execute',
 ]);
 
-export const sessionStateSchema = z.enum(['cold', 'active', 'warm']);
-
 export const triggerTypeSchema = z.enum([
   'interval',
   'message',
@@ -38,17 +36,13 @@ export const triggerTypeSchema = z.enum([
 export const heartbeatStateSchema = z.object({
   tickNumber: z.number().int().nonnegative(),
   currentStage: heartbeatStageSchema,
-  sessionState: sessionStateSchema,
   triggerType: triggerTypeSchema.nullable(),
   triggerContext: z.string().nullable(), // JSON
-  mindSessionId: z.string().nullable(),
   contextTokenCount: z.number().int().nonnegative().default(0),
   startedAt: timestampSchema,
   lastTickAt: timestampSchema.nullable(),
   nextTickAt: timestampSchema.nullable().default(null),
-  sessionWarmSince: timestampSchema.nullable(),
   isRunning: z.boolean(),
-  // Energy system
   energyLevel: z.number().min(0).max(1).default(0.85),
   lastEnergyUpdate: timestampSchema.nullable().default(null),
 });

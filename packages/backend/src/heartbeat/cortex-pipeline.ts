@@ -26,7 +26,7 @@ import * as agentLogStore from '../db/stores/agent-log-store.js';
 import type { AgentEventType } from '@animus-labs/shared';
 import type { GatherResult } from './gather-context.js';
 import type { CompiledPersona } from './persona-compiler.js';
-import { isNonResponse, type CognitiveSnapshot, createEmptySnapshot, snapshotToMindOutput, safeMindOutput } from './cognitive-tools.js';
+import { isNonResponse, type CognitiveSnapshot, snapshotToMindOutput, safeMindOutput } from './cognitive-tools.js';
 import { MIND_SLOT_NAMES } from './cortex-mind.js';
 import {
   buildThoughtSnapshot,
@@ -377,7 +377,7 @@ async function executeThought(
         const agentLogsDb = getAgentLogsDb();
         agentLogStore.insertEvent(agentLogsDb, {
           sessionId: config.logSessionId,
-          eventType: 'thought_failed' as any,
+          eventType: 'thought_failed',
           data: {
             tickNumber,
             error: err instanceof Error ? err.message : String(err),
@@ -393,10 +393,8 @@ async function executeThought(
 }
 
 /**
- * Generate a context-aware placeholder thought from gathered state.
- * This replaces the static hardcoded string and produces varied output
- * based on the trigger type and available context until utilityComplete()
- * is available.
+ * Generate a context-aware placeholder thought when the model
+ * does not call the structured output tool.
  */
 function generatePlaceholderThought(gathered: GatherResult): ThoughtResult {
   const trigger = gathered.trigger;
@@ -776,7 +774,7 @@ async function executeReflect(
             const agentLogsDb = getAgentLogsDb();
             agentLogStore.insertEvent(agentLogsDb, {
               sessionId: config.logSessionId,
-              eventType: 'reflect_failed' as any,
+              eventType: 'reflect_failed',
               data: {
                 tickNumber,
                 error: err instanceof Error ? err.message : String(err),
@@ -797,9 +795,8 @@ async function executeReflect(
 }
 
 /**
- * Generate a context-aware placeholder reflection from gathered state.
- * Produces varied output based on the trigger type and emotional state
- * until utilityComplete() is available.
+ * Generate a context-aware placeholder reflection when the model
+ * does not call the structured output tool.
  */
 function generatePlaceholderReflection(
   gathered: GatherResult,

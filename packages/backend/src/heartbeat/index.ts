@@ -6,8 +6,9 @@
  *
  * This file is the orchestration spine. Pipeline stages are implemented in:
  *   - gather-context.ts    (Stage 1: GATHER)
- *   - mind-session.ts      (Session lifecycle)
- *   - cognitive-tools.ts   (Cognitive MCP tools + snapshot-to-MindOutput)
+ *   - cortex-mind.ts       (CortexAgent lifecycle, session persistence, tool wiring)
+ *   - cortex-pipeline.ts   (5-phase pipeline: THOUGHT, AGENTIC LOOP, REFLECT)
+ *   - cognitive-tools.ts   (Zod schemas for THOUGHT/REFLECT structured output)
  *   - decision-executor.ts (Decision execution)
  *   - execute-output.ts    (Stage 3: EXECUTE)
  *
@@ -55,8 +56,6 @@ import { executeCortexPipeline, type PipelinePhase, type EphemeralSection } from
 import {
   createCortexMind,
   populateContextSlots,
-  MIND_SLOT_NAMES,
-  restoreConversationHistory,
   loadSessionForTick,
   buildMindToolContext as buildCortexToolContext,
   updatePreprocessorVariables,
@@ -101,8 +100,6 @@ class HeartbeatContext {
 
   // HeartbeatContext-owned state (NOT part of subsystems)
   compiledPersona: CompiledPersona | null = null;
-  /** Log session ID for the cortex mind, used by agent_logs for tick timeline */
-  logSessionId: (() => string) | null = null;
 
   // Cortex rate-limit backoff state
   consecutiveRateLimits: number = 0;
@@ -150,7 +147,7 @@ function buildPersonaConfig(
     traits: persona.traits || [],
     values: persona.values || [],
     ...(persona.background != null && { background: persona.background }),
-    ...((persona.personalityNotes ?? persona.communicationStyle) != null && { personalityNotes: (persona.personalityNotes ?? persona.communicationStyle)! }),
+    ...(persona.personalityNotes != null && { personalityNotes: persona.personalityNotes }),
   };
 }
 
@@ -195,10 +192,6 @@ function logTickInput(params: {
 }
 
 // ============================================================================
-// Legacy context snapshot functions removed — replaced by context-snapshot.ts
-// ============================================================================
-
-// ============================================================================
 // Pipeline: Stage 2 -- MIND QUERY
 // ============================================================================
 
@@ -213,6 +206,8 @@ interface MindQueryResult {
   allThoughts: Array<{ content: string; importance: number }>;
   /** How many reply turns were already sent via sendOutbound during streaming. */
   replyTurnsSent: number;
+  /** Per-tick agent log session ID for observability events. */
+  logSessionId: string | null;
 }
 
 /**
@@ -241,37 +236,27 @@ async function cortexMindQuery(
     gathered.trigger.channel,
   );
 
-  // Ensure a log session exists for cortex ticks.
-  // The legacy path creates this via attachSessionLogging() in getOrCreateMindSession(),
-  // but cortex bypasses that. Create a persistent session so tick_input/tick_output
-  // events are recorded and the Heartbeats page can display cortex ticks.
-  if (!ctx.logSessionId) {
-    try {
-      const agentLogsDb = getAgentLogsDb();
-      const session = agentLogStore.createSession(agentLogsDb, {
-        provider: 'cortex',
-        model: cortexMind.model ? String((cortexMind.model as unknown as Record<string, unknown>)['id'] ?? 'cortex') : 'cortex',
-      });
-      const sessionId = session.id;
-      ctx.logSessionId = () => sessionId;
-      log.info(`Created cortex log session: ${sessionId}`);
-    } catch (err) {
-      log.warn('Failed to create cortex log session:', err);
-    }
+  // Create a per-tick log session for agent_logs.db observability.
+  // Each tick gets its own session so cleanup never deletes an in-use session.
+  let logSessionId: string | null = null;
+  try {
+    const agentLogsDb = getAgentLogsDb();
+    const session = agentLogStore.createSession(agentLogsDb, {
+      provider: 'cortex',
+      model: cortexMind.model?.modelId ?? 'cortex',
+    });
+    logSessionId = session.id;
+  } catch (err) {
+    log.warn('Failed to create log session for tick:', err);
   }
-
-  // Attach event logging bridge to persist EventBridge events to agent_logs.db.
-  // This enables the Heartbeats timeline to show SDK-level events (tool calls,
-  // responses, session lifecycle) for Cortex ticks.
-  const logSessionId = ctx.logSessionId?.() ?? null;
   let cortexLogBridge: { detach: () => void } | null = null;
   if (logSessionId) {
     const eventBus = getEventBus();
     cortexLogBridge = attachCortexLogging(cortexAgent, {
       sessionId: logSessionId,
       eventBus,
-      provider: 'claude',
-      model: cortexMind.model ? String((cortexMind.model as unknown as Record<string, unknown>)['id'] ?? 'cortex') : 'cortex',
+      provider: cortexMind.model?.provider ?? 'cortex',
+      model: cortexMind.model?.modelId ?? 'cortex',
     });
   }
 
@@ -408,9 +393,7 @@ async function cortexMindQuery(
         logSessionId,
         tickType: gathered.trigger.type ?? null,
         contactId: gathered.trigger.contactId ?? null,
-        model: cortexMind.model
-          ? String((cortexMind.model as unknown as Record<string, unknown>)['id'] ?? 'cortex')
-          : 'cortex',
+        model: cortexMind.model?.modelId ?? 'cortex',
         contextDebugMode,
       },
       ctx.currentPhase,
@@ -429,8 +412,7 @@ async function cortexMindQuery(
     cortexMind.toolContext.current = null;
 
     // Log agentic loop context snapshot (replaces the old single-snapshot approach)
-    const logSid = ctx.logSessionId?.() ?? null;
-    if (logSid) {
+    if (logSessionId) {
       try {
         const triggerPrompt = buildTriggerSection(gathered.trigger);
         const agenticSnap = buildAgenticSnapshot({
@@ -445,7 +427,7 @@ async function cortexMindQuery(
           firstTurnInputTokens: pipelineResult.firstTurnInputTokens,
         });
         if (agenticSnap) {
-          logPhaseSnapshot(logSid, tickNumber, agenticSnap);
+          logPhaseSnapshot(logSessionId, tickNumber, agenticSnap);
         }
       } catch (err) {
         log.warn('Failed to log context snapshot:', err);
@@ -460,6 +442,7 @@ async function cortexMindQuery(
       tickInputLogged,
       allThoughts: pipelineResult.allThoughts,
       replyTurnsSent: pipelineResult.replyTurnsSent,
+      logSessionId,
     };
   } catch (err) {
     eventBus.off('message:received', messageInjectionHandler);
@@ -476,6 +459,7 @@ async function cortexMindQuery(
       tickInputLogged,
       allThoughts: [],
       replyTurnsSent: 0,
+      logSessionId,
     };
   }
 }
@@ -612,13 +596,10 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
       if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
       return;
     }
-    const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged, allThoughts, replyTurnsSent } = await cortexMindQuery(gathered, tickNumber);
+    const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged, allThoughts, replyTurnsSent, logSessionId } = await cortexMindQuery(gathered, tickNumber);
 
     // Clear typing indicator now that mind query is done
     if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
-
-    // Log tick input to agent_logs.db (only if mindQuery didn't already log it)
-    const logSessionId = ctx.logSessionId?.() ?? null;
     if (logSessionId && !tickInputLogged) {
       try {
         logTickInput({
@@ -699,6 +680,15 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
         });
       } catch (err) {
         log.warn('Failed to log tick_output event:', err);
+      }
+    }
+
+    // Close the per-tick log session
+    if (logSessionId) {
+      try {
+        agentLogStore.endSession(getAgentLogsDb(), logSessionId, 'completed');
+      } catch (err) {
+        log.warn('Failed to close log session:', err);
       }
     }
 
@@ -851,9 +841,7 @@ export async function initializeHeartbeat(subsystems: {
       );
 
       if (cortexAgent) {
-        // Agent created successfully — wire everything up
-        restoreConversationHistory(cortexAgent);
-        log.info('CortexAgent initialized and context restored at startup');
+        log.info('CortexAgent initialized at startup');
 
         if (subsystems.agents.agentOrchestrator) {
           subsystems.agents.agentOrchestrator.setCortexAgent(cortexAgent);
@@ -879,7 +867,6 @@ export async function initializeHeartbeat(subsystems: {
         { messageEmbedder: subsystems.memory.messageEmbedder },
       );
       if (cortexAgent) {
-        restoreConversationHistory(cortexAgent);
         if (subsystems.agents.agentOrchestrator) {
           subsystems.agents.agentOrchestrator.setCortexAgent(cortexAgent);
         }

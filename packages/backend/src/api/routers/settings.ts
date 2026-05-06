@@ -1,5 +1,5 @@
 /**
- * Settings Router - tRPC procedures for system and personality settings.
+ * Settings Router - tRPC procedures for system settings.
  */
 
 import fs from 'node:fs';
@@ -7,7 +7,6 @@ import path from 'node:path';
 import { z } from 'zod/v3';
 import {
   updateSystemSettingsInputSchema,
-  updatePersonalitySettingsInputSchema,
 } from '@animus-labs/shared';
 import { router, protectedProcedure } from '../trpc.js';
 import * as systemStore from '../../db/stores/system-store.js';
@@ -173,16 +172,6 @@ export const settingsRouter = router({
     .input(updateSystemSettingsInputSchema)
     .mutation(({ input }) => {
       return getSettingsService().updateSystemSettings(input);
-    }),
-
-  getPersonalitySettings: protectedProcedure.query(() => {
-    return getSettingsService().getPersonalitySettings();
-  }),
-
-  updatePersonalitySettings: protectedProcedure
-    .input(updatePersonalitySettingsInputSchema)
-    .mutation(({ input }) => {
-      return getSettingsService().updatePersonalitySettings(input);
     }),
 
   getLogCategories: protectedProcedure.query(() => {

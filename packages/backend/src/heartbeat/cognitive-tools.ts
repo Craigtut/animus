@@ -3,11 +3,6 @@
  *
  * Zod schemas for the THOUGHT and REFLECT pipeline phases, plus
  * snapshot types and conversion utilities used by cortex-pipeline.ts.
- *
- * The schemas (recordThoughtSchema, recordCognitiveStateSchema) are used
- * as structured-output definitions in the programmatic THOUGHT and REFLECT
- * phases — they are NOT MCP tools. The legacy MCP tool flow was removed
- * in Phase 2A of the Cortex migration.
  */
 
 import { z } from 'zod/v3';
@@ -39,7 +34,7 @@ export interface CognitiveSnapshot {
   }>;
 }
 
-export function createEmptySnapshot(): CognitiveSnapshot {
+function createEmptySnapshot(): CognitiveSnapshot {
   return {
     thoughts: [],
     experience: null,

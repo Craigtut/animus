@@ -19,7 +19,6 @@ import type {
   contactSchema,
   contactChannelSchema,
   systemSettingsSchema,
-  personalitySettingsSchema,
   onboardingStateSchema,
   existenceParadigmSchema,
   personalityDimensionsSchema,
@@ -27,7 +26,6 @@ import type {
   personaSchema,
   // Heartbeat
   heartbeatStageSchema,
-  sessionStateSchema,
   triggerTypeSchema,
   heartbeatStateSchema,
   emotionNameSchema,
@@ -152,7 +150,6 @@ export type User = z.infer<typeof userSchema>;
 export type Contact = z.infer<typeof contactSchema>;
 export type ContactChannel = z.infer<typeof contactChannelSchema>;
 export type SystemSettings = z.infer<typeof systemSettingsSchema>;
-export type PersonalitySettings = z.infer<typeof personalitySettingsSchema>;
 export type PaginationInput = z.infer<typeof paginationInputSchema>;
 export type OnboardingState = z.infer<typeof onboardingStateSchema>;
 export type ExistenceParadigm = z.infer<typeof existenceParadigmSchema>;
@@ -165,7 +162,6 @@ export type Persona = z.infer<typeof personaSchema>;
 // ============================================================================
 
 export type HeartbeatStage = z.infer<typeof heartbeatStageSchema>;
-export type SessionState = z.infer<typeof sessionStateSchema>;
 export type TriggerType = z.infer<typeof triggerTypeSchema>;
 export type HeartbeatState = z.infer<typeof heartbeatStateSchema>;
 
