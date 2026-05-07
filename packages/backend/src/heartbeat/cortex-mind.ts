@@ -66,7 +66,6 @@ export const MIND_SLOT_NAMES = [
   'thought-observations',
   'experience-observations',
   'message-observations',
-  'long-term-memory',
   'goals',
   'tasks',
 ] as const;
@@ -1039,11 +1038,7 @@ export function populateContextSlots(
   const messageObs = gathered.messageContext?.observations?.content ?? null;
   cm.setSlot('message-observations', messageObs || '');
 
-  // Slot 7: long-term-memory (relevant memories from LanceDB semantic search)
-  const longTermMemory = gathered.memoryContext?.longTermMemorySection ?? null;
-  cm.setSlot('long-term-memory', longTermMemory || '');
-
-  // Slot 8: goals
+  // Slot 7: goals
   const goalContent = [
     gathered.goalContext?.goalSection,
     gathered.goalContext?.proposedGoalsSection,

@@ -1414,7 +1414,23 @@ export function buildEphemeralSections(
       'wired': 'overstimulated, restless, may need to wind down',
     };
     const desc = descriptions[band] ?? band;
-    sections.push({ name: 'Energy State', content: `Energy level: ${level.toFixed(2)} (${band}) — ${desc}` });
+    let energyContent = `Energy level: ${level.toFixed(2)} (${band}) — ${desc}`;
+
+    if (gathered.wakeUpContext) {
+      const durationStr = gathered.wakeUpContext.sleepDurationHours != null
+        ? `approximately ${gathered.wakeUpContext.sleepDurationHours.toFixed(1)} hours`
+        : 'some time';
+      if (gathered.wakeUpContext.type === 'natural') {
+        energyContent += `\nYou are waking up naturally. You slept for ${durationStr}. Your energy is still low but rising.`;
+      } else {
+        const triggerDesc = gathered.wakeUpContext.triggerType
+          ? `A ${gathered.wakeUpContext.triggerType} needs your attention.`
+          : 'Something needs your attention.';
+        energyContent += `\nYou were pulled from sleep after ${durationStr} of rest. ${triggerDesc} You are groggy and deeply drowsy.`;
+      }
+    }
+
+    sections.push({ name: 'Energy State', content: energyContent });
   }
 
   // 9. Recent thoughts (with timestamps)
@@ -1438,6 +1454,17 @@ export function buildEphemeralSections(
       return `  - [${ts}] ${e.content}`;
     });
     sections.push({ name: 'Recent Experiences', content: 'Recent experiences:\n' + lines.join('\n') });
+  }
+
+  // 10b. Recent messages (cross-channel, per-contact)
+  if (gathered.recentMessages.length > 0) {
+    const tz = gathered.aiTimezone || 'UTC';
+    const lines = gathered.recentMessages.map(m => {
+      const ts = formatRelativeTime(m.createdAt, tz);
+      const dir = m.direction === 'inbound' ? 'them' : 'you';
+      return `  - [${ts}] (${dir}, ${m.channel}) ${m.content}`;
+    });
+    sections.push({ name: 'Recent Messages', content: 'Recent messages (cross-channel):\n' + lines.join('\n') });
   }
 
   // 11. Long-term memories (from semantic search)
