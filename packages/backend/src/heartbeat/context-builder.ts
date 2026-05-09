@@ -530,7 +530,7 @@ export function getReplyGuidance(channel: string): string | null {
  * Format an ISO timestamp string in the configured timezone.
  * Falls back to the raw ISO string if the timezone is invalid.
  */
-function formatTimestamp(isoString: string, timezone?: string): string {
+export function formatTimestamp(isoString: string, timezone?: string): string {
   if (!timezone) return isoString;
   try {
     const date = new Date(isoString);
@@ -650,7 +650,7 @@ function buildPluginTriggerSection(trigger: TriggerContext): string {
   return lines.join('\n');
 }
 
-function buildContactSection(contact: Contact, userTimezone?: string): string {
+export function buildContactSection(contact: Contact, userTimezone?: string): string {
   const lines = [
     '── WHO YOU\'RE TALKING TO ──',
     `Contact: ${contact.fullName} (${contact.permissionTier} tier)`,

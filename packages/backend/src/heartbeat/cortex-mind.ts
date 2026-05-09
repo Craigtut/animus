@@ -1003,10 +1003,21 @@ export function populateContextSlots(
   const cm = cortexAgent.getContextManager();
 
   // Slot 0: credentials
-  cm.setSlot('credentials', gathered.credentialManifest || '(No credentials configured)');
+  if (gathered.credentialManifest) {
+    cm.setSlot('credentials',
+      '── AVAILABLE CREDENTIALS ──\n' +
+      'These credentials are stored securely. Use run_with_credentials to\n' +
+      'execute commands that need them. Reference by ref name -- you never\n' +
+      'see the actual values.\n\n' +
+      gathered.credentialManifest +
+      '\n\nUsage: run_with_credentials({ command, credentialRef, envVar })',
+    );
+  } else {
+    cm.setSlot('credentials', '(No credentials configured)');
+  }
 
   // Slot 1: contacts
-  const contactLines: string[] = [];
+  const contactLines: string[] = ['── YOUR CONTACTS ──'];
   for (const { contact, channels } of gathered.contacts) {
     const channelList = channels.map(ch => ch.channel).join(', ');
     let line = `${contact.fullName} [id: ${contact.id}] - ${contact.permissionTier}`;
@@ -1014,44 +1025,78 @@ export function populateContextSlots(
     if (contact.notes) line += `\n  ${contact.notes}`;
     contactLines.push(line);
   }
-  cm.setSlot('contacts', contactLines.length > 0
-    ? contactLines.join('\n')
-    : '(No contacts yet)');
+  if (gathered.contacts.length > 0) {
+    contactLines.push(
+      '',
+      'These are real people. Do not fabricate actions or dialogue for them',
+      'in your experience narrative.',
+    );
+    cm.setSlot('contacts', contactLines.join('\n'));
+  } else {
+    cm.setSlot('contacts', '(No contacts yet)');
+  }
 
   // Slot 2: core-self
   const coreSelf = gathered.memoryContext?.coreSelfSection ?? null;
-  cm.setSlot('core-self', coreSelf || '(No self-knowledge accumulated yet)');
+  cm.setSlot('core-self', coreSelf
+    ? '── CORE SELF ──\n' + coreSelf
+    : '(No self-knowledge accumulated yet)');
 
   // Slot 3: working-memory
   const workingMemory = gathered.memoryContext?.workingMemorySection ?? null;
-  cm.setSlot('working-memory', workingMemory || '(No working memory for this contact)');
+  const wmLabel = gathered.contact?.fullName ? ` (${gathered.contact.fullName})` : '';
+  cm.setSlot('working-memory', workingMemory
+    ? `── WORKING MEMORY${wmLabel} ──\n` + workingMemory
+    : '(No working memory for this contact)');
 
   // Slot 4: thought-observations
   const thoughtObs = gathered.thoughtContext?.observations?.content ?? null;
-  cm.setSlot('thought-observations', thoughtObs || '');
+  cm.setSlot('thought-observations', thoughtObs
+    ? '── THOUGHT OBSERVATIONS ──\n' + thoughtObs
+    : '');
 
   // Slot 5: experience-observations
   const experienceObs = gathered.experienceContext?.observations?.content ?? null;
-  cm.setSlot('experience-observations', experienceObs || '');
+  cm.setSlot('experience-observations', experienceObs
+    ? '── EXPERIENCE OBSERVATIONS ──\n' + experienceObs
+    : '');
 
   // Slot 6: message-observations
   const messageObs = gathered.messageContext?.observations?.content ?? null;
-  cm.setSlot('message-observations', messageObs || '');
+  cm.setSlot('message-observations', messageObs
+    ? '── MESSAGE OBSERVATIONS ──\n' + messageObs
+    : '');
 
   // Slot 7: goals
-  const goalContent = [
-    gathered.goalContext?.goalSection,
-    gathered.goalContext?.proposedGoalsSection,
-    gathered.goalContext?.planningPromptsSection,
-  ].filter(Boolean).join('\n\n');
-  cm.setSlot('goals', goalContent || '(No active goals)');
+  const goalParts: string[] = [];
+  if (gathered.goalContext?.goalSection) {
+    goalParts.push(
+      '── THINGS ON YOUR MIND ──\n' +
+      'These are things you care about. They\'re part of who you are,\n' +
+      'but they don\'t control you. You may advance them, reflect on\n' +
+      'them, or set them aside entirely.\n\n' +
+      gathered.goalContext.goalSection,
+    );
+  }
+  if (gathered.goalContext?.proposedGoalsSection) {
+    goalParts.push('── PENDING GOALS ──\n' + gathered.goalContext.proposedGoalsSection);
+  }
+  if (gathered.goalContext?.planningPromptsSection) {
+    goalParts.push(gathered.goalContext.planningPromptsSection);
+  }
+  cm.setSlot('goals', goalParts.length > 0
+    ? goalParts.join('\n\n')
+    : '(No active goals)');
 
   // Slot 8: tasks
   const taskLines = gathered.deferredTasks.map(t =>
-    `[${t.id}] ${t.title} (priority: ${t.priority}, status: ${t.status})`
+    `- [${t.id.slice(0, 8)}] ${t.title} (priority: ${t.priority}, status: ${t.status})`
   );
   cm.setSlot('tasks', taskLines.length > 0
-    ? taskLines.join('\n')
+    ? '── PENDING TASKS ──\n' +
+      'These tasks are waiting for your attention during quiet moments.\n' +
+      'Use start_task with the task ID to begin working on one.\n\n' +
+      taskLines.join('\n')
     : '(No pending tasks)');
 
   log.debug('Context slots populated');

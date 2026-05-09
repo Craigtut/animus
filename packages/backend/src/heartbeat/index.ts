@@ -280,6 +280,8 @@ async function cortexMindQuery(
   // Build and set the system prompt (persona + cortex operational sections)
   const consumerPrompt = buildSystemPrompt(ctx.compiledPersona, {
     ...(gathered.aiTimezone ? { timezone: gathered.aiTimezone } : {}),
+    energySystemEnabled: gathered.energySystemEnabled,
+    ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
   });
   const systemPrompt = cortexAgent.setBasePrompt(consumerPrompt);
 
@@ -395,6 +397,10 @@ async function cortexMindQuery(
         contactId: gathered.trigger.contactId ?? null,
         model: cortexMind.model?.modelId ?? 'cortex',
         contextDebugMode,
+        existenceParadigm: fullPersona.existenceParadigm ?? 'digital_consciousness',
+        existenceLocation: fullPersona.existenceParadigm === 'simulated_life'
+          ? fullPersona.location
+          : fullPersona.worldDescription,
       },
       ctx.currentPhase,
       pendingInjections,
@@ -628,6 +634,8 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
         goalManager: ctx.goals?.goalManager ?? null,
         buildSystemPrompt: (persona: CompiledPersona) => buildSystemPrompt(persona, {
           ...(gathered.aiTimezone ? { timezone: gathered.aiTimezone } : {}),
+          energySystemEnabled: gathered.energySystemEnabled,
+          ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
         }),
         pluginManager: getPluginManager(),
         taskScheduler: getTaskScheduler(),

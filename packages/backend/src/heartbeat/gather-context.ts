@@ -305,6 +305,9 @@ export async function gatherContext(
       const messageIds = new Set(messageContext.rawItems.map(r => r.id));
       recentMessages = allRecentMessages.filter(m => messageIds.has(m.id));
     }
+  } else {
+    // Interval/scheduled ticks: load recent messages across all contacts
+    recentMessages = messageStore.getRecentMessagesGlobal(msgDb, 30);
   }
 
   // Load external conversation history from channel adapters
