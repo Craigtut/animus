@@ -48,6 +48,7 @@ import { getChannelRouter } from '../channels/channel-router.js';
 import { getPluginManager } from '../plugins/index.js';
 import { join } from 'node:path';
 import { createToolResultPersistor, cleanupDereferencedPaths } from './tool-result-persistor.js';
+import { formatTimestamp } from './context-builder.js';
 import { buildCortexEnvOverrides } from './cortex-env.js';
 import { getSessionsDb } from '../db/index.js';
 import * as sessionStore from '../db/stores/session-store.js';
@@ -65,6 +66,7 @@ export const MIND_SLOT_NAMES = [
   'working-memory',
   'thought-observations',
   'experience-observations',
+  'recent-messages',
   'message-observations',
   'goals',
   'tasks',
@@ -993,7 +995,7 @@ export function updatePreprocessorVariables(
 // ============================================================================
 
 /**
- * Populate all 9 context slots from the gathered context.
+ * Populate all 10 context slots from the gathered context.
  * Called during GATHER phase and on startup.
  */
 export function populateContextSlots(
@@ -1061,13 +1063,51 @@ export function populateContextSlots(
     ? '── EXPERIENCE OBSERVATIONS ──\n' + experienceObs
     : '');
 
-  // Slot 6: message-observations
+  // Slot 6: recent-messages (interval ticks only; message ticks use ephemeral)
+  if (!gathered.contact && gathered.recentMessages.length > 0) {
+    const tz = gathered.aiTimezone || 'UTC';
+    const contactNameMap = new Map<string, string>();
+    for (const { contact } of gathered.contacts) {
+      contactNameMap.set(contact.id, contact.fullName);
+    }
+
+    const groups = new Map<string, typeof gathered.recentMessages>();
+    const chronological = [...gathered.recentMessages].reverse();
+    for (const m of chronological) {
+      const key = `${m.contactId}:${m.channel}`;
+      let group = groups.get(key);
+      if (!group) { group = []; groups.set(key, group); }
+      group.push(m);
+    }
+
+    const parts: string[] = [
+      '── RECENT CONVERSATIONS ──',
+      'These are recent messages exchanged with your contacts.',
+    ];
+    for (const [, msgs] of groups) {
+      if (msgs.length === 0) continue;
+      const first = msgs[0]!;
+      const name = contactNameMap.get(first.contactId) || 'Unknown';
+      parts.push('');
+      parts.push(`With ${name} (via ${first.channel}):`);
+      for (const m of msgs) {
+        const ts = formatTimestamp(m.createdAt, tz);
+        const sender = m.direction === 'inbound' ? name : 'You';
+        parts.push(`  [${ts}] ${sender}: "${m.content}"`);
+      }
+    }
+    cm.setSlot('recent-messages', parts.join('\n'));
+  } else {
+    cm.setSlot('recent-messages', '');
+  }
+
+  // Slot 7: message-observations
   const messageObs = gathered.messageContext?.observations?.content ?? null;
   cm.setSlot('message-observations', messageObs
     ? '── MESSAGE OBSERVATIONS ──\n' + messageObs
     : '');
 
-  // Slot 7: goals
+  // Slot 8: goals
   const goalParts: string[] = [];
   if (gathered.goalContext?.goalSection) {
     goalParts.push(

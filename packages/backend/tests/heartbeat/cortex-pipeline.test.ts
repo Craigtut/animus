@@ -42,15 +42,21 @@ vi.mock('../../src/db/index.js', () => ({
   getMemoryDb: vi.fn(() => ({})),
   getAgentLogsDb: vi.fn(() => ({})),
   getPersonaDb: vi.fn(() => ({})),
+  getSessionsDb: vi.fn(() => ({})),
 }));
 
 vi.mock('../../src/db/stores/heartbeat-store.js', () => ({
-  getHeartbeatState: vi.fn(() => ({ tickNumber: 1, conversationHistory: null })),
+  getHeartbeatState: vi.fn(() => ({ tickNumber: 1 })),
   updateHeartbeatState: vi.fn(),
-  updateConversationHistory: vi.fn(),
-  getConversationHistory: vi.fn(() => null),
   insertThought: vi.fn(),
   insertExperience: vi.fn(),
+}));
+
+vi.mock('../../src/db/stores/session-store.js', () => ({
+  getSession: vi.fn(() => null),
+  upsertSession: vi.fn(),
+  deleteSession: vi.fn(),
+  listSessions: vi.fn(() => []),
 }));
 
 vi.mock('../../src/db/stores/persona-store.js', () => ({
@@ -87,6 +93,14 @@ vi.mock('../../src/db/stores/contact-store.js', () => ({
 
 vi.mock('../../src/db/stores/message-store.js', () => ({
   getConversationByContactAndChannel: vi.fn(),
+  createConversation: vi.fn(() => ({
+    id: 'conv-1',
+    contactId: 'contact-1',
+    channel: 'web',
+    startedAt: new Date().toISOString(),
+    lastMessageAt: new Date().toISOString(),
+    isActive: true,
+  })),
   createMessage: vi.fn(),
   getMessagesInRange: vi.fn(() => []),
   getMessagesSince: vi.fn(() => []),
@@ -157,7 +171,6 @@ interface MockGatherResult {
   recentMessages: Array<{ id: string; content: string; createdAt: string; direction: string }>;
   previousDecisions: Array<{ type: string; description: string; outcome: string }>;
   tickIntervalMs: number;
-  sessionState: 'cold' | 'warm';
   memoryContext: null;
   goalContext: null;
   spawnBudgetNote: null;
@@ -200,7 +213,6 @@ function createMockGather(overrides: Partial<MockGatherResult> = {}): MockGather
     recentMessages: [],
     previousDecisions: [],
     tickIntervalMs: 300000,
-    sessionState: 'cold',
     memoryContext: null,
     goalContext: null,
     spawnBudgetNote: null,
@@ -284,16 +296,17 @@ describe('Cortex Pipeline', () => {
 });
 
 describe('Context Slot Population', () => {
-  it('should populate all 9 slots', async () => {
+  it('should populate all 10 slots', async () => {
     const { populateContextSlots, MIND_SLOT_NAMES } = await import('../../src/heartbeat/cortex-mind.js');
 
-    expect(MIND_SLOT_NAMES).toHaveLength(9);
+    expect(MIND_SLOT_NAMES).toHaveLength(10);
     expect(MIND_SLOT_NAMES).toContain('credentials');
     expect(MIND_SLOT_NAMES).toContain('contacts');
     expect(MIND_SLOT_NAMES).toContain('core-self');
     expect(MIND_SLOT_NAMES).toContain('working-memory');
     expect(MIND_SLOT_NAMES).toContain('thought-observations');
     expect(MIND_SLOT_NAMES).toContain('experience-observations');
+    expect(MIND_SLOT_NAMES).toContain('recent-messages');
     expect(MIND_SLOT_NAMES).toContain('message-observations');
     expect(MIND_SLOT_NAMES).toContain('goals');
     expect(MIND_SLOT_NAMES).toContain('tasks');
@@ -312,8 +325,8 @@ describe('Context Slot Population', () => {
     const gathered = createMockGather();
     populateContextSlots(mockAgent as any, gathered as any);
 
-    // Should have been called 9 times (once per slot)
-    expect(mockSetSlot).toHaveBeenCalledTimes(9);
+    // Should have been called 10 times (once per slot)
+    expect(mockSetSlot).toHaveBeenCalledTimes(10);
 
     // Verify slot names
     const calledSlots = mockSetSlot.mock.calls.map((call: unknown[]) => call[0]);
@@ -323,6 +336,7 @@ describe('Context Slot Population', () => {
     expect(calledSlots).toContain('working-memory');
     expect(calledSlots).toContain('thought-observations');
     expect(calledSlots).toContain('experience-observations');
+    expect(calledSlots).toContain('recent-messages');
     expect(calledSlots).toContain('message-observations');
     expect(calledSlots).toContain('goals');
     expect(calledSlots).toContain('tasks');
@@ -418,12 +432,7 @@ describe('CortexMindState', () => {
     expect(state.providerManager).toBeNull();
     expect(state.model).toBeNull();
     expect(state.toolContext.current).toBeNull();
-    expect(state.initialized).toBe(false);
-    expect(state.conversationHistoryCheckpoint).toBeNull();
-    expect(state.compactionContext).toBeDefined();
-    expect(state.compactionContext.gathered).toBeNull();
-    expect(state.compactionContext.agentManager).toBeNull();
-    expect(state.compactionContext.compiledPersona).toBeNull();
+    expect(state.activeSession).toBeNull();
   });
 });
 
@@ -447,7 +456,7 @@ describe('Error Classification Routing', () => {
   it('should classify context overflow as recoverable', async () => {
     const { classifyError } = await import('@animus-labs/cortex');
 
-    const result = classifyError(new Error('context window exceeded'));
+    const result = classifyError(new Error('context overflow exceeded'));
     expect(result.category).toBe('context_overflow');
     expect(result.severity).toBe('recoverable');
   });

@@ -1451,55 +1451,16 @@ export function buildEphemeralSections(
     sections.push({ name: 'Recent Experiences', content: 'Recent experiences:\n' + lines.join('\n') });
   }
 
-  // 10b. Recent messages
-  if (gathered.recentMessages.length > 0) {
+  // 10b. Recent messages (per-contact only; cross-contact is in the recent-messages slot)
+  if (gathered.contact && gathered.recentMessages.length > 0) {
     const tz = gathered.aiTimezone || 'UTC';
-
-    if (gathered.contact) {
-      // Message/agent tick: single contact, flat list
-      const contactName = gathered.contact.fullName;
-      const lines = gathered.recentMessages.map(m => {
-        const ts = formatTimestamp(m.createdAt, tz);
-        const sender = m.direction === 'inbound' ? contactName : 'You';
-        return `[${ts}] ${sender}: "${m.content}" (via ${m.channel})`;
-      });
-      sections.push({ name: 'Recent Messages', content: 'Recent messages:\n' + lines.join('\n') });
-    } else {
-      // Interval tick: cross-contact, grouped by contact + channel
-      const contactNameMap = new Map<string, string>();
-      for (const { contact } of gathered.contacts) {
-        contactNameMap.set(contact.id, contact.fullName);
-      }
-
-      // Group messages by contactId + channel, preserving chronological order
-      const groups = new Map<string, typeof gathered.recentMessages>();
-      // Messages come newest-first from the query; reverse for chronological display
-      const chronological = [...gathered.recentMessages].reverse();
-      for (const m of chronological) {
-        const key = `${m.contactId}:${m.channel}`;
-        let group = groups.get(key);
-        if (!group) { group = []; groups.set(key, group); }
-        group.push(m);
-      }
-
-      const parts: string[] = [
-        '── RECENT CONVERSATIONS ──',
-        'These are recent messages exchanged with your contacts.',
-      ];
-      for (const [, msgs] of groups) {
-        if (msgs.length === 0) continue;
-        const first = msgs[0]!;
-        const name = contactNameMap.get(first.contactId) || 'Unknown';
-        parts.push('');
-        parts.push(`With ${name} (via ${first.channel}):`);
-        for (const m of msgs) {
-          const ts = formatTimestamp(m.createdAt, tz);
-          const sender = m.direction === 'inbound' ? name : 'You';
-          parts.push(`  [${ts}] ${sender}: "${m.content}"`);
-        }
-      }
-      sections.push({ name: 'Recent Conversations', content: parts.join('\n') });
-    }
+    const contactName = gathered.contact.fullName;
+    const lines = gathered.recentMessages.map(m => {
+      const ts = formatTimestamp(m.createdAt, tz);
+      const sender = m.direction === 'inbound' ? contactName : 'You';
+      return `[${ts}] ${sender}: "${m.content}" (via ${m.channel})`;
+    });
+    sections.push({ name: 'Recent Messages', content: 'Recent messages:\n' + lines.join('\n') });
   }
 
   // 11. Long-term memories (from semantic search)
