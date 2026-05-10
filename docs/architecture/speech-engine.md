@@ -367,6 +367,15 @@ const audio = await speech.tts.synthesize(sentence);
 
 See `docs/architecture/reflex-system.md` for the dual-path voice architecture.
 
+### Home Assistant Integration
+
+The HA integration uses two TTS paths:
+
+- **Batch** (`POST /channels/home-assistant/speech/synthesize`): Routed through the channel adapter and IPC bridge. Returns base64-encoded WAV. Used when HA's pipeline doesn't support streaming.
+- **Streaming** (`POST /api/speech/synthesize-stream`): Direct Fastify route bypassing channel IPC. Returns chunked Int16LE PCM with an 8-byte binary header. Authenticated via Bearer channel API key. Used by the HA TTS entity's `async_stream_tts_audio` for sentence-pipelined synthesis.
+
+See `animus-extensions/docs/architecture/home-assistant-voice.md` for the full HA voice integration architecture.
+
 ### Persona UI
 
 Settings > Persona includes voice selection:

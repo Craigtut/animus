@@ -55,6 +55,11 @@ export interface ProcessHostConfig {
     statusText?: string;
     activity?: string;
   }) => void;
+  transcribeAudio?: (audioBuffer: Buffer, sampleRate: number) => Promise<{ text: string }>;
+  synthesizeText?: (text: string, options?: { voiceId?: string; speed?: number }) => Promise<{ audioBase64: string; sampleRate: number }>;
+  getSpeechStatus?: () => Promise<{ sttAvailable: boolean; ttsAvailable: boolean; ffmpegAvailable: boolean; voiceCount: number }> | { sttAvailable: boolean; ttsAvailable: boolean; ffmpegAvailable: boolean; voiceCount: number };
+  getSpeechVoices?: () => Promise<Array<{ id: string; name: string; type: string; description?: string }>> | Array<{ id: string; name: string; type: string; description?: string }>;
+  updateConfig?: (updates: Record<string, unknown>) => Promise<void>;
 }
 
 export interface SendDeliveryResult {
@@ -340,6 +345,75 @@ export class ChannelProcessHost {
         );
       },
 
+      onSpeechTranscribe: async (msg) => {
+        if (!this.config.transcribeAudio) {
+          this.sendToChild({ type: 'speech_transcribe_response', id: msg.id, error: 'Speech not available' });
+          return;
+        }
+        try {
+          const audioBuffer = Buffer.from(msg.audioBase64, 'base64');
+          const result = await this.config.transcribeAudio(audioBuffer, msg.sampleRate ?? 16000);
+          this.sendToChild({ type: 'speech_transcribe_response', id: msg.id, text: result.text });
+        } catch (err) {
+          this.sendToChild({ type: 'speech_transcribe_response', id: msg.id, error: err instanceof Error ? err.message : String(err) });
+        }
+      },
+
+      onSpeechSynthesize: async (msg) => {
+        if (!this.config.synthesizeText) {
+          this.sendToChild({ type: 'speech_synthesize_response', id: msg.id, error: 'Speech not available' });
+          return;
+        }
+        try {
+          const opts: { voiceId?: string; speed?: number } = {};
+          if (msg.voiceId != null) opts.voiceId = msg.voiceId;
+          if (msg.speed != null) opts.speed = msg.speed;
+          const result = await this.config.synthesizeText(msg.text, opts);
+          this.sendToChild({ type: 'speech_synthesize_response', id: msg.id, audioBase64: result.audioBase64, sampleRate: result.sampleRate });
+        } catch (err) {
+          this.sendToChild({ type: 'speech_synthesize_response', id: msg.id, error: err instanceof Error ? err.message : String(err) });
+        }
+      },
+
+      onSpeechStatus: async (msg) => {
+        if (!this.config.getSpeechStatus) {
+          this.sendToChild({ type: 'speech_status_response', id: msg.id, sttAvailable: false, ttsAvailable: false, ffmpegAvailable: false, voiceCount: 0 });
+          return;
+        }
+        try {
+          const status = await this.config.getSpeechStatus();
+          this.sendToChild({ type: 'speech_status_response', id: msg.id, ...status });
+        } catch (err) {
+          this.sendToChild({ type: 'speech_status_response', id: msg.id, sttAvailable: false, ttsAvailable: false, ffmpegAvailable: false, voiceCount: 0 });
+        }
+      },
+
+      onSpeechVoices: async (msg) => {
+        if (!this.config.getSpeechVoices) {
+          this.sendToChild({ type: 'speech_voices_response', id: msg.id, voices: [] });
+          return;
+        }
+        try {
+          const voices = await this.config.getSpeechVoices();
+          this.sendToChild({ type: 'speech_voices_response', id: msg.id, voices });
+        } catch (err) {
+          this.sendToChild({ type: 'speech_voices_response', id: msg.id, error: err instanceof Error ? err.message : String(err) });
+        }
+      },
+
+      onConfigUpdateRequest: async (msg) => {
+        if (!this.config.updateConfig) {
+          this.sendToChild({ type: 'config_update_response', id: msg.id, error: 'Config updates not supported' });
+          return;
+        }
+        try {
+          await this.config.updateConfig(msg.updates);
+          this.sendToChild({ type: 'config_update_response', id: msg.id });
+        } catch (err) {
+          this.sendToChild({ type: 'config_update_response', id: msg.id, error: err instanceof Error ? err.message : String(err) });
+        }
+      },
+
       onHistoryResponse: (msg) => {
         const pending = this.pendingHistoryRequests.get(msg.id);
         if (pending) {
@@ -482,7 +556,8 @@ export class ChannelProcessHost {
     contactId: string,
     content: string,
     metadata?: Record<string, unknown>,
-    media?: Array<{ type: string; path: string; mimeType: string; filename?: string }>
+    media?: Array<{ type: string; path: string; mimeType: string; filename?: string }>,
+    replyTo?: string,
   ): Promise<SendDeliveryResult> {
     if (!this.childProcess || this.childProcess.killed) {
       this.log.error('Cannot send: process not running');
@@ -527,6 +602,7 @@ export class ChannelProcessHost {
         contactId,
         content,
       };
+      if (replyTo) msg.replyTo = replyTo;
       if (metadata) msg.metadata = metadata;
       if (ipcMedia) msg.media = ipcMedia;
       this.sendToChild(msg);
@@ -683,6 +759,10 @@ export class ChannelProcessHost {
 
   getRegisteredRoutes(): string[] {
     return [...this.registeredRoutes];
+  }
+
+  getDecryptedConfig(): Record<string, unknown> | undefined {
+    return this.config.decryptedConfig;
   }
 
   // ---- Internal ----
