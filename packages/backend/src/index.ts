@@ -15,7 +15,7 @@ import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { initializeDatabases, closeDatabases, getSystemDb, DATABASE_COUNT } from './db/index.js';
+import { initializeDatabases, closeDatabases, getSystemDb, getPersonaDb, DATABASE_COUNT } from './db/index.js';
 import { createTRPCContext, appRouter } from './api/index.js';
 import authPlugin from './plugins/auth.js';
 import { initializeHeartbeat, stopHeartbeat, handleAgentComplete, handleScheduledTask } from './heartbeat/index.js';
@@ -287,6 +287,18 @@ async function main() {
     }
   );
 
+  fastify.addContentTypeParser(
+    'audio/wav',
+    { bodyLimit: 50 * 1024 * 1024 },
+    async (request: import('fastify').FastifyRequest, payload: import('stream').Readable) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of payload) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks);
+    }
+  );
+
   // Capture raw body for channel webhook routes (needed for signature validation)
   fastify.addHook('preParsing', async (request, _reply, payload) => {
     if (request.url.startsWith('/channels/')) {
@@ -360,6 +372,19 @@ async function main() {
 
     if (result.type === 'response') {
       const resp = result.data;
+
+      // Check for streaming signal from reply-streaming capable channels.
+      // The child process handles auth and reportIncoming(), then signals
+      // the parent to take over SSE streaming by returning { streaming: true }.
+      const body = resp.body as Record<string, unknown> | undefined;
+      if (resp.status === 200 && body?.['streaming'] === true) {
+        const { bridgeReplyStream } = await import('./channels/reply-stream-bridge.js');
+        const { getEventBus } = await import('./lib/event-bus.js');
+        const streamRequestId = body['requestId'] as string | undefined;
+        bridgeReplyStream(reply.raw, channelType, getEventBus(), streamRequestId);
+        return;
+      }
+
       if (resp.headers) {
         for (const [key, value] of Object.entries(resp.headers)) {
           reply.header(key, value);
@@ -448,6 +473,17 @@ async function main() {
   // Initialize speech service (lazy-loads models on first use)
   const { initSpeechService } = await import('./speech/index.js');
   const speechService = await initSpeechService({ dataDir: DATA_DIR });
+
+  // Wire TTS default voice to persona setting
+  const personaStoreModule = await import('./db/stores/persona-store.js');
+  speechService.tts.setVoiceIdProvider(() => {
+    try {
+      const persona = personaStoreModule.getPersona(getPersonaDb());
+      return persona?.voiceId ?? null;
+    } catch {
+      return null;
+    }
+  });
 
   // Initialize download manager
   const { initDownloadManager, getSpeechAssets } = await import('./downloads/index.js');

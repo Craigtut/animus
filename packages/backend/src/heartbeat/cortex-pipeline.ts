@@ -267,6 +267,8 @@ export interface PipelineConfig {
   model: string;
   /** Whether to capture full context snapshots per phase (debug mode). */
   contextDebugMode: boolean;
+  /** Low-latency mode: defers THOUGHT after agentic loop, disables working tags. */
+  lowLatency?: boolean;
   /** Persona existence paradigm for first-tick kickstart. */
   existenceParadigm?: 'simulated_life' | 'digital_consciousness';
   /** Persona existence location/world description for first-tick kickstart. */
@@ -479,6 +481,8 @@ async function executeAgenticLoop(
   const eventBus = getEventBus();
   const isMessageTrigger = gathered.trigger.type === 'message';
   const triggerChannel = gathered.trigger.channel ?? '';
+  const triggerContactId = gathered.contact?.id ?? gathered.trigger.contactId ?? '';
+  const triggerRequestId = (gathered.trigger?.metadata as Record<string, unknown> | undefined)?.['externalConversationId'] as string | undefined;
 
   log.info(`AGENTIC LOOP starting (tick #${tickNumber})`);
 
@@ -543,12 +547,14 @@ async function executeAgenticLoop(
         // frontend can render them with visual differentiation. For external channels
         // (SMS, Discord, API), store raw in the DB for observability but deliver
         // userFacing via channelContent so the adapter sends clean text.
+        const triggerReplyTo = triggerMetadata?.['externalConversationId'] as string | undefined;
         await router.sendOutbound({
           contactId: turnContactId,
           channel: gathered.trigger.channel!,
           content: isWebChannel ? rawText.trim() : rawText.trim(),
           ...(!isWebChannel ? { channelContent: userFacingText.trim() } : {}),
           ...(hasReplyMetadata ? { metadata: replyMetadata } : {}),
+          ...(triggerReplyTo ? { replyTo: triggerReplyTo } : {}),
         });
         log.info(`Turn reply sent on "${gathered.trigger.channel}" for tick #${tickNumber} (${userFacingText.length} chars)`);
 
@@ -557,6 +563,8 @@ async function executeAgenticLoop(
           content: userFacingText.trim(),
           tickNumber,
           channel: triggerChannel,
+          contactId: triggerContactId,
+          ...(triggerRequestId ? { requestId: triggerRequestId } : {}),
         });
       } catch (channelErr) {
         log.debug('Turn reply send failed:', channelErr);
@@ -584,6 +592,8 @@ async function executeAgenticLoop(
       accumulated: replyAccumulated + chunk,
       turnIndex: replyTurnsSent,
       channel: triggerChannel,
+      contactId: triggerContactId,
+      ...(triggerRequestId ? { requestId: triggerRequestId } : {}),
     });
   });
 
@@ -613,13 +623,17 @@ async function executeAgenticLoop(
 
     log.info(`AGENTIC LOOP complete (tick #${tickNumber}): reply=${replyAccumulated.length} chars, turns sent=${replyTurnsSent}`);
 
-    // Emit reply completion event
-    if (isMessageTrigger && replyAccumulated.trim()) {
+    // Emit reply completion event. Always emit for message triggers so that
+    // streaming SSE bridges (reply-stream-bridge) close promptly rather than
+    // waiting for the heartbeat:tick_end fallback after the Reflect phase.
+    if (isMessageTrigger) {
       eventBus.emit('reply:complete', {
         content: replyAccumulated.trim(),
         tickNumber,
         totalTurns: replyTurnsSent,
         channel: triggerChannel,
+        contactId: triggerContactId,
+        ...(triggerRequestId ? { requestId: triggerRequestId } : {}),
       });
     }
 
@@ -636,6 +650,17 @@ async function executeAgenticLoop(
     chunkUnsub();
 
     log.error(`AGENTIC LOOP failed (tick #${tickNumber}):`, err);
+
+    if (isMessageTrigger) {
+      eventBus.emit('reply:complete', {
+        content: replyAccumulated.trim(),
+        tickNumber,
+        totalTurns: replyTurnsSent,
+        channel: triggerChannel,
+        contactId: triggerContactId,
+        ...(triggerRequestId ? { requestId: triggerRequestId } : {}),
+      });
+    }
 
     return {
       replyText: replyAccumulated,
@@ -1002,7 +1027,7 @@ export async function executeCortexPipeline(
   currentPhase: { value: PipelinePhase },
   pendingInjections: Array<{ content: string; contactId: string; channel: string }>,
 ): Promise<PipelineResult> {
-  const { gathered, tickNumber } = config;
+  const { gathered, tickNumber, cortexAgent } = config;
   const triggerInfo = {
     type: gathered.trigger.type,
     contactId: gathered.trigger.contactId,
@@ -1010,22 +1035,33 @@ export async function executeCortexPipeline(
     messageId: gathered.trigger.messageId,
   };
 
-  // Phase 2: THOUGHT
-  currentPhase.value = 'thought';
-  logPhaseEvent(config.logSessionId, 'thought_start', { tickNumber });
-  const thoughtStartTime = Date.now();
-  const thought = await executeThought(config);
-  logPhaseEvent(config.logSessionId, 'thought_end', {
-    tickNumber,
-    durationMs: Date.now() - thoughtStartTime,
-    content: thought?.content ?? null,
-    importance: thought?.importance ?? null,
-    failed: thought === null,
-  });
+  // Low-latency mode: disable working tags for this tick
+  if (config.lowLatency) {
+    cortexAgent.setWorkingTagsEnabled(false);
+    log.info(`Low-latency mode active (tick #${tickNumber}): working tags disabled, THOUGHT deferred`);
+  }
 
-  // Log THOUGHT phase usage (structuredComplete/directComplete captures it)
-  const thoughtUsage = config.cortexAgent.getLastDirectUsage();
-  logPhaseUsage(config, 'thought', thoughtUsage);
+  try {
+
+  // Phase 2: THOUGHT (deferred in low-latency mode)
+  let thought: ThoughtResult | null = null;
+  if (!config.lowLatency) {
+    currentPhase.value = 'thought';
+    logPhaseEvent(config.logSessionId, 'thought_start', { tickNumber });
+    const thoughtStartTime = Date.now();
+    thought = await executeThought(config);
+    logPhaseEvent(config.logSessionId, 'thought_end', {
+      tickNumber,
+      durationMs: Date.now() - thoughtStartTime,
+      content: thought?.content ?? null,
+      importance: thought?.importance ?? null,
+      failed: thought === null,
+    });
+
+    // Log THOUGHT phase usage (structuredComplete/directComplete captures it)
+    const thoughtUsage = cortexAgent.getLastDirectUsage();
+    logPhaseUsage(config, 'thought', thoughtUsage);
+  }
 
   // Phase 3: AGENTIC LOOP
   currentPhase.value = 'agentic-loop';
@@ -1096,6 +1132,24 @@ export async function executeCortexPipeline(
   const loopUsage = accumulatedToCortexUsage(loopUsageAcc);
   logPhaseUsage(config, 'agentic_loop', loopUsage);
 
+  // Low-latency mode: run THOUGHT now (after loop, before REFLECT)
+  if (config.lowLatency && thought === null) {
+    currentPhase.value = 'thought';
+    logPhaseEvent(config.logSessionId, 'thought_start', { tickNumber, deferred: true });
+    const thoughtStartTime = Date.now();
+    thought = await executeThought(config);
+    logPhaseEvent(config.logSessionId, 'thought_end', {
+      tickNumber,
+      durationMs: Date.now() - thoughtStartTime,
+      content: thought?.content ?? null,
+      importance: thought?.importance ?? null,
+      failed: thought === null,
+      deferred: true,
+    });
+    const thoughtUsage = cortexAgent.getLastDirectUsage();
+    logPhaseUsage(config, 'thought', thoughtUsage);
+  }
+
   // Decide whether to run REFLECT
   const thoughtFailed = thought === null;
   const loopHadContent = loopResult.hadTurns;
@@ -1131,7 +1185,7 @@ export async function executeCortexPipeline(
   });
 
   // Log REFLECT phase usage (structuredComplete captures it)
-  const reflectUsage = config.cortexAgent.getLastDirectUsage();
+  const reflectUsage = cortexAgent.getLastDirectUsage();
   logPhaseUsage(config, 'reflect', reflectUsage);
 
   // Assemble MindOutput from the combined pipeline results
@@ -1165,6 +1219,12 @@ export async function executeCortexPipeline(
     ephemeralSections: loopResult.ephemeralSections,
     firstTurnInputTokens,
   };
+
+  } finally {
+    if (config.lowLatency) {
+      cortexAgent.setWorkingTagsEnabled(true);
+    }
+  }
 }
 
 // ============================================================================

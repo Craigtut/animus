@@ -157,6 +157,7 @@ export async function executeOutput(
       ? Object.fromEntries(Object.entries(rawTriggerMetadata).filter(([k]) => k !== 'media'))
       : undefined;
     const hasReplyMetadata = replyMetadata && Object.keys(replyMetadata).length > 0;
+    const replyTo = rawTriggerMetadata?.['externalConversationId'] as string | undefined;
 
     try {
       // On proactive ticks (no gathered.contact), validate the contact exists
@@ -183,6 +184,7 @@ export async function executeOutput(
             channel,
             content: finalReplyContent,
             ...(hasReplyMetadata ? { metadata: replyMetadata } : {}),
+            ...(replyTo ? { replyTo } : {}),
             ...(replyMedia && replyMedia.length > 0 ? {
               media: replyMedia.map(m => {
                 const entry: { type: 'image' | 'audio' | 'video' | 'file'; path: string; filename?: string } = {
@@ -207,6 +209,7 @@ export async function executeOutput(
           channel,
           content: finalReplyContent,
           ...(hasReplyMetadata ? { metadata: replyMetadata } : {}),
+          ...(replyTo ? { replyTo } : {}),
           ...(replyMedia && replyMedia.length > 0 ? {
             media: replyMedia.map(m => {
               const entry: { type: 'image' | 'audio' | 'video' | 'file'; path: string; filename?: string } = {
