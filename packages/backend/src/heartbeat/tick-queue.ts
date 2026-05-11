@@ -56,8 +56,13 @@ export class TickQueue {
   /** Per-contact debounce timers */
   private messageDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  /** Track if a contact already has a tick queued */
+  /** Track if a contact already has a tick queued or running */
   private queuedContactTicks = new Set<string>();
+
+  /** Messages that arrived while a tick was running for the same contact.
+   *  Keyed by contactId; only the latest trigger is kept (new messages
+   *  supersede older ones since gather will pick up all stored messages). */
+  private pendingFollowUps = new Map<string, TriggerContext>();
 
   /** Interval timer handle */
   private intervalTimer: ReturnType<typeof setInterval> | null = null;
@@ -111,9 +116,14 @@ export class TickQueue {
       return;
     }
 
-    // If this contact already has a tick queued, skip — the existing
-    // tick will gather all messages when it runs
+    // If this contact already has a tick queued or running, store the
+    // trigger as a pending follow-up. When the current tick finishes,
+    // the follow-up will be enqueued as a new tick. This preserves
+    // the trigger metadata (including requestId/replyTo) so the reply
+    // routes back to the correct waiting HTTP connection.
     if (this.queuedContactTicks.has(contactId)) {
+      this.pendingFollowUps.set(contactId, trigger);
+      log.debug(`Stored pending follow-up for contact ${contactId} (tick in progress)`);
       return;
     }
 
@@ -243,6 +253,7 @@ export class TickQueue {
   clear(): void {
     this.queue = [];
     this.queuedContactTicks.clear();
+    this.pendingFollowUps.clear();
     for (const timer of this.messageDebounceTimers.values()) {
       clearTimeout(timer);
     }
@@ -275,11 +286,19 @@ export class TickQueue {
     } catch (err) {
       log.error(`Error processing tick ${tick.id}:`, err);
     } finally {
-      // Remove contact from queued set AFTER processing completes,
-      // so new messages arriving during an active tick are properly
-      // coalesced rather than creating duplicate ticks.
-      if (tick.trigger.contactId) {
-        this.queuedContactTicks.delete(tick.trigger.contactId);
+      const contactId = tick.trigger.contactId;
+      if (contactId) {
+        this.queuedContactTicks.delete(contactId);
+
+        // If a follow-up message arrived during this tick, enqueue it now.
+        // The follow-up trigger carries the new message's requestId so
+        // the reply routes back to the correct waiting HTTP connection.
+        const followUp = this.pendingFollowUps.get(contactId);
+        if (followUp) {
+          this.pendingFollowUps.delete(contactId);
+          log.info(`Enqueuing pending follow-up for contact ${contactId}`);
+          this.enqueueMessage(followUp);
+        }
       }
       this.processing = false;
       // Reset interval timer after any tick completes
