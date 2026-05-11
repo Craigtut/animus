@@ -1132,9 +1132,12 @@ export async function executeCortexPipeline(
   const loopUsage = accumulatedToCortexUsage(loopUsageAcc);
   logPhaseUsage(config, 'agentic_loop', loopUsage);
 
-  // Low-latency mode: run THOUGHT now (after loop, before REFLECT)
+  // Low-latency mode: run THOUGHT now (after loop, before REFLECT).
+  // Use 'reflect' phase so that mid-tick messages arriving during the
+  // deferred thought are handled by TickQueue as follow-ups, NOT queued
+  // into pendingInjections (which was only consumed before the loop).
   if (config.lowLatency && thought === null) {
-    currentPhase.value = 'thought';
+    currentPhase.value = 'reflect';
     logPhaseEvent(config.logSessionId, 'thought_start', { tickNumber, deferred: true });
     const thoughtStartTime = Date.now();
     thought = await executeThought(config);
