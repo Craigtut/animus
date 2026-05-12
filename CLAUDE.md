@@ -111,7 +111,7 @@ The mind is a top-level orchestrator. It does not perform long-running work; it 
 
 ### The Cortex Package (`@animus-labs/cortex`) -- External
 
-**Cortex lives in its own repository, not in this monorepo.** The local checkout is at `/Users/craigtut/Code/cortex-mono/`. It is a general-purpose agent framework wrapping `@mariozechner/pi-agent-core` with MCP tool support, tool permissions, budget guards, context compaction, a skill system, event logging, built-in tools, and provider management. Animus consumes it as an external dependency via `file:` protocol (pointing to the local cortex-mono checkout). When you need to read or modify Cortex source, look in `/Users/craigtut/Code/cortex-mono/packages/cortex/src/`. Cortex framework docs are at `/Users/craigtut/Code/cortex-mono/docs/`.
+**Cortex lives in its own repository, not in this monorepo.** It is published on npm as `@animus-labs/cortex` and consumed as a normal dependency. The local checkout is at `/Users/craigtut/Code/cortex-mono/`. It is a general-purpose agent framework wrapping `@mariozechner/pi-agent-core` with MCP tool support, tool permissions, budget guards, context compaction, a skill system, event logging, built-in tools, and provider management. When you need to read or modify Cortex source, look in `/Users/craigtut/Code/cortex-mono/packages/cortex/src/`. Cortex framework docs are at `/Users/craigtut/Code/cortex-mono/docs/`.
 
 **Two main exports:** `CortexAgent` (agentic loop) and `ProviderManager` (provider discovery, OAuth, model resolution).
 
@@ -152,9 +152,8 @@ cp .env.example .env
 # NOTE: In dev mode, the backend imports @animus-labs/shared and @animus-labs/agents
 # source (.ts) directly via the "source" export condition (--conditions source).
 # This means changes to shared/agents source are picked up immediately -- no need
-# to rebuild their dist. @animus-labs/cortex is an external file: dependency
-# (from cortex-mono) and also supports the source condition via its package.json
-# exports. The dist is only used for production builds. If you need dist:
+# to rebuild their dist. @animus-labs/cortex is published on npm and resolved
+# from node_modules. The dist is only used for production builds. If you need dist:
 # npm run build -w @animus-labs/shared
 ```
 

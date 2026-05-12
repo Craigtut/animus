@@ -126,7 +126,7 @@ All databases live under `data/databases/` (see `docs/architecture/data-director
 | **Codex SDK** | Legacy OpenAI Codex subprocess agent provider through `@animus-labs/agents` |
 | **OpenCode SDK** | Legacy OpenCode.ai subprocess agent provider through `@animus-labs/agents` |
 
-`@animus-labs/cortex` lives in the sibling `cortex-mono` repository and is consumed via a local `file:` dependency. The backend imports Cortex; Cortex does not import Animus.
+`@animus-labs/cortex` lives in the sibling `cortex-mono` repository and is published on npm. The backend imports Cortex; Cortex does not import Animus.
 
 The `@animus-labs/agents` abstraction remains available for legacy subprocess providers, but the heartbeat mind uses Cortex.
 
