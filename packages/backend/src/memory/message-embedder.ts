@@ -19,6 +19,14 @@ import { createLogger } from '../lib/logger.js';
 const log = createLogger('MessageEmbedder', 'heartbeat');
 
 const TABLE_NAME = 'message_embeddings';
+const DEFAULT_RECALL_LIMIT = 10;
+const SCOPED_RECALL_CANDIDATE_LIMIT = 50;
+
+export interface MessageRecallSearchOptions {
+  timeRange?: { start?: Date; end?: Date };
+  contactId?: string;
+  channel?: string;
+}
 
 export class MessageEmbedder {
   private table: lancedb.Table | null = null;
@@ -61,7 +69,7 @@ export class MessageEmbedder {
 
   async search(
     query: string,
-    options?: { timeRange?: { start?: Date; end?: Date } },
+    options?: MessageRecallSearchOptions,
   ): Promise<RecallResult[]> {
     if (!this.table) return [];
 
@@ -69,7 +77,10 @@ export class MessageEmbedder {
     if (count === 0) return [];
 
     const queryVector = await this.embedder.embedSingle(query);
-    let builder = this.table.search(queryVector).limit(10);
+    const isScoped = !!(options?.contactId || options?.channel);
+    let builder = this.table.search(queryVector).limit(
+      isScoped ? SCOPED_RECALL_CANDIDATE_LIMIT : DEFAULT_RECALL_LIMIT,
+    );
 
     if (options?.timeRange) {
       const filters: string[] = [];
@@ -92,6 +103,8 @@ export class MessageEmbedder {
     for (const r of results) {
       const msg = messageStore.getMessageById(msgDb, r.id as string);
       if (!msg) continue;
+      if (options?.contactId && msg.contactId !== options.contactId) continue;
+      if (options?.channel && msg.channel !== options.channel) continue;
 
       recallResults.push({
         content: msg.content,
@@ -99,6 +112,7 @@ export class MessageEmbedder {
         type: 'message',
         role: msg.direction === 'inbound' ? 'user' : 'assistant',
       });
+      if (recallResults.length >= DEFAULT_RECALL_LIMIT) break;
     }
 
     return recallResults;

@@ -45,10 +45,15 @@ const CORTEX_BUILTIN_TOOLS: Record<string, SdkToolDef> = {
   Read: { displayName: 'Read File', description: 'Read contents of a file', riskTier: 'safe' },
   Write: { displayName: 'Write File', description: 'Write contents to a file', riskTier: 'acts' },
   Edit: { displayName: 'Edit File', description: 'Edit sections of a file', riskTier: 'acts' },
+  UndoEdit: { displayName: 'Undo Edit', description: 'Revert the most recent file edit or write', riskTier: 'acts' },
   Glob: { displayName: 'Glob Search', description: 'Find files matching a glob pattern', riskTier: 'safe' },
   Grep: { displayName: 'Grep Search', description: 'Search file contents with regex', riskTier: 'safe' },
   WebFetch: { displayName: 'Web Fetch', description: 'Fetch content from a URL', riskTier: 'communicates' },
   SubAgent: { displayName: 'Sub Agent', description: 'Spawn a sub-agent for delegated work', riskTier: 'safe' },
+  TaskOutput: { displayName: 'Task Output', description: 'Poll or control background shell tasks', riskTier: 'safe' },
+  ToolSearch: { displayName: 'Tool Search', description: 'Load deferred tool schemas on demand', riskTier: 'safe' },
+  load_skill: { displayName: 'Load Skill', description: 'Load skill instructions into active context', riskTier: 'safe' },
+  recall: { displayName: 'Recall', description: 'Search persisted conversation history', riskTier: 'safe' },
 };
 
 // ---------------------------------------------------------------------------
@@ -132,6 +137,23 @@ export function seedToolPermissions(
         });
         seeded++;
       }
+    }
+  }
+
+  // 4. Purge orphaned tool sources (e.g., old sdk:claude rows from legacy agent adapters)
+  const VALID_SOURCES = new Set(['animus:core', 'cortex:builtin']);
+  if (plugins) {
+    for (const p of plugins) VALID_SOURCES.add(`plugin:${p.name}`);
+  }
+  const allRows = systemDb.prepare('SELECT tool_source FROM tool_permissions').all() as Array<{ tool_source: string }>;
+  const orphanSources = new Set<string>();
+  for (const row of allRows) {
+    if (!VALID_SOURCES.has(row.tool_source)) orphanSources.add(row.tool_source);
+  }
+  if (orphanSources.size > 0) {
+    for (const src of orphanSources) {
+      const deleted = systemDb.prepare('DELETE FROM tool_permissions WHERE tool_source = ?').run(src);
+      log.info(`Purged ${deleted.changes} orphaned tools from source "${src}"`);
     }
   }
 
