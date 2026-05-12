@@ -18,7 +18,34 @@ We evaluated four approaches (native SDK sub-agents, custom orchestration, hybri
 
 Sub-agents are extensions of the mind. They carry the same personality, emotional context, and understanding of the user. The difference is scope: the mind is the quick, aware orchestrator; sub-agents are the ones that go deep on a specific task.
 
-**The mind can handle simple tasks directly.** Not every request needs delegation. If the mind can answer a question, perform a quick lookup, or handle a simple action within the current tick, it should do so — producing a reply directly in its structured output. Sub-agents are reserved for work that would block the mind: research tasks, multi-step workflows, code generation, lengthy analysis, or anything that requires extended tool use. The mind naturally makes this judgment as part of its decision-making.
+**The mind can handle simple tasks directly.** Not every request needs delegation. If the mind can answer a question, perform a quick lookup, or handle a simple action within the current tick, it should do so. Sub-agents are reserved for work that would block the mind or consume significant context window.
+
+### When to Delegate vs. Handle Directly
+
+The mind should develop a bias toward delegation for anything beyond simple, quick tasks. The mind is an orchestrator: it acknowledges, delegates, and synthesizes. It does not do extended grunt work itself.
+
+**Handle directly (no sub-agent needed):**
+- Simple questions the mind can answer from context or with 1-2 tool calls
+- Quick lookups, status checks, or brief information retrieval
+- Short conversational exchanges
+- Tasks where the overhead of spawning a sub-agent exceeds the work itself
+
+**Delegate to a sub-agent:**
+- Research tasks requiring multiple web searches or tool calls (3+)
+- Multi-step workflows with sequential dependencies
+- Code generation, file creation, or multi-file modifications
+- Tasks where the user uses imperative, task-oriented language ("go research...", "put together a report on...", "find out about...")
+- Lengthy analysis or synthesis that would consume significant context window
+- Any task where the mind would need to narrate its process across multiple turns of tool use
+- Tasks that could block the mind from being responsive to other interactions
+
+**The delegation pattern:**
+1. Mind immediately acknowledges the request: "I'll look into that for you."
+2. Mind produces a `spawn_agent` decision with clear task instructions.
+3. Sub-agent works independently, using `send_message` only for meaningful milestones (not narrating every step).
+4. On `agent_complete`, mind reads the result and delivers a clean synthesis to the user.
+
+When the mind does handle multi-step work inline (borderline cases with 2-3 tool calls), Cortex working tags separate internal analysis from user-facing communication. The mind wraps its reasoning in `<working>` tags and keeps progress updates and final answers outside them. Cortex framework details live in `docs/cortex/working-tags.md` in the cortex-mono repository.
 
 **Sub-agents are only spawned for primary contact tasks.** The EXECUTE stage enforces this: `spawn_agent` decisions produced during non-primary contact ticks are dropped. This is a hard permission boundary. See `docs/architecture/contacts.md` for the full permission tier system.
 

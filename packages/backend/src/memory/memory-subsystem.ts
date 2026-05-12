@@ -13,6 +13,8 @@ import { LANCEDB_PATH } from '../utils/env.js';
 import { LocalEmbeddingProvider } from './embedding-provider.js';
 import { VectorStore } from './vector-store.js';
 import { MemoryManager } from './memory-manager.js';
+import { MessageEmbedder } from './message-embedder.js';
+import * as lancedb from '@lancedb/lancedb';
 
 const log = createLogger('MemorySubsystem', 'heartbeat');
 
@@ -21,6 +23,7 @@ export class MemorySubsystem implements SubsystemLifecycle {
   embeddingProvider: LocalEmbeddingProvider | null = null;
   vectorStore: VectorStore | null = null;
   memoryManager: MemoryManager | null = null;
+  messageEmbedder: MessageEmbedder | null = null;
 
   async start(): Promise<void> {
     const memDb = getMemoryDb();
@@ -28,11 +31,17 @@ export class MemorySubsystem implements SubsystemLifecycle {
     this.vectorStore = new VectorStore(LANCEDB_PATH, this.embeddingProvider.dimensions);
     await this.vectorStore.initialize();
     this.memoryManager = new MemoryManager(memDb, this.vectorStore, this.embeddingProvider);
-    log.debug('Memory system initialized');
+
+    const lanceConnection = await lancedb.connect(LANCEDB_PATH);
+    this.messageEmbedder = new MessageEmbedder(lanceConnection, this.embeddingProvider);
+    await this.messageEmbedder.initialize();
+
+    log.debug('Memory system initialized (including message embeddings)');
   }
 
   async stop(): Promise<void> {
     this.memoryManager = null;
+    this.messageEmbedder = null;
     this.vectorStore = null;
     this.embeddingProvider = null;
   }

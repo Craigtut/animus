@@ -34,6 +34,7 @@ const mockSendToChannel = vi.fn(async () => true);
 vi.mock('../../src/channels/channel-manager.js', () => ({
   getChannelManager: () => ({
     sendToChannel: mockSendToChannel,
+    getChannelManifest: vi.fn(() => undefined),
   }),
 }));
 
@@ -103,7 +104,7 @@ describe('channel-router', () => {
       expect(result).not.toBeNull();
       expect(result!.content).toBe('Reply to you');
       expect(result!.direction).toBe('outbound');
-      expect(mockSendToChannel).toHaveBeenCalledWith('web', contact.id, 'Reply to you', undefined, undefined);
+      expect(mockSendToChannel).toHaveBeenCalledWith('web', contact.id, 'Reply to you', undefined, undefined, undefined);
     });
 
     it('still stores message when delivery fails', async () => {

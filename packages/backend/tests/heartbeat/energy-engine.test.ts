@@ -9,7 +9,7 @@ import {
   type WakeUpContext,
 } from '../../src/heartbeat/energy-engine.js';
 import { applyDecay } from '../../src/heartbeat/emotion-engine.js';
-import type { EmotionState } from '@animus/shared';
+import type { EmotionState } from '@animus-labs/shared';
 
 // ============================================================================
 // getEnergyBand
@@ -328,18 +328,18 @@ describe('formatEnergyContext', () => {
     const ctx = formatEnergyContext(0.85, 'peak', 0.85, 300000);
     expect(ctx).toContain('YOUR ENERGY');
     expect(ctx).toContain('peak');
-    expect(ctx).toContain('sharp and energized');
+    expect(ctx).toContain('fully energized');
   });
 
   it('includes band description for alert', () => {
     const ctx = formatEnergyContext(0.55, 'alert', 0.85, 300000);
     expect(ctx).toContain('alert');
-    expect(ctx).toContain('steady and present');
+    expect(ctx).toContain('alert and capable');
   });
 
   it('includes band description for sleeping', () => {
     const ctx = formatEnergyContext(0.02, 'sleeping', 0.0, 1800000);
-    expect(ctx).toContain('deep in sleep');
+    expect(ctx).toContain('You are asleep');
   });
 
   it('is pure state — no instructional content', () => {

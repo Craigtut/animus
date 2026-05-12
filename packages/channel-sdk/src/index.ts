@@ -63,6 +63,28 @@ export interface AdapterContext {
     statusText?: string;
     activity?: string;
   }): void;
+  transcribeAudio(params: {
+    audioBase64: string;
+    sampleRate?: number;
+  }): Promise<{ text: string }>;
+  synthesizeText(params: {
+    text: string;
+    voiceId?: string;
+    speed?: number;
+  }): Promise<{ audioBase64: string; sampleRate: number }>;
+  getSpeechStatus(): Promise<{
+    sttAvailable: boolean;
+    ttsAvailable: boolean;
+    ffmpegAvailable: boolean;
+    voiceCount: number;
+  }>;
+  getSpeechVoices(): Promise<Array<{
+    id: string;
+    name: string;
+    type: string;
+    description?: string;
+  }>>;
+  updateConfig(updates: Record<string, unknown>): Promise<void>;
 }
 
 export interface ChannelAction {
@@ -90,7 +112,7 @@ export interface SendResult {
 export interface ChannelAdapter {
   start(): Promise<void>;
   stop(): Promise<void>;
-  send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<SendResult | void>;
+  send(contactId: string, content: string, metadata?: Record<string, unknown>, replyTo?: string): Promise<SendResult | void>;
   performAction?(action: ChannelAction): Promise<void>;
   getHistory?(params: {
     conversationId: string;

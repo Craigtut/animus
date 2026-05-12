@@ -3,7 +3,7 @@
  */
 
 import Database from 'better-sqlite3';
-import { readFileSync } from 'fs';
+import { readdirSync, readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -15,29 +15,28 @@ function applySql(db: Database.Database, sqlPath: string): void {
   db.exec(sql);
 }
 
+function applyMigrations(db: Database.Database, group: string): void {
+  const dir = path.join(MIGRATIONS_DIR, group);
+  const files = readdirSync(dir)
+    .filter((file) => file.endsWith('.sql'))
+    .sort();
+
+  for (const file of files) {
+    applySql(db, path.join(dir, file));
+  }
+}
+
 export function createTestSystemDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
-  applySql(db, path.join(MIGRATIONS_DIR, 'system', '001_initial.sql'));
-  applySql(db, path.join(MIGRATIONS_DIR, 'system', '002_persona_expansion.sql'));
-  applySql(db, path.join(MIGRATIONS_DIR, 'system', '003_credentials.sql'));
-  applySql(db, path.join(MIGRATIONS_DIR, 'system', '004_log_categories.sql'));
-  applySql(db, path.join(MIGRATIONS_DIR, 'system', '005_energy_settings.sql'));
-  applySql(db, path.join(MIGRATIONS_DIR, 'system', '006_plugins.sql'));
-  applySql(db, path.join(MIGRATIONS_DIR, 'system', '010_tool_permissions.sql'));
-  applySql(db, path.join(MIGRATIONS_DIR, 'system', '018_vault_entries.sql'));
-  applySql(db, path.join(MIGRATIONS_DIR, 'system', '019_telemetry.sql'));
-  applySql(db, path.join(MIGRATIONS_DIR, 'system', '020_plugin_status.sql'));
-  applySql(db, path.join(MIGRATIONS_DIR, 'system', '021_vault_created_by.sql'));
+  applyMigrations(db, 'system');
   return db;
 }
 
 export function createTestHeartbeatDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
-  applySql(db, path.join(MIGRATIONS_DIR, 'heartbeat', '001_initial.sql'));
-  applySql(db, path.join(MIGRATIONS_DIR, 'heartbeat', '003_tool_approvals.sql'));
-  applySql(db, path.join(MIGRATIONS_DIR, 'heartbeat', '004_goal_planning_prompts.sql'));
+  applyMigrations(db, 'heartbeat');
   return db;
 }
 
@@ -67,8 +66,7 @@ export function createTestPersonaDb(): Database.Database {
 export function createTestAgentLogsDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
-  applySql(db, path.join(MIGRATIONS_DIR, 'agent-logs', '001_initial.sql'));
-  applySql(db, path.join(MIGRATIONS_DIR, 'agent-logs', '002_credential_audit.sql'));
+  applyMigrations(db, 'agent-logs');
   return db;
 }
 
@@ -76,5 +74,12 @@ export function createTestContactsDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   applySql(db, path.join(MIGRATIONS_DIR, 'contacts', '001_initial.sql'));
+  return db;
+}
+
+export function createTestSessionsDb(): Database.Database {
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  applyMigrations(db, 'sessions');
   return db;
 }

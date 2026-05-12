@@ -10,9 +10,8 @@
  * See docs/architecture/observational-memory.md — The Reflector Agent.
  */
 
-import type { AgentManager } from '@animus-labs/agents';
-import type { SessionUsage } from '@animus-labs/agents';
 import { estimateTokens } from '@animus-labs/shared';
+import type { CompleteFn } from './index.js';
 import type { StreamType } from '../../config/observational-memory.config.js';
 import { OBSERVATIONAL_MEMORY_CONFIG } from '../../config/observational-memory.config.js';
 import { createLogger } from '../../lib/logger.js';
@@ -172,7 +171,7 @@ export function validateCompression(reflectedTokens: number, targetThreshold: nu
 // ============================================================================
 
 export interface RunReflectorParams {
-  agentManager: AgentManager;
+  completeFn: CompleteFn;
   streamType: StreamType;
   compiledPersona: string;
   observations: string;
@@ -184,26 +183,19 @@ export interface RunReflectorResult {
   observations: string;
   tokenCount: number;
   generation: number;
-  usage: SessionUsage;
 }
 
 /**
  * Run a full reflector cycle with retry logic.
+ * Uses the utility (cheap) model via CortexAgent.utilityComplete().
  *
  * Tries compression at level 0, then escalates to level 1 and 2 if the output
  * still exceeds the target threshold. Accepts the output as-is after max retries.
  */
 export async function runReflector(params: RunReflectorParams): Promise<RunReflectorResult> {
-  const { agentManager, streamType, compiledPersona, observations, targetThreshold, config } = params;
-
-  const configuredProviders = agentManager.getConfiguredProviders();
-  if (configuredProviders.length === 0) {
-    throw new Error('No agent providers configured');
-  }
-  const provider = configuredProviders[0]!;
+  const { completeFn, streamType, compiledPersona, observations, targetThreshold, config } = params;
 
   const systemPrompt = buildReflectorSystemPrompt(streamType, compiledPersona);
-  let totalUsage: SessionUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   let currentObservations = observations;
   let currentTokenCount = estimateTokens(observations);
 
@@ -215,65 +207,38 @@ export async function runReflector(params: RunReflectorParams): Promise<RunRefle
 
     const userMessage = buildReflectorUserMessage(currentObservations, compressionLevel);
 
-    // Graceful degradation: skip if no session slots available
-    if (!agentManager.canCreateSession()) {
-      log.warn(`Skipping ${streamType} reflection level ${compressionLevel} — no session slots available`);
-      break;
-    }
-
-    const session = await agentManager.createSession({
-      provider,
-      model: config.model,
-      temperature: config.reflector.temperature,
-      maxOutputTokens: config.reflector.maxOutputTokens,
+    const content = await completeFn({
       systemPrompt,
-      permissions: {
-        executionMode: 'plan',
-        approvalLevel: 'none',
-      },
+      messages: [{ role: 'user', content: userMessage }],
     });
 
-    try {
-      const response = await session.prompt(userMessage);
-      const parsed = parseReflectorOutput(response.content);
-      const reflectedTokens = estimateTokens(parsed.observations);
+    const parsed = parseReflectorOutput(content);
+    const reflectedTokens = estimateTokens(parsed.observations);
 
-      // Accumulate usage across retries
-      totalUsage = {
-        inputTokens: totalUsage.inputTokens + response.usage.inputTokens,
-        outputTokens: totalUsage.outputTokens + response.usage.outputTokens,
-        totalTokens: totalUsage.totalTokens + response.usage.totalTokens,
+    if (validateCompression(reflectedTokens, targetThreshold)) {
+      log.debug(`Reflector compressed to ${reflectedTokens} tokens (target: ${targetThreshold}) at level ${compressionLevel}`);
+      return {
+        observations: parsed.observations,
+        tokenCount: reflectedTokens,
+        generation: compressionLevel + 1,
       };
+    }
 
-      if (validateCompression(reflectedTokens, targetThreshold)) {
-        log.debug(`Reflector compressed to ${reflectedTokens} tokens (target: ${targetThreshold}) at level ${compressionLevel}`);
-        return {
-          observations: parsed.observations,
-          tokenCount: reflectedTokens,
-          generation: compressionLevel + 1,
-          usage: totalUsage,
-        };
-      }
+    // Not compressed enough -- feed the output back for the next level
+    currentObservations = parsed.observations;
+    currentTokenCount = reflectedTokens;
 
-      // Not compressed enough — feed the output back for the next level
-      currentObservations = parsed.observations;
-      currentTokenCount = reflectedTokens;
-
-      if (level < maxRetries) {
-        log.warn(`Reflector level ${compressionLevel} produced ${reflectedTokens} tokens (target: ${targetThreshold}), retrying`);
-      }
-    } finally {
-      await session.end();
+    if (level < maxRetries) {
+      log.warn(`Reflector level ${compressionLevel} produced ${reflectedTokens} tokens (target: ${targetThreshold}), retrying`);
     }
   }
 
-  // All retries exhausted — accept as-is
+  // All retries exhausted -- accept as-is
   log.warn(`Reflector exhausted all ${maxRetries + 1} attempts for ${streamType}, accepting ${currentTokenCount} tokens (target: ${targetThreshold})`);
 
   return {
     observations: currentObservations,
     tokenCount: currentTokenCount,
     generation: maxRetries + 1,
-    usage: totalUsage,
   };
 }

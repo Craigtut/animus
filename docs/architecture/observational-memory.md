@@ -14,6 +14,24 @@ Observational memory solves this by:
 4. **Preserving fidelity** — Recent items stay raw (full detail); older items are compressed but not lost
 5. **Running asynchronously** — Observer/Reflector run during EXECUTE, never blocking the mind
 
+### Relationship to Cortex Observational Memory
+
+Animus and Cortex now both have observation systems, but they solve different
+problems:
+
+- **Cortex observational memory** compresses the live agentic-loop transcript
+  for one `(contact_id, channel)` session. Its state is stored in `sessions.db`
+  alongside that thread's Cortex conversation history.
+- **Animus observational memory** compresses durable domain records: messages
+  across all channels for a contact, plus global thoughts and experiences. Its
+  state is stored in `memory.db.observations` and loaded through the
+  `message-observations`, `thought-observations`, and
+  `experience-observations` context slots.
+
+These systems are intentionally independent. Cortex handles per-thread context
+window health; Animus preserves cross-channel relational memory and inner-life
+continuity.
+
 ### Relationship to Existing Memory Layers
 
 Observational memory operates within the **short-term memory** layer. It does not replace working memory, core self, or long-term memory — it enhances the short-term context window.
@@ -192,19 +210,12 @@ The Observer's system prompt is stream-aware. Each stream type gets a tailored s
 ### Observer Agent Configuration
 
 ```typescript
-// Observer creates a new cold session per invocation
-const observerSession = await agentAdapter.createSession({
+const result = await completeFn({
   systemPrompt: buildObserverSystemPrompt(streamType, compiledPersona),
   //            ↑ Includes compiled persona + stream-specific observation instructions
   //              Does NOT include operational instructions, decision types, or output schema
-  temperature: 0.3,    // Some flexibility for prioritization
-  maxOutputTokens: 8000, // Sufficient for observation output
-  // No MCP tools — pure text-in, text-out
+  messages: [{ role: 'user', content: buildObserverUserMessage(batchItems, existingObservations) }],
 });
-
-const result = await observerSession.prompt(
-  buildObserverUserMessage(batchItems, existingObservations)
-);
 ```
 
 ---
@@ -370,7 +381,7 @@ Observational memory data lives in **`memory.db`** alongside working memory, cor
 
 1. **Lifecycle alignment** — Observations are accumulated knowledge, not ephemeral tick state. They should survive a soft reset (clear `heartbeat.db` but preserve memories).
 2. **Scoping** — Message observations are per-contact, like working memory. Same database, same access patterns.
-3. **Reset semantics** — Full reset clears everything. Soft reset keeps observations + working memory + core self. The agent loses its mood but remembers conversation history.
+3. **Reset semantics** — Full reset clears everything. Soft reset keeps observations + working memory + core self, while clearing Cortex thread sessions. The agent loses its active thread history but keeps compressed relational and inner-life memory.
 
 ### Schema
 
@@ -451,10 +462,10 @@ For each stream (messages, thoughts, experiences):
   3. If overflow exceeds the batch threshold:
      a. Calculate batch size: stream.rawTokens * observeBatchSize
      b. Take ~batchSize tokens of the OLDEST raw items as the batch
-     c. Spawn Observer cold session:
+     c. Run Observer via Cortex utility completion:
         - System prompt: compiled persona + stream-specific observer instructions
         - User message: batch items + existing observations
-        - Model: configured model (default: haiku-tier)
+        - Model: Cortex utility model
      d. Parse observer output → new observation text
      e. Append new observations to existing observation content
      f. Update watermark to the newest item in the batch
@@ -462,10 +473,10 @@ For each stream (messages, thoughts, experiences):
      h. Log observation event for debugging
 
   4. If observation token_count exceeds observationTokens budget:
-     a. Spawn Reflector cold session:
+     a. Run Reflector via Cortex utility completion:
         - System prompt: compiled persona + stream-specific reflector instructions
         - User message: full observation content + compression level
-        - Model: configured model (default: haiku-tier)
+        - Model: Cortex utility model
      b. Parse reflector output → compressed observations
      c. Validate compression (reflected tokens < threshold)
      d. If validation fails, retry with higher compression level (up to max retries)
@@ -604,29 +615,28 @@ Date: Feb 13, 2026 (yesterday)
 
 ---
 
-## Agent SDK Integration
+## Cortex Utility Model Integration
 
-### Cold Sessions with Persona
+The Observer and Reflector are no longer subprocess SDK sessions. They are
+simple text-in/text-out completion calls backed by `CortexAgent.utilityComplete()`.
 
-The Observer and Reflector use the existing `@animus-labs/agents` SDK abstraction to create cold sessions:
-
-- **New session per invocation** — No warm session reuse, no state carryover
-- **Includes compiled persona** — The Observer and Reflector are the mind reflecting, not generic summarizers. They receive the compiled persona block so observations and reflections carry the mind's perspective and voice.
-- **No operational instructions** — No decision types, output schema, emotion deltas, or other mind-specific operational context. The system prompt contains persona + observation/reflection instructions only.
-- **No MCP tools** — Pure text-in, text-out compression tasks
-- **No streaming** — We don't need incremental output; wait for the full response
+- **No persistent session** — Each invocation sends a system prompt and one user
+  message, then parses the full response.
+- **Includes compiled persona** — The Observer and Reflector are the mind
+  reflecting, not generic summarizers. They receive the compiled persona block
+  so observations and reflections carry the mind's perspective and voice.
+- **No operational instructions** — No decision types, output schema, emotion
+  deltas, or other mind-specific operational context. The system prompt
+  contains persona + observation/reflection instructions only.
+- **No tools** — Pure text-in, text-out compression tasks.
+- **No streaming** — We wait for the complete response because downstream code
+  needs parsed structured sections.
 
 ### Model Selection
 
-The model is configurable in the observational memory config file. Starting default: **haiku-tier** (the cheapest, fastest model available from the configured provider).
-
-Rationale: Compression tasks don't require the primary mind's model. Haiku-tier is fast, cheap, and more than capable of structured observation extraction.
-
-If the configured provider doesn't offer a haiku-tier model, the system falls back to the provider's default model with a warning logged.
-
-### Provider Compatibility
-
-The agent adapter interface handles provider differences. Observer/Reflector sessions use the same `createSession()` API as all other agent sessions. No provider-specific code needed.
+Cortex resolves the utility model for these calls. By default it selects the
+configured provider's appropriate cheaper utility model when available, while
+keeping provider credentials and model resolution inside Cortex.
 
 ---
 

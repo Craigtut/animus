@@ -160,7 +160,6 @@ describe('system-store', () => {
     it('returns default settings', () => {
       const settings = systemStore.getSystemSettings(db);
       expect(settings.heartbeatIntervalMs).toBe(300000);
-      expect(settings.defaultAgentProvider).toBe('claude');
       expect(settings.goalApprovalMode).toBe('always_approve');
     });
 
@@ -181,24 +180,6 @@ describe('system-store', () => {
       systemStore.updateSystemSettings(db, { telemetryEnabled: true });
       const restored = systemStore.getSystemSettings(db);
       expect(restored.telemetryEnabled).toBe(true);
-    });
-  });
-
-  describe('personality settings (persona.db)', () => {
-    it('returns default personality', () => {
-      const ps = personaStore.getPersonalitySettings(personaDb);
-      expect(ps.name).toBe('Animus');
-      expect(ps.traits).toEqual([]);
-    });
-
-    it('updates personality', () => {
-      personaStore.updatePersonalitySettings(personaDb, {
-        name: 'Atlas',
-        traits: ['curious', 'empathetic'],
-      });
-      const ps = personaStore.getPersonalitySettings(personaDb);
-      expect(ps.name).toBe('Atlas');
-      expect(ps.traits).toEqual(['curious', 'empathetic']);
     });
   });
 

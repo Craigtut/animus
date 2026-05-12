@@ -8,7 +8,7 @@ import {
   getAllowedTools,
   isToolAllowed,
   TOOL_PERMISSIONS,
-} from '@animus/shared';
+} from '@animus-labs/shared';
 import { getToolsForTier, getTool, getToolNames, executeTool } from '../../src/tools/registry.js';
 import type { ToolHandlerContext } from '../../src/tools/types.js';
 

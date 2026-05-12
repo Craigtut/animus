@@ -237,7 +237,7 @@ describe('HeartbeatStore', () => {
       triggerType: null,
       triggerContext: null,
       mindSessionId: null,
-      sessionTokenCount: 0,
+      contextTokenCount: 0,
       startedAt: '2024-01-01T00:00:00Z',
       lastTickAt: '2024-01-01T00:05:00Z',
       sessionWarmSince: null,

@@ -27,8 +27,8 @@ import * as memoryStore from '../../src/db/stores/memory-store.js';
 import { buildMindContext, buildSystemPrompt, type TriggerContext, type MindContextParams } from '../../src/heartbeat/context-builder.js';
 import { compilePersona, type PersonaConfig, estimateTokens } from '../../src/heartbeat/persona-compiler.js';
 import { applyDecay, applyDelta, computeBaselines } from '../../src/heartbeat/emotion-engine.js';
-import type { MindOutput, EmotionState, Contact, HeartbeatState } from '@animus/shared';
-import { mindOutputSchema } from '@animus/shared';
+import type { MindOutput, EmotionState, Contact, HeartbeatState } from '@animus-labs/shared';
+import { mindOutputSchema } from '@animus-labs/shared';
 import type Database from 'better-sqlite3';
 
 // ============================================================================
@@ -151,7 +151,6 @@ describe('Full Tick Cycle', () => {
     const context = buildMindContext({
       trigger,
       contact,
-      sessionState: 'cold',
       currentEmotions: emotions,
       tickIntervalMs: 300000,
       recentThoughts: [],
@@ -165,10 +164,11 @@ describe('Full Tick Cycle', () => {
       goalContext: null,
     });
 
-    // System prompt should be provided for cold session
+    // System prompt should always be provided
     expect(context.systemPrompt).toBeTruthy();
     expect(context.systemPrompt).toContain('TestAnimus');
-    expect(context.systemPrompt).toContain('OPERATING INSTRUCTIONS');
+    expect(context.systemPrompt).toContain('YOUR INNER LIFE');
+    expect(context.systemPrompt).toContain('DECISIONS');
 
     // User message should contain the trigger
     expect(context.userMessage).toContain('Alice sent a message via web');
@@ -305,7 +305,6 @@ describe('Full Tick Cycle', () => {
     const context = buildMindContext({
       trigger: { type: 'interval', elapsedMs: 300000 },
       contact: null,
-      sessionState: 'warm',
       currentEmotions: emotions,
       tickIntervalMs: 300000,
       recentThoughts: [],
@@ -315,22 +314,21 @@ describe('Full Tick Cycle', () => {
       compiledPersona,
     });
 
-    // Warm session => no system prompt
-    expect(context.systemPrompt).toBeNull();
+    // System prompt always included
+    expect(context.systemPrompt).toBeTruthy();
     // User message should have interval trigger
     expect(context.userMessage).toContain('has passed since your last tick');
     // Should NOT contain contact section
     expect(context.userMessage).not.toContain('WHO YOU\'RE TALKING TO');
   });
 
-  it('warm session skips system prompt', () => {
+  it('always includes system prompt', () => {
     const compiledPersona = compilePersona(makePersonaConfig());
     const emotions = applyDecay(heartbeatStore.getEmotionStates(hbDb), Date.now());
 
-    const cold = buildMindContext({
+    const ctx = buildMindContext({
       trigger: { type: 'interval', elapsedMs: 60000 },
       contact: null,
-      sessionState: 'cold',
       currentEmotions: emotions,
       tickIntervalMs: 300000,
       recentThoughts: [],
@@ -340,24 +338,9 @@ describe('Full Tick Cycle', () => {
       compiledPersona,
     });
 
-    const warm = buildMindContext({
-      trigger: { type: 'interval', elapsedMs: 60000 },
-      contact: null,
-      sessionState: 'warm',
-      currentEmotions: emotions,
-      tickIntervalMs: 300000,
-      recentThoughts: [],
-      recentExperiences: [],
-      recentMessages: [],
-      previousDecisions: [],
-      compiledPersona,
-    });
-
-    expect(cold.systemPrompt).toBeTruthy();
-    expect(warm.systemPrompt).toBeNull();
-    // Both should have user messages
-    expect(cold.tokenBreakdown.systemPrompt).toBeGreaterThan(0);
-    expect(warm.tokenBreakdown.systemPrompt).toBeUndefined();
+    expect(ctx.systemPrompt).toBeTruthy();
+    expect(ctx.tokenBreakdown.systemPrompt).toBeGreaterThan(0);
+    expect(ctx.userMessage).toBeTruthy();
   });
 });
 
@@ -377,7 +360,6 @@ describe('Crash Recovery', () => {
     heartbeatStore.updateHeartbeatState(hbDb, {
       tickNumber: 5,
       currentStage: 'gather',
-      sessionState: 'active',
       triggerType: 'message',
       triggerContext: JSON.stringify({ type: 'message', contactId: 'c1' }),
     });
@@ -387,17 +369,15 @@ describe('Crash Recovery', () => {
     expect(stuck.currentStage).toBe('gather');
     expect(stuck.tickNumber).toBe(5);
 
-    // Recovery: reset to idle and cold (what initializeHeartbeat does)
+    // Recovery: reset to idle (what initializeHeartbeat does)
     heartbeatStore.updateHeartbeatState(hbDb, {
       currentStage: 'idle',
-      sessionState: 'cold',
       triggerType: null,
       triggerContext: null,
     });
 
     const recovered = heartbeatStore.getHeartbeatState(hbDb);
     expect(recovered.currentStage).toBe('idle');
-    expect(recovered.sessionState).toBe('cold');
     expect(recovered.triggerType).toBeNull();
     // Tick number preserved (not reset) — we don't lose track of where we are
     expect(recovered.tickNumber).toBe(5);
@@ -407,25 +387,23 @@ describe('Crash Recovery', () => {
     heartbeatStore.updateHeartbeatState(hbDb, {
       tickNumber: 10,
       currentStage: 'mind',
-      sessionState: 'active',
       triggerType: 'interval',
-      mindSessionId: 'session-abc',
     });
 
     const stuck = heartbeatStore.getHeartbeatState(hbDb);
     expect(stuck.currentStage).toBe('mind');
-    expect(stuck.mindSessionId).toBe('session-abc');
+    expect(stuck.triggerType).toBe('interval');
 
     // Recovery
     heartbeatStore.updateHeartbeatState(hbDb, {
       currentStage: 'idle',
-      sessionState: 'cold',
       triggerType: null,
       triggerContext: null,
     });
 
     const recovered = heartbeatStore.getHeartbeatState(hbDb);
     expect(recovered.currentStage).toBe('idle');
+    expect(recovered.triggerType).toBeNull();
     expect(recovered.tickNumber).toBe(10);
   });
 
@@ -433,7 +411,6 @@ describe('Crash Recovery', () => {
     heartbeatStore.updateHeartbeatState(hbDb, {
       tickNumber: 15,
       currentStage: 'execute',
-      sessionState: 'active',
       triggerType: 'scheduled_task',
     });
 
@@ -447,7 +424,6 @@ describe('Crash Recovery', () => {
     // Recovery
     heartbeatStore.updateHeartbeatState(hbDb, {
       currentStage: 'idle',
-      sessionState: 'cold',
       triggerType: null,
       triggerContext: null,
     });
@@ -469,13 +445,11 @@ describe('Crash Recovery', () => {
     // Crash in mind stage
     heartbeatStore.updateHeartbeatState(hbDb, {
       currentStage: 'mind',
-      sessionState: 'active',
     });
 
     // Recovery
     heartbeatStore.updateHeartbeatState(hbDb, {
       currentStage: 'idle',
-      sessionState: 'cold',
       triggerType: null,
       triggerContext: null,
     });
@@ -607,7 +581,6 @@ describe('Context Completeness', () => {
         messageId: 'msg-1',
       },
       contact: makeContact(),
-      sessionState: 'cold',
       currentEmotions: emotions,
       tickIntervalMs: 300000,
       recentThoughts: [
@@ -634,7 +607,7 @@ describe('Context Completeness', () => {
 
     const ctx = buildMindContext(params);
 
-    // System prompt (cold session)
+    // System prompt
     expect(ctx.systemPrompt).toContain('TestAnimus');
     expect(ctx.systemPrompt).toContain('YOUR INNER LIFE');
 

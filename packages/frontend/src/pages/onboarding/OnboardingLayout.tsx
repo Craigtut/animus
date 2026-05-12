@@ -22,7 +22,7 @@ function FrozenOutlet() {
 
 const setupSteps: { step: OnboardingStep; label: string; path: string }[] = [
   { step: 'welcome', label: 'Welcome', path: '/onboarding/welcome' },
-  { step: 'agent_provider', label: 'Agent', path: '/onboarding/agent' },
+  { step: 'agent_provider', label: 'Provider', path: '/onboarding/agent' },
   { step: 'identity', label: 'You', path: '/onboarding/identity' },
   { step: 'about_you', label: 'About You', path: '/onboarding/about-you' },
 ];

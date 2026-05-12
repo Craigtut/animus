@@ -535,7 +535,26 @@ fn main() {
                     }
                     #[cfg(windows)]
                     {
-                        let _ = child.kill();
+                        // On Windows, child.kill() calls TerminateProcess which
+                        // instantly kills the sidecar without running cleanup.
+                        // Instead, send an HTTP POST to /api/shutdown which
+                        // triggers the same graceful shutdown as SIGTERM on Unix.
+                        let shutdown_url = format!("http://127.0.0.1:{}/api/shutdown", port);
+                        match reqwest::blocking::Client::builder()
+                            .timeout(Duration::from_secs(2))
+                            .build()
+                            .and_then(|client| client.post(&shutdown_url).send())
+                        {
+                            Ok(resp) if resp.status().is_success() => {
+                                // Shutdown request accepted; wait for the process
+                                // to exit gracefully (handled by the wait loop below).
+                            }
+                            _ => {
+                                // Shutdown endpoint unreachable (sidecar may have
+                                // already crashed). Fall back to TerminateProcess.
+                                let _ = child.kill();
+                            }
+                        }
                     }
 
                     // Wait up to 5 seconds for graceful shutdown

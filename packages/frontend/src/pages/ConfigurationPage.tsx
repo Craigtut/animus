@@ -44,6 +44,12 @@ export function ConfigurationPage({ extensionType }: ConfigurationPageProps) {
       navigate(-1);
     },
   });
+  const refreshPairingMutation = trpc.channels.refreshPairingCode.useMutation({
+    onSuccess: (data, variables) => {
+      utils.channels.getConfig.invalidate({ name: name! });
+      setConfigValues((prev) => ({ ...prev, [variables.fieldKey]: data.code }));
+    },
+  });
 
   // Plugin queries
   const pluginConfigData = trpc.plugins.getConfig.useQuery(
@@ -167,6 +173,12 @@ export function ConfigurationPage({ extensionType }: ConfigurationPageProps) {
   const handleFieldChange = (key: string, value: unknown) => {
     setConfigValues((prev) => ({ ...prev, [key]: value }));
   };
+
+  const handleRefreshPairing = isChannel
+    ? (fieldKey: string) => {
+        refreshPairingMutation.mutate({ name: name!, fieldKey });
+      }
+    : undefined;
 
   const isSaving = isChannel
     ? channelConfigureMutation.isPending
@@ -295,6 +307,7 @@ export function ConfigurationPage({ extensionType }: ConfigurationPageProps) {
               onRawJsonChange={(json) => { setRawJson(json); setRawJsonError(''); }}
               rawJsonError={rawJsonError || undefined}
               pluginName={name}
+              onRefreshPairing={handleRefreshPairing}
             />
           </div>
         </div>

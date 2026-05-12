@@ -38,6 +38,7 @@ vi.mock('../../src/lib/event-bus.js', () => ({
 vi.mock('../../src/channels/channel-manager.js', () => ({
   getChannelManager: () => ({
     sendToChannel: vi.fn(async () => true),
+    getChannelManifest: vi.fn(() => undefined),
   }),
 }));
 

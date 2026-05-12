@@ -6,7 +6,7 @@ import {
   type MindContextParams,
 } from '../../src/heartbeat/context-builder.js';
 import { compilePersona, type PersonaConfig } from '../../src/heartbeat/persona-compiler.js';
-import type { EmotionState, Thought, Experience, Message, TickDecision, Contact, ContactChannel } from '@animus/shared';
+import type { EmotionState, Thought, Experience, Message, TickDecision, Contact, ContactChannel } from '@animus-labs/shared';
 
 function makePersonaConfig(): PersonaConfig {
   return {
@@ -79,7 +79,6 @@ function makeParams(overrides: Partial<MindContextParams> = {}): MindContextPara
   return {
     trigger: { type: 'interval', elapsedMs: 300000 },
     contact: null,
-    sessionState: 'cold',
     currentEmotions: [makeEmotion('joy', 0.5), makeEmotion('curiosity', 0.3)],
     tickIntervalMs: 300000,
     recentThoughts: [],
@@ -99,30 +98,24 @@ describe('context-builder', () => {
 
       expect(prompt).toContain('Test'); // Name
       expect(prompt).toContain('YOUR INNER LIFE');
-      expect(prompt).toContain('OPERATING INSTRUCTIONS');
       expect(prompt).toContain('YOUR EMOTIONS');
       expect(prompt).toContain('DECISIONS');
       expect(prompt).toContain('YOUR MEMORY');
-      expect(prompt).toContain('SESSION AWARENESS');
+      expect(prompt).toContain('LOG AWARENESS');
     });
   });
 
   describe('buildMindContext', () => {
-    it('includes systemPrompt for cold sessions', () => {
-      const ctx = buildMindContext(makeParams({ sessionState: 'cold' }));
+    it('always includes systemPrompt', () => {
+      const ctx = buildMindContext(makeParams());
       expect(ctx.systemPrompt).toBeTruthy();
-      expect(ctx.userMessage).toBeTruthy();
-    });
-
-    it('excludes systemPrompt for warm sessions', () => {
-      const ctx = buildMindContext(makeParams({ sessionState: 'warm' }));
-      expect(ctx.systemPrompt).toBeNull();
       expect(ctx.userMessage).toBeTruthy();
     });
 
     it('includes token breakdown', () => {
       const ctx = buildMindContext(makeParams());
       expect(ctx.tokenBreakdown.userMessage).toBeGreaterThan(0);
+      expect(ctx.tokenBreakdown.systemPrompt).toBeGreaterThan(0);
     });
   });
 
@@ -453,7 +446,7 @@ describe('context-builder', () => {
 
       expect(msg).toContain('YOUR ENERGY');
       expect(msg).toContain('peak');
-      expect(msg).toContain('sharp and energized');
+      expect(msg).toContain('fully energized');
     });
 
     it('omits energy section when energyLevel is null', () => {
@@ -513,8 +506,8 @@ describe('context-builder', () => {
       const persona = compilePersona(makePersonaConfig());
       const prompt = buildSystemPrompt(persona, { energySystemEnabled: true });
       expect(prompt).toContain('YOUR ENERGY');
-      expect(prompt).toContain('energyDelta');
-      expect(prompt).toContain('circadian rhythm');
+      expect(prompt).toContain('energy level');
+      expect(prompt).toContain('energy colors your thinking');
     });
 
     it('omits ENERGY_GUIDANCE when energySystemEnabled is false', () => {
@@ -603,9 +596,8 @@ describe('context-builder', () => {
       expect(msg).not.toContain('Trigger payload');
     });
 
-    it('plugin decision descriptions flow through buildMindContext for cold sessions', () => {
+    it('plugin decision descriptions flow through buildMindContext', () => {
       const ctx = buildMindContext(makeParams({
-        sessionState: 'cold',
         pluginDecisionDescriptions: '- send_notification: Send a push notification',
       }));
 
@@ -667,8 +659,8 @@ describe('context-builder', () => {
 
       // Operational sections
       expect(prompt).toContain('YOUR INNER LIFE');
-      expect(prompt).toContain('OPERATING INSTRUCTIONS');
-      expect(prompt).toContain('record_thought');
+      expect(prompt).toContain('DECISIONS');
+      expect(prompt).toContain('YOUR MEMORY');
     });
 
     it('renders full system prompt for inspection', () => {

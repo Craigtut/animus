@@ -17,11 +17,12 @@ import * as systemStore from '../db/stores/system-store.js';
 import * as contactStore from '../db/stores/contact-store.js';
 import * as taskStore from '../db/stores/task-store.js';
 import * as messageStore from '../db/stores/message-store.js';
+import * as usageStore from '../db/stores/usage-store.js';
 import { expiresIn, now, clamp, builtInDecisionTypeSchema } from '@animus-labs/shared';
 import type { MindOutput, IEventBus, AgentEventType } from '@animus-labs/shared';
 
-import type { AgentManager } from '@animus-labs/agents';
 import type { MemoryManager } from '../memory/index.js';
+import type { CompleteFn } from '../memory/observational-memory/index.js';
 import { processAllStreams } from '../memory/observational-memory/index.js';
 import { OBSERVATIONAL_MEMORY_CONFIG } from '../config/observational-memory.config.js';
 import type { SeedManager } from '../goals/index.js';
@@ -32,6 +33,7 @@ import { applyDelta } from './emotion-engine.js';
 import { getEnergyBand, isInSleepHours } from './energy-engine.js';
 import { logDecisionsInTransaction, executeDecisions, type DecisionExecutorDeps } from './decision-executor.js';
 import type { CompiledPersona } from './persona-compiler.js';
+import { cleanupOldToolResults } from './tool-result-persistor.js';
 import type { TickQueue } from './tick-queue.js';
 import { createLogger } from '../lib/logger.js';
 
@@ -45,10 +47,12 @@ export interface ExecuteOutputDeps {
   decisionDeps: DecisionExecutorDeps;
   memoryManager: MemoryManager | null;
   seedManager: SeedManager | null;
-  agentManager: AgentManager | null;
+  completeFn: CompleteFn | null;
   compiledPersona: CompiledPersona | null;
   tickQueue: TickQueue;
   deferredQueue: DeferredQueue;
+  /** CortexAgent for dynamic cache retention updates on interval changes. */
+  onIntervalChanged?: (newIntervalMs: number) => void;
 }
 
 // ============================================================================
@@ -153,6 +157,7 @@ export async function executeOutput(
       ? Object.fromEntries(Object.entries(rawTriggerMetadata).filter(([k]) => k !== 'media'))
       : undefined;
     const hasReplyMetadata = replyMetadata && Object.keys(replyMetadata).length > 0;
+    const replyTo = rawTriggerMetadata?.['externalConversationId'] as string | undefined;
 
     try {
       // On proactive ticks (no gathered.contact), validate the contact exists
@@ -179,6 +184,7 @@ export async function executeOutput(
             channel,
             content: finalReplyContent,
             ...(hasReplyMetadata ? { metadata: replyMetadata } : {}),
+            ...(replyTo ? { replyTo } : {}),
             ...(replyMedia && replyMedia.length > 0 ? {
               media: replyMedia.map(m => {
                 const entry: { type: 'image' | 'audio' | 'video' | 'file'; path: string; filename?: string } = {
@@ -203,6 +209,7 @@ export async function executeOutput(
           channel,
           content: finalReplyContent,
           ...(hasReplyMetadata ? { metadata: replyMetadata } : {}),
+          ...(replyTo ? { replyTo } : {}),
           ...(replyMedia && replyMedia.length > 0 ? {
             media: replyMedia.map(m => {
               const entry: { type: 'image' | 'audio' | 'video' | 'file'; path: string; filename?: string } = {
@@ -336,8 +343,10 @@ export async function executeOutput(
       const newBand = getEnergyBand(after);
       if (newBand === 'sleeping' && prevBand !== 'sleeping') {
         deps.tickQueue.updateInterval(settings.sleepTickIntervalMs);
+        deps.onIntervalChanged?.(settings.sleepTickIntervalMs);
       } else if (prevBand === 'sleeping' && newBand !== 'sleeping' && !inSleepHours) {
         deps.tickQueue.updateInterval(settings.heartbeatIntervalMs);
+        deps.onIntervalChanged?.(settings.heartbeatIntervalMs);
       }
     }
 
@@ -486,13 +495,13 @@ export async function executeOutput(
   });
 
   // 8. Observational memory processing (async, non-blocking)
-  // Requires both agentManager and compiledPersona -- persona may be null on first boot
-  if (deps.agentManager && deps.compiledPersona) {
+  // Requires both completeFn and compiledPersona -- persona may be null on first boot
+  if (deps.completeFn && deps.compiledPersona) {
     try {
       // Fire-and-forget -- don't await, don't block next tick
       processAllStreams({
         deps: {
-          agentManager: deps.agentManager,
+          completeFn: deps.completeFn,
           memoryDb: getMemoryDb(),
           compiledPersona: deps.compiledPersona.compiledText,
           eventBus: eventBusRef,
@@ -519,6 +528,9 @@ export async function executeOutput(
   taskStore.cleanupOldTaskRuns(hbDb, settings.taskRunRetentionDays);
   heartbeatStore.expirePendingApprovals(hbDb);
   heartbeatStore.cleanupOldApprovals(hbDb, 7);
+  cleanupOldToolResults(settings.agentLogRetentionDays).catch(err =>
+    log.warn('Tool-result TTL sweep failed (non-fatal):', err),
+  );
 
   // 9a. Memory pool pruning -- interval ticks only
   if (gathered.trigger.type === 'interval' && deps.memoryManager) {
@@ -544,6 +556,20 @@ export async function executeOutput(
     }
   }
 
+  // 9c. Daily usage rollup and raw data pruning (~once per day, checked every 100 ticks)
+  if (tickNumber % 100 === 0) {
+    try {
+      runDailyUsageRollup();
+    } catch (err) {
+      log.warn('Daily usage rollup failed (non-fatal):', err);
+    }
+    try {
+      pruneOldUsageData();
+    } catch (err) {
+      log.warn('Usage data pruning failed (non-fatal):', err);
+    }
+  }
+
   // 10. Mark delivery failures as notified (the mind has now seen them in context)
   if (gathered.deliveryFailures && gathered.deliveryFailures.length > 0) {
     try {
@@ -559,4 +585,115 @@ export async function executeOutput(
   const executeMs = Date.now() - executeStartTime;
   log.info(`Execute complete (${executeMs}ms)`);
   logExecuteEvent('execute_complete', { totalDurationMs: executeMs });
+}
+
+// ============================================================================
+// Usage Maintenance Helpers
+// ============================================================================
+
+/**
+ * Aggregate yesterday's raw usage data into the usage_daily_rollups table.
+ *
+ * Checks if a rollup already exists for yesterday's date. If not, queries
+ * raw agent_usage data grouped by tick_type and model, then inserts rollups
+ * plus a combined "all" rollup (tick_type = NULL, model = NULL).
+ */
+function runDailyUsageRollup(): void {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const dateStr = yesterday.toISOString().split('T')[0]!; // YYYY-MM-DD
+
+  const agentLogsDb = getAgentLogsDb();
+
+  // Check if rollup already exists for yesterday
+  const existingRollups = usageStore.getDailyRollups(agentLogsDb, {
+    start: dateStr,
+    end: dateStr,
+  });
+  if (existingRollups.length > 0) return;
+
+  // Query raw usage data for yesterday, grouped by tick_type and model
+  const dayStart = `${dateStr}T00:00:00.000Z`;
+  const dayEnd = `${dateStr}T23:59:59.999Z`;
+  const breakdown = usageStore.getUsageBreakdown(agentLogsDb, {
+    start: dayStart,
+    end: dayEnd,
+    dimension: 'tick_type',
+  });
+
+  // Get per-model breakdown as well for detailed rollups
+  const modelBreakdown = usageStore.getUsageBreakdown(agentLogsDb, {
+    start: dayStart,
+    end: dayEnd,
+    dimension: 'model',
+  });
+
+  // Insert per-tick-type rollups
+  for (const row of breakdown) {
+    usageStore.insertDailyRollup(agentLogsDb, {
+      date: dateStr,
+      tickType: row.dimension,
+      model: null,
+      inputTokens: row.inputTokens,
+      outputTokens: row.outputTokens,
+      cacheReadTokens: row.cacheReadTokens,
+      cacheWriteTokens: row.cacheWriteTokens,
+      totalTokens: row.totalTokens,
+      totalCostUsd: row.costUsd,
+      tickCount: row.tickCount,
+    });
+  }
+
+  // Insert per-model rollups
+  for (const row of modelBreakdown) {
+    usageStore.insertDailyRollup(agentLogsDb, {
+      date: dateStr,
+      tickType: null,
+      model: row.dimension,
+      inputTokens: row.inputTokens,
+      outputTokens: row.outputTokens,
+      cacheReadTokens: row.cacheReadTokens,
+      cacheWriteTokens: row.cacheWriteTokens,
+      totalTokens: row.totalTokens,
+      totalCostUsd: row.costUsd,
+      tickCount: row.tickCount,
+    });
+  }
+
+  // Insert combined "all" rollup (tick_type = NULL, model = NULL)
+  const totals = usageStore.getUsageTimeSeries(agentLogsDb, {
+    start: dayStart,
+    end: dayEnd,
+    bucketMinutes: 24 * 60, // single bucket for the whole day
+  });
+  if (totals.totals.tickCount > 0) {
+    usageStore.insertDailyRollup(agentLogsDb, {
+      date: dateStr,
+      tickType: null,
+      model: null,
+      inputTokens: totals.totals.inputTokens,
+      outputTokens: totals.totals.outputTokens,
+      cacheReadTokens: totals.totals.cacheReadTokens,
+      cacheWriteTokens: totals.totals.cacheWriteTokens,
+      totalTokens: totals.totals.totalTokens,
+      totalCostUsd: totals.totals.costUsd,
+      tickCount: totals.totals.tickCount,
+    });
+  }
+
+  log.debug(`Daily usage rollup completed for ${dateStr}`);
+}
+
+/**
+ * Prune raw usage data older than 30 days.
+ *
+ * Rolled-up data is preserved in usage_daily_rollups indefinitely;
+ * only the detailed per-request rows in agent_usage are removed.
+ */
+function pruneOldUsageData(): void {
+  const agentLogsDb = getAgentLogsDb();
+  const pruned = usageStore.pruneRawUsage(agentLogsDb, 30);
+  if (pruned > 0) {
+    log.info(`Usage pruning: removed ${pruned} raw usage records older than 30 days`);
+  }
 }

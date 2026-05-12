@@ -241,7 +241,7 @@ export class TelemetryService {
   private getCurrentProvider(): string {
     try {
       const settings = settingsStore.getSystemSettings(getSystemDb());
-      return settings.defaultAgentProvider ?? 'unknown';
+      return settings.cortexProvider ?? 'unknown';
     } catch {
       return 'unknown';
     }

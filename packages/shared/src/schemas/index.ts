@@ -28,3 +28,4 @@ export * from './channel-packages.js';
 export * from './observational-memory.js';
 export * from './saves.js';
 export * from './package-manifest.js';
+export * from './usage.js';

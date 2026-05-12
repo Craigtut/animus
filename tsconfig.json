@@ -6,7 +6,7 @@
       "@animus-labs/shared": ["packages/shared/src"],
       "@animus-labs/agents": ["packages/agents/src"],
       "@animus-labs/backend": ["packages/backend/src"],
-      "@animus-labs/frontend": ["packages/frontend/src"]
+      "@animus-labs/frontend": ["packages/frontend/src"],
     }
   },
   "references": [

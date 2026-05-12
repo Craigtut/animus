@@ -26,12 +26,6 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod/v3';
 import { executeTool } from '../registry.js';
 import type { ToolHandlerContext, ToolResult } from '../types.js';
-import {
-  handleRecordThought,
-  handleRecordCognitiveState,
-  recordThoughtSchema,
-  recordCognitiveStateSchema,
-} from '../../heartbeat/cognitive-tools.js';
 import { createLogger } from '../../lib/logger.js';
 import { logProcessSpawn } from '../../lib/process-diagnostics.js';
 
@@ -56,7 +50,7 @@ export interface MutableToolContext {
 }
 
 /** Tool set identifiers for the bridge */
-export type ToolSet = 'mind' | 'cognitive' | 'subagent';
+export type ToolSet = 'mind' | 'subagent';
 
 /** JSON Schema tool definition returned by the bridge */
 export interface BridgeToolDef {
@@ -123,27 +117,6 @@ function convertZodToJsonSchema(schema: ZodTypeAny): Record<string, unknown> {
  * Get tool definitions for a given tool set, with permission filtering applied.
  */
 export function getToolDefs(toolSet: ToolSet): BridgeToolDef[] {
-  if (toolSet === 'cognitive') {
-    return [
-      {
-        name: 'record_thought',
-        description:
-          'Your first action every time you respond. Call this once before writing any reply ' +
-          'or calling any other tool. It is critical that this is the very first thing you do.',
-        inputSchema: convertZodToJsonSchema(recordThoughtSchema),
-      },
-      {
-        name: 'record_cognitive_state',
-        description:
-          'MANDATORY — call this exactly once after your reply. Your response is not complete ' +
-          'until you call this tool. record_thought bookends the start of your turn; this ' +
-          'bookends the end. Without it, your thoughts, emotions, and experiences are lost. ' +
-          'Call it after your final reply text, then you are done.',
-        inputSchema: convertZodToJsonSchema(recordCognitiveStateSchema),
-      },
-    ];
-  }
-
   if (toolSet === 'mind') {
     const mindTools = getMindTools();
     const defs: BridgeToolDef[] = [];
@@ -222,7 +195,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     // GET /tools — returns tool definitions
     if (req.method === 'GET' && path === '/tools') {
       const toolSet = url.searchParams.get('set') as ToolSet | null;
-      if (!toolSet || !['mind', 'cognitive', 'subagent'].includes(toolSet)) {
+      if (!toolSet || !['mind', 'subagent'].includes(toolSet)) {
         jsonResponse(res, 400, { error: 'Missing or invalid "set" parameter' });
         return;
       }
@@ -252,40 +225,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
       log.info(`Bridge tool call: ${toolName} (taskId=${taskId})`);
       const result: ToolResult = await executeTool(toolName as AnimusToolName, args, ctxRef.current);
-      jsonResponse(res, 200, result);
-      return;
-    }
-
-    // POST /cognitive/thought — records a thought
-    if (req.method === 'POST' && path === '/cognitive/thought') {
-      const body = JSON.parse(await readBody(req));
-      const parsed = recordThoughtSchema.safeParse(body);
-      if (!parsed.success) {
-        log.warn('Invalid record_thought input:', parsed.error.message);
-        jsonResponse(res, 200, { content: [{ type: 'text', text: `Invalid input: ${parsed.error.message}` }], isError: true });
-        return;
-      }
-      const result = handleRecordThought(parsed.data);
-      jsonResponse(res, 200, result);
-      return;
-    }
-
-    // POST /cognitive/state — records cognitive state
-    if (req.method === 'POST' && path === '/cognitive/state') {
-      const body = JSON.parse(await readBody(req));
-      // Coerce string "null" to actual null — LLMs frequently emit "null" as a string
-      for (const key of ['energyDelta', 'coreSelfUpdate', 'workingMemoryUpdate'] as const) {
-        if ((body as Record<string, unknown>)[key] === 'null') {
-          (body as Record<string, unknown>)[key] = null;
-        }
-      }
-      const parsed = recordCognitiveStateSchema.safeParse(body);
-      if (!parsed.success) {
-        log.warn('Invalid record_cognitive_state input:', parsed.error.message);
-        jsonResponse(res, 200, { content: [{ type: 'text', text: `Invalid input: ${parsed.error.message}` }], isError: true });
-        return;
-      }
-      const result = handleRecordCognitiveState(parsed.data);
       jsonResponse(res, 200, result);
       return;
     }
@@ -414,7 +353,7 @@ function resolveTsxBinary(): string {
  * to spawn an MCP subprocess.
  *
  * @param port     Bridge port to connect to
- * @param toolSet  Which tools to expose: 'mind', 'cognitive', 'subagent'
+ * @param toolSet  Which tools to expose: 'mind' or 'subagent'
  * @param taskId   Task ID for context lookup in the bridge
  */
 export function buildMcpServerConfig(

@@ -12,7 +12,9 @@ COPY packages/frontend/package.json packages/frontend/
 COPY packages/channel-sdk/package.json packages/channel-sdk/
 COPY packages/tts-native/package.json packages/tts-native/
 
-# Install all dependencies (including devDependencies for build).
+# Install all dependencies
+# NOTE: @animus-labs/cortex must be published to npm before Docker builds work.
+# The file: protocol dependency in backend/package.json won't resolve in Docker context. (including devDependencies for build).
 # onnxruntime-node's postinstall downloads optional CUDA GPU libraries (~500MB)
 # from GitHub. CPU binaries are already bundled in the package. Skip the GPU
 # download since we use CPU inference in Docker.
@@ -39,6 +41,7 @@ COPY packages/channel-sdk/ packages/channel-sdk/
 COPY tsconfig.base.json tsconfig.json ./
 
 # Build in dependency order: shared → agents → frontend → backend
+# Cortex is an external npm dependency (installed via npm install above).
 # .dockerignore excludes **/dist and **/*.tsbuildinfo to prevent stale build
 # artifacts from poisoning the Docker build. Each step also cleans dist/ as
 # defense in depth. The backend tsc may have type errors (noEmitOnError

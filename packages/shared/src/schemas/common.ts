@@ -27,8 +27,8 @@ export const KNOWN_CHANNEL_TYPES = ['web', 'sms', 'discord', 'api', 'voice'] as 
 /** Contact permission tier */
 export const permissionTierSchema = z.enum(['primary', 'standard']);
 
-/** Supported agent SDK providers */
-export const agentProviderSchema = z.enum(['claude', 'codex', 'opencode']);
+/** Supported agent providers. 'cortex' is active; others exist for historical log compatibility. */
+export const agentProviderSchema = z.enum(['claude', 'codex', 'opencode', 'cortex']);
 
 // ============================================================================
 // Pagination

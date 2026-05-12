@@ -9,7 +9,7 @@ import {
   MAX_GOALS_IN_CONTEXT,
   RESONANCE_WEIGHT,
 } from '../../src/goals/salience.js';
-import type { Goal, EmotionState } from '@animus/shared';
+import type { Goal, EmotionState } from '@animus-labs/shared';
 
 function makeGoal(overrides: Partial<Goal> = {}): Goal {
   return {

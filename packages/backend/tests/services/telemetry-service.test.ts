@@ -27,7 +27,7 @@ vi.mock('../../src/db/index.js', () => ({
 
 const mockGetSystemSettings = vi.fn(() => ({
   telemetryEnabled: true,
-  defaultAgentProvider: 'claude',
+  cortexProvider: 'anthropic',
 }));
 
 vi.mock('../../src/db/stores/settings-store.js', () => ({
@@ -62,7 +62,7 @@ describe('TelemetryService', () => {
     // Reset settings mock to default
     mockGetSystemSettings.mockReturnValue({
       telemetryEnabled: true,
-      defaultAgentProvider: 'claude',
+      cortexProvider: 'anthropic',
     });
 
     service = new TelemetryService();
@@ -114,7 +114,7 @@ describe('TelemetryService', () => {
     it('returns false when DB setting is disabled', () => {
       mockGetSystemSettings.mockReturnValue({
         telemetryEnabled: false,
-        defaultAgentProvider: 'claude',
+        cortexProvider: 'anthropic',
       });
       service.initialize();
       expect(service.isEnabled()).toBe(false);

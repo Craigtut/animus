@@ -1157,10 +1157,14 @@ Pi does not have native session IDs like Claude (which gets them from the CLI su
 
 ### Resume Implementation
 
-Pi Agent state can be serialized via `agent.state.messages`. For crash recovery:
+Pi Agent state can be serialized via `agent.state.messages`. This research note
+predates the Cortex migration; the implemented Animus path stores per-thread
+Cortex conversation history in `sessions.db`, not in `heartbeat_state`.
 
-1. Before each tick's EXECUTE stage, serialize `agent.state.messages` to `heartbeat_state.mind_session_state` (JSON column in `heartbeat.db`)
-2. On crash recovery, if `mind_session_id` starts with `pi:`, deserialize the messages and reconstruct the Agent
+For crash recovery in this proposed adapter design:
+
+1. Before each tick's EXECUTE stage, serialize `agent.state.messages` to a session checkpoint
+2. On crash recovery, deserialize the thread checkpoint and reconstruct the Agent
 3. The reconstructed Agent has full conversation history but loses any in-flight tool execution state
 
 This is acceptable for the heartbeat system -- the mind session is designed to handle cold restarts gracefully.

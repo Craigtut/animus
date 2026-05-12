@@ -15,7 +15,6 @@ describe('heartbeat-store', () => {
       const state = store.getHeartbeatState(db);
       expect(state.tickNumber).toBe(0);
       expect(state.currentStage).toBe('idle');
-      expect(state.sessionState).toBe('cold');
       expect(state.isRunning).toBe(false);
     });
 

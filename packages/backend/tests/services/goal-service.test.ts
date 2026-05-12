@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import { createTestHeartbeatDb } from '../helpers.js';
 import * as heartbeatStore from '../../src/db/stores/heartbeat-store.js';
-import type { Goal } from '@animus/shared';
+import type { Goal } from '@animus-labs/shared';
 
 // ============================================================================
 // Mocks — must be set up before dynamically importing the service

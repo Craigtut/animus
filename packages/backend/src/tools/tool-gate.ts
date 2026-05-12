@@ -2,11 +2,10 @@
  * Tool Gate — unified permission enforcement for all tool types.
  *
  * This is the single source of truth for the "ask" mode approval flow.
- * Three enforcement points call this function:
+ * Two enforcement points call this function:
  *
- *   1. canUseTool callback (mind-session.ts) — SDK built-in tools + plugin MCP (Codex)
- *   2. PreToolUse hook (mind-session.ts) — plugin MCP tools (Claude)
- *   3. checkToolPermission (registry.ts) — core Animus MCP tools (via bridge)
+ *   1. resolvePermission callback (cortex-mind.ts) — CortexAgent tool permission gate
+ *   2. checkToolPermission (registry.ts) — core Animus MCP tools (via bridge)
  *
  * Each caller handles its own entry-point-specific concerns (exempt checks,
  * tool-name-to-permKey mapping, security deny-list) then delegates here.

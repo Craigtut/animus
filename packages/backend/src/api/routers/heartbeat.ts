@@ -18,7 +18,7 @@ import {
   getAgentOrchestrator,
 } from '../../heartbeat/index.js';
 import { getEventBus } from '../../lib/event-bus.js';
-import type { HeartbeatState, EmotionState, Thought, Experience, TickDecision, EnergyBand, EnergyHistoryEntry, AgentEventType } from '@animus-labs/shared';
+import type { HeartbeatState, EmotionState, Thought, Experience, TickDecision, EnergyBand, EnergyHistoryEntry, AgentEventType, PhaseUsage } from '@animus-labs/shared';
 import * as systemStore from '../../db/stores/system-store.js';
 import * as personaStore from '../../db/stores/persona-store.js';
 import { getSystemDb } from '../../db/index.js';
@@ -443,7 +443,6 @@ export const heartbeatRouter = router({
       interface TickInputData {
         tickNumber: number;
         triggerType: string;
-        sessionState: string;
         tokenBreakdown?: Record<string, number>;
       }
 
@@ -483,7 +482,6 @@ export const heartbeatRouter = router({
         return {
           tickNumber: data.tickNumber,
           triggerType: data.triggerType,
-          sessionState: data.sessionState,
           tokenBreakdown: data.tokenBreakdown,
           thoughtPreview: thoughtContent?.slice(0, 100) ?? null,
           durationMs: outData?.durationMs ?? null,
@@ -517,7 +515,6 @@ export const heartbeatRouter = router({
         tickNumber: number;
         triggerType: string;
         triggerContext: unknown;
-        sessionState: string;
         systemPrompt: string | null;
         userMessage: string;
         systemPromptManifest?: unknown[] | null;
@@ -569,11 +566,27 @@ export const heartbeatRouter = router({
         }
       }
 
+      // Get Cortex context snapshot (new system, null for legacy ticks)
+      const cortexContextSnapshot = agentLogStore.getTickContextSnapshot(agentLogsDb, tickNumber);
+
+      // Get per-phase usage records for cache visibility
+      const phaseUsageRecords = agentLogStore.getUsageByTickNumber(agentLogsDb, tickNumber);
+      const phaseUsage: PhaseUsage[] = phaseUsageRecords
+        .filter((u) => u.pipelinePhase != null)
+        .map((u) => ({
+          phase: u.pipelinePhase!,
+          inputTokens: u.inputTokens,
+          outputTokens: u.outputTokens,
+          cacheReadTokens: u.cacheReadTokens ?? 0,
+          cacheWriteTokens: u.cacheWriteTokens ?? 0,
+          costUsd: u.costUsd ?? 0,
+          model: u.model,
+        }));
+
       return {
         tickNumber,
         triggerType: inputData.triggerType,
         triggerContext: inputData.triggerContext,
-        sessionState: inputData.sessionState,
         systemPrompt,
         userMessage: inputData.userMessage,
         systemPromptManifest,
@@ -586,6 +599,8 @@ export const heartbeatRouter = router({
         emotionHistory,
         decisions,
         usage,
+        phaseUsage,
+        cortexContextSnapshot,
         createdAt: tickInput.createdAt,
       };
     }),
@@ -594,9 +609,9 @@ export const heartbeatRouter = router({
    * Subscribe to tick input stored events (fires early, before LLM prompting).
    */
   onTickInputStored: protectedProcedure.subscription(() => {
-    return observable<{ tickNumber: number; triggerType: string; sessionState: string }>((emit) => {
+    return observable<{ tickNumber: number; triggerType: string }>((emit) => {
       const eventBus = getEventBus();
-      const handler = (data: { tickNumber: number; triggerType: string; sessionState: string }) => {
+      const handler = (data: { tickNumber: number; triggerType: string }) => {
         emit.next(data);
       };
       eventBus.on('tick:input_stored', handler);
@@ -613,7 +628,6 @@ export const heartbeatRouter = router({
     type TickStoredPayload = {
       tickNumber: number;
       triggerType: string;
-      sessionState: string;
       durationMs: number | null;
       createdAt: string;
     };
@@ -648,11 +662,9 @@ export const heartbeatRouter = router({
       const events = agentLogStore.getTimelineForTick(agentLogsDb, tickNumber);
       if (!events) return null;
 
-      // Extract triggerType and sessionState from tick_input event data
       const tickInputEvent = events.find((e) => e.eventType === 'tick_input');
       const tickInputData = tickInputEvent?.data as Record<string, unknown> | undefined;
       const triggerType = (tickInputData?.['triggerType'] as string) ?? 'unknown';
-      const sessionState = (tickInputData?.['sessionState'] as string) ?? 'unknown';
       const sessionId = tickInputEvent?.sessionId ?? '';
 
       // Check if tick is complete (has tick_output)
@@ -683,20 +695,55 @@ export const heartbeatRouter = router({
       const rawOutput = tickOutputData?.['rawOutput'] as Record<string, unknown> | undefined;
       const reply = (rawOutput?.['reply'] as { content: string; contactId: string; channel: string; replyToMessageId?: string; tone?: string } | null) ?? null;
 
-      // Get usage from agent_usage for this session
+      // Get per-phase usage records (for phase-grouped timeline token display)
+      const phaseUsageRecords = agentLogStore.getUsageByTickNumber(agentLogsDb, tickNumber);
+
+      // Aggregate usage across ALL phases for the header summary.
+      // Each phase (thought, agentic_loop, reflect) stores its own usage record.
+      // Input tokens from pi-ai are the NON-cached portion only; the actual context
+      // window at each call is input + cacheRead. We report both so the frontend
+      // can display context size accurately.
       let usage = null;
-      if (sessionId) {
-        const usages = agentLogStore.getSessionUsage(agentLogsDb, sessionId);
-        if (usages.length > 0) {
-          usage = usages[usages.length - 1]!;
+      if (phaseUsageRecords.length > 0) {
+        let inputTokens = 0;
+        let outputTokens = 0;
+        let cacheReadTokens = 0;
+        let cacheWriteTokens = 0;
+        let totalTokens = 0;
+        let costUsd = 0;
+        for (const u of phaseUsageRecords) {
+          inputTokens += u.inputTokens;
+          outputTokens += u.outputTokens;
+          cacheReadTokens += u.cacheReadTokens ?? 0;
+          cacheWriteTokens += u.cacheWriteTokens ?? 0;
+          totalTokens += u.totalTokens;
+          costUsd += u.costUsd ?? 0;
         }
+        usage = { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, totalTokens, costUsd };
       }
+      const phaseUsage: PhaseUsage[] = phaseUsageRecords
+        .filter((u) => u.pipelinePhase != null)
+        .map((u) => ({
+          phase: u.pipelinePhase!,
+          inputTokens: u.inputTokens,
+          outputTokens: u.outputTokens,
+          cacheReadTokens: u.cacheReadTokens ?? 0,
+          cacheWriteTokens: u.cacheWriteTokens ?? 0,
+          costUsd: u.costUsd ?? 0,
+          model: u.model,
+        }));
+
+      // Get context window size for budget visualization
+      const contextSnapshot = agentLogStore.getTickContextSnapshot(agentLogsDb, tickNumber);
+      const contextWindow = contextSnapshot?.['contextWindow'] as number | null ?? null;
+
+      // Get per-phase context snapshots (if debug mode captured them)
+      const phaseSnapshots = agentLogStore.getPhaseContextSnapshots(agentLogsDb, tickNumber);
 
       return {
         tickNumber,
         sessionId,
         triggerType,
-        sessionState,
         isComplete,
         durationMs,
         createdAt: tickInputEvent?.createdAt ?? '',
@@ -709,6 +756,9 @@ export const heartbeatRouter = router({
           reply,
         },
         usage,
+        phaseUsage,
+        contextWindow,
+        phaseSnapshots,
       };
     }),
 

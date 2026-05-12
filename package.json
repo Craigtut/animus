@@ -1,6 +1,6 @@
 {
   "name": "animus",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "private": true,
   "description": "An agentic system with a mind, a spirit, and an inner will that moves with agency to act",
   "license": "MIT",
@@ -19,7 +19,6 @@
     "build:tauri": "npm run build:prod && npm run prepare:tauri && cd packages/tauri && cargo tauri build",
     "prepare:tauri": "node scripts/prepare-tauri.mjs",
     "start": "npm start -w @animus-labs/backend",
-    "sandbox": "cd packages/backend && npx tsx --env-file-if-exists=../../.env --conditions source src/sandbox/index.tsx",
     "docker:build": "docker build -t animus .",
     "docker:up": "docker compose up -d",
     "test": "vitest",

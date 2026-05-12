@@ -15,7 +15,7 @@ import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { initializeDatabases, closeDatabases, getSystemDb, DATABASE_COUNT } from './db/index.js';
+import { initializeDatabases, closeDatabases, getSystemDb, getPersonaDb, DATABASE_COUNT } from './db/index.js';
 import { createTRPCContext, appRouter } from './api/index.js';
 import authPlugin from './plugins/auth.js';
 import { initializeHeartbeat, stopHeartbeat, handleAgentComplete, handleScheduledTask } from './heartbeat/index.js';
@@ -25,7 +25,7 @@ import { GoalSubsystem } from './goals/index.js';
 import { TaskSubsystem } from './tasks/index.js';
 import { AgentSubsystem } from './heartbeat/agent-subsystem.js';
 import { getAutosaveSubsystem } from './services/autosave-subsystem.js';
-import { loadCredentialsIntoEnv, ensureClaudeOnboardingFile } from './services/credential-service.js';
+import { loadCredentialsIntoEnv } from './services/credential-service.js';
 import { env, DATA_DIR } from './utils/env.js';
 import {
   loadVault,
@@ -137,45 +137,12 @@ async function main() {
     const { verifyEncryptionKey } = await import('./lib/encryption-service.js');
     verifyEncryptionKey(getSystemDb());
     credentialSummary = loadCredentialsIntoEnv(getSystemDb());
-    ensureClaudeOnboardingFile();
   } else {
     log.info('Vault is sealed or absent: skipping credential loading');
   }
 
-  // Route agents package logs through the backend logger so all output
-  // uses the same format (timestamps, level labels, file logging, categories).
-  const { setDefaultLogger, initModelRegistry } = await import('@animus-labs/agents');
-  const agentsLog = createLogger('Agents', 'agents');
-  setDefaultLogger({
-    debug(msg: string, ctx?: Record<string, unknown>) {
-      agentsLog.debug(ctx ? `${msg} ${JSON.stringify(ctx)}` : msg);
-    },
-    info(msg: string, ctx?: Record<string, unknown>) {
-      agentsLog.info(ctx ? `${msg} ${JSON.stringify(ctx)}` : msg);
-    },
-    warn(msg: string, ctx?: Record<string, unknown>) {
-      agentsLog.warn(ctx ? `${msg} ${JSON.stringify(ctx)}` : msg);
-    },
-    error(msg: string, ctx?: Record<string, unknown>) {
-      agentsLog.error(ctx ? `${msg} ${JSON.stringify(ctx)}` : msg);
-    },
-  });
-
-  // Initialize model registry with disk cache for LiteLLM pricing data
-  const modelRegistry = initModelRegistry({
-    cacheDir: path.join(DATA_DIR, 'cache'),
-    cacheTtlMs: 24 * 60 * 60 * 1000,
-  });
-  modelRegistry.refresh().then(
-    ({ updated, errors }) => {
-      if (errors.length > 0) {
-        log.warn('Model registry refresh had errors', { errors });
-      } else {
-        log.debug(`Model registry initialized (${modelRegistry.size} models, ${updated} pricing updates)`);
-      }
-    },
-    (err) => log.warn('Model registry refresh failed (local data still available)', { error: String(err) }),
-  );
+  // Model registry and provider management are handled by the Cortex package.
+  // See packages/cortex/src/provider-registry.ts for model resolution.
 
   // Create Fastify instance
   const fastify = Fastify({
@@ -320,6 +287,18 @@ async function main() {
     }
   );
 
+  fastify.addContentTypeParser(
+    'audio/wav',
+    { bodyLimit: 50 * 1024 * 1024 },
+    async (request: import('fastify').FastifyRequest, payload: import('stream').Readable) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of payload) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks);
+    }
+  );
+
   // Capture raw body for channel webhook routes (needed for signature validation)
   fastify.addHook('preParsing', async (request, _reply, payload) => {
     if (request.url.startsWith('/channels/')) {
@@ -341,6 +320,24 @@ async function main() {
       status: 'ok',
       timestamp: new Date().toISOString(),
     };
+  });
+
+  // Graceful shutdown endpoint (used by Tauri on Windows where SIGTERM is not available).
+  // Only accepts requests from localhost to prevent external shutdown triggers.
+  fastify.post('/api/shutdown', async (request, reply) => {
+    const remoteIp = request.ip;
+    if (remoteIp !== '127.0.0.1' && remoteIp !== '::1' && remoteIp !== '::ffff:127.0.0.1') {
+      return reply.status(403).send({ error: 'Shutdown only allowed from localhost' });
+    }
+    log.info('Received shutdown request via /api/shutdown (Tauri IPC)');
+    reply.status(200).send({ status: 'shutting_down' });
+    // Defer shutdown to after the response is sent
+    setImmediate(() => {
+      shutdown('HTTP_SHUTDOWN').catch((err) => {
+        log.error('Shutdown failed:', err);
+        process.exit(1);
+      });
+    });
   });
 
   // Channel webhook catch-all route — forwards to channel child processes
@@ -375,6 +372,19 @@ async function main() {
 
     if (result.type === 'response') {
       const resp = result.data;
+
+      // Check for streaming signal from reply-streaming capable channels.
+      // The child process handles auth and reportIncoming(), then signals
+      // the parent to take over SSE streaming by returning { streaming: true }.
+      const body = resp.body as Record<string, unknown> | undefined;
+      if (resp.status === 200 && body?.['streaming'] === true) {
+        const { bridgeReplyStream } = await import('./channels/reply-stream-bridge.js');
+        const { getEventBus } = await import('./lib/event-bus.js');
+        const streamRequestId = body['requestId'] as string | undefined;
+        bridgeReplyStream(reply.raw, channelType, getEventBus(), streamRequestId);
+        return;
+      }
+
       if (resp.headers) {
         for (const [key, value] of Object.entries(resp.headers)) {
           reply.header(key, value);
@@ -437,7 +447,7 @@ async function main() {
     );
   }
 
-  const seededToolPermissions = seedToolPermissions(getSystemDb(), settings.defaultAgentProvider ?? 'claude', collectPluginTools());
+  const seededToolPermissions = seedToolPermissions(getSystemDb(), collectPluginTools());
 
   // Set up approval notifier (event bus listener for tool approval lifecycle)
   const { setupApprovalNotifier } = await import('./tools/approval-notifier.js');
@@ -446,21 +456,16 @@ async function main() {
 
   // Re-seed tool permissions when plugins change at runtime
   getEventBus().on('plugin:changed', () => {
-    const currentSettings = systemStore.getSystemSettings(getSystemDb());
-    const reseeded = seedToolPermissions(getSystemDb(), currentSettings.defaultAgentProvider ?? 'claude', collectPluginTools());
+    const reseeded = seedToolPermissions(getSystemDb(), collectPluginTools());
     log.info('Re-seeded tool permissions after plugin change');
     log.debug(`Tool permissions count after re-seed: ${reseeded}`);
   });
 
-  // Re-seed tool permissions when the agent provider changes at runtime.
-  // Without this, switching providers leaves stale SDK tools in the DB
-  // (e.g. Codex tools when switching to Claude) and the new provider's
-  // unique tools (Read, Glob, WebFetch, etc.) never get permission records.
+  // Re-seed tool permissions when the cortex provider changes at runtime.
   getEventBus().on('system:settings_updated', (payload) => {
-    if ('defaultAgentProvider' in payload) {
-      const provider = (payload as Record<string, unknown>)['defaultAgentProvider'] as string;
-      const reseeded = seedToolPermissions(getSystemDb(), provider, collectPluginTools());
-      log.info(`Re-seeded tool permissions after provider change to "${provider}"`);
+    if ('cortexProvider' in payload) {
+      const reseeded = seedToolPermissions(getSystemDb(), collectPluginTools());
+      log.info('Re-seeded tool permissions after cortex provider change');
       log.debug(`Tool permissions count after re-seed: ${reseeded}`);
     }
   });
@@ -468,6 +473,17 @@ async function main() {
   // Initialize speech service (lazy-loads models on first use)
   const { initSpeechService } = await import('./speech/index.js');
   const speechService = await initSpeechService({ dataDir: DATA_DIR });
+
+  // Wire TTS default voice to persona setting
+  const personaStoreModule = await import('./db/stores/persona-store.js');
+  speechService.tts.setVoiceIdProvider(() => {
+    try {
+      const persona = personaStoreModule.getPersona(getPersonaDb());
+      return persona?.voiceId ?? null;
+    } catch {
+      return null;
+    }
+  });
 
   // Initialize download manager
   const { initDownloadManager, getSpeechAssets } = await import('./downloads/index.js');
@@ -548,7 +564,7 @@ async function main() {
     dbCount: DATABASE_COUNT,
     credentialsStored: credentialSummary.storedCount,
     cliDetectedProviders: credentialSummary.cliDetectedProviders,
-    modelDataCount: modelRegistry.size,
+    modelDataCount: 0,
     pluginsLoaded: pluginStats.loaded,
     pluginsEnabled: pluginStats.enabled,
     deployedSkills: pluginStats.deployedSkills,
@@ -569,7 +585,7 @@ async function main() {
 
   // Fire app_started telemetry event
   telemetry.captureAppStarted({
-    provider: settings.defaultAgentProvider ?? 'claude',
+    provider: settings.cortexProvider ?? 'unknown',
     channelCount: channelStats.installed,
     pluginCount: pluginStats.loaded,
   });

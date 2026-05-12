@@ -328,7 +328,123 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 // ============================================================================
-// Voice Card
+// Gender metadata for built-in voices
+// ============================================================================
+
+const VOICE_GENDER: Record<string, 'M' | 'F'> = {
+  alba: 'F', anna: 'F', azelma: 'F', caro_davy: 'F', cosette: 'F',
+  eponine: 'F', eve: 'F', fantine: 'F', jane: 'F', mary: 'F', vera: 'F',
+  bill_boerst: 'M', charles: 'M', george: 'M', javert: 'M', jean: 'M',
+  marius: 'M', michael: 'M', paul: 'M', peter_yearsley: 'M', stuart_bell: 'M',
+};
+
+// ============================================================================
+// Compact Voice Item (for built-in voices)
+// ============================================================================
+
+function CompactVoiceItem({
+  voice,
+  isSelected,
+  onSelect,
+  previewState,
+  onPreview,
+  onStopPreview,
+}: {
+  voice: Voice;
+  isSelected: boolean;
+  onSelect: () => void;
+  previewState: 'idle' | 'generating' | 'playing';
+  onPreview: () => void;
+  onStopPreview: () => void;
+}) {
+  const theme = useTheme();
+  const isActive = previewState !== 'idle';
+  const gender = VOICE_GENDER[voice.id];
+
+  return (
+    <div
+      role="option"
+      aria-selected={isSelected}
+      onClick={onSelect}
+      css={css`
+        display: flex;
+        align-items: center;
+        gap: ${theme.spacing[1.5]};
+        padding: ${theme.spacing[1.5]} ${theme.spacing[2]};
+        border-radius: ${theme.borderRadius.sm};
+        cursor: pointer;
+        border: 1px solid ${isSelected ? theme.colors.accent : 'transparent'};
+        background: ${isSelected ? `${theme.colors.accent}0a` : 'transparent'};
+        transition: all ${theme.transitions.fast};
+
+        &:hover {
+          background: ${isSelected ? `${theme.colors.accent}12` : theme.colors.background.elevated};
+        }
+      `}
+    >
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          if (isActive) onStopPreview();
+          else onPreview();
+        }}
+        css={css`
+          flex-shrink: 0;
+          width: 24px;
+          height: 24px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all ${theme.transitions.fast};
+          color: ${isActive ? theme.colors.accent : theme.colors.text.disabled};
+
+          &:hover { color: ${theme.colors.accent}; }
+        `}
+        aria-label={isActive ? 'Stop preview' : `Preview ${voice.name}`}
+      >
+        {previewState === 'generating' ? (
+          <WaveformBars generating />
+        ) : previewState === 'playing' ? (
+          <WaveformBars />
+        ) : (
+          <Play size={12} weight="fill" />
+        )}
+      </button>
+
+      <span css={css`
+        flex: 1;
+        min-width: 0;
+        font-size: ${theme.typography.fontSize.sm};
+        font-weight: ${isSelected ? theme.typography.fontWeight.medium : theme.typography.fontWeight.normal};
+        color: ${theme.colors.text.primary};
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        line-height: 1;
+      `}>
+        {voice.name}
+      </span>
+
+      {gender && (
+        <span css={css`
+          flex-shrink: 0;
+          font-size: ${theme.typography.fontSize.tiny};
+          font-weight: ${theme.typography.fontWeight.medium};
+          color: ${theme.colors.text.disabled};
+          line-height: 1;
+          letter-spacing: 0.02em;
+        `}>
+          {gender}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Voice Card (for custom voices)
 // ============================================================================
 
 function VoiceCard({
@@ -358,7 +474,6 @@ function VoiceCard({
       onClick={onSelect}
     >
       <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-        {/* Preview button / waveform */}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -394,7 +509,6 @@ function VoiceCard({
           )}
         </button>
 
-        {/* Voice info */}
         <div css={css`flex: 1; min-width: 0;`}>
           <Typography.SmallBodyAlt as="span">{voice.name}</Typography.SmallBodyAlt>
           {voice.description && (
@@ -404,7 +518,6 @@ function VoiceCard({
           )}
         </div>
 
-        {/* Delete button (custom voices only, visible on hover) */}
         {onDelete && (
           <button
             onClick={(e) => {
@@ -807,6 +920,13 @@ function UploadDropZone({ onUploaded }: { onUploaded: () => void }) {
 // Voice Grid
 // ============================================================================
 
+const compactGridStyles = (breakpoint: string) => css`
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  @media (max-width: ${breakpoint}) { grid-template-columns: repeat(2, 1fr); }
+`;
+
 const voiceGridStyles = (breakpoint: string) => css`
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -905,9 +1025,9 @@ export function VoiceTab({
             {builtinVoices.length > 0 && (
               <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
                 <SectionLabel>Built-in Voices</SectionLabel>
-                <div css={voiceGridStyles(theme.breakpoints.sm)}>
-                  {builtinVoices.map((voice) => (
-                    <VoiceCard
+                <div css={compactGridStyles(theme.breakpoints.sm)}>
+                  {[...builtinVoices].sort((a, b) => a.name.localeCompare(b.name)).map((voice) => (
+                    <CompactVoiceItem
                       key={voice.id}
                       voice={voice}
                       isSelected={voiceId === voice.id}

@@ -30,14 +30,16 @@ export function AddContactModal({ open, onClose, onSuccess }: AddContactModalPro
       { type: 'web', displayName: 'Web', identifierLabel: 'Username', identifierPlaceholder: 'username' },
     ];
     for (const pkg of packages) {
-      types.push({
-        type: pkg.channelType,
-        displayName: pkg.displayName,
-        identifierLabel: pkg.identity.identifierLabel,
-        identifierPlaceholder: pkg.identity.identifierPlaceholder,
-        identifierValidation: pkg.identity.identifierValidation,
-        identifierHelpText: pkg.identity.identifierHelpText,
-      });
+      if (pkg.identity.resolution !== 'primary' && pkg.identity.identifierLabel) {
+        types.push({
+          type: pkg.channelType,
+          displayName: pkg.displayName,
+          identifierLabel: pkg.identity.identifierLabel,
+          identifierPlaceholder: pkg.identity.identifierPlaceholder,
+          identifierValidation: pkg.identity.identifierValidation,
+          identifierHelpText: pkg.identity.identifierHelpText,
+        });
+      }
     }
     return types;
   }, [packages]);

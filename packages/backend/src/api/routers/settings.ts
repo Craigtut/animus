@@ -1,5 +1,5 @@
 /**
- * Settings Router - tRPC procedures for system and personality settings.
+ * Settings Router - tRPC procedures for system settings.
  */
 
 import fs from 'node:fs';
@@ -7,10 +7,10 @@ import path from 'node:path';
 import { z } from 'zod/v3';
 import {
   updateSystemSettingsInputSchema,
-  updatePersonalitySettingsInputSchema,
 } from '@animus-labs/shared';
 import { router, protectedProcedure } from '../trpc.js';
 import * as systemStore from '../../db/stores/system-store.js';
+import * as settingsStore from '../../db/stores/settings-store.js';
 import * as memoryStore from '../../db/stores/memory-store.js';
 import { getSystemDb, getMemoryDb } from '../../db/index.js';
 import { isConfigured, verifyEncryptionKey } from '../../lib/encryption-service.js';
@@ -77,15 +77,17 @@ function runHealthChecks(): { status: 'healthy' | 'degraded' | 'unhealthy'; chec
     checks.push({ id: 'user_registered', label: 'User registered', status: 'fail', severity: 'critical', detail: String(err) });
   }
 
-  // 4. Provider configured (credentials table or env vars)
+  // 4. Provider configured (Cortex credentials, legacy credentials, or env vars)
   try {
-    const providers = ['claude', 'codex', 'opencode'];
-    const hasCredential = providers.some(p => systemStore.getCredential(systemDb, p) !== null);
+    const cortexSettings = settingsStore.getCortexSettings(systemDb);
+    const hasCortexProvider = !!cortexSettings.cortexProvider;
+    const legacyProviders = ['claude', 'codex', 'opencode'];
+    const hasLegacyCredential = legacyProviders.some(p => systemStore.getCredential(systemDb, p) !== null);
     const hasEnvKey = !!(process.env['ANTHROPIC_API_KEY'] || process.env['CLAUDE_CODE_OAUTH_TOKEN'] || process.env['OPENAI_API_KEY']);
-    if (hasCredential || hasEnvKey) {
+    if (hasCortexProvider || hasLegacyCredential || hasEnvKey) {
       checks.push({ id: 'provider_configured', label: 'Agent provider', status: 'pass', severity: 'critical' });
     } else {
-      checks.push({ id: 'provider_configured', label: 'Agent provider', status: 'fail', severity: 'critical', detail: 'No API key configured for any provider' });
+      checks.push({ id: 'provider_configured', label: 'Agent provider', status: 'fail', severity: 'critical', detail: 'No provider configured' });
     }
   } catch (err) {
     checks.push({ id: 'provider_configured', label: 'Agent provider', status: 'fail', severity: 'critical', detail: String(err) });
@@ -173,16 +175,6 @@ export const settingsRouter = router({
     .input(updateSystemSettingsInputSchema)
     .mutation(({ input }) => {
       return getSettingsService().updateSystemSettings(input);
-    }),
-
-  getPersonalitySettings: protectedProcedure.query(() => {
-    return getSettingsService().getPersonalitySettings();
-  }),
-
-  updatePersonalitySettings: protectedProcedure
-    .input(updatePersonalitySettingsInputSchema)
-    .mutation(({ input }) => {
-      return getSettingsService().updatePersonalitySettings(input);
     }),
 
   getLogCategories: protectedProcedure.query(() => {

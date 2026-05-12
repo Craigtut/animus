@@ -5,7 +5,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Heartbeat as HeartbeatIcon,
-  Robot,
   ChatCircle,
   Target,
   GearSix,
@@ -18,10 +17,7 @@ import {
   Warning,
   CheckCircle,
   XCircle,
-  ShieldCheck,
-  Copy,
   ArrowSquareOut,
-  CircleNotch,
   Trash,
   List,
   X,
@@ -36,8 +32,8 @@ import {
   CaretDown,
   Wrench,
   SignOut,
-  MagnifyingGlass,
   Key,
+  Brain,
   type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
 import { Card, SelectionCard, Button, Input, Select, Modal, Badge, Toggle, Slider, Typography, Tooltip } from '../components/ui';
@@ -49,34 +45,21 @@ import type { Theme } from '../styles/theme';
 import { SavesSection } from '../components/settings/SavesSection';
 import { ToolsSection } from '../components/settings/ToolsSection';
 import { PackageConsentDialog } from '../components/settings/PackageConsentDialog';
-import { Upload, ArrowCounterClockwise } from '@phosphor-icons/react';
+import { Upload, ArrowCounterClockwise, ArrowsClockwise } from '@phosphor-icons/react';
 import { AnpkDropZone } from '../components/settings/AnpkDropZone';
+import { buildOAuthCards } from '../utils/provider-display';
 import { AboutInline } from '../components/settings/AboutSection';
 import { TelemetryInline } from '../components/settings/TelemetrySection';
 import { PasswordsSection } from '../components/settings/PasswordsSection';
 import { toast } from '../store/toast-store';
+import { useHeartbeatStore } from '../store/heartbeat-store';
 import DOMPurify from 'dompurify';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-type SettingsSection = 'heartbeat' | 'provider' | 'channels' | 'plugins' | 'passwords' | 'tools' | 'goals' | 'saves' | 'system';
-
-interface ModelData {
-  id: string;
-  name: string;
-  provider: string;
-  contextWindow: number;
-  maxOutputTokens: number;
-  inputPricePer1M: number;
-  outputPricePer1M: number;
-  supportsVision: boolean;
-  supportsThinking: boolean;
-  recommended: boolean;
-  isDefault: boolean;
-  createdAt: string | null;
-}
+type SettingsSection = 'heartbeat' | 'cortex_provider' | 'channels' | 'plugins' | 'passwords' | 'tools' | 'goals' | 'saves' | 'system';
 
 interface SidebarItem {
   id: SettingsSection;
@@ -86,7 +69,7 @@ interface SidebarItem {
 
 const sections: SidebarItem[] = [
   { id: 'heartbeat', label: 'Heartbeat', icon: HeartbeatIcon },
-  { id: 'provider', label: 'Agent Provider', icon: Robot },
+  { id: 'cortex_provider', label: 'AI Provider', icon: Brain },
   { id: 'channels', label: 'Channels', icon: ChatCircle },
   { id: 'plugins', label: 'Plugins', icon: PuzzlePiece },
   { id: 'passwords', label: 'Passwords', icon: Key },
@@ -158,8 +141,6 @@ function HeartbeatSection() {
   const [showPauseConfirm, setShowPauseConfirm] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
   const intervalSave = useSaveFlash();
-  const warmthSave = useSaveFlash();
-  const budgetSave = useSaveFlash();
 
   const isRunning = hbState?.isRunning ?? false;
 
@@ -169,33 +150,18 @@ function HeartbeatSection() {
   }, [isRunning, isResuming]);
   const tickNumber = hbState?.tickNumber ?? 0;
   const currentStage = hbState?.currentStage ?? 'idle';
-  const sessionState = hbState?.sessionState ?? 'cold';
   const lastTickAt = hbState?.lastTickAt ?? null;
 
   // Local state for immediate slider feedback (avoids waiting for API round-trip)
   const [localIntervalMs, setLocalIntervalMs] = useState<number | null>(null);
-  const [localWarmthMs, setLocalWarmthMs] = useState<number | null>(null);
-  const [localBudget, setLocalBudget] = useState<number | null>(null);
-
   const intervalMs = localIntervalMs ?? systemSettings?.heartbeatIntervalMs ?? 300000;
-  const warmthMs = localWarmthMs ?? systemSettings?.sessionWarmthMs ?? 900000;
-  const contextBudget = localBudget ?? systemSettings?.sessionContextBudget ?? 0.7;
 
   // Sync local state when server data arrives (and local isn't overriding)
   useEffect(() => {
     if (systemSettings && localIntervalMs === null) setLocalIntervalMs(null);
   }, [systemSettings?.heartbeatIntervalMs]);
-  useEffect(() => {
-    if (systemSettings && localWarmthMs === null) setLocalWarmthMs(null);
-  }, [systemSettings?.sessionWarmthMs]);
-  useEffect(() => {
-    if (systemSettings && localBudget === null) setLocalBudget(null);
-  }, [systemSettings?.sessionContextBudget]);
-
   // Debounced API persistence
   const intervalTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const warmthTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const budgetTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const formatInterval = (ms: number) => {
     const mins = Math.round(ms / 60000);
@@ -237,23 +203,6 @@ function HeartbeatSection() {
     intervalTimerRef.current = setTimeout(() => {
       updateIntervalMutation.mutate({ intervalMs: ms }, { onSuccess: () => intervalSave.flash() });
       updateSettingsMutation.mutate({ heartbeatIntervalMs: ms });
-    }, 300);
-  };
-
-  const handleWarmthChange = (mins: number) => {
-    const ms = mins * 60000;
-    setLocalWarmthMs(ms);
-    clearTimeout(warmthTimerRef.current);
-    warmthTimerRef.current = setTimeout(() => {
-      updateSettingsMutation.mutate({ sessionWarmthMs: ms }, { onSuccess: () => warmthSave.flash() });
-    }, 300);
-  };
-
-  const handleBudgetChange = (val: number) => {
-    setLocalBudget(val);
-    clearTimeout(budgetTimerRef.current);
-    budgetTimerRef.current = setTimeout(() => {
-      updateSettingsMutation.mutate({ sessionContextBudget: val }, { onSuccess: () => budgetSave.flash() });
     }, 300);
   };
 
@@ -384,57 +333,6 @@ function HeartbeatSection() {
             </div>
           </div>
         </Modal>
-      </div>
-
-      {/* Session Info */}
-      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
-          Session
-        </Typography.Subtitle>
-        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-          <Typography.SmallBody as="span" color="secondary">State:</Typography.SmallBody>
-          <Badge variant={sessionState === 'active' ? 'success' : sessionState === 'warm' ? 'warning' : 'default'}>
-            {sessionState.charAt(0).toUpperCase() + sessionState.slice(1)}
-          </Badge>
-        </div>
-
-        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-            <Typography.SmallBody as="label" color="secondary">
-              Warmth window: {Math.round(warmthMs / 60000)} min
-            </Typography.SmallBody>
-            <SaveIndicator show={warmthSave.show} />
-          </div>
-          <Slider
-            value={warmthMs / 60000}
-            onChange={handleWarmthChange}
-            min={5}
-            max={60}
-            step={5}
-            leftLabel="5 min"
-            rightLabel="60 min"
-            showNeutral={false}
-          />
-        </div>
-
-        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-            <Typography.SmallBody as="label" color="secondary">
-              Context budget: {Math.round(contextBudget * 100)}%
-            </Typography.SmallBody>
-            <SaveIndicator show={budgetSave.show} />
-          </div>
-          <Slider
-            value={contextBudget}
-            onChange={handleBudgetChange}
-            min={0.3}
-            max={1}
-            step={0.05}
-            leftLabel="30%"
-            rightLabel="100%"
-            showNeutral={false}
-          />
-        </div>
       </div>
 
       {/* Sleep & Energy */}
@@ -606,2154 +504,983 @@ function SleepEnergySettings() {
 }
 
 // ============================================================================
-// Section: Agent Provider
+// Section: AI Provider (Cortex)
 // ============================================================================
 
-function ProviderSection() {
+// ── Helpers for Cortex Provider Section ──
+
+/** Format a time-until-expiry string from a Unix timestamp (ms). */
+/** Three breathing dots animation for OAuth waiting states. */
+function BreathingDots({ color }: { color: string }) {
+  const breathe = keyframes`
+    0%, 100% { opacity: 0.3; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1); }
+  `;
+  return (
+    <span css={css`display: inline-flex; gap: 4px; align-items: center;`}>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          css={css`
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: ${color};
+            animation: ${breathe} 1.8s ease-in-out infinite;
+            animation-delay: ${i * 0.25}s;
+          `}
+        />
+      ))}
+    </span>
+  );
+}
+
+function CortexProviderSection() {
   const theme = useTheme();
   const utils = trpc.useUtils();
 
+  const { data: statusData, isLoading: statusLoading } = trpc.cortexProvider.getStatus.useQuery();
+  const { data: allProviders } = trpc.cortexProvider.listConfiguredProviders.useQuery();
+
+  const removeCredentialMutation = trpc.cortexProvider.removeCredential.useMutation({
+    onSuccess: () => {
+      utils.cortexProvider.getStatus.invalidate();
+      utils.cortexProvider.listConfiguredProviders.invalidate();
+    },
+  });
+
+  const setThinkingMutation = trpc.cortexProvider.setThinkingLevel.useMutation({
+    onSuccess: () => utils.cortexProvider.getStatus.invalidate(),
+  });
+
+  const setActiveMutation = trpc.cortexProvider.setActiveProvider.useMutation({
+    onSuccess: () => {
+      utils.cortexProvider.getStatus.invalidate();
+      utils.cortexProvider.listConfiguredProviders.invalidate();
+    },
+  });
+
+  // OAuth flow mutations (for Reconnect)
+  const initiateOAuthMutation = trpc.cortexProvider.initiateOAuth.useMutation();
+  const cancelOAuthMutation = trpc.cortexProvider.cancelOAuth.useMutation();
+
+  const thinkingSave = useSaveFlash();
+  const modelSave = useSaveFlash();
+  const utilityModelSave = useSaveFlash();
+  const contextLimitSave = useSaveFlash();
+
+  // Context window limit slider state
+  const setContextLimitMutation = trpc.cortexProvider.setContextWindowLimit.useMutation({
+    onSuccess: () => {
+      contextLimitSave.flash();
+      utils.cortexProvider.getStatus.invalidate();
+    },
+  });
+  const [localContextLimit, setLocalContextLimit] = useState<number | null | 'unset'>('unset');
+  const contextLimitTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Utility model
   const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
-  const { data: claudeKey } = trpc.provider.hasKey.useQuery({ provider: 'claude' });
-  const { data: codexKey } = trpc.provider.hasKey.useQuery({ provider: 'codex' });
-  const { data: detectData, dataUpdatedAt: detectUpdatedAt } = trpc.provider.detect.useQuery();
-
-  const saveKeyMutation = trpc.provider.saveKey.useMutation({
-    onSuccess: () => {
-      utils.provider.hasKey.invalidate();
-      utils.provider.detect.invalidate();
-    },
-  });
-  const validateMutation = trpc.provider.validateKey.useMutation();
-  const removeKeyMutation = trpc.provider.removeKey.useMutation({
-    onSuccess: () => {
-      utils.provider.hasKey.invalidate();
-      utils.provider.detect.invalidate();
-    },
-  });
-  const useCliMutation = trpc.provider.useCli.useMutation({
-    onSuccess: () => {
-      utils.provider.hasKey.invalidate();
-      utils.provider.detect.invalidate();
-    },
-  });
   const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation({
-    onSuccess: () => {
-      utils.settings.getSystemSettings.invalidate();
-      // Provider changes re-seed tool permissions on the backend;
-      // invalidate the tools cache so the UI picks up the new set.
-      utils.tools.listTools.invalidate();
+    onSuccess: () => utils.settings.getSystemSettings.invalidate(),
+  });
+
+  // Model list for the active provider
+  const activeProvider = statusData?.provider ?? null;
+  const { data: models } = trpc.cortexProvider.listModels.useQuery(
+    { provider: activeProvider! },
+    { enabled: !!activeProvider }
+  );
+
+
+  const [switchModalOpen, setSwitchModalOpen] = useState(false);
+
+  // Reconnect OAuth state
+  const [reconnectState, setReconnectState] = useState<'idle' | 'authenticating'>('idle');
+
+  // Subscribe to OAuth status when reconnecting
+  trpc.cortexProvider.oauthStatus.useSubscription(undefined, {
+    enabled: reconnectState === 'authenticating',
+    onData: (event) => {
+      if (event.type === 'success') {
+        setReconnectState('idle');
+        utils.cortexProvider.getStatus.invalidate();
+        utils.cortexProvider.listConfiguredProviders.invalidate();
+        // Dismiss any auth errors from the store
+        const errors = useHeartbeatStore.getState().systemErrors;
+        errors
+          .filter((e) => e.category === 'authentication')
+          .forEach((e) => useHeartbeatStore.getState().dismissSystemError(e.id));
+      } else if (event.type === 'error') {
+        setReconnectState('idle');
+      }
     },
   });
 
-  // Codex OAuth mutations
-  const codexInitiateMutation = trpc.codexAuth.initiate.useMutation();
-  const codexCancelMutation = trpc.codexAuth.cancel.useMutation();
-
-  // Claude OAuth mutations
-  const claudeInitiateMutation = trpc.claudeAuth.initiate.useMutation();
-  const claudeCancelMutation = trpc.claudeAuth.cancel.useMutation();
-  const claudeLogoutMutation = trpc.claudeAuth.logout.useMutation({
-    onSuccess: () => {
-      utils.provider.hasKey.invalidate();
-      utils.provider.detect.invalidate();
-    },
-  });
-
-  // Codex CLI auth mutations
-  const codexCliInitiateMutation = trpc.codexCliAuth.initiate.useMutation();
-  const codexCliCancelMutation = trpc.codexCliAuth.cancel.useMutation();
-  const codexCliLogoutMutation = trpc.codexCliAuth.logout.useMutation({
-    onSuccess: () => {
-      utils.provider.hasKey.invalidate();
-      utils.provider.detect.invalidate();
-    },
-  });
-
-  const rawProvider = systemSettings?.defaultAgentProvider ?? 'claude';
-  const activeProvider: 'claude' | 'codex' = rawProvider === 'codex' ? 'codex' : 'claude';
-  const activeModel = systemSettings?.defaultModel ?? null;
-
-  // Local state
-  const [expandedProviderGroup, setExpandedProviderGroup] = useState<'claude' | 'codex'>(activeProvider);
-  const [showAllClaudeModels, setShowAllClaudeModels] = useState(false);
-  const [showAllCodexModels, setShowAllCodexModels] = useState(false);
-  const [claudeModelSearch, setClaudeModelSearch] = useState('');
-  const [codexModelSearch, setCodexModelSearch] = useState('');
-  const [credentialsExpandedProvider, setCredentialsExpandedProvider] = useState<'claude' | 'codex' | null>(null);
-  const [credentialInput, setCredentialInput] = useState('');
-  const [showKey, setShowKey] = useState(false);
-  const [validateResult, setValidateResult] = useState<{ valid: boolean; message: string } | null>(null);
-  const [recentSwitch, setRecentSwitch] = useState<{
-    fromModel: string | null;
-    fromProvider: string;
-    toModel: string;
-    toProvider: string;
-    modelName: string;
-    undoTimer: ReturnType<typeof setTimeout> | null;
-  } | null>(null);
-  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Codex OAuth state
-  const [codexOAuthSession, setCodexOAuthSession] = useState<string | null>(null);
-  const [codexOAuthData, setCodexOAuthData] = useState<{
-    userCode: string;
-    verificationUrl: string;
-    expiresIn: number;
-  } | null>(null);
-  const [codexOAuthStatus, setCodexOAuthStatus] = useState<'idle' | 'pending' | 'success' | 'error' | 'expired'>('idle');
-  const [codexOAuthMessage, setCodexOAuthMessage] = useState('');
-  const [codexCountdown, setCodexCountdown] = useState(0);
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [codeCopied, setCodeCopied] = useState(false);
-
-  // Claude OAuth state
-  const [claudeOAuthSession, setClaudeOAuthSession] = useState<string | null>(null);
-  const [claudeOAuthStatus, setClaudeOAuthStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
-  const [claudeOAuthMessage, setClaudeOAuthMessage] = useState('');
-
-  // Codex CLI auth state
-  const [codexCliAuthSession, setCodexCliAuthSession] = useState<string | null>(null);
-  const [codexCliAuthStatus, setCodexCliAuthStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
-  const [codexCliAuthMessage, setCodexCliAuthMessage] = useState('');
-
-  // Sync expanded provider group with active provider on initial load
-  const initialSyncDone = useRef(false);
-  useEffect(() => {
-    if (!initialSyncDone.current && systemSettings) {
-      initialSyncDone.current = true;
-      setExpandedProviderGroup(activeProvider);
-    }
-  }, [systemSettings, activeProvider]);
-
-  // Auto-reset reasoning effort from 'max' when switching away from Claude
-  useEffect(() => {
-    if (systemSettings?.reasoningEffort === 'max' && activeProvider !== 'claude') {
-      updateSettingsMutation.mutate({ reasoningEffort: 'high' });
-    }
-  }, [activeProvider, systemSettings?.reasoningEffort]);
-
-  // detect may clean up stale CLI credentials; refetch hasKey to stay in sync
-  useEffect(() => {
-    if (detectUpdatedAt) {
-      utils.provider.hasKey.invalidate();
-    }
-  }, [detectUpdatedAt, utils.provider.hasKey]);
-
-  // Two parallel model queries — one per provider
-  const { data: claudeModels } = trpc.provider.listModels.useQuery({ provider: 'claude' }) as { data: ModelData[] | undefined };
-  const { data: codexModels } = trpc.provider.listModels.useQuery({ provider: 'codex' }) as { data: ModelData[] | undefined };
-
-  const stopCountdown = useCallback(() => {
-    if (countdownRef.current) {
-      clearInterval(countdownRef.current);
-      countdownRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => stopCountdown();
-  }, [stopCountdown]);
-
-  // Codex OAuth status subscription
-  trpc.codexAuth.status.useSubscription(
-    { sessionId: codexOAuthSession! },
-    {
-      enabled: codexOAuthSession !== null && codexOAuthStatus === 'pending',
-      onData: (data) => {
-        if (data.status === 'success') {
-          setCodexOAuthStatus('success');
-          stopCountdown();
-          utils.provider.hasKey.invalidate();
-          utils.provider.detect.invalidate();
-        } else if (data.status === 'error') {
-          setCodexOAuthStatus('error');
-          setCodexOAuthMessage(data.message ?? 'Authorization failed');
-          stopCountdown();
-        } else if (data.status === 'expired') {
-          setCodexOAuthStatus('expired');
-          setCodexOAuthMessage('Authorization code expired');
-          stopCountdown();
-        } else if (data.status === 'cancelled') {
-          setCodexOAuthStatus('idle');
-          stopCountdown();
-        }
-      },
-    }
+  // System errors from the heartbeat store (auth failures)
+  // Use a stable selector to avoid infinite re-renders from filter creating new arrays
+  const systemErrors = useHeartbeatStore((s) => s.systemErrors);
+  const authErrors = useMemo(
+    () => systemErrors.filter((e) => e.category === 'authentication'),
+    [systemErrors]
   );
+  const hasAuthFailure = authErrors.length > 0;
+  const latestAuthError = authErrors[authErrors.length - 1] ?? null;
 
-  // Claude OAuth status subscription
-  trpc.claudeAuth.status.useSubscription(
-    { sessionId: claudeOAuthSession! },
-    {
-      enabled: claudeOAuthSession !== null && claudeOAuthStatus === 'pending',
-      onData: (data) => {
-        if (data.status === 'success') {
-          setClaudeOAuthStatus('success');
-          utils.provider.hasKey.invalidate();
-          utils.provider.detect.invalidate();
-        } else if (data.status === 'error') {
-          setClaudeOAuthStatus('error');
-          setClaudeOAuthMessage(data.message ?? 'Authentication failed');
-        } else if (data.status === 'cancelled') {
-          setClaudeOAuthStatus('idle');
-        }
-      },
-    }
-  );
+  const isConnected = statusData?.connected ?? false;
+  const providerName = allProviders?.find(p => p.id === activeProvider)?.name ?? activeProvider ?? '';
 
-  // Codex CLI auth status subscription
-  trpc.codexCliAuth.status.useSubscription(
-    { sessionId: codexCliAuthSession! },
-    {
-      enabled: codexCliAuthSession !== null && codexCliAuthStatus === 'pending',
-      onData: (data) => {
-        if (data.status === 'success') {
-          setCodexCliAuthStatus('success');
-          utils.provider.hasKey.invalidate();
-          utils.provider.detect.invalidate();
-        } else if (data.status === 'error') {
-          setCodexCliAuthStatus('error');
-          setCodexCliAuthMessage(data.message ?? 'Authentication failed');
-        } else if (data.status === 'cancelled') {
-          setCodexCliAuthStatus('idle');
-        }
-      },
-    }
-  );
+  // Determine which card state to show:
+  // - If we have auth errors AND we were previously connected, show disconnected state
+  // - If connected normally, show connected state
+  // - If not connected (no provider configured), show not-connected state
+  const showDisconnected = hasAuthFailure && activeProvider;
+  const showConnected = isConnected && !showDisconnected;
+  const showNotConnected = !isConnected && !showDisconnected;
 
-  // Derive CLI detection
-  const claudeCliInstalled = detectData?.find((d) => d.provider === 'claude')?.cliInstalled ?? false;
-  const codexCliInstalled = detectData?.find((d) => d.provider === 'codex')?.cliInstalled ?? false;
-  const claudeCliAvailable = detectData?.find((d) => d.provider === 'claude')?.methods.some((m) => m.method === 'cli' && m.available) ?? false;
-  const codexCliAvailable = detectData?.find((d) => d.provider === 'codex')?.methods.some((m) => m.method === 'cli' && m.available) ?? false;
+  const meta = statusData?.meta as Record<string, unknown> | null;
+  const method = statusData?.method;
 
-  // Auto-persist cli_detected sentinel when live CLI auth is found but DB has no record.
-  // This keeps the DB in sync so backend consumers (heartbeat, etc.) also see credentials.
-  useEffect(() => {
-    if (claudeCliAvailable && claudeKey && !claudeKey.hasKey) {
-      useCliMutation.mutate({ provider: 'claude' });
-    }
-  }, [claudeCliAvailable, claudeKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (codexCliAvailable && codexKey && !codexKey.hasKey) {
-      useCliMutation.mutate({ provider: 'codex' });
-    }
-  }, [codexCliAvailable, codexKey]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Credential status helpers
-  const getKeyData = (provider: string) => {
-    if (provider === 'claude') return claudeKey;
-    if (provider === 'codex') return codexKey;
-    return null;
-  };
-
-  const hasCredentials = (provider: string) => {
-    // Check DB-stored credentials first
-    if (getKeyData(provider)?.hasKey) return true;
-    // Also consider live CLI auth (detect query) so the badge stays
-    // consistent with the expanded "signed in" state
-    if (provider === 'claude') return claudeCliAvailable;
-    if (provider === 'codex') return codexCliAvailable;
-    return false;
-  };
-
-  // Infer credential type from input prefix
-  const inferredType = (() => {
-    if (!credentialInput || credentialInput.length < 5) return null;
-    if (credentialInput.startsWith('sk-ant-oat01-')) return 'OAuth Token';
-    if (credentialInput.startsWith('sk-ant-api03-')) return 'API Key';
-    if (credentialInput.startsWith('sk-ant-')) return 'API Key';
-    if (credentialInput.startsWith('sk-')) return 'API Key';
-    return null;
-  })();
-
-  // Formatting helpers
-  const formatTokens = (n: number) =>
-    n >= 1_000_000 ? `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M` :
-    n >= 1_000 ? `${Math.round(n / 1_000)}K` : String(n);
-
-  const formatPrice = (per1M: number) => `$${per1M.toFixed(2)}`;
-
-  // Auto-save model selection with optional provider switch
-  const handleModelClick = (model: ModelData) => {
-    // If provider is uncredentialed, open its credential card instead
-    if (!hasCredentials(model.provider)) {
-      setCredentialsExpandedProvider(model.provider as 'claude' | 'codex');
-      return;
-    }
-    // If already the active model, do nothing
-    if (model.id === activeModel && model.provider === activeProvider) return;
-
-    const mutation: { defaultModel: string; defaultAgentProvider?: 'claude' | 'codex' | 'opencode' } = { defaultModel: model.id };
-    if (model.provider !== activeProvider) {
-      mutation.defaultAgentProvider = model.provider as 'claude' | 'codex' | 'opencode';
-    }
-
-    const prevModel = activeModel;
-    const prevProvider = activeProvider;
-
-    updateSettingsMutation.mutate(mutation, {
-      onSuccess: () => {
-        if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-        const timer = setTimeout(() => setRecentSwitch(null), 5000);
-        undoTimerRef.current = timer;
-        setRecentSwitch({
-          fromModel: prevModel,
-          fromProvider: prevProvider,
-          toModel: model.id,
-          toProvider: model.provider,
-          modelName: model.name,
-          undoTimer: timer,
-        });
-      },
-    });
-  };
-
-  const handleUndo = () => {
-    if (!recentSwitch) return;
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    undoTimerRef.current = null;
-
-    const mutation: { defaultModel: string | null; defaultAgentProvider?: 'claude' | 'codex' | 'opencode' } = { defaultModel: recentSwitch.fromModel };
-    if (recentSwitch.fromProvider !== recentSwitch.toProvider) {
-      mutation.defaultAgentProvider = recentSwitch.fromProvider as 'claude' | 'codex' | 'opencode';
-    }
-    updateSettingsMutation.mutate(mutation);
-    setRecentSwitch(null);
-  };
-
-  const toggleCredentialCard = (provider: 'claude' | 'codex') => {
-    setCredentialsExpandedProvider(prev => prev === provider ? null : provider);
-    setCredentialInput('');
-    setShowKey(false);
-    setValidateResult(null);
-  };
-
-  // Cleanup undo timer on unmount
-  useEffect(() => {
-    return () => {
-      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    };
-  }, []);
-
-  const handleValidateAndSave = (provider: 'claude' | 'codex') => {
-    if (!credentialInput.trim()) return;
-    validateMutation.mutate(
-      { provider, key: credentialInput },
+  const handleModelChange = (modelId: string) => {
+    if (!activeProvider) return;
+    // Reset context limit slider so it reflects the new model's server value
+    setLocalContextLimit('unset');
+    clearTimeout(contextLimitTimerRef.current);
+    setActiveMutation.mutate(
+      { provider: activeProvider, model: modelId },
       {
-        onSuccess: (result) => {
-          setValidateResult(result);
-          if (result.valid) {
-            saveKeyMutation.mutate(
-              { provider, key: credentialInput, credentialType: result.credentialType as 'api_key' | 'oauth_token' | undefined },
-              {
-                onSuccess: () => {
-                  setCredentialInput('');
-                  setShowKey(false);
-                },
-              },
-            );
-          }
+        onSuccess: () => {
+          modelSave.flash();
+          // When primary model (and thus provider) changes, reset utility model to recommended
+          updateSettingsMutation.mutate({ utilityModel: 'default' });
         },
-      },
+      }
     );
   };
 
-  const handleRemove = (provider: 'claude' | 'codex') => {
-    removeKeyMutation.mutate({ provider });
+  const handleUtilityModelChange = (value: string) => {
+    updateSettingsMutation.mutate(
+      { utilityModel: value },
+      { onSuccess: () => utilityModelSave.flash() }
+    );
   };
 
-  const handleUseCli = (provider: 'claude' | 'codex') => {
-    useCliMutation.mutate({ provider });
+  const handleThinkingChange = (level: string) => {
+    setThinkingMutation.mutate(
+      { level: level as 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'max' },
+      { onSuccess: () => thinkingSave.flash() }
+    );
   };
 
-  const handleCodexOAuthStart = () => {
-    setCodexOAuthStatus('pending');
-    setCodexOAuthMessage('');
-    setCodexOAuthData(null);
+  const activeModelData = models?.find(m => m.id === statusData?.model);
+  const modelContextWindow = activeModelData?.contextWindow ?? 200_000;
+  const MINIMUM_CONTEXT_WINDOW = 16_384;
+  const DEFAULT_CONTEXT_WINDOW_LIMIT = 100_000;
 
-    codexInitiateMutation.mutate(undefined, {
-      onSuccess: (result) => {
-        setCodexOAuthData({
-          userCode: result.userCode ?? '',
-          verificationUrl: result.verificationUrl ?? '',
-          expiresIn: result.expiresIn ?? 0,
-        });
-        setCodexOAuthSession(result.sessionId);
-        setCodexCountdown(result.expiresIn ?? 0);
+  // Resolve the effective slider value:
+  //   local override > server value > default (min(100K, model max))
+  // Always clamp to [MINIMUM_CONTEXT_WINDOW, modelContextWindow] so the slider
+  // stays in range when switching from a larger to a smaller model.
+  const serverContextLimit = statusData?.contextWindowLimit as number | null | undefined;
+  const defaultLimit = Math.min(DEFAULT_CONTEXT_WINDOW_LIMIT, modelContextWindow);
+  const rawContextLimit =
+    localContextLimit !== 'unset' ? localContextLimit
+    : serverContextLimit != null ? serverContextLimit
+    : defaultLimit;
+  const sliderValue = Math.max(MINIMUM_CONTEXT_WINDOW, Math.min(rawContextLimit ?? defaultLimit, modelContextWindow));
+  const contextPercentage = Math.round((sliderValue / modelContextWindow) * 100);
 
-        stopCountdown();
-        countdownRef.current = setInterval(() => {
-          setCodexCountdown((prev) => {
-            if (prev <= 1) {
-              stopCountdown();
-              return 0;
-            }
-            return prev - 1;
-          });
-        }, 1000);
-      },
-      onError: (err) => {
-        setCodexOAuthStatus('error');
-        setCodexOAuthMessage(err.message ?? 'Failed to start authentication');
-      },
-    });
+  const handleContextLimitChange = (tokens: number) => {
+    // Store the exact token value; the backend/cortex handle clamping
+    setLocalContextLimit(tokens);
+    clearTimeout(contextLimitTimerRef.current);
+    contextLimitTimerRef.current = setTimeout(() => {
+      setContextLimitMutation.mutate({ limit: tokens });
+    }, 300);
   };
 
-  const handleCodexOAuthCancel = () => {
-    if (codexOAuthSession) {
-      codexCancelMutation.mutate({ sessionId: codexOAuthSession });
-    }
-    setCodexOAuthStatus('idle');
-    setCodexOAuthSession(null);
-    setCodexOAuthData(null);
-    stopCountdown();
+  const formatContextTokens = (tokens: number) => {
+    if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+    return `${Math.round(tokens / 1000)}K`;
   };
 
-  const handleClaudeOAuthStart = () => {
-    setClaudeOAuthStatus('pending');
-    setClaudeOAuthMessage('');
+  const handleReconnect = useCallback(() => {
+    if (!activeProvider) return;
+    setReconnectState('authenticating');
+    initiateOAuthMutation.mutate(
+      { provider: activeProvider },
+      {
+        onError: () => setReconnectState('idle'),
+      }
+    );
+  }, [activeProvider, initiateOAuthMutation]);
 
-    claudeInitiateMutation.mutate(undefined, {
-      onSuccess: (result) => {
-        setClaudeOAuthSession(result.sessionId);
-        if (result.status === 'success') {
-          setClaudeOAuthStatus('success');
-          utils.provider.hasKey.invalidate();
-          utils.provider.detect.invalidate();
-        } else if (result.status === 'error') {
-          setClaudeOAuthStatus('error');
-          setClaudeOAuthMessage(result.message ?? 'Authentication failed');
-        }
-      },
-      onError: (err) => {
-        setClaudeOAuthStatus('error');
-        setClaudeOAuthMessage(err.message ?? 'Failed to start authentication');
-      },
-    });
-  };
+  const handleCancelReconnect = useCallback(() => {
+    cancelOAuthMutation.mutate();
+    setReconnectState('idle');
+  }, [cancelOAuthMutation]);
 
-  const handleClaudeOAuthCancel = () => {
-    if (claudeOAuthSession) {
-      claudeCancelMutation.mutate({ sessionId: claudeOAuthSession });
-    }
-    setClaudeOAuthStatus('idle');
-    setClaudeOAuthSession(null);
-  };
+  const handleSwitchModalClose = useCallback(() => {
+    setSwitchModalOpen(false);
+    // Refresh status after modal closes (user may have connected a new provider)
+    utils.cortexProvider.getStatus.invalidate();
+    utils.cortexProvider.listConfiguredProviders.invalidate();
+  }, [utils.cortexProvider.getStatus, utils.cortexProvider.listConfiguredProviders]);
 
-  const handleCodexCliAuthStart = () => {
-    setCodexCliAuthStatus('pending');
-    setCodexCliAuthMessage('');
-    codexCliInitiateMutation.mutate(undefined, {
-      onSuccess: (result) => setCodexCliAuthSession(result.sessionId),
-      onError: (err) => {
-        setCodexCliAuthStatus('error');
-        setCodexCliAuthMessage(err.message ?? 'Failed to start authentication');
-      },
-    });
-  };
+  if (statusLoading) {
+    return (
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+        <Typography.Title3 as="h2">AI Provider</Typography.Title3>
+        <Typography.Caption color="hint">Loading...</Typography.Caption>
+      </div>
+    );
+  }
 
-  const handleCodexCliAuthCancel = () => {
-    if (codexCliAuthSession) codexCliCancelMutation.mutate({ sessionId: codexCliAuthSession });
-    setCodexCliAuthStatus('idle');
-    setCodexCliAuthSession(null);
-  };
-
-  const handleSignOut = (provider: 'claude' | 'codex') => {
-    if (provider === 'claude') {
-      claudeLogoutMutation.mutate();
-    } else {
-      codexCliLogoutMutation.mutate();
-    }
-    // Reset any in-progress auth flows
-    setClaudeOAuthStatus('idle');
-    setClaudeOAuthSession(null);
-    setCodexCliAuthStatus('idle');
-    setCodexCliAuthSession(null);
-  };
-
-  const handleCopyCode = async (code: string) => {
-    try {
-      await navigator.clipboard.writeText(code);
-      setCodeCopied(true);
-      setTimeout(() => setCodeCopied(false), 2000);
-    } catch {
-      // Fallback
-    }
-  };
-
-  const formatCountdown = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
-
-  // Sort models by release date (newest first)
-  const sortByDate = (a: ModelData, b: ModelData) => {
-    if (!a.createdAt && !b.createdAt) return 0;
-    if (!a.createdAt) return 1;
-    if (!b.createdAt) return -1;
-    return b.createdAt.localeCompare(a.createdAt);
-  };
-
-  // Per-provider model lists
-  const claudeRecommended = (claudeModels?.filter(m => m.recommended) ?? []).sort(sortByDate);
-  const claudeNonRecommended = (claudeModels?.filter(m => !m.recommended) ?? []).sort(sortByDate);
-  const codexRecommended = (codexModels?.filter(m => m.recommended) ?? []).sort(sortByDate);
-  const codexNonRecommended = (codexModels?.filter(m => !m.recommended) ?? []).sort(sortByDate);
-
-  // Per-provider search filtering
-  const claudeSearchLower = claudeModelSearch.toLowerCase();
-  const filteredClaudeNonRec = claudeModelSearch
-    ? claudeNonRecommended.filter(m =>
-        m.id.toLowerCase().includes(claudeSearchLower) ||
-        m.name.toLowerCase().includes(claudeSearchLower)
-      )
-    : claudeNonRecommended;
-  const codexSearchLower = codexModelSearch.toLowerCase();
-  const filteredCodexNonRec = codexModelSearch
-    ? codexNonRecommended.filter(m =>
-        m.id.toLowerCase().includes(codexSearchLower) ||
-        m.name.toLowerCase().includes(codexSearchLower)
-      )
-    : codexNonRecommended;
-
-  const MAX_VISIBLE_ALL = 20;
-
-  // Active model data (for reasoning effort support check)
-  const activeModelData = activeModel
-    ? (claudeModels?.find(m => m.id === activeModel) ?? codexModels?.find(m => m.id === activeModel))
-    : null;
-  const activeModelSupportsThinking = activeModelData?.supportsThinking ?? false;
+  const connectionLabel = method === 'oauth'
+    ? (meta?.['displayName'] ? String(meta['displayName']) : 'Signed in')
+    : method === 'api_key' ? 'API key'
+    : method === 'env_var' ? 'Environment variable'
+    : method === 'custom' ? (meta?.['baseUrl'] ? String(meta['baseUrl']) : 'Custom endpoint')
+    : '';
 
   return (
-    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
+    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
+      <Typography.Title3 as="h2">AI Provider</Typography.Title3>
 
-      {/* ============ Undo Banner ============ */}
-      <AnimatePresence>
-        {recentSwitch && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
-          >
-            <div css={css`
-              padding: ${theme.spacing[3]} ${theme.spacing[4]};
-              border: 1px solid ${theme.colors.success.main}33;
-              border-radius: ${theme.borderRadius.md};
-              background: ${theme.colors.success.main}08;
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-              gap: ${theme.spacing[3]};
-            `}>
-              <Typography.SmallBody css={css`
-                display: flex;
-                align-items: center;
-                gap: ${theme.spacing[2]};
-              `}>
-                <CheckCircle size={16} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                <span>Switched to <strong>{recentSwitch.modelName}</strong>. Mind session restarts on next tick.</span>
-              </Typography.SmallBody>
-              <Button variant="ghost" size="sm" onClick={handleUndo} css={css`flex-shrink: 0;`}>
-                Undo
-              </Button>
+      {/* ── Disconnected / Auth Failure State ── */}
+      {showDisconnected && (
+        <Card css={css`
+          padding: ${theme.spacing[5]};
+          border: 1px solid ${theme.colors.warning.main}33;
+          background: ${theme.colors.warning.main}08;
+          &::before { background: linear-gradient(180deg, ${theme.colors.warning.main}18 0%, transparent 100%); }
+        `}>
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+              <Warning size={20} weight="fill" css={css`color: ${theme.colors.warning.main}; flex-shrink: 0;`} />
+              <div>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                  <Typography.SmallBodyAlt>{providerName}</Typography.SmallBodyAlt>
+                  <Badge variant="warning">Disconnected</Badge>
+                </div>
+                <Typography.Caption color="hint" css={css`margin-top: ${theme.spacing[0.5]};`}>
+                  {latestAuthError?.message
+                    ? latestAuthError.message.length > 120
+                      ? `${latestAuthError.message.slice(0, 120)}...`
+                      : latestAuthError.message
+                    : method === 'api_key'
+                      ? 'API key is invalid or has been revoked.'
+                      : 'Authentication expired or revoked.'}
+                </Typography.Caption>
+              </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
-      {/* ============ Model Section Header ============ */}
-      <div>
-        <Typography.Body as="div" css={css`
-          font-weight: ${theme.typography.fontWeight.semibold};
-          margin-bottom: ${theme.spacing[1]};
-        `}>
-          Model
-        </Typography.Body>
-        <Typography.SmallBody color="secondary">
-          Choose which model powers your Animus.
-        </Typography.SmallBody>
-      </div>
+            {reconnectState === 'authenticating' ? (
+              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+                <BreathingDots color={theme.colors.warning.main} />
+                <Typography.Caption color="secondary">Waiting for authorization...</Typography.Caption>
+                <Button variant="ghost" size="sm" onClick={handleCancelReconnect}>Cancel</Button>
+              </div>
+            ) : (
+              <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
+                {method === 'oauth' && (
+                  <Button variant="primary" size="sm" onClick={handleReconnect} loading={initiateOAuthMutation.isPending}>
+                    <ArrowsClockwise size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+                    Reconnect
+                  </Button>
+                )}
+                <Button variant="secondary" size="sm" onClick={() => setSwitchModalOpen(true)}>Switch Provider</Button>
+              </div>
+            )}
 
-      {/* ============ Claude Provider Group ============ */}
-      <div>
-        {/* Provider header row — clickable to expand/collapse */}
-        <button
-          onClick={() => setExpandedProviderGroup(expandedProviderGroup === 'claude' ? 'codex' : 'claude')}
-          css={css`
-            width: 100%;
-            display: flex;
-            align-items: center;
-            gap: ${theme.spacing[2]};
-            margin-bottom: ${expandedProviderGroup === 'claude' ? theme.spacing[2] : '0'};
-            padding: 0;
-            background: transparent;
-            cursor: pointer;
-            border: none;
-            text-align: left;
-          `}
-        >
-          {expandedProviderGroup === 'claude' ? <CaretDown size={12} css={css`color: ${theme.colors.text.hint};`} /> : <CaretRight size={12} css={css`color: ${theme.colors.text.hint};`} />}
-          <span css={css`
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: ${hasCredentials('claude') ? theme.colors.success.main : theme.colors.text.disabled};
-            flex-shrink: 0;
-          `} />
-          <Typography.Body as="span" css={css`
-            font-weight: ${theme.typography.fontWeight.semibold};
-          `}>
-            Claude
-          </Typography.Body>
-          {activeProvider === 'claude' && (
-            <Badge variant="default" css={css`
-              font-size: ${theme.typography.fontSize.xs};
-              background: ${theme.colors.accent}15;
-              color: ${theme.colors.accent};
-            `}>
-              Active
-            </Badge>
+            {latestAuthError?.suggestedAction && (
+              <Typography.Tiny color="hint">{latestAuthError.suggestedAction}</Typography.Tiny>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {/* ── Connected State ── */}
+      {showConnected && (
+        <>
+          {/* Connection status */}
+          <Card css={css`padding: ${theme.spacing[4]} ${theme.spacing[5]};`}>
+            <div css={css`display: flex; align-items: center; justify-content: space-between; min-height: 32px;`}>
+              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                <div css={css`
+                  width: 8px; height: 8px; border-radius: ${theme.borderRadius.full};
+                  background: ${theme.colors.success.main};
+                  box-shadow: 0 0 6px ${theme.colors.success.main}66;
+                  flex-shrink: 0;
+                `} />
+                <Typography.SmallBodyAlt>{providerName}</Typography.SmallBodyAlt>
+                {connectionLabel && (
+                  <>
+                    <span css={css`color: ${theme.colors.text.disabled}; font-size: ${theme.typography.fontSize.xs};`}>/</span>
+                    <Typography.Caption color="hint">{connectionLabel}</Typography.Caption>
+                  </>
+                )}
+              </div>
+              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                <Button variant="secondary" size="sm" onClick={() => setSwitchModalOpen(true)}>
+                  Switch Provider
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => removeCredentialMutation.mutate({ provider: activeProvider! })}
+                  loading={removeCredentialMutation.isPending}
+                  css={css`color: ${theme.colors.text.hint}; &:hover { color: ${theme.colors.error.main}; }`}
+                >
+                  <SignOut size={14} />
+                </Button>
+              </div>
+            </div>
+          </Card>
+
+          {/* Model configuration */}
+          {models && models.length > 0 && (
+            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                  <Typography.SmallBodyAlt>Model</Typography.SmallBodyAlt>
+                  <SaveIndicator show={modelSave.show} />
+                </div>
+                <Select
+                  value={statusData?.model ?? ''}
+                  onChange={(value) => handleModelChange(value)}
+                  options={models.map((m) => ({
+                    value: m.id,
+                    label: `${m.name} (${Math.round(m.contextWindow / 1000)}K context)`,
+                  }))}
+                />
+              </div>
+
+              {/* Thinking level */}
+              {(() => {
+                const activeModelForThinking = models?.find(m => m.id === statusData?.model);
+                if (!activeModelForThinking?.supportsThinking) return null;
+
+                const allLevels: Array<{ value: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'max'; label: string }> = [
+                  { value: 'off', label: 'Off' },
+                  { value: 'minimal', label: 'Minimal' },
+                  { value: 'low', label: 'Low' },
+                  { value: 'medium', label: 'Medium' },
+                  { value: 'high', label: 'High' },
+                  { value: 'max', label: 'Max' },
+                ];
+                const supported = activeModelForThinking.supportedThinkingLevels;
+                const thinkingOptions = supported?.length
+                  ? allLevels.filter(l => supported.includes(l.value))
+                  : allLevels;
+
+                return (
+                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                    <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                      <Typography.SmallBodyAlt>Thinking Level</Typography.SmallBodyAlt>
+                      <SaveIndicator show={thinkingSave.show} />
+                    </div>
+                    <Select
+                      value={statusData?.thinkingLevel ?? 'high'}
+                      onChange={(value) => handleThinkingChange(value)}
+                      maxWidth="200px"
+                      options={thinkingOptions}
+                    />
+                    <Typography.Caption color="hint">
+                      Controls how much the model reasons before responding. Higher levels use more tokens.
+                    </Typography.Caption>
+                  </div>
+                );
+              })()}
+
+              {/* Context window limit */}
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                  <Typography.SmallBodyAlt>Context Usage</Typography.SmallBodyAlt>
+                  <SaveIndicator show={contextLimitSave.show} />
+                </div>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[4]};`}>
+                  <div css={css`flex: 1;`}>
+                    <Slider
+                      value={sliderValue}
+                      onChange={handleContextLimitChange}
+                      min={MINIMUM_CONTEXT_WINDOW}
+                      max={modelContextWindow}
+                      step={1000}
+                      leftLabel={formatContextTokens(MINIMUM_CONTEXT_WINDOW)}
+                      rightLabel={formatContextTokens(modelContextWindow)}
+                      showNeutral={false}
+                    />
+                  </div>
+                  <Typography.SmallBodyAlt as="span" css={css`white-space: nowrap; min-width: 110px;`}>
+                    {`${contextPercentage}% · ${formatContextTokens(sliderValue)}`}
+                  </Typography.SmallBodyAlt>
+                </div>
+                <Typography.Caption as="p" color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+                  Limits how much of the model's context window is used. Lower values trigger compaction sooner, reducing token costs. Default is {formatContextTokens(defaultLimit)}.
+                </Typography.Caption>
+              </div>
+
+              {/* Utility model */}
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                  <Typography.SmallBodyAlt>Utility Model</Typography.SmallBodyAlt>
+                  <SaveIndicator show={utilityModelSave.show} />
+                </div>
+                <Select
+                  value={systemSettings?.utilityModel ?? 'default'}
+                  onChange={(value) => handleUtilityModelChange(value)}
+                  options={[
+                    { value: 'default', label: 'Recommended' },
+                    ...[...models]
+                      .sort((a, b) => (a.pricing?.input ?? Infinity) - (b.pricing?.input ?? Infinity))
+                      .map((m) => ({
+                        value: m.id,
+                        label: `${m.name}${m.pricing ? ` ($${m.pricing.input.toFixed(2)}/$${m.pricing.output.toFixed(2)} per 1M)` : ''}`,
+                      })),
+                  ]}
+                />
+                <Typography.Caption color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+                  A smaller model used for internal operations like web page summarization and safety checks. Does not affect the quality of the agent's main responses.
+                </Typography.Caption>
+              </div>
+            </div>
           )}
-          {!hasCredentials('claude') && (
-            <span
-              onClick={(e) => { e.stopPropagation(); toggleCredentialCard('claude'); }}
+        </>
+      )}
+
+      {/* ── Not Connected State ── */}
+      {showNotConnected && (
+        <Card css={css`padding: ${theme.spacing[8]} ${theme.spacing[5]};`}>
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]}; align-items: center; text-align: center;`}>
+            <Typography.Body color="secondary">No AI provider configured</Typography.Body>
+            <Typography.Caption color="hint">
+              Connect a provider to start using Animus.
+            </Typography.Caption>
+            <Button variant="primary" size="sm" onClick={() => setSwitchModalOpen(true)}>
+              Set Up Provider
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* ── Switch Provider Modal ── */}
+      <Modal open={switchModalOpen} onClose={handleSwitchModalClose} maxWidth="560px">
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
+          <div css={css`display: flex; align-items: center; justify-content: space-between;`}>
+            <Typography.Title3 as="h2" css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
+              Switch Provider
+            </Typography.Title3>
+            <button
+              onClick={handleSwitchModalClose}
               css={css`
-                margin-left: auto;
-                font-size: 13px;
-                color: ${theme.colors.accent};
-                cursor: pointer;
-                &:hover { text-decoration: underline; }
+                display: flex; align-items: center; justify-content: center;
+                width: 28px; height: 28px; border-radius: ${theme.borderRadius.sm};
+                background: none; border: none; cursor: pointer;
+                color: ${theme.colors.text.hint};
+                &:hover { color: ${theme.colors.text.primary}; background: ${theme.colors.background.elevated}; }
               `}
             >
-              Set up credentials
-            </span>
-          )}
-        </button>
-
-        <AnimatePresence initial={false}>
-        {expandedProviderGroup === 'claude' && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            css={css`overflow: hidden;`}
-          >
-        {!hasCredentials('claude') ? (
-          <div css={css`
-            padding: ${theme.spacing[3]} ${theme.spacing[4]};
-            border: 1px solid ${theme.colors.border.light};
-            border-radius: ${theme.borderRadius.md};
-            text-align: center;
-          `}>
-            <Typography.SmallBody color="secondary">
-              Set up Claude credentials below to select a model.
-            </Typography.SmallBody>
+              <X size={16} />
+            </button>
           </div>
-        ) : (
-          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-            {/* Recommended Claude models */}
-            {claudeRecommended.length > 0 && (
-              <div css={css`
-                border: 1px solid ${theme.colors.border.light};
-                border-radius: ${theme.borderRadius.md};
-                overflow: hidden;
-              `}>
-                <div css={css`
-                  padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                  background: ${theme.colors.background.elevated};
-                  border-bottom: 1px solid ${theme.colors.border.light};
-                `}>
-                  <Typography.SmallBody css={css`
-                    font-weight: ${theme.typography.fontWeight.semibold};
-                    color: ${theme.colors.text.primary};
-                  `}>
-                    Recommended
-                  </Typography.SmallBody>
-                </div>
+          <SwitchProviderModalContent onClose={handleSwitchModalClose} />
+        </div>
+      </Modal>
+    </div>
+  );
+}
 
-                {claudeRecommended.map((model, idx) => {
-                  const isCurrent = model.id === activeModel;
-                  return (
-                    <div
-                      key={model.id}
-                      onClick={() => handleModelClick(model)}
-                      css={css`
-                        padding: ${theme.spacing[3]} ${theme.spacing[4]};
-                        cursor: pointer;
-                        transition: background 150ms ease-out;
-                        position: relative;
-                        ${idx > 0 ? `border-top: 1px solid ${theme.colors.border.light};` : ''}
-                        ${isCurrent ? `
-                          background: ${theme.colors.accent}0a;
-                          border-left: 2px solid ${theme.colors.accent};
-                          padding-left: calc(${theme.spacing[4]} - 2px);
-                        ` : `
-                          border-left: 2px solid transparent;
-                          padding-left: calc(${theme.spacing[4]} - 2px);
-                          &:hover {
-                            background: ${theme.colors.accent}05;
-                          }
-                        `}
-                      `}
-                    >
-                      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; margin-bottom: ${theme.spacing[1]};`}>
-                        <span css={css`
-                          width: 18px;
-                          height: 18px;
-                          border-radius: 50%;
-                          border: 2px solid ${isCurrent ? theme.colors.accent : theme.colors.border.default};
-                          display: flex;
-                          align-items: center;
-                          justify-content: center;
-                          flex-shrink: 0;
-                          transition: all 150ms ease-out;
-                          ${isCurrent ? `background: ${theme.colors.accent};` : ''}
-                        `}>
-                          {isCurrent && (
-                            <span css={css`
-                              width: 6px;
-                              height: 6px;
-                              border-radius: 50%;
-                              background: ${theme.colors.accentForeground};
-                            `} />
-                          )}
-                        </span>
-                        <Typography.Body as="span" css={css`
-                          font-weight: ${theme.typography.fontWeight.medium};
-                          font-size: 15px;
-                        `}>
-                          {model.name}
-                        </Typography.Body>
-                        {isCurrent && (
-                          <Badge variant="default" css={css`font-size: ${theme.typography.fontSize.xs};`}>
-                            Current
-                          </Badge>
-                        )}
-                        {model.isDefault && (
-                          <Badge variant="default" css={css`
-                            font-size: ${theme.typography.fontSize.xs};
-                            background: ${theme.colors.accent}15;
-                            color: ${theme.colors.accent};
-                          `}>
-                            Default
-                          </Badge>
-                        )}
-                      </div>
-                      <div css={css`
-                        margin-left: 24px;
-                        font-size: 13px;
-                        color: ${theme.colors.text.secondary};
-                        line-height: 1.4;
-                      `}>
-                        {formatTokens(model.contextWindow)} context · {formatTokens(model.maxOutputTokens)} max output
-                      </div>
-                      <div css={css`
-                        margin-left: 24px;
-                        font-size: 13px;
-                        color: ${theme.colors.text.secondary};
-                        line-height: 1.4;
-                      `}>
-                        <span css={css`color: ${theme.colors.text.primary};`}>{formatPrice(model.inputPricePer1M)}</span> input /{' '}
-                        <span css={css`color: ${theme.colors.text.primary};`}>{formatPrice(model.outputPricePer1M)}</span> output per 1M tokens
-                      </div>
-                      {(model.supportsVision || model.supportsThinking) && (
-                        <div css={css`
-                          margin-left: 24px;
-                          margin-top: ${theme.spacing[1]};
-                          display: flex;
-                          gap: ${theme.spacing[1]};
-                        `}>
-                          {model.supportsVision && (
-                            <span css={css`
-                              font-size: 12px;
-                              padding: 1px ${theme.spacing[1.5]};
-                              background: ${theme.colors.background.elevated};
-                              border-radius: ${theme.borderRadius.sm};
-                              color: ${theme.colors.text.hint};
-                            `}>
-                              Vision
-                            </span>
-                          )}
-                          {model.supportsThinking && (
-                            <span css={css`
-                              font-size: 12px;
-                              padding: 1px ${theme.spacing[1.5]};
-                              background: ${theme.colors.background.elevated};
-                              border-radius: ${theme.borderRadius.sm};
-                              color: ${theme.colors.text.hint};
-                            `}>
-                              Thinking
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+/**
+ * Inner content for the Switch Provider modal.
+ * Reuses the same three-layer progressive disclosure from onboarding,
+ * adapted for modal use (no onboarding navigation, auto-closes on success).
+ */
+function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
+  const theme = useTheme();
+  const utils = trpc.useUtils();
 
-            {/* All Claude models (collapsible with search) */}
-            {claudeNonRecommended.length > 0 && (
-              <div css={css`
-                border: 1px solid ${theme.colors.border.light};
-                border-radius: ${theme.borderRadius.md};
-                overflow: hidden;
-              `}>
-                <div css={css`
-                  padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                  background: ${theme.colors.background.elevated};
-                  border-bottom: ${showAllClaudeModels || claudeModelSearch ? `1px solid ${theme.colors.border.light}` : 'none'};
-                  display: flex;
-                  align-items: center;
-                  justify-content: space-between;
-                  gap: ${theme.spacing[2]};
-                `}>
-                  <button
-                    onClick={() => { setShowAllClaudeModels(!showAllClaudeModels); setClaudeModelSearch(''); }}
-                    css={css`
-                      display: flex;
-                      align-items: center;
-                      gap: ${theme.spacing[1.5]};
-                      background: transparent;
-                      cursor: pointer;
-                      padding: 0;
-                      color: ${theme.colors.text.secondary};
-                      &:hover { color: ${theme.colors.text.primary}; }
-                    `}
-                  >
-                    {showAllClaudeModels || claudeModelSearch ? <CaretDown size={12} /> : <CaretRight size={12} />}
-                    <Typography.SmallBody css={css`
-                      font-weight: ${theme.typography.fontWeight.semibold};
-                      color: inherit;
-                    `}>
-                      All Models ({claudeNonRecommended.length})
-                    </Typography.SmallBody>
-                  </button>
+  const { data: statusData } = trpc.cortexProvider.getStatus.useQuery();
+  const { data: allProviders } = trpc.cortexProvider.listProviders.useQuery();
 
-                  {(showAllClaudeModels || claudeModelSearch) && (
-                    <div css={css`
-                      position: relative;
-                      flex: 1;
-                      max-width: 240px;
-                    `}>
-                      <MagnifyingGlass size={14} css={css`
-                        position: absolute;
-                        left: ${theme.spacing[2]};
-                        top: 50%;
-                        transform: translateY(-50%);
-                        color: ${theme.colors.text.hint};
-                        pointer-events: none;
-                      `} />
-                      <input
-                        type="text"
-                        value={claudeModelSearch}
-                        onChange={(e) => setClaudeModelSearch(e.target.value)}
-                        placeholder="Search models..."
-                        css={css`
-                          width: 100%;
-                          padding: ${theme.spacing[1.5]} ${theme.spacing[3]} ${theme.spacing[1.5]} 2rem;
-                          border: 1px solid ${theme.colors.border.default};
-                          border-radius: ${theme.borderRadius.md};
-                          background: ${theme.colors.background.default};
-                          color: ${theme.colors.text.primary};
-                          font-size: 13px;
-                          outline: none;
-                          &:focus {
-                            border-color: ${theme.colors.accent};
-                          }
-                          &::placeholder {
-                            color: ${theme.colors.text.hint};
-                          }
-                        `}
-                      />
-                    </div>
-                  )}
-                </div>
+  const oauthCards = useMemo(() => buildOAuthCards(allProviders ?? []), [allProviders]);
 
-                {(showAllClaudeModels || claudeModelSearch) && (() => {
-                  const visible = filteredClaudeNonRec.slice(0, MAX_VISIBLE_ALL);
-                  const overflow = filteredClaudeNonRec.length - visible.length;
-                  return (
-                    <>
-                      {visible.length === 0 && claudeModelSearch && (
-                        <div css={css`
-                          padding: ${theme.spacing[4]};
-                          text-align: center;
-                          color: ${theme.colors.text.hint};
-                          font-size: 13px;
-                        `}>
-                          No models matching &quot;{claudeModelSearch}&quot;
-                        </div>
-                      )}
+  // OAuth state
+  const [oauthProvider, setOauthProvider] = useState<string | null>(null);
+  const [oauthState, setOauthState] = useState<'idle' | 'authenticating' | 'success' | 'error'>('idle');
+  const [oauthAuthUrl, setOauthAuthUrl] = useState<string | null>(null);
+  const [oauthDeviceCode, setOauthDeviceCode] = useState<string | null>(null);
+  const [oauthError, setOauthError] = useState<string | null>(null);
 
-                      {visible.map((model, idx) => {
-                        const isCurrent = model.id === activeModel;
-                        return (
-                          <div
-                            key={model.id}
-                            onClick={() => handleModelClick(model)}
-                            css={css`
-                              padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                              cursor: pointer;
-                              transition: background 150ms ease-out;
-                              ${idx > 0 ? `border-top: 1px solid ${theme.colors.border.light};` : ''}
-                              ${isCurrent ? `
-                                background: ${theme.colors.accent}0a;
-                                border-left: 2px solid ${theme.colors.accent};
-                                padding-left: calc(${theme.spacing[4]} - 2px);
-                              ` : `
-                                border-left: 2px solid transparent;
-                                padding-left: calc(${theme.spacing[4]} - 2px);
-                                &:hover {
-                                  background: ${theme.colors.accent}05;
-                                }
-                              `}
-                            `}
-                          >
-                            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                              <span css={css`
-                                width: 16px;
-                                height: 16px;
-                                border-radius: 50%;
-                                border: 2px solid ${isCurrent ? theme.colors.accent : theme.colors.border.default};
-                                display: flex;
-                                align-items: center;
-                                justify-content: center;
-                                flex-shrink: 0;
-                                transition: all 150ms ease-out;
-                                ${isCurrent ? `background: ${theme.colors.accent};` : ''}
-                              `}>
-                                {isCurrent && (
-                                  <span css={css`
-                                    width: 5px;
-                                    height: 5px;
-                                    border-radius: 50%;
-                                    background: ${theme.colors.accentForeground};
-                                  `} />
-                                )}
-                              </span>
-                              <Typography.SmallBody css={css`
-                                font-weight: ${theme.typography.fontWeight.medium};
-                              `}>
-                                {model.name}
-                              </Typography.SmallBody>
-                              {isCurrent && (
-                                <Badge variant="default" css={css`font-size: 11px;`}>
-                                  Current
-                                </Badge>
-                              )}
-                              {model.contextWindow > 0 && (
-                                <span css={css`
-                                  font-size: 12px;
-                                  color: ${theme.colors.text.hint};
-                                  margin-left: auto;
-                                `}>
-                                  {formatTokens(model.contextWindow)} · {formatPrice(model.inputPricePer1M)}/{formatPrice(model.outputPricePer1M)}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+  // API key state
+  const [apiKeyExpanded, setApiKeyExpanded] = useState(false);
+  const [apiKeyProvider, setApiKeyProvider] = useState('');
+  const [apiKeyValue, setApiKeyValue] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [apiKeyValidation, setApiKeyValidation] = useState<'idle' | 'validating' | 'success' | 'error'>('idle');
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
 
-                      {overflow > 0 && (
-                        <div css={css`
-                          padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                          border-top: 1px solid ${theme.colors.border.light};
-                          font-size: 12px;
-                          color: ${theme.colors.text.hint};
-                          text-align: center;
-                        `}>
-                          and {overflow} more matching...
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            )}
-          </div>
-        )}
-          </motion.div>
-        )}
-        </AnimatePresence>
-      </div>
+  // Custom endpoint state
+  const [customExpanded, setCustomExpanded] = useState(false);
+  const [customBaseUrl, setCustomBaseUrl] = useState('');
+  const [customModelId, setCustomModelId] = useState('');
+  const [customApiKey, setCustomApiKey] = useState('');
+  const [customValidation, setCustomValidation] = useState<'idle' | 'validating' | 'success' | 'error'>('idle');
 
-      {/* Divider between provider groups */}
-      <div css={css`border-top: 1px solid ${theme.colors.border.light};`} />
+  // Mutations
+  const initiateOAuthMutation = trpc.cortexProvider.initiateOAuth.useMutation();
+  const cancelOAuthMutation = trpc.cortexProvider.cancelOAuth.useMutation();
+  const validateApiKeyMutation = trpc.cortexProvider.validateApiKey.useMutation();
+  const saveApiKeyMutation = trpc.cortexProvider.saveApiKey.useMutation();
+  const saveCustomMutation = trpc.cortexProvider.saveCustomEndpoint.useMutation();
+  const testCustomMutation = trpc.cortexProvider.testCustomEndpoint.useMutation();
 
-      {/* ============ Codex Provider Group ============ */}
-      <div>
-        {/* Provider header row — clickable to expand/collapse */}
-        <button
-          onClick={() => setExpandedProviderGroup(expandedProviderGroup === 'codex' ? 'claude' : 'codex')}
-          css={css`
-            width: 100%;
-            display: flex;
-            align-items: center;
-            gap: ${theme.spacing[2]};
-            margin-bottom: ${expandedProviderGroup === 'codex' ? theme.spacing[2] : '0'};
-            padding: 0;
-            background: transparent;
-            cursor: pointer;
-            border: none;
-            text-align: left;
-          `}
-        >
-          {expandedProviderGroup === 'codex' ? <CaretDown size={12} css={css`color: ${theme.colors.text.hint};`} /> : <CaretRight size={12} css={css`color: ${theme.colors.text.hint};`} />}
-          <span css={css`
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: ${hasCredentials('codex') ? theme.colors.success.main : theme.colors.text.disabled};
-            flex-shrink: 0;
-          `} />
-          <Typography.Body as="span" css={css`
-            font-weight: ${theme.typography.fontWeight.semibold};
-          `}>
-            Codex
-          </Typography.Body>
-          {activeProvider === 'codex' && (
-            <Badge variant="default" css={css`
-              font-size: ${theme.typography.fontSize.xs};
-              background: ${theme.colors.accent}15;
-              color: ${theme.colors.accent};
-            `}>
-              Active
-            </Badge>
-          )}
-          {!hasCredentials('codex') && (
-            <span
-              onClick={(e) => { e.stopPropagation(); toggleCredentialCard('codex'); }}
-              css={css`
-                margin-left: auto;
-                font-size: 13px;
-                color: ${theme.colors.accent};
-                cursor: pointer;
-                &:hover { text-decoration: underline; }
-              `}
-            >
-              Set up credentials
-            </span>
-          )}
-        </button>
+  // OAuth subscription
+  trpc.cortexProvider.oauthStatus.useSubscription(undefined, {
+    enabled: oauthState === 'authenticating',
+    onData: (event) => {
+      if (event.type === 'auth_url') {
+        setOauthAuthUrl(event.url);
+        if (event.deviceCode) setOauthDeviceCode(event.deviceCode);
+      } else if (event.type === 'success') {
+        setOauthState('success');
+        utils.cortexProvider.getStatus.invalidate();
+        utils.cortexProvider.listConfiguredProviders.invalidate();
+        setTimeout(() => onClose(), 600);
+      } else if (event.type === 'error') {
+        setOauthState('error');
+        setOauthError(event.message);
+      }
+    },
+  });
 
-        <AnimatePresence initial={false}>
-        {expandedProviderGroup === 'codex' && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            css={css`overflow: hidden;`}
-          >
-        {!hasCredentials('codex') ? (
-          <div css={css`
-            padding: ${theme.spacing[3]} ${theme.spacing[4]};
-            border: 1px solid ${theme.colors.border.light};
-            border-radius: ${theme.borderRadius.md};
-            text-align: center;
-          `}>
-            <Typography.SmallBody color="secondary">
-              Set up Codex credentials below to select a model.
-            </Typography.SmallBody>
-          </div>
-        ) : (
-          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-            {/* Recommended Codex models */}
-            {codexRecommended.length > 0 && (
-              <div css={css`
-                border: 1px solid ${theme.colors.border.light};
-                border-radius: ${theme.borderRadius.md};
-                overflow: hidden;
-              `}>
-                <div css={css`
-                  padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                  background: ${theme.colors.background.elevated};
-                  border-bottom: 1px solid ${theme.colors.border.light};
-                `}>
-                  <Typography.SmallBody css={css`
-                    font-weight: ${theme.typography.fontWeight.semibold};
-                    color: ${theme.colors.text.primary};
-                  `}>
-                    Recommended
-                  </Typography.SmallBody>
-                </div>
+  const apiKeyProviders = (allProviders ?? []).filter(
+    (p) => p.authMethods.includes('api_key')
+  );
+  const selectedApiProvider = apiKeyProviders.find((p) => p.id === apiKeyProvider);
 
-                {codexRecommended.map((model, idx) => {
-                  const isCurrent = model.id === activeModel;
-                  return (
-                    <div
-                      key={model.id}
-                      onClick={() => handleModelClick(model)}
-                      css={css`
-                        padding: ${theme.spacing[3]} ${theme.spacing[4]};
-                        cursor: pointer;
-                        transition: background 150ms ease-out;
-                        position: relative;
-                        ${idx > 0 ? `border-top: 1px solid ${theme.colors.border.light};` : ''}
-                        ${isCurrent ? `
-                          background: ${theme.colors.accent}0a;
-                          border-left: 2px solid ${theme.colors.accent};
-                          padding-left: calc(${theme.spacing[4]} - 2px);
-                        ` : `
-                          border-left: 2px solid transparent;
-                          padding-left: calc(${theme.spacing[4]} - 2px);
-                          &:hover {
-                            background: ${theme.colors.accent}05;
-                          }
-                        `}
-                      `}
-                    >
-                      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; margin-bottom: ${theme.spacing[1]};`}>
-                        <span css={css`
-                          width: 18px;
-                          height: 18px;
-                          border-radius: 50%;
-                          border: 2px solid ${isCurrent ? theme.colors.accent : theme.colors.border.default};
-                          display: flex;
-                          align-items: center;
-                          justify-content: center;
-                          flex-shrink: 0;
-                          transition: all 150ms ease-out;
-                          ${isCurrent ? `background: ${theme.colors.accent};` : ''}
-                        `}>
-                          {isCurrent && (
-                            <span css={css`
-                              width: 6px;
-                              height: 6px;
-                              border-radius: 50%;
-                              background: ${theme.colors.accentForeground};
-                            `} />
-                          )}
-                        </span>
-                        <Typography.Body as="span" css={css`
-                          font-weight: ${theme.typography.fontWeight.medium};
-                          font-size: 15px;
-                        `}>
-                          {model.name}
-                        </Typography.Body>
-                        {isCurrent && (
-                          <Badge variant="default" css={css`font-size: ${theme.typography.fontSize.xs};`}>
-                            Current
-                          </Badge>
-                        )}
-                        {model.isDefault && (
-                          <Badge variant="default" css={css`
-                            font-size: ${theme.typography.fontSize.xs};
-                            background: ${theme.colors.accent}15;
-                            color: ${theme.colors.accent};
-                          `}>
-                            Default
-                          </Badge>
-                        )}
-                      </div>
-                      <div css={css`
-                        margin-left: 24px;
-                        font-size: 13px;
-                        color: ${theme.colors.text.secondary};
-                        line-height: 1.4;
-                      `}>
-                        {formatTokens(model.contextWindow)} context · {formatTokens(model.maxOutputTokens)} max output
-                      </div>
-                      <div css={css`
-                        margin-left: 24px;
-                        font-size: 13px;
-                        color: ${theme.colors.text.secondary};
-                        line-height: 1.4;
-                      `}>
-                        <span css={css`color: ${theme.colors.text.primary};`}>{formatPrice(model.inputPricePer1M)}</span> input /{' '}
-                        <span css={css`color: ${theme.colors.text.primary};`}>{formatPrice(model.outputPricePer1M)}</span> output per 1M tokens
-                      </div>
-                      {(model.supportsVision || model.supportsThinking) && (
-                        <div css={css`
-                          margin-left: 24px;
-                          margin-top: ${theme.spacing[1]};
-                          display: flex;
-                          gap: ${theme.spacing[1]};
-                        `}>
-                          {model.supportsVision && (
-                            <span css={css`
-                              font-size: 12px;
-                              padding: 1px ${theme.spacing[1.5]};
-                              background: ${theme.colors.background.elevated};
-                              border-radius: ${theme.borderRadius.sm};
-                              color: ${theme.colors.text.hint};
-                            `}>
-                              Vision
-                            </span>
-                          )}
-                          {model.supportsThinking && (
-                            <span css={css`
-                              font-size: 12px;
-                              padding: 1px ${theme.spacing[1.5]};
-                              background: ${theme.colors.background.elevated};
-                              border-radius: ${theme.borderRadius.sm};
-                              color: ${theme.colors.text.hint};
-                            `}>
-                              Thinking
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+  useEffect(() => {
+    if (!apiKeyProvider && apiKeyProviders.length > 0) {
+      setApiKeyProvider(apiKeyProviders[0]!.id);
+    }
+  }, [apiKeyProvider, apiKeyProviders]);
 
-            {/* All Codex models (collapsible with search) */}
-            {codexNonRecommended.length > 0 && (
-              <div css={css`
-                border: 1px solid ${theme.colors.border.light};
-                border-radius: ${theme.borderRadius.md};
-                overflow: hidden;
-              `}>
-                <div css={css`
-                  padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                  background: ${theme.colors.background.elevated};
-                  border-bottom: ${showAllCodexModels || codexModelSearch ? `1px solid ${theme.colors.border.light}` : 'none'};
-                  display: flex;
-                  align-items: center;
-                  justify-content: space-between;
-                  gap: ${theme.spacing[2]};
-                `}>
-                  <button
-                    onClick={() => { setShowAllCodexModels(!showAllCodexModels); setCodexModelSearch(''); }}
-                    css={css`
-                      display: flex;
-                      align-items: center;
-                      gap: ${theme.spacing[1.5]};
-                      background: transparent;
-                      cursor: pointer;
-                      padding: 0;
-                      color: ${theme.colors.text.secondary};
-                      &:hover { color: ${theme.colors.text.primary}; }
-                    `}
-                  >
-                    {showAllCodexModels || codexModelSearch ? <CaretDown size={12} /> : <CaretRight size={12} />}
-                    <Typography.SmallBody css={css`
-                      font-weight: ${theme.typography.fontWeight.semibold};
-                      color: inherit;
-                    `}>
-                      All Models ({codexNonRecommended.length})
-                    </Typography.SmallBody>
-                  </button>
+  const handleOAuthStart = useCallback((providerId: string) => {
+    setOauthProvider(providerId);
+    setOauthState('authenticating');
+    setOauthError(null);
+    setOauthAuthUrl(null);
+    setOauthDeviceCode(null);
+    initiateOAuthMutation.mutate(
+      { provider: providerId },
+      {
+        onError: (err) => {
+          setOauthState('error');
+          setOauthError(err.message ?? 'Authentication failed');
+        },
+      }
+    );
+  }, [initiateOAuthMutation]);
 
-                  {(showAllCodexModels || codexModelSearch) && (
-                    <div css={css`
-                      position: relative;
-                      flex: 1;
-                      max-width: 240px;
-                    `}>
-                      <MagnifyingGlass size={14} css={css`
-                        position: absolute;
-                        left: ${theme.spacing[2]};
-                        top: 50%;
-                        transform: translateY(-50%);
-                        color: ${theme.colors.text.hint};
-                        pointer-events: none;
-                      `} />
-                      <input
-                        type="text"
-                        value={codexModelSearch}
-                        onChange={(e) => setCodexModelSearch(e.target.value)}
-                        placeholder="Search models..."
-                        css={css`
-                          width: 100%;
-                          padding: ${theme.spacing[1.5]} ${theme.spacing[3]} ${theme.spacing[1.5]} 2rem;
-                          border: 1px solid ${theme.colors.border.default};
-                          border-radius: ${theme.borderRadius.md};
-                          background: ${theme.colors.background.default};
-                          color: ${theme.colors.text.primary};
-                          font-size: 13px;
-                          outline: none;
-                          &:focus {
-                            border-color: ${theme.colors.accent};
-                          }
-                          &::placeholder {
-                            color: ${theme.colors.text.hint};
-                          }
-                        `}
-                      />
-                    </div>
-                  )}
-                </div>
+  const handleOAuthCancel = useCallback(() => {
+    cancelOAuthMutation.mutate();
+    setOauthState('idle');
+    setOauthProvider(null);
+  }, [cancelOAuthMutation]);
 
-                {(showAllCodexModels || codexModelSearch) && (() => {
-                  const visible = filteredCodexNonRec.slice(0, MAX_VISIBLE_ALL);
-                  const overflow = filteredCodexNonRec.length - visible.length;
-                  return (
-                    <>
-                      {visible.length === 0 && codexModelSearch && (
-                        <div css={css`
-                          padding: ${theme.spacing[4]};
-                          text-align: center;
-                          color: ${theme.colors.text.hint};
-                          font-size: 13px;
-                        `}>
-                          No models matching &quot;{codexModelSearch}&quot;
-                        </div>
-                      )}
-
-                      {visible.map((model, idx) => {
-                        const isCurrent = model.id === activeModel;
-                        return (
-                          <div
-                            key={model.id}
-                            onClick={() => handleModelClick(model)}
-                            css={css`
-                              padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                              cursor: pointer;
-                              transition: background 150ms ease-out;
-                              ${idx > 0 ? `border-top: 1px solid ${theme.colors.border.light};` : ''}
-                              ${isCurrent ? `
-                                background: ${theme.colors.accent}0a;
-                                border-left: 2px solid ${theme.colors.accent};
-                                padding-left: calc(${theme.spacing[4]} - 2px);
-                              ` : `
-                                border-left: 2px solid transparent;
-                                padding-left: calc(${theme.spacing[4]} - 2px);
-                                &:hover {
-                                  background: ${theme.colors.accent}05;
-                                }
-                              `}
-                            `}
-                          >
-                            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                              <span css={css`
-                                width: 16px;
-                                height: 16px;
-                                border-radius: 50%;
-                                border: 2px solid ${isCurrent ? theme.colors.accent : theme.colors.border.default};
-                                display: flex;
-                                align-items: center;
-                                justify-content: center;
-                                flex-shrink: 0;
-                                transition: all 150ms ease-out;
-                                ${isCurrent ? `background: ${theme.colors.accent};` : ''}
-                              `}>
-                                {isCurrent && (
-                                  <span css={css`
-                                    width: 5px;
-                                    height: 5px;
-                                    border-radius: 50%;
-                                    background: ${theme.colors.accentForeground};
-                                  `} />
-                                )}
-                              </span>
-                              <Typography.SmallBody css={css`
-                                font-weight: ${theme.typography.fontWeight.medium};
-                              `}>
-                                {model.name}
-                              </Typography.SmallBody>
-                              {isCurrent && (
-                                <Badge variant="default" css={css`font-size: 11px;`}>
-                                  Current
-                                </Badge>
-                              )}
-                              {model.contextWindow > 0 && (
-                                <span css={css`
-                                  font-size: 12px;
-                                  color: ${theme.colors.text.hint};
-                                  margin-left: auto;
-                                `}>
-                                  {formatTokens(model.contextWindow)} · {formatPrice(model.inputPricePer1M)}/{formatPrice(model.outputPricePer1M)}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-
-                      {overflow > 0 && (
-                        <div css={css`
-                          padding: ${theme.spacing[2]} ${theme.spacing[4]};
-                          border-top: 1px solid ${theme.colors.border.light};
-                          font-size: 12px;
-                          color: ${theme.colors.text.hint};
-                          text-align: center;
-                        `}>
-                          and {overflow} more matching...
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            )}
-          </div>
-        )}
-          </motion.div>
-        )}
-        </AnimatePresence>
-      </div>
-
-      {/* ============ Reasoning Effort ============ */}
-      <div css={css`
-        ${!activeModelSupportsThinking ? 'opacity: 0.45; pointer-events: none;' : ''}
-      `}>
-        <Typography.Body as="div" css={css`
-          font-weight: ${theme.typography.fontWeight.semibold};
-          margin-bottom: ${theme.spacing[1]};
-        `}>
-          Reasoning Effort
-        </Typography.Body>
-        <Typography.SmallBody as="div" css={css`
-          color: ${theme.colors.text.secondary};
-          margin-bottom: ${theme.spacing[2]};
-        `}>
-          {activeModelSupportsThinking
-            ? activeProvider === 'claude'
-              ? 'Controls how much the model thinks before responding. Max is Claude-only.'
-              : 'Controls how much the model thinks before responding.'
-            : 'Not supported by the current model.'}
-        </Typography.SmallBody>
-        <div css={css`
-          display: flex;
-          border: 1px solid ${theme.colors.border.default};
-          border-radius: ${theme.borderRadius.md};
-          overflow: hidden;
-        `}>
-          {[
-            { value: null, label: 'Default' },
-            { value: 'low' as const, label: 'Low' },
-            { value: 'medium' as const, label: 'Medium' },
-            { value: 'high' as const, label: 'High' },
-            ...(activeProvider === 'claude' ? [{ value: 'max' as const, label: 'Max' }] : []),
-          ].map((effort, idx) => {
-            const isSelected = (systemSettings?.reasoningEffort ?? null) === effort.value;
-            return (
-              <button
-                key={effort.label}
-                onClick={() => {
-                  updateSettingsMutation.mutate({ reasoningEffort: effort.value });
-                }}
-                css={css`
-                  flex: 1;
-                  padding: ${theme.spacing[2]} ${theme.spacing[2]};
-                  cursor: pointer;
-                  transition: all 150ms ease-out;
-                  font-size: ${theme.typography.fontSize.sm};
-                  font-weight: ${theme.typography.fontWeight.medium};
-                  ${idx > 0 ? `border-left: 1px solid ${theme.colors.border.default};` : ''}
-                  ${isSelected ? `
-                    background: ${theme.colors.accent}15;
-                    color: ${theme.colors.accent};
-                  ` : `
-                    background: transparent;
-                    color: ${theme.colors.text.secondary};
-                    &:hover {
-                      background: ${theme.colors.background.elevated};
-                      color: ${theme.colors.text.primary};
-                    }
-                  `}
-                `}
-              >
-                {effort.label}
-              </button>
+  const handleValidateApiKey = useCallback(() => {
+    if (!apiKeyValue.trim()) return;
+    setApiKeyValidation('validating');
+    setApiKeyError(null);
+    validateApiKeyMutation.mutate(
+      { provider: apiKeyProvider, apiKey: apiKeyValue },
+      {
+        onSuccess: (result) => {
+          if (result.valid) {
+            saveApiKeyMutation.mutate(
+              { provider: apiKeyProvider, apiKey: apiKeyValue },
+              {
+                onSuccess: () => {
+                  setApiKeyValidation('success');
+                  utils.cortexProvider.getStatus.invalidate();
+                  utils.cortexProvider.listConfiguredProviders.invalidate();
+                  setTimeout(() => onClose(), 600);
+                },
+                onError: (err) => {
+                  setApiKeyValidation('error');
+                  setApiKeyError(err.message ?? 'Failed to save key');
+                },
+              }
             );
-          })}
-        </div>
+          } else {
+            setApiKeyValidation('error');
+            setApiKeyError('Invalid API key. Check that you copied the full key.');
+          }
+        },
+        onError: (err) => {
+          setApiKeyValidation('error');
+          setApiKeyError(err.message ?? 'Validation failed');
+        },
+      }
+    );
+  }, [apiKeyProvider, apiKeyValue, validateApiKeyMutation, saveApiKeyMutation, utils, onClose]);
+
+  const handleTestCustom = useCallback(() => {
+    if (!customBaseUrl || !customModelId) return;
+    setCustomValidation('validating');
+    testCustomMutation.mutate(
+      { baseUrl: customBaseUrl, modelId: customModelId, apiKey: customApiKey || undefined },
+      {
+        onSuccess: (result) => {
+          if (result.valid) {
+            saveCustomMutation.mutate(
+              { baseUrl: customBaseUrl, modelId: customModelId, apiKey: customApiKey || undefined },
+              {
+                onSuccess: () => {
+                  setCustomValidation('success');
+                  utils.cortexProvider.getStatus.invalidate();
+                  utils.cortexProvider.listConfiguredProviders.invalidate();
+                  setTimeout(() => onClose(), 600);
+                },
+                onError: () => setCustomValidation('error'),
+              }
+            );
+          } else {
+            setCustomValidation('error');
+          }
+        },
+        onError: () => setCustomValidation('error'),
+      }
+    );
+  }, [customBaseUrl, customModelId, customApiKey, testCustomMutation, saveCustomMutation, utils, onClose]);
+
+  return (
+    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
+      <Typography.Caption color="secondary">
+        Connect to a different AI provider. Your existing configuration will be replaced.
+      </Typography.Caption>
+
+      {/* OAuth Provider Cards */}
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+        {oauthCards.map((card) => {
+          const isAuthenticating = oauthProvider === card.id && oauthState === 'authenticating';
+          const isError = oauthProvider === card.id && oauthState === 'error';
+          const isCurrent = statusData?.provider === card.id && statusData.connected;
+
+          return (
+            <div
+              key={card.id}
+              css={css`
+                padding: ${theme.spacing[3]};
+                border-radius: ${theme.borderRadius.md};
+                border: 1px solid ${isCurrent ? theme.colors.success.main + '55' : theme.colors.border.default};
+                background: ${isCurrent ? theme.colors.success.main + '08' : theme.colors.background.paper};
+                transition: border-color ${theme.transitions.fast}, background ${theme.transitions.fast};
+              `}
+            >
+              {isAuthenticating ? (
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                  <Typography.SmallBodyAlt>{card.name}</Typography.SmallBodyAlt>
+                  {oauthAuthUrl && oauthDeviceCode ? (
+                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+                      <Typography.Caption color="secondary">Open the browser and enter code:</Typography.Caption>
+                      <Typography.SmallBodyAlt as="code" css={css`letter-spacing: 0.15em;`}>
+                        {oauthDeviceCode}
+                      </Typography.SmallBodyAlt>
+                    </div>
+                  ) : (
+                    <Typography.Caption color="secondary">
+                      {oauthAuthUrl ? 'Complete sign-in in your browser.' : 'Starting authentication...'}
+                    </Typography.Caption>
+                  )}
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                    <BreathingDots color={theme.colors.text.hint} />
+                    <Typography.Tiny color="hint">Waiting for authorization...</Typography.Tiny>
+                    <Button variant="ghost" size="sm" onClick={handleOAuthCancel}>Cancel</Button>
+                  </div>
+                </div>
+              ) : isError ? (
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                    <XCircle size={16} weight="fill" css={css`color: ${theme.colors.error.main}; flex-shrink: 0;`} />
+                    <Typography.SmallBody css={css`color: ${theme.colors.error.main};`}>
+                      {oauthError || 'Authentication failed'}
+                    </Typography.SmallBody>
+                  </div>
+                  <Button variant="secondary" size="sm" onClick={() => handleOAuthStart(card.id)} css={css`align-self: flex-start;`}>
+                    Try again
+                  </Button>
+                </div>
+              ) : (
+                <div css={css`display: flex; align-items: center; justify-content: space-between;`}>
+                  <div>
+                    <Typography.SmallBodyAlt>{card.name}</Typography.SmallBodyAlt>
+                    <Typography.Tiny color="hint">{card.description}</Typography.Tiny>
+                  </div>
+                  {isCurrent ? (
+                    <Badge variant="success">Current</Badge>
+                  ) : (
+                    <Button variant="secondary" size="sm" onClick={() => handleOAuthStart(card.id)}>
+                      Sign In
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
-      {/* ============ Credentials ============ */}
-      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-        <div>
-          <Typography.Body as="div" css={css`
-            font-weight: ${theme.typography.fontWeight.semibold};
-            margin-bottom: ${theme.spacing[1]};
-          `}>
-            Credentials
-          </Typography.Body>
-          <Typography.SmallBody color="secondary">
-            API keys and authentication for each provider.
-          </Typography.SmallBody>
-        </div>
-
-        {/* Claude credential card */}
-        <div css={css`
-          border: 1px solid ${theme.colors.border.light};
-          border-radius: ${theme.borderRadius.md};
-          overflow: hidden;
-        `}>
-          <button
-            onClick={() => toggleCredentialCard('claude')}
-            css={css`
-              width: 100%;
-              padding: ${theme.spacing[3]} ${theme.spacing[4]};
-              display: flex;
-              align-items: center;
-              gap: ${theme.spacing[2]};
-              background: transparent;
-              cursor: pointer;
-              border: none;
-              text-align: left;
-            `}
-          >
-            <span css={css`
-              width: 8px;
-              height: 8px;
-              border-radius: 50%;
-              background: ${hasCredentials('claude') ? theme.colors.success.main : theme.colors.text.disabled};
-              flex-shrink: 0;
-            `} />
-            <Typography.SmallBody css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
-              Claude
-            </Typography.SmallBody>
-            <Badge variant="default" css={css`font-size: 11px;`}>
-              {hasCredentials('claude') ? 'Connected' : 'Not configured'}
-            </Badge>
-            <span css={css`margin-left: auto; color: ${theme.colors.text.hint};`}>
-              {credentialsExpandedProvider === 'claude' ? <CaretDown size={12} /> : <CaretRight size={12} />}
-            </span>
-          </button>
-          <AnimatePresence>
-            {credentialsExpandedProvider === 'claude' && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                css={css`overflow: hidden;`}
-              >
-                <div css={css`
-                  padding: ${theme.spacing[3]} ${theme.spacing[4]};
-                  border-top: 1px solid ${theme.colors.border.light};
-                  display: flex;
-                  flex-direction: column;
-                  gap: ${theme.spacing[3]};
-                `}>
-                  {/* CLI signed-in state */}
-                  {claudeCliAvailable && (
-                    <div css={css`
-                      padding: ${theme.spacing[3]};
-                      border-radius: ${theme.borderRadius.sm};
-                      border: 1px solid ${theme.colors.success.main}33;
-                      background: ${theme.colors.success.main}08;
-                      display: flex;
-                      align-items: center;
-                      justify-content: space-between;
-                      gap: ${theme.spacing[3]};
-                    `}>
-                      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                        <CheckCircle size={18} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                        <div>
-                          <Typography.SmallBody as="div">Claude is signed in</Typography.SmallBody>
-                          <Typography.Caption as="div" color="hint">Claude Code CLI authenticated</Typography.Caption>
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleSignOut('claude')}
-                        loading={claudeLogoutMutation.isPending}
-                        css={css`flex-shrink: 0;`}
-                      >
-                        <SignOut size={14} css={css`margin-right: ${theme.spacing[1]};`} />
-                        Sign out
-                      </Button>
-                    </div>
-                  )}
-
-                  {/* CLI installed, not authenticated */}
-                  {claudeCliInstalled && !claudeCliAvailable && (
-                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                      {claudeOAuthStatus === 'idle' && (
-                        <div css={css`
-                          display: flex;
-                          align-items: center;
-                          justify-content: space-between;
-                          padding: ${theme.spacing[3]};
-                          border: 1px solid ${theme.colors.border.light};
-                          border-radius: ${theme.borderRadius.sm};
-                          gap: ${theme.spacing[2]};
-                        `}>
-                          <div>
-                            <Typography.SmallBody as="div">Claude Sign In</Typography.SmallBody>
-                            <Typography.Caption as="div" color="hint">Recommended. Opens a browser to sign in.</Typography.Caption>
-                          </div>
-                          <Button size="sm" onClick={handleClaudeOAuthStart} loading={claudeInitiateMutation.isPending}>
-                            Sign in
-                          </Button>
-                        </div>
-                      )}
-
-                      {claudeOAuthStatus === 'pending' && (
-                        <div css={css`
-                          padding: ${theme.spacing[3]};
-                          border: 1px solid ${theme.colors.border.default};
-                          border-radius: ${theme.borderRadius.sm};
-                          display: flex;
-                          flex-direction: column;
-                          gap: ${theme.spacing[3]};
-                        `}>
-                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                            <CircleNotch
-                              size={14}
-                              css={css`
-                                color: ${theme.colors.text.hint};
-                                animation: spin 1s linear infinite;
-                                @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-                              `}
-                            />
-                            <Typography.SmallBody as="div" color="secondary">
-                              Complete sign-in in your browser...
-                            </Typography.SmallBody>
-                          </div>
-                          <Button variant="ghost" size="sm" onClick={handleClaudeOAuthCancel}>
-                            Cancel
-                          </Button>
-                        </div>
-                      )}
-
-                      {claudeOAuthStatus === 'success' && (
-                        <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
-                          display: flex; align-items: center; gap: ${theme.spacing[2]};
-                          padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                          background: ${theme.colors.success.main}0d;
-                          border-radius: ${theme.borderRadius.sm};
-                        `}>
-                          <CheckCircle size={16} weight="fill" /> Signed in with Claude
-                        </Typography.SmallBody>
-                      )}
-
-                      {claudeOAuthStatus === 'error' && (
-                        <div css={css`
-                          display: flex; align-items: center; justify-content: space-between;
-                          padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                          background: ${theme.colors.error.main}0d;
-                          border-radius: ${theme.borderRadius.sm};
-                        `}>
-                          <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
-                            <XCircle size={16} weight="fill" /> {claudeOAuthMessage || 'Failed'}
-                          </Typography.SmallBody>
-                          <Button variant="ghost" size="sm" onClick={() => { setClaudeOAuthStatus('idle'); setClaudeOAuthSession(null); }}>
-                            Retry
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Claude OAuth (non-CLI) */}
-                  {!claudeCliInstalled && (
-                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                      {claudeOAuthStatus === 'idle' && (
-                        <div css={css`
-                          display: flex;
-                          align-items: center;
-                          justify-content: space-between;
-                          padding: ${theme.spacing[3]};
-                          border: 1px solid ${theme.colors.border.light};
-                          border-radius: ${theme.borderRadius.sm};
-                          gap: ${theme.spacing[2]};
-                        `}>
-                          <div>
-                            <Typography.SmallBody as="div">Claude Sign In</Typography.SmallBody>
-                            <Typography.Caption as="div" color="hint">Use your Claude subscription (Pro/Max)</Typography.Caption>
-                          </div>
-                          <Button size="sm" onClick={handleClaudeOAuthStart} loading={claudeInitiateMutation.isPending}>
-                            Sign in
-                          </Button>
-                        </div>
-                      )}
-
-                      {claudeOAuthStatus === 'pending' && (
-                        <div css={css`
-                          padding: ${theme.spacing[3]};
-                          border: 1px solid ${theme.colors.border.default};
-                          border-radius: ${theme.borderRadius.sm};
-                          display: flex;
-                          flex-direction: column;
-                          gap: ${theme.spacing[3]};
-                        `}>
-                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                            <CircleNotch
-                              size={14}
-                              css={css`
-                                color: ${theme.colors.text.hint};
-                                animation: spin 1s linear infinite;
-                                @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-                              `}
-                            />
-                            <Typography.SmallBody as="div" color="secondary">
-                              Complete sign-in in your browser...
-                            </Typography.SmallBody>
-                          </div>
-                          <Button variant="ghost" size="sm" onClick={handleClaudeOAuthCancel}>
-                            Cancel
-                          </Button>
-                        </div>
-                      )}
-
-                      {claudeOAuthStatus === 'success' && (
-                        <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
-                          display: flex; align-items: center; gap: ${theme.spacing[2]};
-                          padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                          background: ${theme.colors.success.main}0d;
-                          border-radius: ${theme.borderRadius.sm};
-                        `}>
-                          <CheckCircle size={16} weight="fill" /> Signed in with Claude
-                        </Typography.SmallBody>
-                      )}
-
-                      {claudeOAuthStatus === 'error' && (
-                        <div css={css`
-                          display: flex; align-items: center; justify-content: space-between;
-                          padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                          background: ${theme.colors.error.main}0d;
-                          border-radius: ${theme.borderRadius.sm};
-                        `}>
-                          <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
-                            <XCircle size={16} weight="fill" /> {claudeOAuthMessage || 'Failed'}
-                          </Typography.SmallBody>
-                          <Button variant="ghost" size="sm" onClick={() => { setClaudeOAuthStatus('idle'); setClaudeOAuthSession(null); }}>
-                            Retry
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* API key / OAuth token input */}
-                  <div css={css`display: flex; gap: ${theme.spacing[2]}; align-items: flex-end;`}>
-                    <div css={css`flex: 1;`}>
-                      <Input
-                        label="API Key or OAuth Token"
-                        type={showKey ? 'text' : 'password'}
-                        value={credentialInput}
-                        onChange={(e) => { setCredentialInput((e.target as HTMLInputElement).value); setValidateResult(null); }}
-                        placeholder={hasCredentials('claude') ? '********' : 'sk-ant-api03-... or sk-ant-oat01-...'}
-                        rightElement={
-                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[1.5]};`}>
-                            {inferredType && credentialInput.length > 8 && (
-                              <Typography.Caption color="hint" css={css`
-                                background: ${theme.colors.background.elevated};
-                                padding: 1px ${theme.spacing[1]};
-                                border-radius: ${theme.borderRadius.sm};
-                                white-space: nowrap;
-                              `}>
-                                {inferredType}
-                              </Typography.Caption>
-                            )}
-                            <Tooltip content="Encrypted at rest and injected securely at runtime" position="top" align="right">
-                              <ShieldCheck size={16} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                            </Tooltip>
-                            <button
-                              onClick={() => setShowKey(!showKey)}
-                              css={css`
-                                cursor: pointer; padding: 0; color: ${theme.colors.text.hint};
-                                &:hover { color: ${theme.colors.text.primary}; }
-                              `}
-                            >
-                              {showKey ? <EyeSlash size={16} /> : <Eye size={16} />}
-                            </button>
-                          </div>
-                        }
-                      />
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() => handleValidateAndSave('claude')}
-                      loading={validateMutation.isPending || saveKeyMutation.isPending}
-                      disabled={!credentialInput.trim()}
+      {/* API Key Layer */}
+      <div>
+        <button
+          onClick={() => setApiKeyExpanded(!apiKeyExpanded)}
+          css={css`
+            display: flex; align-items: center; gap: ${theme.spacing[1]};
+            padding: 0; background: none; border: none; cursor: pointer;
+            font-size: ${theme.typography.fontSize.sm}; font-family: inherit;
+            color: ${theme.colors.text.hint};
+            &:hover { color: ${theme.colors.text.secondary}; }
+          `}
+        >
+          <CaretRight size={12} css={css`
+            transition: transform 150ms ease;
+            transform: rotate(${apiKeyExpanded ? '90deg' : '0deg'});
+          `} />
+          Use an API key instead
+        </button>
+        <AnimatePresence>
+          {apiKeyExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              css={css`overflow: hidden;`}
+            >
+              <div css={css`
+                display: flex; flex-direction: column; gap: ${theme.spacing[3]};
+                padding: ${theme.spacing[3]};
+                margin-top: ${theme.spacing[2]};
+                border-radius: ${theme.borderRadius.md};
+                border: 1px solid ${theme.colors.border.default};
+                background: ${theme.colors.background.elevated};
+              `}>
+                <select
+                  value={apiKeyProvider}
+                  onChange={(e) => {
+                    setApiKeyProvider(e.target.value);
+                    setApiKeyValidation('idle');
+                    setApiKeyError(null);
+                    setApiKeyValue('');
+                  }}
+                  css={css`
+                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                    background: ${theme.colors.background.paper};
+                    border: 1px solid ${theme.colors.border.default};
+                    border-radius: ${theme.borderRadius.default};
+                    color: ${theme.colors.text.primary};
+                    font-size: ${theme.typography.fontSize.sm};
+                    font-family: inherit; cursor: pointer; outline: none;
+                    &:focus { border-color: ${theme.colors.border.focus}; }
+                  `}
+                >
+                  {apiKeyProviders.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
+                  <div css={css`flex: 1; position: relative;`}>
+                    <input
+                      type={showKey ? 'text' : 'password'}
+                      value={apiKeyValue}
+                      onChange={(e) => { setApiKeyValue(e.target.value); setApiKeyValidation('idle'); setApiKeyError(null); }}
+                      placeholder={selectedApiProvider?.keyPrefix ? `${selectedApiProvider.keyPrefix}...` : 'Enter API key'}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && apiKeyValue.trim()) handleValidateApiKey(); }}
+                      css={css`
+                        width: 100%; padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                        padding-right: ${theme.spacing[8]};
+                        background: ${theme.colors.background.paper};
+                        border: 1px solid ${apiKeyValidation === 'error' ? theme.colors.error.main : theme.colors.border.default};
+                        border-radius: ${theme.borderRadius.default};
+                        color: ${theme.colors.text.primary}; font-size: ${theme.typography.fontSize.sm};
+                        outline: none;
+                        &:focus { border-color: ${apiKeyValidation === 'error' ? theme.colors.error.main : theme.colors.border.focus}; }
+                        &::placeholder { color: ${theme.colors.text.hint}; }
+                      `}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowKey(!showKey)}
+                      css={css`
+                        position: absolute; right: ${theme.spacing[2]}; top: 50%; transform: translateY(-50%);
+                        color: ${theme.colors.text.hint}; display: flex; padding: 0; background: none; border: none; cursor: pointer;
+                        &:hover { color: ${theme.colors.text.primary}; }
+                      `}
                     >
-                      Validate & Save
-                    </Button>
+                      {showKey ? <EyeSlash size={16} /> : <Eye size={16} />}
+                    </button>
                   </div>
-                  {validateResult && (
-                    <Typography.Caption as="div" color={validateResult.valid ? theme.colors.success.main : theme.colors.error.main}>
-                      {validateResult.message}
-                    </Typography.Caption>
-                  )}
-
-                  {hasCredentials('claude') && (
-                    <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemove('claude')}
-                        loading={removeKeyMutation.isPending}
-                      >
-                        <Trash size={14} css={css`margin-right: ${theme.spacing[1]};`} />
-                        Remove credentials
-                      </Button>
-                    </div>
-                  )}
-
-                  <Typography.Caption as="div" color="disabled" css={css`
-                    display: flex; align-items: center; gap: ${theme.spacing[1.5]};
-                  `}>
-                    <ShieldCheck size={12} css={css`flex-shrink: 0;`} />
-                    <span>Encrypted at rest. Never leaves your instance.</span>
-                  </Typography.Caption>
+                  <Button
+                    variant={apiKeyValidation === 'success' ? 'secondary' : 'primary'}
+                    size="sm"
+                    onClick={handleValidateApiKey}
+                    loading={apiKeyValidation === 'validating'}
+                    disabled={!apiKeyValue.trim()}
+                    css={css`flex-shrink: 0; min-width: 100px;`}
+                  >
+                    {apiKeyValidation === 'success' ? (
+                      <span css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                        <CheckCircle size={14} weight="fill" /> Saved
+                      </span>
+                    ) : 'Validate'}
+                  </Button>
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* Codex credential card */}
-        <div css={css`
-          border: 1px solid ${theme.colors.border.light};
-          border-radius: ${theme.borderRadius.md};
-          overflow: hidden;
-        `}>
-          <button
-            onClick={() => toggleCredentialCard('codex')}
-            css={css`
-              width: 100%;
-              padding: ${theme.spacing[3]} ${theme.spacing[4]};
-              display: flex;
-              align-items: center;
-              gap: ${theme.spacing[2]};
-              background: transparent;
-              cursor: pointer;
-              border: none;
-              text-align: left;
-            `}
-          >
-            <span css={css`
-              width: 8px;
-              height: 8px;
-              border-radius: 50%;
-              background: ${hasCredentials('codex') ? theme.colors.success.main : theme.colors.text.disabled};
-              flex-shrink: 0;
-            `} />
-            <Typography.SmallBody css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
-              Codex
-            </Typography.SmallBody>
-            <Badge variant="default" css={css`font-size: 11px;`}>
-              {hasCredentials('codex') ? 'Connected' : 'Not configured'}
-            </Badge>
-            <span css={css`margin-left: auto; color: ${theme.colors.text.hint};`}>
-              {credentialsExpandedProvider === 'codex' ? <CaretDown size={12} /> : <CaretRight size={12} />}
-            </span>
-          </button>
-          <AnimatePresence>
-            {credentialsExpandedProvider === 'codex' && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                css={css`overflow: hidden;`}
-              >
-                <div css={css`
-                  padding: ${theme.spacing[3]} ${theme.spacing[4]};
-                  border-top: 1px solid ${theme.colors.border.light};
-                  display: flex;
-                  flex-direction: column;
-                  gap: ${theme.spacing[3]};
-                `}>
-                  {/* CLI signed-in state */}
-                  {codexCliAvailable && (
-                    <div css={css`
-                      padding: ${theme.spacing[3]};
-                      border-radius: ${theme.borderRadius.sm};
-                      border: 1px solid ${theme.colors.success.main}33;
-                      background: ${theme.colors.success.main}08;
-                      display: flex;
-                      align-items: center;
-                      justify-content: space-between;
-                      gap: ${theme.spacing[3]};
-                    `}>
-                      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                        <CheckCircle size={18} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                        <div>
-                          <Typography.SmallBody as="div">Codex is signed in</Typography.SmallBody>
-                          <Typography.Caption as="div" color="hint">Codex CLI authenticated</Typography.Caption>
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleSignOut('codex')}
-                        loading={codexCliLogoutMutation.isPending}
-                        css={css`flex-shrink: 0;`}
-                      >
-                        <SignOut size={14} css={css`margin-right: ${theme.spacing[1]};`} />
-                        Sign out
-                      </Button>
-                    </div>
-                  )}
-
-                  {/* CLI installed, not authenticated */}
-                  {codexCliInstalled && !codexCliAvailable && (
-                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                      {codexCliAuthStatus === 'idle' && (
-                        <div css={css`
-                          display: flex;
-                          align-items: center;
-                          justify-content: space-between;
-                          padding: ${theme.spacing[3]};
-                          border: 1px solid ${theme.colors.border.light};
-                          border-radius: ${theme.borderRadius.sm};
-                          gap: ${theme.spacing[2]};
-                        `}>
-                          <div>
-                            <Typography.SmallBody as="div">ChatGPT Sign In</Typography.SmallBody>
-                            <Typography.Caption as="div" color="hint">Recommended. Opens a browser to sign in.</Typography.Caption>
-                          </div>
-                          <Button size="sm" onClick={handleCodexCliAuthStart} loading={codexCliInitiateMutation.isPending}>
-                            Sign in
-                          </Button>
-                        </div>
-                      )}
-
-                      {codexCliAuthStatus === 'pending' && (
-                        <div css={css`
-                          padding: ${theme.spacing[3]};
-                          border: 1px solid ${theme.colors.border.default};
-                          border-radius: ${theme.borderRadius.sm};
-                          display: flex;
-                          flex-direction: column;
-                          gap: ${theme.spacing[3]};
-                        `}>
-                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                            <CircleNotch
-                              size={14}
-                              css={css`
-                                color: ${theme.colors.text.hint};
-                                animation: spin 1s linear infinite;
-                                @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-                              `}
-                            />
-                            <Typography.SmallBody as="div" color="secondary">
-                              Complete sign-in in your browser...
-                            </Typography.SmallBody>
-                          </div>
-                          <Button variant="ghost" size="sm" onClick={handleCodexCliAuthCancel}>
-                            Cancel
-                          </Button>
-                        </div>
-                      )}
-
-                      {codexCliAuthStatus === 'success' && (
-                        <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
-                          display: flex; align-items: center; gap: ${theme.spacing[2]};
-                          padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                          background: ${theme.colors.success.main}0d;
-                          border-radius: ${theme.borderRadius.sm};
-                        `}>
-                          <CheckCircle size={16} weight="fill" /> Signed in with ChatGPT
-                        </Typography.SmallBody>
-                      )}
-
-                      {codexCliAuthStatus === 'error' && (
-                        <div css={css`
-                          display: flex; align-items: center; justify-content: space-between;
-                          padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                          background: ${theme.colors.error.main}0d;
-                          border-radius: ${theme.borderRadius.sm};
-                        `}>
-                          <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
-                            <XCircle size={16} weight="fill" /> {codexCliAuthMessage || 'Failed'}
-                          </Typography.SmallBody>
-                          <Button variant="ghost" size="sm" onClick={() => { setCodexCliAuthStatus('idle'); setCodexCliAuthSession(null); }}>
-                            Retry
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Codex device-code OAuth */}
-                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                    {codexOAuthStatus === 'idle' && (
-                      <div css={css`
-                        display: flex;
-                        align-items: center;
-                        justify-content: space-between;
-                        padding: ${theme.spacing[3]};
-                        border: 1px solid ${theme.colors.border.light};
-                        border-radius: ${theme.borderRadius.sm};
-                        gap: ${theme.spacing[2]};
-                      `}>
-                        <div>
-                          <Typography.SmallBody as="div">ChatGPT Device Code</Typography.SmallBody>
-                          <Typography.Caption as="div" color="hint">Use your ChatGPT subscription via device code</Typography.Caption>
-                        </div>
-                        <Button size="sm" variant="secondary" onClick={handleCodexOAuthStart} loading={codexInitiateMutation.isPending}>
-                          Sign in
-                        </Button>
-                      </div>
-                    )}
-
-                    {codexOAuthStatus === 'pending' && codexOAuthData && (
-                      <div css={css`
-                        padding: ${theme.spacing[3]};
-                        border: 1px solid ${theme.colors.border.default};
-                        border-radius: ${theme.borderRadius.sm};
-                        display: flex;
-                        flex-direction: column;
-                        gap: ${theme.spacing[3]};
-                      `}>
-                        <Typography.SmallBody as="div" color="secondary">
-                          Open{' '}
-                          <a
-                            href={codexOAuthData.verificationUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            css={css`color: ${theme.colors.text.primary}; font-weight: ${theme.typography.fontWeight.medium}; text-decoration: none; &:hover { text-decoration: underline; }`}
-                          >
-                            {codexOAuthData.verificationUrl} <ArrowSquareOut size={12} css={css`vertical-align: middle;`} />
-                          </a>{' '}
-                          and enter:
-                        </Typography.SmallBody>
-                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                          <Typography.Subtitle as="code" css={css`
-                            font-weight: ${theme.typography.fontWeight.semibold};
-                            letter-spacing: 0.12em;
-                            background: ${theme.colors.background.elevated};
-                            padding: ${theme.spacing[1.5]} ${theme.spacing[3]};
-                            border-radius: ${theme.borderRadius.sm};
-                            border: 1px solid ${theme.colors.border.default};
-                          `}>
-                            {codexOAuthData.userCode}
-                          </Typography.Subtitle>
-                          <button
-                            onClick={() => handleCopyCode(codexOAuthData.userCode)}
-                            css={css`
-                              display: flex; align-items: center; gap: ${theme.spacing[0.5]};
-                              font-size: ${theme.typography.fontSize.xs};
-                              color: ${codeCopied ? theme.colors.success.main : theme.colors.text.hint};
-                              cursor: pointer; padding: ${theme.spacing[1]};
-                              &:hover { color: ${codeCopied ? theme.colors.success.main : theme.colors.text.primary}; }
-                            `}
-                          >
-                            {codeCopied ? <CheckCircle size={12} /> : <Copy size={12} />}
-                            {codeCopied ? 'Copied' : 'Copy'}
-                          </button>
-                        </div>
-                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                          <CircleNotch
-                            size={14}
-                            css={css`
-                              color: ${theme.colors.text.hint};
-                              animation: spin 1s linear infinite;
-                              @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-                            `}
-                          />
-                          <Typography.Caption color="hint">Waiting...</Typography.Caption>
-                          {codexCountdown > 0 && (
-                            <Typography.Caption color="disabled" css={css`margin-left: auto;`}>
-                              {formatCountdown(codexCountdown)}
-                            </Typography.Caption>
-                          )}
-                        </div>
-                        <Button variant="ghost" size="sm" onClick={handleCodexOAuthCancel}>
-                          Cancel
-                        </Button>
-                      </div>
-                    )}
-
-                    {codexOAuthStatus === 'success' && (
-                      <Typography.SmallBody as="div" color={theme.colors.success.main} css={css`
-                        display: flex; align-items: center; gap: ${theme.spacing[2]};
-                        padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                        background: ${theme.colors.success.main}0d;
-                        border-radius: ${theme.borderRadius.sm};
-                      `}>
-                        <CheckCircle size={16} weight="fill" /> Signed in with ChatGPT
-                      </Typography.SmallBody>
-                    )}
-
-                    {(codexOAuthStatus === 'error' || codexOAuthStatus === 'expired') && (
-                      <div css={css`
-                        display: flex; align-items: center; justify-content: space-between;
-                        padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                        background: ${theme.colors.error.main}0d;
-                        border-radius: ${theme.borderRadius.sm};
-                      `}>
-                        <Typography.SmallBody as="span" color={theme.colors.error.main} css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
-                          <XCircle size={16} weight="fill" /> {codexOAuthMessage || 'Failed'}
-                        </Typography.SmallBody>
-                        <Button variant="ghost" size="sm" onClick={() => { setCodexOAuthStatus('idle'); setCodexOAuthSession(null); setCodexOAuthData(null); }}>
-                          Retry
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* API key input */}
-                  <div css={css`display: flex; gap: ${theme.spacing[2]}; align-items: flex-end;`}>
-                    <div css={css`flex: 1;`}>
-                      <Input
-                        label="API Key"
-                        type={showKey ? 'text' : 'password'}
-                        value={credentialInput}
-                        onChange={(e) => { setCredentialInput((e.target as HTMLInputElement).value); setValidateResult(null); }}
-                        placeholder={hasCredentials('codex') ? '********' : 'sk-proj-...'}
-                        rightElement={
-                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[1.5]};`}>
-                            <Tooltip content="Encrypted at rest and injected securely at runtime" position="top" align="right">
-                              <ShieldCheck size={16} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                            </Tooltip>
-                            <button
-                              onClick={() => setShowKey(!showKey)}
-                              css={css`
-                                cursor: pointer; padding: 0; color: ${theme.colors.text.hint};
-                                &:hover { color: ${theme.colors.text.primary}; }
-                              `}
-                            >
-                              {showKey ? <EyeSlash size={16} /> : <Eye size={16} />}
-                            </button>
-                          </div>
-                        }
-                      />
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() => handleValidateAndSave('codex')}
-                      loading={validateMutation.isPending || saveKeyMutation.isPending}
-                      disabled={!credentialInput.trim()}
-                    >
-                      Validate & Save
-                    </Button>
-                  </div>
-                  {validateResult && (
-                    <Typography.Caption as="div" color={validateResult.valid ? theme.colors.success.main : theme.colors.error.main}>
-                      {validateResult.message}
-                    </Typography.Caption>
-                  )}
-
-                  {hasCredentials('codex') && (
-                    <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemove('codex')}
-                        loading={removeKeyMutation.isPending}
-                      >
-                        <Trash size={14} css={css`margin-right: ${theme.spacing[1]};`} />
-                        Remove credentials
-                      </Button>
-                    </div>
-                  )}
-
-                  <Typography.Caption as="div" color="disabled" css={css`
-                    display: flex; align-items: center; gap: ${theme.spacing[1.5]};
-                  `}>
-                    <ShieldCheck size={12} css={css`flex-shrink: 0;`} />
-                    <span>Encrypted at rest. Never leaves your instance.</span>
+                {apiKeyValidation === 'error' && (
+                  <Typography.Caption css={css`color: ${theme.colors.error.main}; display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                    <XCircle size={12} weight="fill" /> {apiKeyError || 'Invalid API key'}
                   </Typography.Caption>
+                )}
+                {selectedApiProvider?.keyUrl && (
+                  <Typography.Tiny
+                    as="a"
+                    href={`https://${selectedApiProvider.keyUrl}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    color="hint"
+                    css={css`
+                      display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
+                      text-decoration: none;
+                      &:hover { text-decoration: underline; color: ${theme.colors.text.secondary}; }
+                    `}
+                  >
+                    Get your key at {selectedApiProvider.keyUrl} <ArrowSquareOut size={10} />
+                  </Typography.Tiny>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Custom Endpoint Layer */}
+      <div>
+        <button
+          onClick={() => setCustomExpanded(!customExpanded)}
+          css={css`
+            display: flex; align-items: center; gap: ${theme.spacing[1]};
+            padding: 0; background: none; border: none; cursor: pointer;
+            font-size: ${theme.typography.fontSize.sm}; font-family: inherit;
+            color: ${theme.colors.text.hint};
+            &:hover { color: ${theme.colors.text.secondary}; }
+          `}
+        >
+          <CaretRight size={12} css={css`
+            transition: transform 150ms ease;
+            transform: rotate(${customExpanded ? '90deg' : '0deg'});
+          `} />
+          Configure a custom endpoint
+        </button>
+        <AnimatePresence>
+          {customExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              css={css`overflow: hidden;`}
+            >
+              <div css={css`
+                display: flex; flex-direction: column; gap: ${theme.spacing[3]};
+                padding: ${theme.spacing[3]};
+                margin-top: ${theme.spacing[2]};
+                border-radius: ${theme.borderRadius.md};
+                border: 1px solid ${theme.colors.border.default};
+                background: ${theme.colors.background.elevated};
+              `}>
+                <Typography.Tiny color="hint">
+                  For self-hosted models (Ollama, vLLM, LM Studio) or custom OpenAI-compatible APIs
+                </Typography.Tiny>
+                <input
+                  type="text"
+                  value={customBaseUrl}
+                  onChange={(e) => { setCustomBaseUrl(e.target.value); setCustomValidation('idle'); }}
+                  placeholder="http://localhost:11434/v1"
+                  css={css`
+                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                    background: ${theme.colors.background.paper};
+                    border: 1px solid ${theme.colors.border.default};
+                    border-radius: ${theme.borderRadius.default};
+                    color: ${theme.colors.text.primary}; font-size: ${theme.typography.fontSize.sm};
+                    outline: none;
+                    &:focus { border-color: ${theme.colors.border.focus}; }
+                    &::placeholder { color: ${theme.colors.text.hint}; }
+                  `}
+                />
+                <Typography.Tiny color="disabled">
+                  Running in Docker? Use http://host.docker.internal:PORT instead of localhost.
+                </Typography.Tiny>
+                <input
+                  type="text"
+                  value={customModelId}
+                  onChange={(e) => { setCustomModelId(e.target.value); setCustomValidation('idle'); }}
+                  placeholder="Model ID (e.g. llama-3.3-70b)"
+                  css={css`
+                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                    background: ${theme.colors.background.paper};
+                    border: 1px solid ${theme.colors.border.default};
+                    border-radius: ${theme.borderRadius.default};
+                    color: ${theme.colors.text.primary}; font-size: ${theme.typography.fontSize.sm};
+                    outline: none;
+                    &:focus { border-color: ${theme.colors.border.focus}; }
+                    &::placeholder { color: ${theme.colors.text.hint}; }
+                  `}
+                />
+                <input
+                  type="password"
+                  value={customApiKey}
+                  onChange={(e) => setCustomApiKey(e.target.value)}
+                  placeholder="API Key (optional)"
+                  css={css`
+                    padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                    background: ${theme.colors.background.paper};
+                    border: 1px solid ${theme.colors.border.default};
+                    border-radius: ${theme.borderRadius.default};
+                    color: ${theme.colors.text.primary}; font-size: ${theme.typography.fontSize.sm};
+                    outline: none;
+                    &:focus { border-color: ${theme.colors.border.focus}; }
+                    &::placeholder { color: ${theme.colors.text.hint}; }
+                  `}
+                />
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleTestCustom}
+                    loading={customValidation === 'validating'}
+                    disabled={!customBaseUrl || !customModelId}
+                  >
+                    {customValidation === 'success' ? (
+                      <span css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                        <CheckCircle size={14} weight="fill" /> Connected
+                      </span>
+                    ) : 'Test Connection'}
+                  </Button>
+                  {customValidation === 'error' && (
+                    <Typography.Tiny css={css`color: ${theme.colors.error.main}; display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                      <XCircle size={12} weight="fill" /> Connection failed
+                    </Typography.Tiny>
+                  )}
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
 }
+
 
 
 // ============================================================================
@@ -4569,6 +3296,26 @@ function SystemSection() {
         </div>
       )}
 
+      {/* Developer */}
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+        <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+          Developer
+        </Typography.Subtitle>
+
+        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+          <Toggle
+            checked={settings?.contextDebugMode ?? false}
+            onChange={(checked: boolean) => {
+              updateSettingsMutation.mutate({ contextDebugMode: checked });
+            }}
+            label="Context debug mode"
+          />
+        </div>
+        <Typography.Caption as="p" color="hint" css={css`margin-top: -${theme.spacing[1]};`}>
+          Captures full context window breakdowns for each pipeline phase and agentic loop turn. Useful for debugging prompt assembly and cache performance. Increases storage.
+        </Typography.Caption>
+      </div>
+
       {/* Telemetry */}
       <TelemetryInline />
 
@@ -4860,7 +3607,7 @@ export function SettingsPage() {
   const renderSection = () => {
     switch (activeSection) {
       case 'heartbeat': return <HeartbeatSection />;
-      case 'provider': return <ProviderSection />;
+      case 'cortex_provider': return <CortexProviderSection />;
       case 'channels': return <ChannelsSection />;
       case 'plugins': return <PluginsSection />;
       case 'passwords': return <PasswordsSection />;

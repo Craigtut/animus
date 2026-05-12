@@ -16,10 +16,13 @@ export const channelManifestAuthorSchema = z.object({
   url: z.string().url().optional(),
 });
 
+export const channelIdentityResolutionSchema = z.enum(['lookup', 'primary']).default('lookup');
+
 export const channelIdentitySchema = z.object({
-  identifierLabel: z.string().min(1),
+  resolution: channelIdentityResolutionSchema,
+  identifierLabel: z.string().optional(),
   identifierPlaceholder: z.string().optional(),
-  identifierValidation: z.string().optional(), // regex pattern
+  identifierValidation: z.string().optional(),
   identifierHelpText: z.string().optional(),
 });
 
@@ -33,11 +36,13 @@ export const channelCapabilitySchema = z.enum([
   'typing-indicator',
   'voice-messages',
   'conversation-history',
+  'reply-streaming',
 ]);
 
 export const channelPermissionsSchema = z.object({
   network: z.array(z.string()).default([]),
   env: z.array(z.string()).default([]),
+  speech: z.boolean().default(false),
 });
 
 export const channelStoreMetadataSchema = z.object({
@@ -79,6 +84,8 @@ export const configFieldTypeSchema = z.enum([
   'text-list',
   'toggle',
   'oauth',
+  'info',
+  'pairing',
 ]);
 
 export const configFieldOptionSchema = z.object({

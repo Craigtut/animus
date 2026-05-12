@@ -1,5 +1,5 @@
 /**
- * Settings Service - business logic for system and personality settings.
+ * Settings Service - business logic for system settings.
  *
  * Encapsulates settings updates, log category management, and side effects
  * (event emission, cache updates).
@@ -7,13 +7,12 @@
  */
 
 import { createLogger } from '../lib/logger.js';
-import { getSystemDb, getPersonaDb } from '../db/index.js';
+import { getSystemDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
-import * as personaStore from '../db/stores/persona-store.js';
 import { updateCategoryCache } from '../lib/logger.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { getAutosaveSubsystem } from './autosave-subsystem.js';
-import type { SystemSettings, PersonalitySettings } from '@animus-labs/shared';
+import type { SystemSettings } from '@animus-labs/shared';
 
 const log = createLogger('SettingsService', 'server');
 
@@ -52,25 +51,6 @@ class SettingsService {
       }
     }
     return systemStore.getSystemSettings(getSystemDb());
-  }
-
-  /**
-   * Get current personality settings.
-   */
-  getPersonalitySettings(): PersonalitySettings {
-    return personaStore.getPersonalitySettings(getPersonaDb());
-  }
-
-  /**
-   * Update personality settings. Strips undefined values.
-   */
-  updatePersonalitySettings(input: Record<string, unknown>): PersonalitySettings {
-    const clean: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(input)) {
-      if (v !== undefined) clean[k] = v;
-    }
-    personaStore.updatePersonalitySettings(getPersonaDb(), clean as Partial<PersonalitySettings>);
-    return personaStore.getPersonalitySettings(getPersonaDb());
   }
 
   /**

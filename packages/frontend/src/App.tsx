@@ -13,8 +13,6 @@ import { useSettingsStore } from './store';
 // Guards
 import { AuthGuard } from './components/guards/AuthGuard';
 import { GuestGuard } from './components/guards/GuestGuard';
-import { SetupGuard } from './components/guards/SetupGuard';
-
 // Layout
 import { AppLayout } from './components/layout/AppLayout';
 
@@ -29,7 +27,7 @@ import { MigrationPage } from './pages/MigrationPage';
 // Onboarding
 import { OnboardingLayout } from './pages/onboarding/OnboardingLayout';
 import { WelcomeStep } from './pages/onboarding/WelcomeStep';
-import { AgentProviderStep } from './pages/onboarding/AgentProviderStep';
+import { CortexProviderStep } from './pages/onboarding/CortexProviderStep';
 import { IdentityStep } from './pages/onboarding/IdentityStep';
 import { AboutYouStep } from './pages/onboarding/AboutYouStep';
 import { ExistenceStep } from './pages/onboarding/persona/ExistenceStep';
@@ -49,9 +47,9 @@ import { MindPage } from './pages/MindPage';
 import { PeoplePage } from './pages/PeoplePage';
 import { PersonaPage } from './pages/PersonaPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { UsagePage } from './pages/UsagePage';
 import { ConfigurationPage } from './pages/ConfigurationPage';
 import { NotFoundPage } from './pages/NotFoundPage';
-import { SetupPage } from './pages/SetupPage';
 import { MaintenanceOverlay } from './components/MaintenanceOverlay';
 import { DownloadToast } from './components/DownloadToast';
 import { ToastContainer } from './components/ToastContainer';
@@ -174,15 +172,12 @@ export function App() {
               <Route path="/login" element={<GuestGuard><LoginPage /></GuestGuard>} />
               <Route path="/register" element={<GuestGuard><RegisterPage /></GuestGuard>} />
 
-              {/* Setup route (auth required, before onboarding) */}
-              <Route path="/setup" element={<AuthGuard><SetupPage /></AuthGuard>} />
-
-              {/* Onboarding routes (auth required, SDK must be installed) */}
-              <Route path="/onboarding" element={<AuthGuard><SetupGuard><OnboardingLayout /></SetupGuard></AuthGuard>}>
+              {/* Onboarding routes (auth required) */}
+              <Route path="/onboarding" element={<AuthGuard><OnboardingLayout /></AuthGuard>}>
                 <Route index element={<Navigate to="welcome" replace />} />
                 <Route path="welcome" element={<WelcomeStep />} />
                 <Route path="restore" element={<RestoreStep />} />
-                <Route path="agent" element={<AgentProviderStep />} />
+                <Route path="agent" element={<CortexProviderStep />} />
                 <Route path="identity" element={<IdentityStep />} />
                 <Route path="about-you" element={<AboutYouStep />} />
                 <Route path="persona" element={<Navigate to="existence" replace />} />
@@ -195,10 +190,10 @@ export function App() {
                 <Route path="persona/background" element={<BackgroundStep />} />
                 <Route path="persona/review" element={<ReviewStep />} />
               </Route>
-              <Route path="/onboarding/birth" element={<AuthGuard><SetupGuard><BirthPage /></SetupGuard></AuthGuard>} />
+              <Route path="/onboarding/birth" element={<AuthGuard><BirthPage /></AuthGuard>} />
 
-              {/* Main app routes (auth required, SDK must be installed) */}
-              <Route element={<AuthGuard><SetupGuard><AppLayout /></SetupGuard></AuthGuard>}>
+              {/* Main app routes (auth required) */}
+              <Route element={<AuthGuard><AppLayout /></AuthGuard>}>
                 <Route path="/" element={<PresencePage />} />
                 <Route path="/presence" element={<Navigate to="/" replace />} />
                 <Route path="/mind" element={<MindPage />} />
@@ -209,6 +204,7 @@ export function App() {
                 <Route path="/persona/*" element={<PersonaPage />} />
                 <Route path="/settings/channels/:name/configure" element={<ConfigurationPage extensionType="channel" />} />
                 <Route path="/settings/plugins/:name/configure" element={<ConfigurationPage extensionType="plugin" />} />
+                <Route path="/usage" element={<UsagePage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/settings/*" element={<SettingsPage />} />
               </Route>

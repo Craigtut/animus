@@ -1,7 +1,7 @@
 /**
  * Event Bus — type definitions and interface.
  *
- * Types live in @animus/shared. The concrete implementation
+ * Types live in @animus-labs/shared. The concrete implementation
  * (using Node.js EventEmitter) lives in the backend package.
  */
 
@@ -50,10 +50,10 @@ export interface AnimusEventMap {
   // Decisions
   'decision:made': TickDecision;
 
-  // Reply streaming
-  'reply:chunk': { content: string; accumulated: string; turnIndex: number; channel: string };
-  'reply:turn_complete': { turnIndex: number; content: string; tickNumber: number; channel: string };
-  'reply:complete': { content: string; tickNumber: number; totalTurns: number; channel: string };
+  // Reply streaming (requestId links events to a specific inbound HTTP request)
+  'reply:chunk': { content: string; accumulated: string; turnIndex: number; channel: string; contactId: string; requestId?: string };
+  'reply:turn_complete': { turnIndex: number; content: string; tickNumber: number; channel: string; contactId: string; requestId?: string };
+  'reply:complete': { content: string; tickNumber: number; totalTurns: number; channel: string; contactId: string; requestId?: string };
 
   // Goals & Seeds
   'goal:created': Goal;
@@ -84,12 +84,10 @@ export interface AnimusEventMap {
   'tick:input_stored': {
     tickNumber: number;
     triggerType: string;
-    sessionState: string;
   };
   'tick:context_stored': {
     tickNumber: number;
     triggerType: string;
-    sessionState: string;
     durationMs: number | null;
     createdAt: string;
   };
@@ -140,6 +138,19 @@ export interface AnimusEventMap {
     message: string;
     error?: string;
   };
+
+  // Budget
+  'budget:alert': { threshold: number; spentUsd: number; limitUsd: number; percentUsed: number };
+  'budget:hard_stop': { spentUsd: number; limitUsd: number };
+  'budget:reset': { newWindowStart: string; newWindowEnd: string };
+  'budget:tick_blocked': { reason: string; triggerType: string };
+
+  // Cortex Provider
+  'cortex:provider-changed': { provider: string; model: string };
+  'cortex:thinking-level-changed': { level: string };
+  'cortex:provider-removed': Record<string, never>;
+  'cortex:context-limit-changed': { limit: number | null };
+  'cortex:auth-failed': { provider?: string; message: string };
 
   // System
   'system:settings_updated': Record<string, unknown>;

@@ -27,6 +27,7 @@ interface ConfigFormProps {
   rawJsonError?: string | undefined;
   /** Plugin/extension name, passed to OAuth fields */
   pluginName?: string | undefined;
+  onRefreshPairing?: ((fieldKey: string) => void) | undefined;
 }
 
 export const ConfigForm = forwardRef<ConfigFormHandle, ConfigFormProps>(
@@ -46,6 +47,7 @@ export const ConfigForm = forwardRef<ConfigFormHandle, ConfigFormProps>(
     onRawJsonChange,
     rawJsonError,
     pluginName,
+    onRefreshPairing,
   }, ref) => {
     const theme = useTheme();
     const fieldRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -154,6 +156,7 @@ export const ConfigForm = forwardRef<ConfigFormHandle, ConfigFormProps>(
                     highlighted={highlightedField === field.key}
                     onChange={onChange}
                     onToggleSecret={onToggleSecret}
+                    onRefreshPairing={onRefreshPairing}
                     pluginName={pluginName}
                     configValues={configValues}
                   />
@@ -197,6 +200,7 @@ export const ConfigForm = forwardRef<ConfigFormHandle, ConfigFormProps>(
                     highlighted={highlightedField === field.key}
                     onChange={onChange}
                     onToggleSecret={onToggleSecret}
+                    onRefreshPairing={onRefreshPairing}
                     pluginName={pluginName}
                     configValues={configValues}
                   />

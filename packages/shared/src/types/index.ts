@@ -19,7 +19,6 @@ import type {
   contactSchema,
   contactChannelSchema,
   systemSettingsSchema,
-  personalitySettingsSchema,
   onboardingStateSchema,
   existenceParadigmSchema,
   personalityDimensionsSchema,
@@ -27,7 +26,6 @@ import type {
   personaSchema,
   // Heartbeat
   heartbeatStageSchema,
-  sessionStateSchema,
   triggerTypeSchema,
   heartbeatStateSchema,
   emotionNameSchema,
@@ -101,6 +99,20 @@ import type {
   DecisionTypeSchema,
   TriggerDefinitionSchema,
   PluginMcpServerSchema,
+  // Usage & Budget
+  tickTypeSchema,
+  pipelinePhaseSchema,
+  timeWindowSchema,
+  breakdownDimensionSchema,
+  usageRecordSchema,
+  usageTimeSeriesBucketSchema,
+  usageTotalsSchema,
+  usageTimeSeriesSchema,
+  usageBreakdownRowSchema,
+  cacheStatsSchema,
+  budgetConfigSchema,
+  budgetStatusSchema,
+  budgetAlertSchema,
   // Observational Memory
   streamTypeSchema,
   observationSchema,
@@ -138,7 +150,6 @@ export type User = z.infer<typeof userSchema>;
 export type Contact = z.infer<typeof contactSchema>;
 export type ContactChannel = z.infer<typeof contactChannelSchema>;
 export type SystemSettings = z.infer<typeof systemSettingsSchema>;
-export type PersonalitySettings = z.infer<typeof personalitySettingsSchema>;
 export type PaginationInput = z.infer<typeof paginationInputSchema>;
 export type OnboardingState = z.infer<typeof onboardingStateSchema>;
 export type ExistenceParadigm = z.infer<typeof existenceParadigmSchema>;
@@ -151,7 +162,6 @@ export type Persona = z.infer<typeof personaSchema>;
 // ============================================================================
 
 export type HeartbeatStage = z.infer<typeof heartbeatStageSchema>;
-export type SessionState = z.infer<typeof sessionStateSchema>;
 export type TriggerType = z.infer<typeof triggerTypeSchema>;
 export type HeartbeatState = z.infer<typeof heartbeatStateSchema>;
 
@@ -229,6 +239,38 @@ export type AgentSession = z.infer<typeof agentSessionSchema>;
 export type AgentEventType = z.infer<typeof agentEventTypeSchema>;
 export type AgentEvent = z.infer<typeof agentEventSchema>;
 export type AgentUsage = z.infer<typeof agentUsageSchema>;
+
+// ============================================================================
+// Phase Usage (per-phase cache visibility for Context Inspector)
+// ============================================================================
+
+export interface PhaseUsage {
+  phase: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
+  model: string | null;
+}
+
+// ============================================================================
+// Usage & Budget
+// ============================================================================
+
+export type TickType = z.infer<typeof tickTypeSchema>;
+export type PipelinePhase = z.infer<typeof pipelinePhaseSchema>;
+export type TimeWindow = z.infer<typeof timeWindowSchema>;
+export type BreakdownDimension = z.infer<typeof breakdownDimensionSchema>;
+export type UsageRecord = z.infer<typeof usageRecordSchema>;
+export type UsageTimeSeriesBucket = z.infer<typeof usageTimeSeriesBucketSchema>;
+export type UsageTotals = z.infer<typeof usageTotalsSchema>;
+export type UsageTimeSeries = z.infer<typeof usageTimeSeriesSchema>;
+export type UsageBreakdownRow = z.infer<typeof usageBreakdownRowSchema>;
+export type CacheStats = z.infer<typeof cacheStatsSchema>;
+export type BudgetConfig = z.infer<typeof budgetConfigSchema>;
+export type BudgetStatus = z.infer<typeof budgetStatusSchema>;
+export type BudgetAlert = z.infer<typeof budgetAlertSchema>;
 
 // ============================================================================
 // Channels (runtime)
@@ -397,6 +439,168 @@ export interface ContextSection {
   category: ContextSectionCategory;
   tokenCount: number;
 }
+
+// ============================================================================
+// Cortex Context Snapshot (context inspector, shared with frontend)
+// ============================================================================
+
+/** A single named section with content and token estimate */
+export interface ContextSnapshotSection {
+  name: string;
+  content: string;
+  tokenCount: number;
+  category?: string;
+}
+
+/** Snapshot of all context sent to the LLM for a given tick */
+export interface CortexContextSnapshot {
+  /** Consumer/Animus system prompt sections (persona, emotions, etc.) */
+  consumerSystemPrompt: ContextSnapshotSection[];
+  /** Cortex operational system prompt sections (rules, tools, environment) */
+  cortexSystemPrompt: ContextSnapshotSection[];
+  /** Named context slots (dynamic, currently 9) */
+  slots: ContextSnapshotSection[];
+  /** Conversation history metadata (not full content) */
+  conversationHistory: {
+    messageCount: number;
+    totalTokens: number;
+    hasSummary: boolean;
+    summaryTokens: number | null;
+    oldestMessageTimestamp: string | null;
+  };
+  /** Ephemeral per-tick context (full content) */
+  ephemeral: ContextSnapshotSection[];
+  /** The trigger/user message for this tick */
+  triggerMessage: {
+    content: string;
+    tokenCount: number;
+  };
+  /** Model context window size for budget visualization */
+  contextWindow: number;
+  /** Total tokens across all sections (estimated via chars/4) */
+  totalTokens: number;
+  /** Actual input tokens from the first agentic loop turn (from API response) */
+  firstTurnActualInputTokens?: number;
+}
+
+// ============================================================================
+// Per-Phase Context Snapshots (debug context capture)
+// ============================================================================
+
+/** A single message as sent to the LLM (captured in debug mode only) */
+export interface MessageSnapshot {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  tokenCount: number;
+}
+
+/** Lightweight history metadata (always captured) */
+export interface HistorySnapshotMeta {
+  messageCount: number;
+  totalTokens: number;
+  hasSummary: boolean;
+  summaryTokens: number | null;
+  oldestMessageTimestamp: string | null;
+}
+
+/** Thought phase context snapshot */
+export interface ThoughtContextSnapshot {
+  phase: 'thought';
+  tickNumber: number;
+  /** Thought-specific system prompt sections (3 sections: instructions, persona, preamble) */
+  systemPrompt: ContextSnapshotSection[];
+  /** Context slots included (8 of 9, no credentials) */
+  slots: ContextSnapshotSection[];
+  /** Summarized conversation history metadata */
+  conversationHistory: HistorySnapshotMeta;
+  /** Ephemeral per-tick context sections */
+  ephemeral: ContextSnapshotSection[];
+  /** The thought generation prompt */
+  prompt: ContextSnapshotSection;
+  /** Model context window size */
+  contextWindow: number;
+  /** Total estimated tokens across all sections */
+  totalTokens: number;
+  /** Full message array (debug mode only) */
+  messages?: MessageSnapshot[] | undefined;
+}
+
+/** Agentic loop context snapshot (extends existing CortexContextSnapshot shape) */
+export interface AgenticContextSnapshot {
+  phase: 'agentic_loop';
+  tickNumber: number;
+  /** Consumer/Animus system prompt sections */
+  consumerSystemPrompt: ContextSnapshotSection[];
+  /** Cortex operational system prompt sections */
+  cortexSystemPrompt: ContextSnapshotSection[];
+  /** Named context slots */
+  slots: ContextSnapshotSection[];
+  /** Conversation history metadata */
+  conversationHistory: HistorySnapshotMeta;
+  /** Ephemeral per-tick context */
+  ephemeral: ContextSnapshotSection[];
+  /** The trigger/user message */
+  triggerMessage: { content: string; tokenCount: number };
+  /** Model context window size */
+  contextWindow: number;
+  /** Total estimated tokens */
+  totalTokens: number;
+  /** Actual input tokens from the first turn (from API) */
+  firstTurnActualInputTokens?: number | undefined;
+  /** Full message array at loop start (debug mode only) */
+  messages?: MessageSnapshot[] | undefined;
+}
+
+/** Per-turn delta within the agentic loop (debug mode only) */
+export interface AgenticTurnDelta {
+  phase: 'agentic_turn';
+  tickNumber: number;
+  turnNumber: number;
+  /** Number of new messages added since last turn */
+  newMessageCount: number;
+  /** Total conversation history messages at this turn */
+  totalHistoryMessages: number;
+  /** Total history tokens at this turn */
+  totalHistoryTokens: number;
+  /** Usage from this turn's API response */
+  turnUsage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+  };
+  /** The new messages added (debug mode only) */
+  newMessages?: MessageSnapshot[] | undefined;
+}
+
+/** Reflect phase context snapshot */
+export interface ReflectContextSnapshot {
+  phase: 'reflect';
+  tickNumber: number;
+  /** Reflect-specific system prompt sections (8 sections) */
+  systemPrompt: ContextSnapshotSection[];
+  /** Context slots included (8 of 9, no credentials) */
+  slots: ContextSnapshotSection[];
+  /** Current-tick agentic turn messages metadata */
+  currentTickTurns: { messageCount: number; totalTokens: number };
+  /** Ephemeral per-tick context sections */
+  ephemeral: ContextSnapshotSection[];
+  /** The reflect prompt */
+  prompt: ContextSnapshotSection;
+  /** Model context window size */
+  contextWindow: number;
+  /** Total estimated tokens */
+  totalTokens: number;
+  /** Full message array (debug mode only) */
+  messages?: MessageSnapshot[] | undefined;
+}
+
+/** Discriminated union of all phase context snapshots */
+export type PhaseContextSnapshot =
+  | ThoughtContextSnapshot
+  | AgenticContextSnapshot
+  | ReflectContextSnapshot
+  | AgenticTurnDelta;
 
 // ============================================================================
 // Distribution (Package System)

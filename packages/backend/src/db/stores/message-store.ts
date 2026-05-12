@@ -151,6 +151,11 @@ function rowToMessage(row: Record<string, unknown>): Message {
   } as Message;
 }
 
+export function getMessageById(db: Database.Database, id: string): Message | null {
+  const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  return row ? rowToMessage(row) : null;
+}
+
 // ============================================================================
 // Delivery Tracking
 // ============================================================================
@@ -276,6 +281,25 @@ export function getMessagesSince(
   return attachMedia(db, rows.map(rowToMessage));
 }
 
+/**
+ * Get messages in a time range (exclusive on both bounds), oldest first.
+ * Kept as a general helper for bounded message-history reconstruction.
+ */
+export function getMessagesInRange(
+  db: Database.Database,
+  conversationId: string,
+  after: string,
+  before: string,
+  limit: number = 500
+): Message[] {
+  const rows = db
+    .prepare(
+      'SELECT * FROM messages WHERE conversation_id = ? AND created_at > ? AND created_at < ? ORDER BY created_at ASC LIMIT ?'
+    )
+    .all(conversationId, after, before, limit) as Array<Record<string, unknown>>;
+  return attachMedia(db, rows.map(rowToMessage));
+}
+
 export function getMessagesByContact(
   db: Database.Database,
   contactId: string,
@@ -305,6 +329,23 @@ export function getMessagesByContact(
       `SELECT * FROM messages WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC LIMIT ?`
     )
     .all(...params, limit) as Array<Record<string, unknown>>;
+  return attachMedia(db, rows.map(rowToMessage));
+}
+
+/**
+ * Get recent messages across all contacts, newest first.
+ * Used during interval ticks to give the agent awareness of recent conversations.
+ */
+export function getRecentMessagesGlobal(
+  db: Database.Database,
+  limit: number = 30,
+  since?: string,
+): Message[] {
+  const query = since
+    ? 'SELECT * FROM messages WHERE created_at > ? ORDER BY created_at DESC LIMIT ?'
+    : 'SELECT * FROM messages ORDER BY created_at DESC LIMIT ?';
+  const params = since ? [since, limit] : [limit];
+  const rows = db.prepare(query).all(...params) as Array<Record<string, unknown>>;
   return attachMedia(db, rows.map(rowToMessage));
 }
 

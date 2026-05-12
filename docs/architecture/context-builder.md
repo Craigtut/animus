@@ -1070,18 +1070,22 @@ interface IContextBuilder {
 interface MindContextParams {
   trigger: TriggerContext;
   contact: ResolvedContact | null;
-  sessionState: 'cold' | 'warm';
   currentEmotions: EmotionState[];
-  tickInterval: number;
-  sessionTokenCount: number;
-  contextBudget: number;
+  tickIntervalMs: number;
+  recentThoughts: Thought[];
+  recentExperiences: Experience[];
+  recentMessages: Message[];
+  previousDecisions: TickDecision[];
+  compiledPersona: CompiledPersona;
+  activeSession?: { contactId: string; channel: string } | null;
 }
 
 interface CompiledContext {
-  systemPrompt: string | null;    // null for warm sessions (already sent)
+  systemPrompt: string;
   userMessage: string;
+  systemPromptManifest: ContextSection[];
+  userMessageManifest: ContextSection[];
   tokenBreakdown: Record<string, number>;
-  truncatedSections: string[];    // Sections that were truncated to fit budget
 }
 
 interface CompiledPersona {

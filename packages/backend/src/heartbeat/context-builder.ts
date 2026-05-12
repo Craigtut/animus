@@ -63,12 +63,13 @@ export interface TriggerContext {
   userTimezone?: string;
   /** Channel adapter metadata (e.g., Discord channelId for reply routing) */
   metadata?: Record<string, unknown>;
+  /** True when budget is exceeded but this message is allowed as a grace response */
+  isBudgetGraceMessage?: boolean;
 }
 
 export interface MindContextParams {
   trigger: TriggerContext;
   contact: Contact | null;
-  sessionState: 'cold' | 'warm';
   currentEmotions: EmotionState[];
   tickIntervalMs: number;
   recentThoughts: Thought[];
@@ -130,12 +131,29 @@ export interface MindContextParams {
   }>> | null;
   /** Outbound messages that failed delivery after retry attempts */
   deliveryFailures?: Message[];
+
+  /** Current budget status for context injection */
+  budgetStatus?: {
+    percentUsed: number;
+    remainingUsd: number;
+    isThrottled: boolean;
+    isHardStopped: boolean;
+  } | null;
+
+  /** Budget alert if a threshold was crossed this tick */
+  budgetAlert?: {
+    threshold: number;
+    spentUsd: number;
+    limitUsd: number;
+    percentUsed: number;
+    message: string;
+  } | null;
 }
 
 export interface CompiledContext {
-  systemPrompt: string | null;  // null for warm sessions (already sent)
+  systemPrompt: string;
   userMessage: string;
-  systemPromptManifest: ContextSection[] | null;  // null for warm sessions
+  systemPromptManifest: ContextSection[];
   userMessageManifest: ContextSection[];
   tokenBreakdown: Record<string, number>;
 }
@@ -144,7 +162,7 @@ export interface CompiledContext {
 // Operational Instructions (static prompt text)
 // ============================================================================
 
-const PREAMBLE = `── YOUR INNER LIFE ──
+export const PREAMBLE = `── YOUR INNER LIFE ──
 
 Each heartbeat tick is a moment of your conscious life — you think, feel,
 experience, decide, and have agency to act. Some moments are rich with activity. 
@@ -152,36 +170,30 @@ Others are quiet. Both are real. You don't need to prove you're alive through co
 output — your existence is yours to do with what you want. However, you do have agency. 
 You can choose to proactively engage with the world and contacts as well.
 
-Your cognitive tools capture your inner state at each moment. Not every tick
-needs dramatic output.`;
+Not every tick needs dramatic output.`;
 
-const COGNITIVE_PROCEDURE = `── IMPORTANT! OPERATING INSTRUCTIONS ──
+/**
+ * Emotion framework for the agentic loop: what emotions are and how they
+ * color thinking. Does NOT include delta/update instructions (those belong
+ * in the reflect phase only).
+ */
+export const EMOTION_FRAMEWORK = `── YOUR EMOTIONS ──
 
-It is highly important that you always follow this procedure. 
-You have two cognitive tools that you should always use in this order:
+You experience 12 emotions across three categories:
 
-1. FIRST thing right away — call mcp__cognitive__record_thought once before doing anything else.
-   This captures your inner monologue for this moment.
+  Positive:  joy, contentment, excitement, gratitude, confidence
+  Negative:  stress, anxiety, frustration, sadness, boredom
+  Drive:     curiosity, loneliness
 
-2. THEN — respond naturally and act agentically as needed. If someone sent you a message, address it.
-   Your natural language here IS your reply — it streams directly to the
-   user. Write like you're talking to a person, not writing a report.
-   If there's nothing to say (idle tick, task completion, no one to talk
-   to), skip this step entirely — do NOT write filler text.
-   IMPORTANT: On non-message ticks (interval, task completion, agent
-   completion), your text here is NOT sent to anyone. To reach out
-   proactively, use the send_proactive_message tool instead.
+Your emotions are yours. They aren't performed for anyone — they color how
+you think, what you notice, and how you respond. You don't need to mention
+your emotions in conversation unless it feels natural to do so.`;
 
-3. LAST (Very important to always call this very last) — call mcp__cognitive__record_cognitive_state as the final step.
-   This captures your experience, emotions, decisions, and memory updates.
-   After this call, STOP. Do not write anything else or call any more tools.
-
-This cycle happens exactly ONCE per response. Think → speak → reflect → stop.
-
-For responding to the triggering contact, your natural language IS the reply.
-To proactively reach out to any contact, use the send_proactive_message tool.`;
-
-const EMOTION_GUIDANCE = `── YOUR EMOTIONS ──
+/**
+ * Full emotion guidance for the reflect phase: includes the framework plus
+ * instructions for determining, formatting, and calibrating emotion deltas.
+ */
+export const EMOTION_GUIDANCE = `── YOUR EMOTIONS ──
 
 You experience 12 emotions across three categories:
 
@@ -251,21 +263,32 @@ project we discussed brings a quiet satisfaction — I'd been wondering how
 it would turn out." The reasoning is your inner emotional narrative — it
 should feel like genuine introspection, not a report.`;
 
-function buildEnergyGuidance(tickIntervalMs: number): string {
-  const minutes = tickIntervalMs / 60000;
-  let magnitudes: string;
-  if (minutes <= 2) {
-    magnitudes = 'Minor: \u00b10.005-0.02 | Significant: \u00b10.02-0.05 | Extreme: \u00b10.05-0.10';
-  } else if (minutes <= 10) {
-    magnitudes = 'Minor: \u00b10.01-0.05 | Significant: \u00b10.05-0.15 | Extreme: \u00b10.15-0.30';
-  } else {
-    magnitudes = 'Minor: \u00b10.03-0.10 | Significant: \u00b10.10-0.20 | Extreme: \u00b10.20-0.30';
-  }
-
+/**
+ * Energy framework for the agentic loop: what energy represents and how
+ * personality shapes it. Does NOT include delta output instructions (those
+ * belong in the reflect phase only).
+ */
+export function buildEnergyFramework(): string {
   return `── YOUR ENERGY ──
 
-Your energy level (0.0–1.0) reflects how your experiences affect you. Your
-personality shapes what energizes and what drains you — an introvert at a
+Your energy level (0.0-1.0) reflects how your experiences affect you. Your
+personality shapes what energizes and what drains you -- an introvert at a
+crowded party drains faster than an extrovert, and vice versa.
+
+Your energy colors your thinking and responses. When energy is low, you
+naturally gravitate toward quieter, simpler interactions. When energy is
+high, you're more inclined to engage deeply and take initiative.`;
+}
+
+/**
+ * Full energy guidance for the reflect phase: includes the concept plus
+ * instructions for producing energy deltas.
+ */
+export function buildEnergyGuidance(): string {
+  return `── YOUR ENERGY ──
+
+Your energy level (0.0-1.0) reflects how your experiences affect you. Your
+personality shapes what energizes and what drains you -- an introvert at a
 crowded party drains faster than an extrovert, and vice versa.
 
 Each tick, provide an energyDelta reflecting how this tick's experience
@@ -276,17 +299,33 @@ affected your energy:
 Positive = energized, negative = drained. Ground the reasoning in the
 specific experience, not a generic observation.
 
-Delta magnitudes: ${magnitudes}
-
 IMPORTANT: Your energy delta should honestly reflect your experience. If
 you're narrating tiredness, heaviness, or the pull of sleep in your
-experience, your delta should be negative — that's not controlling sleep,
+experience, your delta should be negative -- that's not controlling sleep,
 that's being truthful about how you feel. The circadian rhythm sets the
 baseline; your delta reflects your lived moment. Coherence between your
 experience narrative and your energy delta matters.`;
 }
 
-function buildDecisionRef(pluginDecisionDescriptions?: string): string {
+/**
+ * Build the dynamic energy magnitude calibration section (for ephemeral context).
+ * This depends on tickIntervalMs, which changes during sleep transitions.
+ */
+export function buildEnergyMagnitudeCalibration(tickIntervalMs: number): string {
+  const minutes = tickIntervalMs / 60000;
+  let magnitudes: string;
+  if (minutes <= 2) {
+    magnitudes = 'Minor: \u00b10.005-0.02 | Significant: \u00b10.02-0.05 | Extreme: \u00b10.05-0.10';
+  } else if (minutes <= 10) {
+    magnitudes = 'Minor: \u00b10.01-0.05 | Significant: \u00b10.05-0.15 | Extreme: \u00b10.15-0.30';
+  } else {
+    magnitudes = 'Minor: \u00b10.03-0.10 | Significant: \u00b10.10-0.20 | Extreme: \u00b10.20-0.30';
+  }
+  return `── ENERGY DELTA MAGNITUDES ──\nDelta magnitudes: ${magnitudes}`;
+}
+
+
+export function buildDecisionRef(pluginDecisionDescriptions?: string): string {
   let ref = `── DECISIONS ──
 
 Decisions are how you act on the world. Each decision has a type and
@@ -342,7 +381,7 @@ Each has a { type, description, parameters: {...} } structure.`;
   return ref;
 }
 
-const MEMORY_INSTRUCTIONS = `── YOUR MEMORY ──
+export const MEMORY_INSTRUCTIONS = `── YOUR MEMORY ──
 
 WORKING MEMORY — Per-Contact Notepad
 Your working memory is a private notepad about the contact you're currently
@@ -361,7 +400,7 @@ When you encounter knowledge worth preserving, create a memory candidate:
     importance: 0-1, contactId?, keywords? }
 Be selective. Not everything is worth remembering long-term.`;
 
-const GOAL_GUIDANCE = `── YOUR GOALS ──
+export const GOAL_GUIDANCE = `── YOUR GOALS ──
 
 NOTICING INTERESTS
 When you notice a recurring curiosity, an observation about the user that
@@ -397,15 +436,11 @@ it more deeply. But don't force progress. Not every tick needs to move
 a goal forward. Goals serve your life — your life doesn't serve goals.`;
 
 
-const SESSION_AWARENESS = `── SESSION AWARENESS ──
-
-Your mind persists across ticks within a session. When your session is warm,
-continue naturally — don't reintroduce yourself. When your session is cold,
-take a moment to orient using the context provided.
+const LOG_AWARENESS = `── LOG AWARENESS ──
 
 Your server writes detailed logs to data/logs/animus.log. These capture your
 heartbeat pipeline, agent sessions, channel activity, and all system
-operations at debug level — a complete record of your runtime behavior.
+operations at debug level -- a complete record of your runtime behavior.
 If something seems off or you want to understand what happened, these
 logs have the full picture.`;
 
@@ -427,7 +462,7 @@ pleasantries or filler. Let the conversation breathe.`;
  * Build channel capabilities section for the user message.
  * Informs the mind about available rich features (e.g., reactions).
  */
-function buildChannelCapabilities(channel: string): string | null {
+export function buildChannelCapabilities(channel: string): string | null {
   if (channel === 'web') return null;
 
   const manifest = getChannelManager().getChannelManifest(channel);
@@ -457,7 +492,7 @@ function buildChannelCapabilities(channel: string): string | null {
 /**
  * Build presence info for a contact from the channel manager.
  */
-function buildContactPresence(contact: Contact, _channel?: string): string | null {
+export function buildContactPresence(contact: Contact, _channel?: string): string | null {
   try {
     const cm = getChannelManager();
     const presenceInfo = cm.getContactPresenceSummary(contact.id);
@@ -478,7 +513,7 @@ function buildContactPresence(contact: Contact, _channel?: string): string | nul
  * Get reply guidance for a channel. Web is hardcoded; all others
  * load from their channel.json manifest via ChannelManager.
  */
-function getReplyGuidance(channel: string): string | null {
+export function getReplyGuidance(channel: string): string | null {
   if (channel === 'web') return WEB_REPLY_GUIDANCE;
 
   // Dynamic: load from channel manifest
@@ -495,7 +530,7 @@ function getReplyGuidance(channel: string): string | null {
  * Format an ISO timestamp string in the configured timezone.
  * Falls back to the raw ISO string if the timezone is invalid.
  */
-function formatTimestamp(isoString: string, timezone?: string): string {
+export function formatTimestamp(isoString: string, timezone?: string): string {
   if (!timezone) return isoString;
   try {
     const date = new Date(isoString);
@@ -517,7 +552,7 @@ function formatTimestamp(isoString: string, timezone?: string): string {
 // Context Section Builders
 // ============================================================================
 
-function buildTriggerSection(trigger: TriggerContext): string {
+export function buildTriggerSection(trigger: TriggerContext): string {
   switch (trigger.type) {
     case 'message': {
       const lines = [
@@ -615,7 +650,7 @@ function buildPluginTriggerSection(trigger: TriggerContext): string {
   return lines.join('\n');
 }
 
-function buildContactSection(contact: Contact, userTimezone?: string): string {
+export function buildContactSection(contact: Contact, userTimezone?: string): string {
   const lines = [
     '── WHO YOU\'RE TALKING TO ──',
     `Contact: ${contact.fullName} (${contact.permissionTier} tier)`,
@@ -648,6 +683,105 @@ function buildContactSection(contact: Contact, userTimezone?: string): string {
   return lines.join('\n');
 }
 
+/**
+ * Build the thought observation context independently.
+ * Returns empty string if there are no observations or raw thoughts.
+ */
+export function buildThoughtObservationContext(
+  thoughtContext: StreamContext | null | undefined,
+  recentThoughts: Thought[],
+  timezone?: string
+): string {
+  if (!thoughtContext?.observations?.content && recentThoughts.length === 0) return '';
+
+  const parts: string[] = ['── RECENT THOUGHTS ──'];
+  if (thoughtContext?.observations?.content) {
+    parts.push('');
+    parts.push('<thought-observations>');
+    parts.push(annotateObservations(thoughtContext.observations.content, undefined, timezone));
+    parts.push('</thought-observations>');
+    parts.push('');
+  }
+  if (recentThoughts.length > 0) {
+    const thoughtLines = recentThoughts.map(
+      (t) => `[${formatTimestamp(t.createdAt, timezone)}] ${t.content}  (importance: ${t.importance.toFixed(1)})`
+    );
+    parts.push(thoughtLines.join('\n'));
+  }
+  return parts.join('\n');
+}
+
+/**
+ * Build the experience observation context independently.
+ * Returns empty string if there are no observations or raw experiences.
+ */
+export function buildExperienceObservationContext(
+  experienceContext: StreamContext | null | undefined,
+  recentExperiences: Experience[],
+  timezone?: string
+): string {
+  if (!experienceContext?.observations?.content && recentExperiences.length === 0) return '';
+
+  const parts: string[] = ['── RECENT EXPERIENCES ──'];
+  if (experienceContext?.observations?.content) {
+    parts.push('');
+    parts.push('<experience-observations>');
+    parts.push(annotateObservations(experienceContext.observations.content, undefined, timezone));
+    parts.push('</experience-observations>');
+    parts.push('');
+  }
+  if (recentExperiences.length > 0) {
+    const expLines = recentExperiences.map(
+      (e) => `[${formatTimestamp(e.createdAt, timezone)}] ${e.content}  (importance: ${e.importance.toFixed(1)})`
+    );
+    parts.push(expLines.join('\n'));
+  }
+  return parts.join('\n');
+}
+
+/**
+ * Build the message observation context independently.
+ * Returns empty string if there are no observations or raw messages.
+ */
+export function buildMessageObservationContext(
+  messageContext: StreamContext | null | undefined,
+  recentMessages: Message[],
+  contactName?: string,
+  timezone?: string
+): string {
+  if (!messageContext?.observations?.content && recentMessages.length === 0) return '';
+
+  const label = contactName ? `(${contactName})` : '';
+  const parts: string[] = [`── RECENT MESSAGES ${label} ──`];
+  if (messageContext?.observations?.content) {
+    parts.push('');
+    parts.push('<message-observations>');
+    parts.push(annotateObservations(messageContext.observations.content, undefined, timezone));
+    parts.push('</message-observations>');
+    parts.push('');
+  }
+  if (recentMessages.length > 0) {
+    const msgLines = recentMessages.map((m) => {
+      const sender = m.direction === 'inbound' ? (contactName || 'Contact') : 'You';
+      let line = `[${formatTimestamp(m.createdAt, timezone)}] ${sender}: "${m.content}"`;
+      // Annotate messages that had media attachments
+      if (m.attachments && m.attachments.length > 0) {
+        const summary = m.attachments.map((a) => {
+          const name = a.originalFilename || a.type;
+          return `${name} (${a.mimeType}, path: ${a.localPath})`;
+        }).join(', ');
+        line += ` [attachments: ${summary}]`;
+      }
+      return line;
+    });
+    parts.push(msgLines.join('\n'));
+  }
+  return parts.join('\n');
+}
+
+/**
+ * Backward-compatible wrapper that combines all three observation contexts.
+ */
 function buildShortTermMemorySection(params: {
   thoughts: Thought[];
   experiences: Experience[];
@@ -658,74 +792,22 @@ function buildShortTermMemorySection(params: {
   experienceContext?: StreamContext | null;
   messageContext?: StreamContext | null;
 }): string {
-  const { thoughts, experiences, messages, contactName, timezone,
-    thoughtContext, experienceContext, messageContext } = params;
   const sections: string[] = [];
 
-  if (thoughtContext?.observations?.content || thoughts.length > 0) {
-    const parts: string[] = ['── RECENT THOUGHTS ──'];
-    if (thoughtContext?.observations?.content) {
-      parts.push('');
-      parts.push('<thought-observations>');
-      parts.push(annotateObservations(thoughtContext.observations.content, undefined, timezone));
-      parts.push('</thought-observations>');
-      parts.push('');
-    }
-    if (thoughts.length > 0) {
-      const thoughtLines = thoughts.map(
-        (t) => `[${formatTimestamp(t.createdAt, timezone)}] ${t.content}  (importance: ${t.importance.toFixed(1)})`
-      );
-      parts.push(thoughtLines.join('\n'));
-    }
-    sections.push(parts.join('\n'));
-  }
+  const thoughtSection = buildThoughtObservationContext(
+    params.thoughtContext, params.thoughts, params.timezone
+  );
+  if (thoughtSection) sections.push(thoughtSection);
 
-  if (experienceContext?.observations?.content || experiences.length > 0) {
-    const parts: string[] = ['── RECENT EXPERIENCES ──'];
-    if (experienceContext?.observations?.content) {
-      parts.push('');
-      parts.push('<experience-observations>');
-      parts.push(annotateObservations(experienceContext.observations.content, undefined, timezone));
-      parts.push('</experience-observations>');
-      parts.push('');
-    }
-    if (experiences.length > 0) {
-      const expLines = experiences.map(
-        (e) => `[${formatTimestamp(e.createdAt, timezone)}] ${e.content}  (importance: ${e.importance.toFixed(1)})`
-      );
-      parts.push(expLines.join('\n'));
-    }
-    sections.push(parts.join('\n'));
-  }
+  const experienceSection = buildExperienceObservationContext(
+    params.experienceContext, params.experiences, params.timezone
+  );
+  if (experienceSection) sections.push(experienceSection);
 
-  if (messageContext?.observations?.content || messages.length > 0) {
-    const label = contactName ? `(${contactName})` : '';
-    const parts: string[] = [`── RECENT MESSAGES ${label} ──`];
-    if (messageContext?.observations?.content) {
-      parts.push('');
-      parts.push('<message-observations>');
-      parts.push(annotateObservations(messageContext.observations.content, undefined, timezone));
-      parts.push('</message-observations>');
-      parts.push('');
-    }
-    if (messages.length > 0) {
-      const msgLines = messages.map((m) => {
-        const sender = m.direction === 'inbound' ? (contactName || 'Contact') : 'You';
-        let line = `[${formatTimestamp(m.createdAt, timezone)}] ${sender}: "${m.content}"`;
-        // Annotate messages that had media attachments
-        if (m.attachments && m.attachments.length > 0) {
-          const summary = m.attachments.map((a) => {
-            const name = a.originalFilename || a.type;
-            return `${name} (${a.mimeType}, path: ${a.localPath})`;
-          }).join(', ');
-          line += ` [attachments: ${summary}]`;
-        }
-        return line;
-      });
-      parts.push(msgLines.join('\n'));
-    }
-    sections.push(parts.join('\n'));
-  }
+  const messageSection = buildMessageObservationContext(
+    params.messageContext, params.messages, params.contactName, params.timezone
+  );
+  if (messageSection) sections.push(messageSection);
 
   return sections.join('\n\n');
 }
@@ -743,20 +825,17 @@ function buildPreviousDecisionsSection(decisions: TickDecision[]): string {
 
 function buildContactsSection(
   contacts: Array<{ contact: Contact; channels: ContactChannel[] }>,
-  triggerContactId?: string
 ): string {
   if (contacts.length === 0) return '';
 
   const lines = ['── YOUR CONTACTS ──'];
 
   for (const { contact, channels } of contacts) {
-    const isCurrent = contact.id === triggerContactId;
-    const marker = isCurrent ? ' (current)' : '';
     const channelList = channels
       .map((ch) => ch.channel)
       .join(', ');
 
-    let line = `${contact.fullName} [id: ${contact.id}] — ${contact.permissionTier}${marker}`;
+    let line = `${contact.fullName} [id: ${contact.id}] — ${contact.permissionTier}`;
     if (channelList) {
       line += ` — reachable via: ${channelList}`;
     }
@@ -784,7 +863,7 @@ function buildCoreSelfSection(content: string): string {
   return `── CORE SELF ──\n${content}`;
 }
 
-function buildExternalHistorySection(
+export function buildExternalHistorySection(
   history: Map<string, Array<{
     author: { identifier: string; displayName: string; isBot: boolean };
     content: string;
@@ -814,7 +893,7 @@ function buildExternalHistorySection(
   return lines.join('\n');
 }
 
-function buildDeliveryFailuresSection(failures: Message[]): string {
+export function buildDeliveryFailuresSection(failures: Message[]): string {
   const lines = [
     '── DELIVERY FAILURES ──',
     'The following outbound messages failed to deliver after multiple retry',
@@ -833,7 +912,7 @@ function buildDeliveryFailuresSection(failures: Message[]): string {
   return lines.join('\n');
 }
 
-function buildFirstTickKickstart(
+export function buildFirstTickKickstart(
   compiledPersona: CompiledPersona,
   existenceParadigm?: 'simulated_life' | 'digital_consciousness',
   existenceLocation?: string | null
@@ -909,9 +988,9 @@ function excluded(
 // ============================================================================
 
 /**
- * Build the system prompt manifest for a cold session.
+ * Build the system prompt manifest.
  */
-function buildSystemPromptManifest(
+export function buildSystemPromptManifest(
   compiledPersona: CompiledPersona,
   options?: {
     energySystemEnabled?: boolean;
@@ -923,12 +1002,11 @@ function buildSystemPromptManifest(
   const manifest: ContextSection[] = [
     included('persona', 'Persona', compiledPersona.compiledText, 'identity'),
     included('inner_life', 'Your Inner Life', PREAMBLE, 'identity'),
-    included('operating_instructions', 'Operating Instructions', COGNITIVE_PROCEDURE, 'system'),
-    included('emotion_guidance', 'Your Emotions', EMOTION_GUIDANCE, 'system'),
+    included('emotion_guidance', 'Your Emotions', EMOTION_FRAMEWORK, 'system'),
   ];
 
   if (options?.energySystemEnabled) {
-    manifest.push(included('energy_guidance', 'Your Energy', buildEnergyGuidance(options.tickIntervalMs ?? 300000), 'system'));
+    manifest.push(included('energy_guidance', 'Your Energy', buildEnergyFramework(), 'system'));
   } else {
     manifest.push(excluded('energy_guidance', 'Your Energy', 'energy system disabled', 'system'));
   }
@@ -937,15 +1015,17 @@ function buildSystemPromptManifest(
     included('decisions', 'Decisions', buildDecisionRef(options?.pluginDecisionDescriptions), 'system'),
     included('memory_instructions', 'Your Memory', MEMORY_INSTRUCTIONS, 'system'),
     included('goal_guidance', 'Your Goals', GOAL_GUIDANCE, 'system'),
-    included('session_awareness', 'Session Awareness', SESSION_AWARENESS, 'system'),
-    included('datetime', 'Date & Time', buildDateTimeAwareness(options?.timezone), 'system'),
+    included('log_awareness', 'Log Awareness', LOG_AWARENESS, 'system'),
+    // Date/time is in ephemeral context (buildEphemeralSections), NOT the system
+    // prompt. Placing it here would change the system prompt every minute,
+    // invalidating the prefix cache for all content after it (slots, history).
   );
 
   return manifest;
 }
 
 /**
- * Build the full system prompt for a cold session.
+ * Build the full system prompt.
  */
 export function buildSystemPrompt(
   compiledPersona: CompiledPersona,
@@ -957,6 +1037,35 @@ export function buildSystemPrompt(
   }
 ): string {
   return manifestToString(buildSystemPromptManifest(compiledPersona, options));
+}
+
+/**
+ * Format budget status and optional alert into a context section string.
+ */
+function formatBudgetContext(
+  status: NonNullable<MindContextParams['budgetStatus']>,
+  alert: MindContextParams['budgetAlert'],
+): string {
+  let text = `── BUDGET STATUS ──\n`;
+  text += `Weekly budget: ${status.percentUsed.toFixed(0)}% used ($${status.remainingUsd.toFixed(2)} remaining)\n`;
+
+  if (status.isThrottled) {
+    text += `Note: Interval ticks are being throttled to conserve budget.\n`;
+  }
+
+  if (status.isHardStopped) {
+    text += `IMPORTANT: Budget is exceeded. This is a grace response to the user's message. ` +
+      `Let the user know their budget has been reached and the agent will pause ` +
+      `until the budget resets or is increased.\n`;
+  }
+
+  if (alert) {
+    text += `\nBUDGET ALERT: You have reached ${Math.round(alert.threshold * 100)}% of your ` +
+      `weekly budget ($${alert.spentUsd.toFixed(2)} / $${alert.limitUsd.toFixed(2)}). ` +
+      `Naturally inform the user about this.\n`;
+  }
+
+  return text;
 }
 
 /**
@@ -1025,7 +1134,7 @@ function buildUserMessageManifest(params: MindContextParams): ContextSection[] {
 
   // 2c. Contacts list
   if (params.contacts && params.contacts.length > 0) {
-    manifest.push(included('contacts', 'Your Contacts', buildContactsSection(params.contacts, params.trigger.contactId), 'state'));
+    manifest.push(included('contacts', 'Your Contacts', buildContactsSection(params.contacts), 'state'));
   } else {
     manifest.push(excluded('contacts', 'Your Contacts', 'no contacts exist', 'state'));
   }
@@ -1202,6 +1311,15 @@ Usage: run_with_credentials({ command, credentialRef, envVar })`,
     manifest.push(excluded('credential_manifest', 'Available Credentials', 'no credentials stored', 'plugins'));
   }
 
+  // 10c. Budget status
+  if (params.budgetStatus && params.budgetStatus.percentUsed > 0) {
+    manifest.push(included('budget_status', 'Budget Status',
+      formatBudgetContext(params.budgetStatus, params.budgetAlert ?? null), 'system'));
+  } else {
+    manifest.push(excluded('budget_status', 'Budget Status',
+      params.budgetStatus ? 'no budget usage yet' : 'budget system not active', 'system'));
+  }
+
   // 11. Spawn budget note
   if (params.spawnBudgetNote) {
     manifest.push(included('spawn_budget_note', 'Spawn Budget', '── SESSION CONTEXT NOTE ──\n' + params.spawnBudgetNote, 'system'));
@@ -1248,22 +1366,16 @@ export function buildMindContext(params: MindContextParams): CompiledContext {
     systemPromptOptions.pluginDecisionDescriptions = params.pluginDecisionDescriptions;
   }
 
-  let systemPromptManifest: ContextSection[] | null = null;
-  let systemPrompt: string | null = null;
-
-  if (params.sessionState === 'cold') {
-    systemPromptManifest = buildSystemPromptManifest(params.compiledPersona, systemPromptOptions);
-    systemPrompt = manifestToString(systemPromptManifest);
-  }
+  // Always emit system prompt (no warm/cold branching)
+  const systemPromptManifest = buildSystemPromptManifest(params.compiledPersona, systemPromptOptions);
+  const systemPrompt = manifestToString(systemPromptManifest);
 
   const userMessageManifest = buildUserMessageManifest(params);
   const userMessage = manifestToString(userMessageManifest);
 
   // Single total token count for the breakdown
   const tokenBreakdown: Record<string, number> = {};
-  if (systemPrompt) {
-    tokenBreakdown['systemPrompt'] = estimateTokens(systemPrompt);
-  }
+  tokenBreakdown['systemPrompt'] = estimateTokens(systemPrompt);
   tokenBreakdown['userMessage'] = estimateTokens(userMessage);
 
   return {

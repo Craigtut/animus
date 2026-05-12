@@ -8,12 +8,6 @@
  */
 export const OBSERVATIONAL_MEMORY_CONFIG = {
   /**
-   * Model used for Observer and Reflector agents.
-   * Haiku-tier recommended — compression tasks don't need the primary mind's model.
-   */
-  model: 'haiku' as const,
-
-  /**
    * Observer agent settings
    */
   observer: {

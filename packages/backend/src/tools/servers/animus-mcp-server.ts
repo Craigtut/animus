@@ -8,7 +8,7 @@
  *
  * Environment variables (set by buildMcpServerConfig):
  *   BRIDGE_PORT — localhost port of the HTTP bridge
- *   TOOL_SET   — 'mind' | 'cognitive' | 'subagent'
+ *   TOOL_SET   — 'mind' | 'subagent'
  *   TASK_ID    — task ID for context lookup in the bridge
  *
  * Dependencies: @modelcontextprotocol/sdk (for Server + StdioServerTransport)
@@ -130,12 +130,9 @@ async function main(): Promise<void> {
     toolMap.set(def.name, def);
   }
 
-  // Determine server name based on tool set
-  const serverName = TOOL_SET === 'cognitive' ? 'cognitive' : 'animus';
-
   // Create the MCP server
   const mcpServer = new Server(
-    { name: serverName, version: '1.0.0' },
+    { name: 'animus', version: '1.0.0' },
     { capabilities: { tools: {} } },
   );
 
@@ -154,27 +151,7 @@ async function main(): Promise<void> {
   mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
-    // Route cognitive tools to dedicated bridge endpoints
-    if (TOOL_SET === 'cognitive') {
-      if (name === 'record_thought') {
-        return (await bridgePost('/cognitive/thought', args ?? {})) as {
-          content: Array<{ type: string; text: string }>;
-          isError?: boolean;
-        };
-      }
-      if (name === 'record_cognitive_state') {
-        return (await bridgePost('/cognitive/state', args ?? {})) as {
-          content: Array<{ type: string; text: string }>;
-          isError?: boolean;
-        };
-      }
-      return {
-        content: [{ type: 'text', text: `Unknown cognitive tool: ${name}` }],
-        isError: true,
-      };
-    }
-
-    // Route regular Animus tools through the execute endpoint
+    // Route Animus tools through the execute endpoint
     const result = (await bridgePost('/execute', {
       taskId: TASK_ID,
       toolName: name,
@@ -187,7 +164,7 @@ async function main(): Promise<void> {
   // Connect via stdio
   const transport = new StdioServerTransport();
   await mcpServer.connect(transport);
-  process.stderr.write(`[animus-mcp] Connected via stdio (server="${serverName}", tools=${toolDefs.length})\n`);
+  process.stderr.write(`[animus-mcp] Connected via stdio (server="animus", tools=${toolDefs.length})\n`);
 }
 
 main().catch((err) => {

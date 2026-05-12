@@ -52,6 +52,9 @@ import {
 import type { TickQueue } from './tick-queue.js';
 import type { PluginManager } from '../plugins/index.js';
 import { createLogger } from '../lib/logger.js';
+import { getEventBus } from '../lib/event-bus.js';
+import { getAgentLogsDb } from '../db/index.js';
+import { getBudgetService } from '../services/budget-service.js';
 
 const log = createLogger('GatherContext', 'heartbeat');
 
@@ -68,7 +71,6 @@ export interface GatherResult {
   recentMessages: ReturnType<typeof messageStore.getRecentMessages>;
   previousDecisions: ReturnType<typeof heartbeatStore.getTickDecisions>;
   tickIntervalMs: number;
-  sessionState: 'cold' | 'warm';
   memoryContext: MemoryContext | null;
   goalContext: GoalContext | null;
   spawnBudgetNote: string | null;
@@ -99,6 +101,23 @@ export interface GatherResult {
   }>> | null;
   /** Outbound messages that failed delivery and haven't been shown to the mind yet */
   deliveryFailures: Message[];
+
+  /** Current budget status for ephemeral context injection */
+  budgetStatus: {
+    percentUsed: number;
+    remainingUsd: number;
+    isThrottled: boolean;
+    isHardStopped: boolean;
+  } | null;
+
+  /** Budget alert if a new threshold was crossed this tick */
+  budgetAlert: {
+    threshold: number;
+    spentUsd: number;
+    limitUsd: number;
+    percentUsed: number;
+    message: string;
+  } | null;
 }
 
 export interface GatherDeps {
@@ -107,40 +126,9 @@ export interface GatherDeps {
   seedManager: SeedManager | null;
   goalManager: GoalManager | null;
   agentOrchestrator: AgentOrchestrator | null;
-  sessionInvalidated: boolean;
-  /** Callback to clear the invalidation flag after reading it */
-  clearSessionInvalidation: () => void;
   pluginManager: PluginManager;
   channelManager: ChannelManager;
   deferredQueue: DeferredQueue;
-}
-
-// ============================================================================
-// Session State Determination
-// ============================================================================
-
-function determineSessionState(
-  state: HeartbeatState,
-  warmthMs: number,
-  deps: GatherDeps,
-): 'cold' | 'warm' {
-  // Plugin change forces cold session on next tick
-  if (deps.sessionInvalidated) {
-    deps.clearSessionInvalidation();
-    log.info('Session invalidated by plugin change — forcing cold start');
-    return 'cold';
-  }
-
-  if (state.sessionState === 'cold') return 'cold';
-
-  // Check if warmth window has expired
-  if (state.sessionWarmSince) {
-    const warmSince = new Date(state.sessionWarmSince).getTime();
-    const elapsed = Date.now() - warmSince;
-    if (elapsed > warmthMs) return 'cold';
-  }
-
-  return 'warm';
 }
 
 // ============================================================================
@@ -158,10 +146,8 @@ export async function gatherContext(
   const settings = systemStore.getSystemSettings(sysDb);
   const state = heartbeatStore.getHeartbeatState(hbDb);
 
-  // Determine session state
   const gatherStart = Date.now();
-  const sessionState = determineSessionState(state, settings.sessionWarmthMs, deps);
-  log.info(`Gather: session=${sessionState}, trigger=${trigger.type}${trigger.contactName ? `, contact=${trigger.contactName}` : ''}`);
+  log.info(`Gather: trigger=${trigger.type}${trigger.contactName ? `, contact=${trigger.contactName}` : ''}`);
 
   // Compute energy state (before emotion decay — sleep affects decay rate)
   let energyLevel: number | null = null;
@@ -319,6 +305,9 @@ export async function gatherContext(
       const messageIds = new Set(messageContext.rawItems.map(r => r.id));
       recentMessages = allRecentMessages.filter(m => messageIds.has(m.id));
     }
+  } else {
+    // Interval/scheduled ticks: load recent messages across all contacts
+    recentMessages = messageStore.getRecentMessagesGlobal(msgDb, 30);
   }
 
   // Load external conversation history from channel adapters
@@ -496,6 +485,38 @@ export async function gatherContext(
     log.warn('Failed to load delivery failures:', err);
   }
 
+  // Budget context for ephemeral injection
+  let budgetStatus: GatherResult['budgetStatus'] = null;
+  let budgetAlert: GatherResult['budgetAlert'] = null;
+  try {
+    const budgetService = getBudgetService({ getSystemDb, getAgentLogsDb });
+    const budgetConfig = budgetService.getBudgetConfig();
+
+    if (budgetConfig.weeklyBudgetUsd > 0) {
+      const status = budgetService.getBudgetStatus(settings.heartbeatIntervalMs);
+      budgetStatus = {
+        percentUsed: status.percentUsed,
+        remainingUsd: status.remainingUsd,
+        isThrottled: status.throttleFactor > 0,
+        isHardStopped: status.isHardStopped,
+      };
+
+      budgetAlert = budgetService.checkAlerts();
+      if (budgetAlert) {
+        budgetService.recordAlertSent(budgetAlert.threshold);
+        getEventBus().emit('budget:alert', { ...budgetAlert });
+        if (status.isHardStopped) {
+          getEventBus().emit('budget:hard_stop', {
+            spentUsd: status.currentSpendUsd,
+            limitUsd: budgetConfig.weeklyBudgetUsd,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    log.warn('Budget context gathering failed:', err);
+  }
+
   const gatherMs = Date.now() - gatherStart;
   log.info(`Gather complete (${gatherMs}ms): ${recentMessages.length} messages, ${recentThoughts.length} recent thoughts, ${emotions.filter(e => e.intensity > 0.1).length} active emotions${energyBand ? `, energy=${energyBand}` : ''}${memCtx ? ', memory=yes' : ''}${goalCtx ? ', goals=yes' : ''}${deliveryFailures.length > 0 ? `, deliveryFailures=${deliveryFailures.length}` : ''}`);
 
@@ -508,7 +529,6 @@ export async function gatherContext(
     recentMessages,
     previousDecisions,
     tickIntervalMs: energyBand === 'sleeping' ? settings.sleepTickIntervalMs : settings.heartbeatIntervalMs,
-    sessionState,
     memoryContext: memCtx,
     goalContext: goalCtx,
     spawnBudgetNote,
@@ -529,5 +549,7 @@ export async function gatherContext(
     trustRampContext,
     externalHistory,
     deliveryFailures,
+    budgetStatus,
+    budgetAlert,
   };
 }

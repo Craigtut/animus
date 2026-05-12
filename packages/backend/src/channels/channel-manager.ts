@@ -207,6 +207,19 @@ export class ChannelManager {
     this.manifests.set(manifest.type, manifest);
     if (configSchema) this.configSchemas.set(manifest.type, configSchema);
 
+    // Auto-generate pairing codes for any 'pairing' type fields
+    if (configSchema) {
+      const pairingFields = configSchema.fields.filter(f => f.type === 'pairing');
+      if (pairingFields.length > 0) {
+        const initialConfig: Record<string, unknown> = {};
+        for (const field of pairingFields) {
+          initialConfig[field.key] = crypto.randomBytes(4).toString('hex').toUpperCase();
+        }
+        systemStore.setChannelPackageConfig(db, manifest.name, initialConfig, [], []);
+        log.info(`Generated pairing code(s) for ${manifest.name}`);
+      }
+    }
+
     getEventBus().emit('channel:installed', { name: manifest.name, channelType: manifest.type });
     log.info(`Installed channel package: ${manifest.name} (${manifest.type}) v${manifest.version}`);
     return manifest;
@@ -764,7 +777,8 @@ export class ChannelManager {
     contactId: string,
     content: string,
     metadata?: Record<string, unknown>,
-    media?: Array<{ type: string; path: string; mimeType: string; filename?: string }>
+    media?: Array<{ type: string; path: string; mimeType: string; filename?: string }>,
+    replyTo?: string,
   ): Promise<SendDeliveryResult> {
     // Check built-in channels first (e.g., web)
     const builtIn = this.builtInSenders.get(channelType);
@@ -785,7 +799,7 @@ export class ChannelManager {
       log.error(`Cannot send to channel ${channelType}: not running`);
       return { ok: false, error: `Channel ${channelType} not running` };
     }
-    return host.send(contactId, content, metadata, media);
+    return host.send(contactId, content, metadata, media, replyTo);
   }
 
   /**
@@ -882,6 +896,10 @@ export class ChannelManager {
     return this.processes.get(channelType);
   }
 
+  getInstalledChannelTypes(): string[] {
+    return [...this.processes.keys()];
+  }
+
   /**
    * Get all installed channels with status info.
    */
@@ -907,7 +925,7 @@ export class ChannelManager {
         author: manifest?.author ?? { name: 'Unknown' },
         icon: manifest?.icon ?? '',
         capabilities: manifest?.capabilities ?? [],
-        identity: manifest?.identity ?? { identifierLabel: 'ID' },
+        identity: manifest?.identity ?? { resolution: 'lookup' as const },
         enabled: pkg.enabled,
         status: effectiveStatus,
         lastError: pkg.lastError,
@@ -1181,6 +1199,47 @@ export class ChannelManager {
 
         return { localPath, sizeBytes: buffer.length };
       },
+      updateConfig: async (updates: Record<string, unknown>) => {
+        const currentConfig = systemStore.getChannelPackageConfig(db, pkg.name, secretKeys, fileSecretKeys) ?? {};
+        const merged = { ...currentConfig, ...updates };
+        const allSecretKeys = [...secretKeys, ...Object.keys(updates).filter(k => {
+          const field = configSchema?.fields.find(f => f.key === k);
+          return field?.type === 'secret';
+        })];
+        systemStore.setChannelPackageConfig(db, pkg.name, merged, allSecretKeys, fileSecretKeys);
+        host.updateConfig(merged);
+        log.info(`Channel ${pkg.name} config updated via adapter`);
+      },
+      ...(manifest.permissions?.speech ? {
+        transcribeAudio: async (audioBuffer: Buffer, _sampleRate: number) => {
+          const { getSpeechService } = await import('../speech/speech-service.js');
+          const { readWavSamplesFromBuffer } = await import('../speech/audio-utils.js');
+          const speech = getSpeechService();
+          const { samples, sampleRate: sr } = readWavSamplesFromBuffer(audioBuffer);
+          const text = await speech.stt.transcribe(samples, sr);
+          return { text };
+        },
+        synthesizeText: async (text: string, options?: { voiceId?: string; speed?: number }) => {
+          const { getSpeechService } = await import('../speech/speech-service.js');
+          const speech = getSpeechService();
+          const result = await speech.tts.synthesize(text, options);
+          return { audioBase64: result.wavBuffer.toString('base64'), sampleRate: result.sampleRate };
+        },
+        getSpeechStatus: async () => {
+          const { getSpeechService } = await import('../speech/speech-service.js');
+          return getSpeechService().getStatus();
+        },
+        getSpeechVoices: async () => {
+          const { getSpeechService } = await import('../speech/speech-service.js');
+          return getSpeechService().voices.listVoices().map((v: { id: string; name: string; type: string; description?: string }) => {
+            const entry: { id: string; name: string; type: string; description?: string } = {
+              id: v.id, name: v.name, type: v.type,
+            };
+            if (v.description) entry.description = v.description;
+            return entry;
+          });
+        },
+      } : {}),
     });
 
     try {

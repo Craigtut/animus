@@ -27,6 +27,10 @@ interface VoiceManifest {
   voices: VoiceEntry[];
 }
 
+function formatVoiceName(id: string): string {
+  return id.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
 /** Scan WAV files from test_wavs/ directory dynamically. */
 function discoverBuiltinVoiceNames(testWavsDir: string): string[] {
   if (!fs.existsSync(testWavsDir)) return [];
@@ -86,6 +90,14 @@ export class VoiceManager {
       this.manifest.voices.filter((v) => v.type === 'builtin').map((v) => v.id)
     );
 
+    // Normalize existing builtin entries (fix underscored names and descriptions)
+    for (const voice of this.manifest.voices) {
+      if (voice.type !== 'builtin') continue;
+      const expectedName = formatVoiceName(voice.id);
+      if (voice.name !== expectedName) voice.name = expectedName;
+      if (voice.description !== 'Built-in voice') voice.description = 'Built-in voice';
+    }
+
     for (const name of voiceNames) {
       if (existingBuiltinIds.has(name)) continue;
 
@@ -99,10 +111,10 @@ export class VoiceManager {
 
       this.manifest.voices.push({
         id: name,
-        name: name.charAt(0).toUpperCase() + name.slice(1),
+        name: formatVoiceName(name),
         type: 'builtin',
         filePath: `builtin/${name}.wav`,
-        description: `Built-in voice`,
+        description: 'Built-in voice',
         addedAt: new Date().toISOString(),
       });
 

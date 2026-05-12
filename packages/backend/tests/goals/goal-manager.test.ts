@@ -13,7 +13,7 @@ import {
   GOAL_PLANNING_PROMPT_STRONGER_TICKS,
   GOAL_PLANNING_PROMPT_FORCEFUL_TICKS,
 } from '../../src/goals/planning.js';
-import type { IEmbeddingProvider, EmotionState } from '@animus/shared';
+import type { IEmbeddingProvider, EmotionState } from '@animus-labs/shared';
 
 // --------------------------------------------------------------------------
 // Mock embedding provider

@@ -10,7 +10,6 @@ import {
   timestampSchema,
   channelTypeSchema,
   permissionTierSchema,
-  agentProviderSchema,
 } from './common.js';
 
 // ============================================================================
@@ -77,14 +76,11 @@ export const contactChannelSchema = z.object({
 export const systemSettingsSchema = z.object({
   heartbeatIntervalMs: z.number().int().positive().default(300000),
   sessionWarmthMs: z.number().int().positive().default(900000),
-  sessionContextBudget: z.number().positive().max(1).default(0.7),
   thoughtRetentionDays: z.number().int().positive().default(14),
   experienceRetentionDays: z.number().int().positive().default(14),
   emotionHistoryRetentionDays: z.number().int().positive().default(14),
   agentLogRetentionDays: z.number().int().positive().default(7),
   taskRunRetentionDays: z.number().int().positive().default(7),
-  defaultAgentProvider: agentProviderSchema.default('claude'),
-  defaultModel: z.string().nullable().optional(),
   goalApprovalMode: z
     .enum(['always_approve', 'auto_approve', 'full_autonomy'])
     .default('always_approve'),
@@ -93,7 +89,6 @@ export const systemSettingsSchema = z.object({
   sleepStartHour: z.number().int().min(0).max(23).default(22),
   sleepEndHour: z.number().int().min(0).max(23).default(7),
   sleepTickIntervalMs: z.number().int().positive().default(1800000),
-  reasoningEffort: z.enum(['low', 'medium', 'high', 'max']).nullable().default(null),
   memoryPoolMaxSize: z.number().int().min(100).default(40000),
   telemetryEnabled: z.boolean().default(true),
   // Autosave system
@@ -102,6 +97,21 @@ export const systemSettingsSchema = z.object({
   autosaveFrequency: z.enum(['1h', '6h', '12h', '24h', '3d', '7d']).default('24h'),
   autosaveTimeOfDay: z.number().int().min(0).max(23).default(3),
   lastAutosaveAt: z.string().nullable().default(null), // ISO 8601, persisted for restart recovery
+  // Budget system
+  budgetWeeklyUsd: z.number().min(0).default(0),
+  budgetStartDate: z.string().nullable().default(null),
+  budgetThrottleEnabled: z.boolean().default(true),
+  budgetLastAlertedThreshold: z.number().min(0).default(0),
+  // Cortex settings (provider/model for the cortex migration)
+  cortexProvider: z.string().nullable().default(null),
+  cortexModel: z.string().nullable().default(null),
+  cortexThinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high', 'max']).default('high'),
+  cortexContextWindowLimit: z.number().int().min(16_384).nullable().default(null),
+  utilityModel: z.string().default('default'),
+  // Debug: capture full context snapshots per pipeline phase
+  contextDebugMode: z.boolean().default(false),
+  // Debug: enable Cortex prompt watchdog diagnostics (logs prompt lifecycle events)
+  cortexDiagnostics: z.boolean().default(false),
 });
 
 export const updateSystemSettingsInputSchema = systemSettingsSchema.partial();
@@ -163,26 +173,13 @@ export const personaSchema = z.object({
   voiceId: z.string().nullable(),
   voiceSpeed: z.number().min(0.5).max(1.5).default(1.0),
   isFinalized: z.boolean(),
-  // Legacy field for backwards compat with old personalitySettings reads
-  communicationStyle: z.string().optional(),
 });
 
 export const personaDraftInputSchema = personaSchema
-  .omit({ isFinalized: true, communicationStyle: true })
+  .omit({ isFinalized: true })
   .partial()
   .extend({ name: z.string().min(1).optional() });
 
 export const personaUpdateInputSchema = personaSchema
-  .omit({ isFinalized: true, communicationStyle: true })
+  .omit({ isFinalized: true })
   .partial();
-
-/** @deprecated Use personaSchema. Kept for backwards compat with old settings router. */
-export const personalitySettingsSchema = z.object({
-  name: z.string().min(1),
-  traits: z.array(z.string()),
-  communicationStyle: z.string(),
-  values: z.array(z.string()),
-});
-
-export const updatePersonalitySettingsInputSchema =
-  personalitySettingsSchema.partial();

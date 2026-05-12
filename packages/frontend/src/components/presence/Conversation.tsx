@@ -437,6 +437,95 @@ function MessageMarkdown({ content }: { content: string }) {
 }
 
 // ============================================================================
+// Working tag parsing and rendering
+// ============================================================================
+
+interface ContentSegment {
+  type: 'user-facing' | 'working';
+  text: string;
+}
+
+/**
+ * Parse message content into segments, separating working tag content
+ * from user-facing content. Working tags use the pattern <working>...</working>.
+ */
+function parseWorkingTags(raw: string): ContentSegment[] {
+  const segments: ContentSegment[] = [];
+  const regex = /<working>([\s\S]*?)(<\/working>|$)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(raw)) !== null) {
+    // User-facing text before this working tag
+    if (match.index > lastIndex) {
+      const text = raw.slice(lastIndex, match.index).trim();
+      if (text) segments.push({ type: 'user-facing', text });
+    }
+    // Working content
+    const workingText = match[1]!.trim();
+    if (workingText) segments.push({ type: 'working', text: workingText });
+    lastIndex = regex.lastIndex;
+  }
+
+  // Remaining user-facing text after the last working tag
+  if (lastIndex < raw.length) {
+    const text = raw.slice(lastIndex).trim();
+    if (text) segments.push({ type: 'user-facing', text });
+  }
+
+  // If no working tags were found, return the entire content as user-facing
+  if (segments.length === 0 && raw.trim()) {
+    segments.push({ type: 'user-facing', text: raw });
+  }
+
+  return segments;
+}
+
+/** Check whether a raw message string contains any working tags */
+function hasWorkingTags(content: string): boolean {
+  return /<working>/.test(content);
+}
+
+/**
+ * Renders message content with working tag segments visually dimmed.
+ * Working content appears inline but at lower opacity so the user's
+ * direct communication stands out.
+ */
+function WorkingTagsContent({ content }: { content: string }) {
+  const theme = useTheme();
+  const components = useMarkdownComponents();
+  const segments = useMemo(() => parseWorkingTags(content), [content]);
+
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.type === 'working' ? (
+          <span
+            key={i}
+            css={css`
+              opacity: 0.42;
+              font-style: italic;
+              border-left: 2px solid ${theme.mode === 'light'
+                ? 'rgba(26, 24, 22, 0.12)'
+                : 'rgba(250, 249, 244, 0.12)'};
+              padding-left: ${theme.spacing[2]};
+              margin: 0.4em 0;
+              display: block;
+            `}
+          >
+            <ReactMarkdown components={components}>{seg.text}</ReactMarkdown>
+          </span>
+        ) : (
+          <span key={i}>
+            <ReactMarkdown components={components}>{seg.text}</ReactMarkdown>
+          </span>
+        ),
+      )}
+    </>
+  );
+}
+
+// ============================================================================
 // System Error Card
 // ============================================================================
 
@@ -778,7 +867,9 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
                           : ''}
                       `}
                     >
-                      <MessageMarkdown content={item.data.content} />
+                      {item.data.role === 'assistant' && hasWorkingTags(item.data.content)
+                        ? <WorkingTagsContent content={item.data.content} />
+                        : <MessageMarkdown content={item.data.content} />}
                       {item.data.attachments && item.data.attachments.length > 0 && (
                         <MessageAttachments attachments={item.data.attachments} />
                       )}
@@ -811,7 +902,9 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
                     color="primary"
                     css={css`max-width: 85%;`}
                   >
-                    <MessageMarkdown content={turn.accumulated} />
+                    {hasWorkingTags(turn.accumulated)
+                      ? <WorkingTagsContent content={turn.accumulated} />
+                      : <MessageMarkdown content={turn.accumulated} />}
                     {turn.isStreaming && <BlinkingCursor />}
                   </Typography.Body>
                 </div>

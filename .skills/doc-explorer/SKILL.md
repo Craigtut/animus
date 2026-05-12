@@ -73,7 +73,7 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/architecture/backend-architecture.md` | Backend modular monolith architecture: store patterns, service layer, subsystem lifecycles, pipeline deps, decision handler registry, anti-patterns |
 | `docs/architecture/release-engineering.md` | Release engineering: versioning policy (lockstep vs independent packages), conventional commits, CI pipeline (typecheck/lint/test), release workflow (tag-triggered Tauri builds for macOS + Windows), bump-version and release scripts, cross-compilation, code signing (future), changelog generation |
 | `docs/architecture/telemetry.md` | Telemetry system: 5 PostHog events (install, app_started, daily_active, feature_used, error_occurred), anonymous ID, deduplication, opt-out mechanisms, privacy guarantees, TelemetryService singleton, event bus integration |
-| `docs/architecture/tech-stack.md` | Full technology overview, frontend stack (Vite, React 19, Zustand, Emotion, Motion), backend stack (Fastify, tRPC, SQLite), seven databases, LanceDB, agent SDKs, deployment paths, shared abstractions (Embedding Provider, Context Builder, Decay Engine, Event Bus, Encryption Service, Database Stores, Migrations) |
+| `docs/architecture/tech-stack.md` | Full technology overview, frontend stack (Vite, React 19, Zustand, Emotion, Motion), backend stack (Fastify, tRPC, SQLite), eight databases, LanceDB, agent SDKs, deployment paths, shared abstractions (Embedding Provider, Context Builder, Decay Engine, Event Bus, Encryption Service, Database Stores, Migrations) |
 
 ### Agent SDKs
 
@@ -88,6 +88,17 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/agents/codex/oauth.md` | Codex OAuth device code flow: OpenAI endpoints, device auth protocol, token lifecycle, auth.json format, Animus proxy architecture, tRPC procedures. **STATUS: REFERENCE** |
 | `docs/agents/codex/app-server-protocol.md` | Codex app-server JSON-RPC protocol: initialization handshake, method inventory, turn management. **STATUS: REFERENCE** |
 | `docs/agents/opencode/sdk-research.md` | OpenCode SDK: client/server architecture, session management, plugin system, 75+ providers. **STATUS: REFERENCE** |
+
+### Cortex Integration (Animus-specific)
+
+**NOTE:** Cortex framework docs (architecture, tools, compaction, skills, providers, working tags) have moved to the cortex-mono repository. Only Animus-specific integration docs remain here.
+
+| File | Covers |
+|------|--------|
+| `docs/cortex/mind-migration.md` | Mind pipeline migration: 5-phase pipeline (GATHER/THOUGHT/AGENTIC LOOP/REFLECT/EXECUTE), context slot configuration, ephemeral context sections, system prompt composition, per-thread session persistence in sessions.db, warm/cold removal, event bridge, Cortex tools, frontend changes, system prompt rebuild |
+| `docs/cortex/backend-auth-integration.md` | Backend auth integration: CortexCredentialService, credential storage (system.db), AES-256-GCM encryption, cortex-provider.ts tRPC router, getApiKey callback wiring, OAuth flow coordination, headless/Docker detection, Docker OAuth compatibility matrix (per-provider flow types), system_settings schema, event bus events, legacy auth coexistence |
+| `docs/cortex/frontend-auth-ux.md` | Frontend auth UX: progressive disclosure (OAuth > API key > custom endpoint), CortexProviderStep onboarding component, provider card states, headless device-code variant, settings page AI Provider section, model picker, thinking level, legacy SDK demotion, visual design notes |
+| `docs/cortex/upgrade-plan.md` | Cortex upgrade plan: phase tracking, architectural decisions (dual observation systems, session threading, recall callback), commit log, remaining work (phases 5-7) |
 
 ### Research (Planned/Exploratory)
 
@@ -141,6 +152,7 @@ When you need context for a task, follow this approach:
 25. **For reflex/fast-response (PLANNED)**: Read `docs/research/reflex-system.md`
 26. **For Codex OAuth**: Read `docs/agents/codex/oauth.md`
 27. **For telemetry/analytics/PostHog**: Read `docs/architecture/telemetry.md`
+28. **For Cortex integration (Animus-specific)**: Read `docs/cortex/mind-migration.md` for the 5-phase pipeline and session threading, `docs/cortex/backend-auth-integration.md` for credential wiring, `docs/cortex/frontend-auth-ux.md` for the auth UX, and `docs/cortex/upgrade-plan.md` for the latest Animus-side adoption decisions. For Cortex framework docs (architecture, tools, compaction, skills, providers, working tags), see the cortex-mono repository.
 
 ## Topic Keyword Guide
 
@@ -181,6 +193,11 @@ Use this to quickly map user questions to the right docs:
 - **codex, openai, thread, codex sdk** -> `docs/agents/codex/sdk-research.md`
 - **codex oauth, chatgpt auth, device code** -> `docs/agents/codex/oauth.md`
 - **opencode, provider-agnostic, client-server** -> `docs/agents/opencode/sdk-research.md`
+- **cortex, cortex agent, pi-agent-core, mind migration, 5-phase pipeline, THOUGHT phase, REFLECT phase** -> `docs/cortex/mind-migration.md` (Animus integration; framework docs in cortex-mono)
+- **cortex auth, cortex credentials, CortexCredentialService, cortex provider router, getApiKey callback, provider switching** -> `docs/cortex/backend-auth-integration.md`
+- **auth UX, onboarding auth, provider step, progressive disclosure, OAuth UX, API key UX, custom endpoint UX, settings provider** -> `docs/cortex/frontend-auth-ux.md`
+- **cortex upgrade, session threading, dual observation, recall callback, tool result persistence, CortexTool contract** -> `docs/cortex/upgrade-plan.md`
+- **skill, skills, SKILL.md, compaction, MCP client, provider manager, working tags, context manager** -> Cortex framework docs (see cortex-mono repo)
 - **pi, pi-ai, transformContext, multi-provider** -> `docs/agents/pi/research/sdk-research.md`
 - **reflex, fast response, voice latency, dual path, Vercel AI SDK** -> `docs/research/reflex-system.md`
 - **voice mode UI, voice UX, voice visualization, barge-in** -> `docs/research/voice-mode.md`

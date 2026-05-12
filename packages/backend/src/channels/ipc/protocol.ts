@@ -20,6 +20,7 @@ export interface SendMessage {
   id: string;
   contactId: string;
   content: string;
+  replyTo?: string;
   metadata?: Record<string, unknown>;
   media?: Array<{
     type: 'image' | 'audio' | 'video' | 'file';
@@ -60,9 +61,48 @@ export interface MediaDownloadResponseMessage {
   error?: string;
 }
 
+// Speech IPC — responses from parent to child
+
+export interface SpeechTranscribeResponseMessage {
+  type: 'speech_transcribe_response';
+  id: string;
+  text?: string;
+  error?: string;
+}
+
+export interface SpeechSynthesizeResponseMessage {
+  type: 'speech_synthesize_response';
+  id: string;
+  audioBase64?: string;
+  sampleRate?: number;
+  error?: string;
+}
+
+export interface SpeechStatusResponseMessage {
+  type: 'speech_status_response';
+  id: string;
+  sttAvailable: boolean;
+  ttsAvailable: boolean;
+  ffmpegAvailable: boolean;
+  voiceCount: number;
+}
+
+export interface SpeechVoicesResponseMessage {
+  type: 'speech_voices_response';
+  id: string;
+  voices?: Array<{ id: string; name: string; type: string; description?: string }>;
+  error?: string;
+}
+
 export interface ConfigUpdateMessage {
   type: 'config_update';
   config: Record<string, unknown>;
+}
+
+export interface ConfigUpdateResponseMessage {
+  type: 'config_update_response';
+  id: string;
+  error?: string;
 }
 
 export interface ActionMessage {
@@ -91,6 +131,11 @@ export type ParentToChildMessage =
   | RouteRequestMessage
   | ResolveContactResponseMessage
   | MediaDownloadResponseMessage
+  | SpeechTranscribeResponseMessage
+  | SpeechSynthesizeResponseMessage
+  | SpeechStatusResponseMessage
+  | SpeechVoicesResponseMessage
+  | ConfigUpdateResponseMessage
   | ConfigUpdateMessage
   | ActionMessage
   | PingMessage
@@ -213,6 +258,39 @@ export interface PresenceUpdateMessage {
   activity?: string;
 }
 
+// Speech IPC — requests from child to parent
+
+export interface SpeechTranscribeMessage {
+  type: 'speech_transcribe';
+  id: string;
+  audioBase64: string;
+  sampleRate?: number;
+}
+
+export interface SpeechSynthesizeMessage {
+  type: 'speech_synthesize';
+  id: string;
+  text: string;
+  voiceId?: string;
+  speed?: number;
+}
+
+export interface SpeechStatusMessage {
+  type: 'speech_status';
+  id: string;
+}
+
+export interface SpeechVoicesMessage {
+  type: 'speech_voices';
+  id: string;
+}
+
+export interface ConfigUpdateRequestMessage {
+  type: 'config_update_request';
+  id: string;
+  updates: Record<string, unknown>;
+}
+
 export interface HistoryResponseMessage {
   type: 'history_response';
   id: string;
@@ -238,6 +316,11 @@ export type ChildToParentMessage =
   | RouteResponseEndMessage
   | ResolveContactMessage
   | MediaDownloadMessage
+  | SpeechTranscribeMessage
+  | SpeechSynthesizeMessage
+  | SpeechStatusMessage
+  | SpeechVoicesMessage
+  | ConfigUpdateRequestMessage
   | LogMessage
   | RouteRegisterMessage
   | ErrorMessage

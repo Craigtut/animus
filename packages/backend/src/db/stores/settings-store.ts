@@ -20,6 +20,8 @@ export function getSystemSettings(db: Database.Database): SystemSettings {
     energySystemEnabled: intToBool(rest['energySystemEnabled'] as number),
     telemetryEnabled: intToBool(rest['telemetryEnabled'] as number),
     autosaveEnabled: intToBool(rest['autosaveEnabled'] as number),
+    budgetThrottleEnabled: intToBool(rest['budgetThrottleEnabled'] as number),
+    contextDebugMode: intToBool(rest['contextDebugMode'] as number),
   } as SystemSettings;
 }
 
@@ -33,31 +35,43 @@ export function updateSystemSettings(
   const mapping: Record<string, string> = {
     heartbeatIntervalMs: 'heartbeat_interval_ms',
     sessionWarmthMs: 'session_warmth_ms',
-    sessionContextBudget: 'session_context_budget',
     thoughtRetentionDays: 'thought_retention_days',
     experienceRetentionDays: 'experience_retention_days',
     emotionHistoryRetentionDays: 'emotion_history_retention_days',
     agentLogRetentionDays: 'agent_log_retention_days',
     taskRunRetentionDays: 'task_run_retention_days',
-    defaultAgentProvider: 'default_agent_provider',
-    defaultModel: 'default_model',
     goalApprovalMode: 'goal_approval_mode',
     energySystemEnabled: 'energy_system_enabled',
     telemetryEnabled: 'telemetry_enabled',
     sleepStartHour: 'sleep_start_hour',
     sleepEndHour: 'sleep_end_hour',
     sleepTickIntervalMs: 'sleep_tick_interval_ms',
-    reasoningEffort: 'reasoning_effort',
     memoryPoolMaxSize: 'memory_pool_max_size',
     autosaveEnabled: 'autosave_enabled',
     autosaveMaxCount: 'autosave_max_count',
     autosaveFrequency: 'autosave_frequency',
     autosaveTimeOfDay: 'autosave_time_of_day',
     lastAutosaveAt: 'last_autosave_at',
+    budgetWeeklyUsd: 'budget_weekly_usd',
+    budgetStartDate: 'budget_start_date',
+    budgetThrottleEnabled: 'budget_throttle_enabled',
+    budgetLastAlertedThreshold: 'budget_last_alerted_threshold',
+    cortexProvider: 'cortex_provider',
+    cortexModel: 'cortex_model',
+    cortexThinkingLevel: 'cortex_thinking_level',
+    cortexContextWindowLimit: 'cortex_context_window_limit',
+    utilityModel: 'utility_model',
+    contextDebugMode: 'context_debug_mode',
   };
 
   // Boolean fields need int conversion
-  const booleanFields = new Set(['energySystemEnabled', 'telemetryEnabled', 'autosaveEnabled']);
+  const booleanFields = new Set([
+    'energySystemEnabled',
+    'telemetryEnabled',
+    'autosaveEnabled',
+    'budgetThrottleEnabled',
+    'contextDebugMode',
+  ]);
 
   for (const [camelKey, snakeKey] of Object.entries(mapping)) {
     const value = (data as Record<string, unknown>)[camelKey];
@@ -67,6 +81,63 @@ export function updateSystemSettings(
     }
   }
 
+  if (fields.length === 0) return;
+  fields.push('updated_at = ?');
+  values.push(now());
+  db.prepare(`UPDATE system_settings SET ${fields.join(', ')} WHERE id = 1`).run(...values);
+}
+
+// ============================================================================
+// Cortex Settings
+// ============================================================================
+
+export interface CortexSettings {
+  cortexProvider: string | null;
+  cortexModel: string | null;
+  cortexThinkingLevel: string;
+  cortexContextWindowLimit: number | null;
+  utilityModel: string;
+}
+
+export function getCortexSettings(db: Database.Database): CortexSettings {
+  const row = db.prepare(
+    'SELECT cortex_provider, cortex_model, cortex_thinking_level, cortex_context_window_limit, utility_model FROM system_settings WHERE id = 1'
+  ).get() as {
+    cortex_provider: string | null;
+    cortex_model: string | null;
+    cortex_thinking_level: string | null;
+    cortex_context_window_limit: number | null;
+    utility_model: string | null;
+  } | undefined;
+  return {
+    cortexProvider: row?.cortex_provider ?? null,
+    cortexModel: row?.cortex_model ?? null,
+    cortexThinkingLevel: row?.cortex_thinking_level ?? 'high',
+    cortexContextWindowLimit: row?.cortex_context_window_limit ?? null,
+    utilityModel: row?.utility_model ?? 'default',
+  };
+}
+
+export function updateCortexSettings(
+  db: Database.Database,
+  data: Partial<CortexSettings>
+): void {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  const mapping: Record<string, string> = {
+    cortexProvider: 'cortex_provider',
+    cortexModel: 'cortex_model',
+    cortexThinkingLevel: 'cortex_thinking_level',
+    cortexContextWindowLimit: 'cortex_context_window_limit',
+    utilityModel: 'utility_model',
+  };
+  for (const [camelKey, snakeKey] of Object.entries(mapping)) {
+    const value = (data as Record<string, unknown>)[camelKey];
+    if (value !== undefined) {
+      fields.push(`${snakeKey} = ?`);
+      values.push(value);
+    }
+  }
   if (fields.length === 0) return;
   fields.push('updated_at = ?');
   values.push(now());

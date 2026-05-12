@@ -843,7 +843,7 @@ The heartbeat system persists state to survive crashes gracefully. The design pr
    - If the session died: mark as `failed`, let the mind learn about it on the next tick
    - If the session is still running: re-attach event handlers and continue tracking
 
-6. The mind's agent session is resumable via the `@animus-labs/agents` session resume capability (`{provider}:{native_id}` format). On crash recovery, the warm session is lost — the next tick starts cold. This is acceptable; cold starts just inject the full system prompt and GATHER CONTEXT.
+6. The mind's Cortex thread state is resumable per `(contact_id, channel)` via `sessions.db`. On crash recovery, any in-flight tick is discarded and the next tick restores the last completed conversation checkpoint for that thread. Inner-life ticks start with empty Cortex history and do not write a session checkpoint.
 
 ### State Schema
 
@@ -852,14 +852,11 @@ CREATE TABLE heartbeat_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),  -- Singleton
   tick_number INTEGER NOT NULL DEFAULT 0,
   current_stage TEXT NOT NULL DEFAULT 'idle',  -- 'idle' | 'gather' | 'mind' | 'execute'
-  session_state TEXT NOT NULL DEFAULT 'cold',  -- 'cold' | 'active' | 'warm'
   trigger_type TEXT,                            -- 'interval' | 'message' | 'scheduled_task' | 'agent_complete' | 'plugin_trigger'
   trigger_context TEXT,                         -- JSON
-  mind_session_id TEXT,                         -- Agent session ID for resume
-  session_token_count INTEGER DEFAULT 0,        -- Cumulative tokens in current session (for context budget)
+  context_token_count INTEGER DEFAULT 0,        -- Current context footprint estimate
   started_at TEXT NOT NULL,
   last_tick_at TEXT,
-  session_warm_since TEXT,                      -- When the current warm window started
   is_running INTEGER NOT NULL DEFAULT 0         -- 0 = paused (pre-onboarding or stopped), 1 = running
 );
 ```
@@ -922,7 +919,8 @@ interface HeartbeatState {
   tickNumber: number;
   currentStage: 'idle' | 'gather' | 'mind' | 'execute';
   triggerType: 'interval' | 'message' | 'scheduled_task' | 'agent_complete' | 'plugin_trigger' | null;
-  mindSessionId: string | null;
+  triggerContext: string | null;
+  contextTokenCount: number;
   startedAt: Timestamp;
   lastTickAt: Timestamp | null;
   isRunning: boolean;

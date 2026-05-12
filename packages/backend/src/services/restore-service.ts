@@ -21,7 +21,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { tmpdir } from 'os';
-import { DATA_DIR, DB_PERSONA_PATH, DB_HEARTBEAT_PATH, DB_MEMORY_PATH, DB_MESSAGES_PATH, DB_AGENT_LOGS_PATH, DB_CONTACTS_PATH, LANCEDB_PATH } from '../utils/env.js';
+import { DATA_DIR, DB_PERSONA_PATH, DB_HEARTBEAT_PATH, DB_MEMORY_PATH, DB_MESSAGES_PATH, DB_AGENT_LOGS_PATH, DB_CONTACTS_PATH, DB_SESSIONS_PATH, LANCEDB_PATH } from '../utils/env.js';
 import { createLogger } from '../lib/logger.js';
 import { setMaintenanceMode } from '../lib/maintenance.js';
 import { operationInProgress, getSave, extractArchive, getArchivePath } from './save-service.js';
@@ -42,6 +42,7 @@ const AI_DB_FILES = [
   { name: 'messages.db', envPath: DB_MESSAGES_PATH },
   { name: 'agent_logs.db', envPath: DB_AGENT_LOGS_PATH },
   { name: 'contacts.db', envPath: DB_CONTACTS_PATH },
+  { name: 'sessions.db', envPath: DB_SESSIONS_PATH },
 ];
 
 // ---------------------------------------------------------------------------
@@ -193,7 +194,7 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     log.info('Channels stopped');
 
     // 6. Stop plugin triggers
-    const { getPluginManager } = await import('./plugin-manager.js');
+    const { getPluginManager } = await import('../plugins/plugin-manager.js');
     const pluginManager = getPluginManager();
     await pluginManager.stopTriggers();
     log.info('Plugin triggers stopped');

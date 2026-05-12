@@ -243,14 +243,16 @@ describe('logSessionUsage', () => {
 
     logSessionUsage(store, 'log-session-1', usage, cost, 'opus-4');
 
-    expect(store.insertUsage).toHaveBeenCalledWith({
-      sessionId: 'log-session-1',
-      inputTokens: 100,
-      outputTokens: 50,
-      totalTokens: 150,
-      costUsd: 0.0105,
-      model: 'opus-4',
-    });
+    expect(store.insertUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'log-session-1',
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+        costUsd: 0.0105,
+        model: 'opus-4',
+      }),
+    );
   });
 
   it('handles null cost', () => {
@@ -316,14 +318,16 @@ describe('attachSessionLogging', () => {
     };
     logUsage(usage, null, 'test-model');
 
-    expect(store.insertUsage).toHaveBeenCalledWith({
-      sessionId: 'log-session-1',
-      inputTokens: 10,
-      outputTokens: 20,
-      totalTokens: 30,
-      costUsd: null,
-      model: 'test-model',
-    });
+    expect(store.insertUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'log-session-1',
+        inputTokens: 10,
+        outputTokens: 20,
+        totalTokens: 30,
+        costUsd: null,
+        model: 'test-model',
+      }),
+    );
   });
 
   it('logUsage is a no-op when session has not started', () => {

@@ -7,6 +7,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { z } from 'zod/v3';
 import { TRPCError } from '@trpc/server';
 import { observable } from '@trpc/server/observable';
@@ -220,14 +221,21 @@ export const channelsRouter = router({
         }
       }
 
-      // Validate required fields
+      // Validate required fields and auto-generate pairing codes
       if (configSchema) {
         for (const field of configSchema.fields) {
+          if (field.type === 'pairing' || field.type === 'info') continue;
           if (field.required && !configToSave[field.key]) {
             throw new TRPCError({
               code: 'BAD_REQUEST',
               message: `Required field: ${field.label}`,
             });
+          }
+        }
+
+        for (const field of configSchema.fields) {
+          if (field.type === 'pairing' && !configToSave[field.key]) {
+            configToSave[field.key] = crypto.randomBytes(4).toString('hex').toUpperCase();
           }
         }
       }
@@ -240,6 +248,40 @@ export const channelsRouter = router({
       }
 
       return { success: true };
+    }),
+
+  refreshPairingCode: protectedProcedure
+    .input(z.object({
+      name: z.string().min(1),
+      fieldKey: z.string().min(1),
+    }))
+    .mutation(async ({ input }) => {
+      const db = getSystemDb();
+      const pkg = systemStore.getChannelPackage(db, input.name);
+      if (!pkg) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel package not found' });
+      }
+
+      const channelManager = getChannelManager();
+      const configSchema = channelManager.getConfigSchema(pkg.channelType);
+      const field = configSchema?.fields.find(f => f.key === input.fieldKey && f.type === 'pairing');
+      if (!field) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Field is not a pairing field' });
+      }
+
+      const secretKeys = configSchema?.fields.filter(f => f.type === 'secret').map(f => f.key) ?? [];
+      const fileSecretKeys = configSchema?.fields.filter(f => f.type === 'file_secret').map(f => f.key) ?? [];
+      const existingConfig = systemStore.getChannelPackageConfig(db, input.name, secretKeys, fileSecretKeys) ?? {};
+
+      const newCode = crypto.randomBytes(4).toString('hex').toUpperCase();
+      existingConfig[input.fieldKey] = newCode;
+      systemStore.setChannelPackageConfig(db, input.name, existingConfig, secretKeys, fileSecretKeys);
+
+      if (pkg.enabled && channelManager.getProcess(pkg.channelType)) {
+        await channelManager.restart(input.name);
+      }
+
+      return { code: newCode };
     }),
 
   /**

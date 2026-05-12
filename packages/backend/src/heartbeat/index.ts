@@ -6,8 +6,9 @@
  *
  * This file is the orchestration spine. Pipeline stages are implemented in:
  *   - gather-context.ts    (Stage 1: GATHER)
- *   - mind-session.ts      (Session lifecycle)
- *   - cognitive-tools.ts   (Cognitive MCP tools + snapshot-to-MindOutput)
+ *   - cortex-mind.ts       (CortexAgent lifecycle, session persistence, tool wiring)
+ *   - cortex-pipeline.ts   (5-phase pipeline: THOUGHT, AGENTIC LOOP, REFLECT)
+ *   - cognitive-tools.ts   (Zod schemas for THOUGHT/REFLECT structured output)
  *   - decision-executor.ts (Decision execution)
  *   - execute-output.ts    (Stage 3: EXECUTE)
  *
@@ -23,8 +24,10 @@ import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
 import { isUnsealed } from '../lib/vault-manager.js';
 import { getTelemetryService } from '../services/telemetry-service.js';
+import { getBudgetService } from '../services/budget-service.js';
 import { now } from '@animus-labs/shared';
 import type { HeartbeatState, MindOutput } from '@animus-labs/shared';
+import { resolveCacheRetention } from '@animus-labs/cortex';
 
 import type { VectorStore } from '../memory/index.js';
 import type { MemorySubsystem } from '../memory/memory-subsystem.js';
@@ -32,7 +35,8 @@ import type { GoalSubsystem } from '../goals/goal-subsystem.js';
 import type { AgentSubsystem } from './agent-subsystem.js';
 
 import { TickQueue, type QueuedTick } from './tick-queue.js';
-import { type TriggerContext, type CompiledContext, buildMindContext, buildSystemPrompt } from './context-builder.js';
+import { type TriggerContext, type CompiledContext, buildMindContext, buildSystemPrompt, buildTriggerSection } from './context-builder.js';
+import { buildAgenticSnapshot, logPhaseSnapshot } from './context-snapshot.js';
 import { computeBaselines, type PersonaDimensions } from './emotion-engine.js';
 import { getEnergyBand } from './energy-engine.js';
 import { compilePersona, type PersonaConfig, type CompiledPersona } from './persona-compiler.js';
@@ -40,13 +44,6 @@ import type { AgentOrchestrator } from './agent-orchestrator.js';
 
 // Extracted modules
 import { gatherContext, type GatherResult } from './gather-context.js';
-import {
-  createMindSessionState,
-  getOrCreateMindSession,
-  buildMindToolContext,
-  resetMindSession,
-  type MindSessionState,
-} from './mind-session.js';
 import { safeMindOutput, snapshotToMindOutput, isNonResponse } from './cognitive-tools.js';
 import { executeOutput } from './execute-output.js';
 import { getPluginManager } from '../plugins/index.js';
@@ -54,7 +51,42 @@ import { getChannelManager } from '../channels/channel-manager.js';
 import { getDeferredQueue, getTaskScheduler, getTaskRunner } from '../tasks/index.js';
 import { interceptApprovalPhrase } from '../tools/approval-interceptor.js';
 
+// Cortex pipeline (Phase 2A)
+import { executeCortexPipeline, type PipelinePhase, type EphemeralSection } from './cortex-pipeline.js';
+import {
+  createCortexMind,
+  populateContextSlots,
+  loadSessionForTick,
+  buildMindToolContext as buildCortexToolContext,
+  updatePreprocessorVariables,
+  destroyCortexMind,
+} from './cortex-mind.js';
+import { attachCortexLogging } from './cortex-log-bridge.js';
+
 const log = createLogger('Heartbeat', 'heartbeat');
+
+// ============================================================================
+// Budget Gate — checks whether a tick should proceed based on budget limits
+// ============================================================================
+
+interface BudgetGateResult {
+  allowed: boolean;
+  reason?: string;
+  /** True when budget is exceeded but we allow one grace reply to a message */
+  isGraceMessage?: boolean;
+}
+
+/**
+ * Check whether the current tick is allowed to proceed given budget constraints.
+ *
+ *   - If hard stopped and trigger is 'message': allow with grace flag
+ *   - If hard stopped and trigger is not 'message': block tick
+ *   - Otherwise: allow
+ */
+function checkBudgetGate(triggerType: string): BudgetGateResult {
+  const budgetService = getBudgetService({ getSystemDb, getAgentLogsDb });
+  return budgetService.shouldAllowTick(triggerType);
+}
 
 // ============================================================================
 // HeartbeatContext — encapsulates all module-level state
@@ -68,11 +100,15 @@ class HeartbeatContext {
 
   // HeartbeatContext-owned state (NOT part of subsystems)
   compiledPersona: CompiledPersona | null = null;
-  mindSession: MindSessionState;
 
-  constructor() {
-    this.mindSession = createMindSessionState();
-  }
+  // Cortex rate-limit backoff state
+  consecutiveRateLimits: number = 0;
+  rateLimitBackoffMs: number = 0;
+
+  // Cortex pipeline phase tracking (for mid-tick injection routing)
+  currentPhase: { value: PipelinePhase } = { value: 'gather' };
+
+  constructor() {}
 }
 
 const ctx = new HeartbeatContext();
@@ -111,7 +147,7 @@ function buildPersonaConfig(
     traits: persona.traits || [],
     values: persona.values || [],
     ...(persona.background != null && { background: persona.background }),
-    ...((persona.personalityNotes ?? persona.communicationStyle) != null && { personalityNotes: (persona.personalityNotes ?? persona.communicationStyle)! }),
+    ...(persona.personalityNotes != null && { personalityNotes: persona.personalityNotes }),
   };
 }
 
@@ -124,7 +160,6 @@ function logTickInput(params: {
   tickNumber: number;
   triggerType: string;
   triggerContext: unknown;
-  sessionState: string;
   compiledContext: CompiledContext;
 }): void {
   const agentLogsDb = getAgentLogsDb();
@@ -135,7 +170,6 @@ function logTickInput(params: {
       tickNumber: params.tickNumber,
       triggerType: params.triggerType,
       triggerContext: params.triggerContext,
-      sessionState: params.sessionState,
       systemPrompt: params.compiledContext.systemPrompt,
       userMessage: params.compiledContext.userMessage,
       systemPromptManifest: params.compiledContext.systemPromptManifest,
@@ -154,7 +188,6 @@ function logTickInput(params: {
   eventBus.emit('tick:input_stored', {
     tickNumber: params.tickNumber,
     triggerType: params.triggerType,
-    sessionState: params.sessionState,
   });
 }
 
@@ -173,36 +206,121 @@ interface MindQueryResult {
   allThoughts: Array<{ content: string; importance: number }>;
   /** How many reply turns were already sent via sendOutbound during streaming. */
   replyTurnsSent: number;
+  /** Per-tick agent log session ID for observability events. */
+  logSessionId: string | null;
 }
 
 /**
- * Execute the mind query stage.
+ * Execute the cortex 5-phase pipeline (the only mind query path).
  *
- * Creates/reuses an agent session, sends compiled context,
- * captures structured state via cognitive MCP tools (record_thought +
- * record_cognitive_state), and streams reply text via phase tracking.
+ * Returns a MindQueryResult so executeTick can process the output uniformly.
  */
-async function mindQuery(
+async function cortexMindQuery(
   gathered: GatherResult,
-  tickNumber: number
+  tickNumber: number,
+  gatherDurationMs: number,
 ): Promise<MindQueryResult> {
-  // Ensure persona is compiled and load full persona for existence info
   const fullPersona = personaStore.getPersona(getPersonaDb());
   if (!ctx.compiledPersona) {
     ctx.compiledPersona = compilePersona(buildPersonaConfig(fullPersona));
   }
 
-  // Determine if session is approaching context limit (~85% of token budget)
-  const SESSION_TOKEN_BUDGET = 100_000; // approx budget for a mind session
-  const state = heartbeatStore.getHeartbeatState(getHeartbeatDb());
-  const memoryFlushPending = state.sessionTokenCount > 0 &&
-    state.sessionTokenCount >= SESSION_TOKEN_BUDGET * 0.85;
+  const cortexMind = ctx.agents!.cortexMind;
+  const cortexAgent = cortexMind.agent!;
 
-  // Build the context -- wire all gathered data through
+  // Load the conversation thread for this tick's (contact, channel) pair.
+  // Inner-life ticks (no contact) start with empty history and don't persist.
+  loadSessionForTick(
+    cortexAgent,
+    cortexMind,
+    gathered.trigger.contactId,
+    gathered.trigger.channel,
+  );
+
+  // Create a per-tick log session for agent_logs.db observability.
+  // Each tick gets its own session so cleanup never deletes an in-use session.
+  let logSessionId: string | null = null;
+  try {
+    const agentLogsDb = getAgentLogsDb();
+    const session = agentLogStore.createSession(agentLogsDb, {
+      provider: 'cortex',
+      model: cortexMind.model?.modelId ?? 'cortex',
+    });
+    logSessionId = session.id;
+  } catch (err) {
+    log.warn('Failed to create log session for tick:', err);
+  }
+  let cortexLogBridge: { detach: () => void } | null = null;
+  if (logSessionId) {
+    const eventBus = getEventBus();
+    cortexLogBridge = attachCortexLogging(cortexAgent, {
+      sessionId: logSessionId,
+      eventBus,
+      provider: cortexMind.model?.provider ?? 'cortex',
+      model: cortexMind.model?.modelId ?? 'cortex',
+    });
+
+    // Log gather phase events retroactively (session didn't exist during gather)
+    try {
+      const agentLogsDb = getAgentLogsDb();
+      const startEvent = agentLogStore.insertEvent(agentLogsDb, {
+        sessionId: logSessionId,
+        eventType: 'gather_start',
+        data: { tickNumber },
+      });
+      eventBus.emit('agent:event:logged', {
+        id: startEvent.id,
+        sessionId: startEvent.sessionId,
+        eventType: startEvent.eventType,
+        data: startEvent.data,
+        createdAt: startEvent.createdAt,
+      });
+      const endEvent = agentLogStore.insertEvent(agentLogsDb, {
+        sessionId: logSessionId,
+        eventType: 'gather_end',
+        data: { tickNumber, durationMs: gatherDurationMs },
+      });
+      eventBus.emit('agent:event:logged', {
+        id: endEvent.id,
+        sessionId: endEvent.sessionId,
+        eventType: endEvent.eventType,
+        data: endEvent.data,
+        createdAt: endEvent.createdAt,
+      });
+    } catch (err) {
+      log.debug('Failed to log gather phase events:', err);
+    }
+  }
+
+  // Signal interaction recency for adaptive compaction thresholds.
+  // Message-triggered ticks set the timestamp to now; interval/scheduled/agent_complete
+  // ticks do not call this, so the timestamp ages naturally, causing the
+  // compaction system to lower its threshold for idle sessions.
+  if (gathered.trigger.type === 'message') {
+    cortexAgent.setLastInteractionTime(Date.now());
+  }
+
+  // Update the mutable tool context for this tick
+  cortexMind.toolContext.current = buildCortexToolContext(gathered, ctx.memory?.memoryManager ?? null);
+
+  // Populate context slots with gathered data
+  populateContextSlots(cortexAgent, gathered);
+
+  // Update preprocessor variables for ${VAR} substitution in SKILL.md files
+  updatePreprocessorVariables(cortexAgent, gathered);
+
+  // Build and set the system prompt (persona + cortex operational sections)
+  const consumerPrompt = buildSystemPrompt(ctx.compiledPersona, {
+    ...(gathered.aiTimezone ? { timezone: gathered.aiTimezone } : {}),
+    energySystemEnabled: gathered.energySystemEnabled,
+    ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
+  });
+  const systemPrompt = cortexAgent.setBasePrompt(consumerPrompt);
+
+  // Build the compiled context for logging (reuse the legacy builder for now)
   const context = buildMindContext({
     trigger: gathered.trigger,
     contact: gathered.contact,
-    sessionState: gathered.sessionState,
     currentEmotions: gathered.emotions,
     tickIntervalMs: gathered.tickIntervalMs,
     recentThoughts: gathered.recentThoughts,
@@ -217,7 +335,7 @@ async function mindQuery(
     graduatingSeedsContext: gathered.goalContext?.graduatingSeedsSection ?? null,
     proposedGoalsContext: gathered.goalContext?.proposedGoalsSection ?? null,
     planningPromptsContext: gathered.goalContext?.planningPromptsSection ?? null,
-    memoryFlushPending,
+    memoryFlushPending: false,
     spawnBudgetNote: gathered.spawnBudgetNote,
     contacts: gathered.contacts,
     tickNumber,
@@ -241,6 +359,8 @@ async function mindQuery(
     ...(gathered.trustRampContext ? { trustRampContext: gathered.trustRampContext } : {}),
     ...(gathered.externalHistory ? { externalHistory: gathered.externalHistory } : {}),
     ...(gathered.deliveryFailures.length > 0 ? { deliveryFailures: gathered.deliveryFailures } : {}),
+    ...(gathered.budgetStatus ? { budgetStatus: gathered.budgetStatus } : {}),
+    ...(gathered.budgetAlert ? { budgetAlert: gathered.budgetAlert } : {}),
   });
 
   const triggerInfo = {
@@ -250,318 +370,142 @@ async function mindQuery(
     messageId: gathered.trigger.messageId,
   };
 
-  // If no agent manager configured, fall back to safe output
-  if (!ctx.agents?.agentManager || ctx.agents.agentManager.getConfiguredProviders().length === 0) {
-    log.warn('No agent provider configured, using safe output');
-    return { output: safeMindOutput(triggerInfo), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged: false, allThoughts: [], replyTurnsSent: 0 };
+  // Log tick input (reuses logSessionId from the log bridge setup above)
+  let tickInputLogged = false;
+  if (logSessionId) {
+    try {
+      logTickInput({
+        logSessionId,
+        tickNumber,
+        triggerType: gathered.trigger.type,
+        triggerContext: gathered.trigger,
+        compiledContext: context,
+      });
+      tickInputLogged = true;
+    } catch (err) {
+      log.warn('Failed to log early tick_input event:', err);
+    }
   }
+
+  // Prepare mid-tick injection queue
+  const pendingInjections: Array<{ content: string; contactId: string; channel: string }> = [];
+  const eventBus = getEventBus();
+
+  // Listen for mid-tick messages and route based on pipeline phase
+  const messageInjectionHandler = (msg: { id: string; contactId: string; direction: string; content: string; channel: string }) => {
+    if (msg.direction !== 'inbound' || msg.contactId !== gathered.contact?.id) return;
+
+    const phase = ctx.currentPhase.value;
+    if (phase === 'thought') {
+      // Queue for injection at the start of the agentic loop
+      pendingInjections.push({ content: msg.content, contactId: msg.contactId, channel: msg.channel });
+      log.info(`Queued mid-tick message during THOUGHT phase: "${msg.content.substring(0, 60)}..."`);
+    } else if (phase === 'agentic-loop') {
+      // Inject directly into the running agentic loop via steer()
+      const messageContent = `[ADDITIONAL MESSAGE received]\nFrom: ${gathered.contact?.fullName ?? 'User'} via ${msg.channel}\n"${msg.content}"`;
+      cortexAgent.steer(messageContent);
+      log.info(`Steered mid-tick message into agentic loop: "${msg.content.substring(0, 60)}..."`);
+    }
+    // During reflect/execute, let TickQueue handle it as a new tick
+  };
+  eventBus.on('message:received', messageInjectionHandler);
 
   try {
-    // If session state is "warm" but no active session exists, we need to rebuild
-    // the system prompt that was skipped during context building
-    let effectiveSystemPrompt = context.systemPrompt;
-    if (!effectiveSystemPrompt && (!ctx.mindSession.session || !ctx.mindSession.session.isActive)) {
-      log.info('Rebuilding system prompt for dead warm session');
-      effectiveSystemPrompt = buildSystemPrompt(ctx.compiledPersona!, {
-        energySystemEnabled: gathered.energySystemEnabled ?? false,
-        tickIntervalMs: gathered.tickIntervalMs,
-        ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
-        ...(gathered.aiTimezone ? { timezone: gathered.aiTimezone } : {}),
-      });
-    }
+    // Run the 5-phase cortex pipeline (THOUGHT, AGENTIC LOOP, REFLECT)
+    ctx.currentPhase.value = 'gather';
+    // Read debug mode setting for context snapshot capture
+    const currentSettings = systemStore.getSystemSettings(getSystemDb());
+    const contextDebugMode = currentSettings.contextDebugMode;
 
-    // Get or create the mind session
-    const mindStart = Date.now();
-    log.info(`Mind query: session=${gathered.sessionState}, provider=${ctx.agents!.agentManager!.getConfiguredProviders()[0] ?? 'none'}`);
+    const triggerMeta = gathered.trigger.metadata as Record<string, unknown> | undefined;
+    const lowLatency = triggerMeta?.['lowLatency'] === true;
 
-    const session = await getOrCreateMindSession(
-      ctx.mindSession,
-      gathered.sessionState,
-      effectiveSystemPrompt,
-      ctx.agents!.agentManager!,
-      ctx.agents!.agentLogStoreAdapter,
+    const pipelineResult = await executeCortexPipeline(
+      {
+        cortexAgent,
+        gathered,
+        compiledPersona: ctx.compiledPersona,
+        tickNumber,
+        systemPrompt,
+        logSessionId,
+        tickType: gathered.trigger.type ?? null,
+        contactId: gathered.trigger.contactId ?? null,
+        model: cortexMind.model?.modelId ?? 'cortex',
+        contextDebugMode,
+        lowLatency,
+        existenceParadigm: fullPersona.existenceParadigm ?? 'digital_consciousness',
+        existenceLocation: fullPersona.existenceParadigm === 'simulated_life'
+          ? fullPersona.location
+          : fullPersona.worldDescription,
+      },
+      ctx.currentPhase,
+      pendingInjections,
     );
 
-    log.info(`Mind session ready: id=${session.id}, hasTools=${!!ctx.mindSession.mcpServer}, hasCognitive=${!!ctx.mindSession.cognitiveServer}`);
+    // Clean up mid-tick injection listener and log bridge
+    eventBus.off('message:received', messageInjectionHandler);
+    cortexLogBridge?.detach();
 
-    // Update the mutable tool context for this tick so tool handlers
-    // can access the current contact/channel/conversation
-    ctx.mindSession.toolContext.current = buildMindToolContext(gathered, ctx.memory?.memoryManager ?? null);
+    // Reset rate-limit backoff on success
+    ctx.consecutiveRateLimits = 0;
+    ctx.rateLimitBackoffMs = 0;
 
-    const eventBus = getEventBus();
+    // Clear tool and compaction context after successful pipeline run
+    cortexMind.toolContext.current = null;
 
-    // Log tick_input BEFORE prompting so the DB entry exists while LLM processes.
-    // This enables getTickTimeline to work for in-progress ticks.
-    let tickInputLogged = false;
-    const logSessionId = ctx.mindSession.logSessionId?.() ?? null;
+    // Log agentic loop context snapshot (replaces the old single-snapshot approach)
     if (logSessionId) {
       try {
-        logTickInput({
-          logSessionId,
+        const triggerPrompt = buildTriggerSection(gathered.trigger);
+        const agenticSnap = buildAgenticSnapshot({
+          cortexAgent,
+          compiledPersona: ctx.compiledPersona,
+          gathered,
+          ephemeralSections: pipelineResult.ephemeralSections,
+          triggerPrompt,
           tickNumber,
-          triggerType: gathered.trigger.type,
-          triggerContext: gathered.trigger,
-          sessionState: gathered.sessionState,
-          compiledContext: context,
+          debugMode: contextDebugMode,
+          timezone: gathered.aiTimezone ?? undefined,
+          firstTurnInputTokens: pipelineResult.firstTurnInputTokens,
         });
-        tickInputLogged = true;
-        log.info(`tick_input logged early for tick #${tickNumber}`);
+        if (agenticSnap) {
+          logPhaseSnapshot(logSessionId, tickNumber, agenticSnap);
+        }
       } catch (err) {
-        log.warn('Failed to log early tick_input event:', err);
+        log.warn('Failed to log context snapshot:', err);
       }
     }
 
-    // Reset cognitive snapshot before prompting
-    const cogServer = ctx.mindSession.cognitiveServer;
-    if (cogServer) {
-      cogServer.resetSnapshot();
-    }
-
-    const estTokens = Object.values(context.tokenBreakdown).reduce((a, b) => a + b, 0);
-    log.info(`Prompting mind (${context.userMessage.length} chars, ~${estTokens} est. tokens)`);
-
-    // Phase-based reply streaming:
-    // Only stream text during the 'replying' phase (after record_thought, before record_cognitive_state)
-    // Only emit reply:chunk events for message-triggered ticks — other tick types
-    // (interval, scheduled_task, agent_complete) treat the text as internal processing.
-    // The mind uses send_proactive_message to reach users on non-message ticks.
-    let replyAccumulated = '';
-    let replySentEarly = false;
-    let replyTurnsSent = 0;
-    const isMessageTrigger = gathered.trigger.type === 'message';
-    const triggerChannel = gathered.trigger.channel ?? '';
-
-    // Per-turn accumulated text tracking for turn-based reply segments
-    const turnTextMap = new Map<number, string>();
-
-    // --- Mid-tick message injection ---
-    // While the mind is running, listen for new inbound messages from the
-    // same contact and inject them into the active agent session via the
-    // AsyncIterable prompt pattern. This lets the agent see and respond
-    // to follow-up messages without waiting for a new tick.
-    const injectedMessageIds = new Set<string>();
-    const injectFn = session.injectMessage?.bind(session);
-    const messageInjectionHandler = (msg: { id: string; contactId: string; direction: string; content: string; channel: string }) => {
-      if (
-        injectFn &&
-        msg.direction === 'inbound' &&
-        msg.contactId === gathered.contact?.id
-      ) {
-        injectedMessageIds.add(msg.id);
-        const injectionContent = [
-          `[ADDITIONAL MESSAGE received while you were composing your response]`,
-          `From: ${gathered.contact.fullName ?? 'User'} via ${msg.channel}`,
-          `"${msg.content}"`,
-          ``,
-          `Incorporate this into your response. You may address all messages in a single reply.`,
-        ].join('\n');
-
-        injectFn(injectionContent);
-        log.info(`Injected mid-tick message into mind session: "${msg.content.substring(0, 60)}..."`);
-
-        // Log as a lifecycle event so it appears in the AgentTimeline
-        const sessionId = ctx.mindSession.logSessionId?.() ?? null;
-        if (sessionId) {
-          try {
-            const agentLogsDb = getAgentLogsDb();
-            const injectedEvent = agentLogStore.insertEvent(agentLogsDb, {
-              sessionId,
-              eventType: 'message_injected',
-              data: {
-                tickNumber,
-                messageId: msg.id,
-                contactId: msg.contactId,
-                channel: msg.channel,
-                content: msg.content,
-                contactName: gathered.contact?.fullName ?? 'Unknown',
-              },
-            });
-            eventBus.emit('agent:event:logged', {
-              id: injectedEvent.id,
-              sessionId: injectedEvent.sessionId,
-              eventType: injectedEvent.eventType,
-              data: injectedEvent.data,
-              createdAt: injectedEvent.createdAt,
-            });
-          } catch (err) {
-            log.warn('Failed to log message_injected event:', err);
-          }
-        }
-      }
+    return {
+      output: pipelineResult.output,
+      compiledContext: context,
+      replySentEarly: pipelineResult.replySentEarly,
+      earlyReplyContent: pipelineResult.earlyReplyContent,
+      tickInputLogged,
+      allThoughts: pipelineResult.allThoughts,
+      replyTurnsSent: pipelineResult.replyTurnsSent,
+      logSessionId,
     };
-    eventBus.on('message:received', messageInjectionHandler);
-
-    // Turn-end handler: persist each turn's reply text as a separate message
-    const turnEndHandler = async (event: import('@animus-labs/agents').AgentEvent) => {
-      if (event.type !== 'turn_end') return;
-      const turnData = event.data as import('@animus-labs/agents').TurnEndData;
-      const turnText = turnTextMap.get(turnData.turnIndex);
-      if (!turnText?.trim()) return;
-      if (isNonResponse(turnText)) {
-        log.info(`Filtered non-response turn ${turnData.turnIndex}: "${turnText.trim()}"`);
-        return;
-      }
-      // Allow replies for both full contacts and recognized participants (synthetic contactId)
-      const turnContactId = gathered.contact?.id ?? gathered.trigger.contactId;
-      if (!isMessageTrigger || !turnContactId || !gathered.trigger.channel) return;
-
-      try {
-        // Strip 'media' from trigger metadata — incoming attachments shouldn't be re-sent.
-        // Keep other metadata like channelId for Discord reply routing.
-        const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
-        const replyMetadata = triggerMetadata
-          ? Object.fromEntries(Object.entries(triggerMetadata).filter(([k]) => k !== 'media'))
-          : undefined;
-        const hasReplyMetadata = replyMetadata && Object.keys(replyMetadata).length > 0;
-        const { getChannelRouter } = await import('../channels/channel-router.js');
-        const router = getChannelRouter();
-        await router.sendOutbound({
-          contactId: turnContactId,
-          channel: gathered.trigger.channel,
-          content: turnText.trim(),
-          ...(hasReplyMetadata ? { metadata: replyMetadata } : {}),
-        });
-        replyTurnsSent++;
-        replySentEarly = true;
-        log.info(`Turn ${turnData.turnIndex} reply sent on "${gathered.trigger.channel}" for tick #${tickNumber} (${turnText.length} chars)`);
-
-        // Emit turn_complete for the frontend
-        eventBus.emit('reply:turn_complete', {
-          turnIndex: turnData.turnIndex,
-          content: turnText.trim(),
-          tickNumber,
-          channel: triggerChannel,
-        });
-      } catch (channelErr) {
-        log.debug(`Turn ${turnData.turnIndex} reply send failed:`, channelErr);
-      }
-    };
-    session.onEvent(turnEndHandler);
-
-    // Stream: feed chunks from the agent adapter, only emit reply chunks during 'replying' phase.
-    // For non-message ticks, still accumulate text (for logging/snapshot) but don't stream to frontend.
-    await session.promptStreaming(
-      context.userMessage,
-      (chunk: string, meta: import('@animus-labs/agents').StreamChunkMeta) => {
-        if (cogServer && cogServer.getPhase() === 'replying') {
-          replyAccumulated += chunk;
-
-          // Track per-turn accumulated text
-          const prev = turnTextMap.get(meta.turnIndex) ?? '';
-          turnTextMap.set(meta.turnIndex, prev + chunk);
-
-          if (isMessageTrigger) {
-            const turnAccumulated = turnTextMap.get(meta.turnIndex)!;
-            eventBus.emit('reply:chunk', {
-              content: chunk,
-              accumulated: turnAccumulated,
-              turnIndex: meta.turnIndex,
-              channel: triggerChannel,
-            });
-          }
-        }
-      },
-    );
-
-    // Remove turn-end handler and stop listening for message injection
-    session.offEvent(turnEndHandler);
-    eventBus.off('message:received', messageInjectionHandler);
-    if (injectedMessageIds.size > 0) {
-      log.info(`Mid-tick injection summary: ${injectedMessageIds.size} message(s) injected during mind query`);
-    }
-
-    // Read cognitive snapshot and convert to MindOutput
-    const snapshot = cogServer ? cogServer.getSnapshot() : null;
-    const allThoughts = snapshot?.thoughts ?? [];
-
-    const output = snapshot
-      ? snapshotToMindOutput(snapshot, replyAccumulated, gathered)
-      : safeMindOutput(triggerInfo);
-
-    const mindMs = Date.now() - mindStart;
-    const totalTurns = turnTextMap.size;
-    if (snapshot) {
-      log.info(`Mind query complete (${(mindMs / 1000).toFixed(1)}s): ${allThoughts.length} thought(s), ${snapshot.emotionDeltas.length} emotion delta(s), ${snapshot.decisions.length} decision(s), reply=${replyAccumulated.length} chars, turns=${totalTurns} (${replyTurnsSent} sent early)`);
-    } else {
-      log.warn('No cognitive server available — using safe fallback');
-    }
-
-    // If no turns were sent during streaming (single-turn or turn_end handler didn't fire),
-    // send the full accumulated reply as one message (fallback to monolithic behavior).
-    // Allow replies for both full contacts and recognized participants (synthetic contactId)
-    const fallbackContactId = gathered.contact?.id ?? gathered.trigger.contactId;
-    if (!replySentEarly && isMessageTrigger && replyAccumulated.trim() && !isNonResponse(replyAccumulated) && fallbackContactId && gathered.trigger.channel) {
-      try {
-        // Strip 'media' from trigger metadata — incoming attachments shouldn't be re-sent.
-        // Keep other metadata like channelId for Discord reply routing.
-        const triggerMetadata = gathered.trigger?.metadata as Record<string, unknown> | undefined;
-        const fallbackMetadata = triggerMetadata
-          ? Object.fromEntries(Object.entries(triggerMetadata).filter(([k]) => k !== 'media'))
-          : undefined;
-        const hasFallbackMetadata = fallbackMetadata && Object.keys(fallbackMetadata).length > 0;
-        const { getChannelRouter } = await import('../channels/channel-router.js');
-        const router = getChannelRouter();
-        await router.sendOutbound({
-          contactId: fallbackContactId,
-          channel: gathered.trigger.channel,
-          content: replyAccumulated.trim(),
-          ...(hasFallbackMetadata ? { metadata: fallbackMetadata } : {}),
-        });
-        replySentEarly = true;
-        replyTurnsSent = 1;
-        log.info(`Fallback: full reply sent on "${gathered.trigger.channel}" for tick #${tickNumber}`);
-      } catch (channelErr) {
-        log.debug('Fallback reply send skipped:', channelErr);
-      }
-    }
-
-    // Emit reply completion event (only for message-triggered ticks)
-    if (isMessageTrigger && output.reply?.content) {
-      eventBus.emit('reply:complete', {
-        content: output.reply.content,
-        tickNumber,
-        totalTurns,
-        channel: triggerChannel,
-      });
-    }
-
-    // Update session token tracking
-    const usage = session.getUsage();
-    if (usage.totalTokens > 0) {
-      const hbDb = getHeartbeatDb();
-      heartbeatStore.updateHeartbeatState(hbDb, {
-        sessionTokenCount: usage.totalTokens,
-        mindSessionId: session.id,
-      });
-      const cost = session.getCost();
-      log.info(`Token usage: ${usage.totalTokens.toLocaleString()} total (session cumulative)${cost ? `, $${cost.totalCostUsd.toFixed(4)}` : ''}`);
-    }
-
-    return { output, compiledContext: context, replySentEarly, earlyReplyContent: replyAccumulated, tickInputLogged, allThoughts, replyTurnsSent };
   } catch (err) {
-    log.error('Mind query failed:', err);
-    ctx.mindSession.toolContext.current = null;
+    eventBus.off('message:received', messageInjectionHandler);
+    cortexLogBridge?.detach();
 
-    // Surface authentication errors to the UI via system:error event
-    const { AgentError } = await import('@animus-labs/agents');
-    if (err instanceof AgentError && err.category === 'authentication') {
-      const eventBus = getEventBus();
-      eventBus.emit('system:error', {
-        category: 'authentication',
-        message: err.message,
-        provider: err.provider,
-        recoverable: false,
-        suggestedAction: (err.details?.suggestedAction as string) ??
-          'Check your API key or re-authenticate in Settings.',
-      });
-    }
+    log.error('Cortex pipeline failed:', err);
+    cortexMind.toolContext.current = null;
 
-    // End the leaked session before nulling references
-    await resetMindSession(ctx.mindSession, ctx.agents?.agentManager ?? null);
-
-    return { output: safeMindOutput(triggerInfo), compiledContext: context, replySentEarly: false, earlyReplyContent: '', tickInputLogged: false, allThoughts: [], replyTurnsSent: 0 };
+    return {
+      output: safeMindOutput(triggerInfo),
+      compiledContext: context,
+      replySentEarly: false,
+      earlyReplyContent: '',
+      tickInputLogged,
+      allThoughts: [],
+      replyTurnsSent: 0,
+      logSessionId,
+    };
   }
 }
+
 
 // ============================================================================
 // Full Tick Execution
@@ -584,7 +528,23 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     return;
   }
 
-  log.info(`Starting tick #${tickNumber} (${queuedTick.trigger.type})`);
+  // Budget gate: check if the tick is allowed to proceed
+  const budgetGate = checkBudgetGate(queuedTick.trigger.type);
+  if (!budgetGate.allowed) {
+    log.warn(`Tick #${tickNumber} blocked by budget: ${budgetGate.reason}`);
+    heartbeatStore.updateHeartbeatState(hbDb, {
+      tickNumber,
+      lastTickAt: now(),
+    });
+    eventBus.emit('budget:tick_blocked', {
+      reason: budgetGate.reason ?? 'budget exceeded',
+      triggerType: queuedTick.trigger.type,
+    });
+    eventBus.emit('heartbeat:state_change', heartbeatStore.getHeartbeatState(hbDb));
+    return;
+  }
+
+  log.info(`Starting tick #${tickNumber} (${queuedTick.trigger.type})${budgetGate.isGraceMessage ? ' [budget grace message]' : ''}`);
 
   // Daily active telemetry (deduped per-day, never blocks the pipeline)
   try {
@@ -604,7 +564,6 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     heartbeatStore.updateHeartbeatState(hbDb, {
       tickNumber,
       currentStage: 'gather',
-      sessionState: 'active',
       triggerType: queuedTick.trigger.type,
       triggerContext: JSON.stringify(queuedTick.trigger),
       lastTickAt: now(),
@@ -620,19 +579,24 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
       eventBus,
     });
 
+    // Annotate trigger with budget grace flag if applicable
+    if (budgetGate.isGraceMessage) {
+      effectiveTrigger.isBudgetGraceMessage = true;
+    }
+
     // Stage 1: GATHER CONTEXT
+    const gatherStartTime = Date.now();
     const gathered = await gatherContext(effectiveTrigger, {
       tickQueue,
       memoryManager: ctx.memory?.memoryManager ?? null,
       seedManager: ctx.goals?.seedManager ?? null,
       goalManager: ctx.goals?.goalManager ?? null,
       agentOrchestrator: ctx.agents?.agentOrchestrator ?? null,
-      sessionInvalidated: ctx.mindSession.invalidated,
-      clearSessionInvalidation: () => { ctx.mindSession.invalidated = false; },
       pluginManager: getPluginManager(),
       channelManager: getChannelManager(),
       deferredQueue: getDeferredQueue(),
     });
+    const gatherDurationMs = Date.now() - gatherStartTime;
     const tickStart = Date.now();
 
     // Start typing indicator for message-triggered ticks
@@ -658,14 +622,28 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     eventBus.emit('heartbeat:stage_change', { stage: 'mind' });
     eventBus.emit('heartbeat:state_change', heartbeatStore.getHeartbeatState(hbDb));
 
-    // Stage 2: MIND QUERY
-    const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged, allThoughts, replyTurnsSent } = await mindQuery(gathered, tickNumber);
+    // Stage 2: MIND QUERY (cortex pipeline)
+    if (!ctx.agents?.cortexMind?.agent) {
+      log.warn('No AI provider configured — skipping mind query');
+      eventBus.emit('system:error', {
+        category: 'configuration',
+        message: 'No AI provider configured. Go to Settings > AI Provider to connect one.',
+        recoverable: true,
+        suggestedAction: 'Configure a provider in Settings > AI Provider.',
+      });
+      heartbeatStore.updateHeartbeatState(hbDb, {
+        tickNumber,
+        lastTickAt: now(),
+        currentStage: 'idle',
+      });
+      eventBus.emit('heartbeat:state_change', heartbeatStore.getHeartbeatState(hbDb));
+      if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
+      return;
+    }
+    const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged, allThoughts, replyTurnsSent, logSessionId } = await cortexMindQuery(gathered, tickNumber, gatherDurationMs);
 
     // Clear typing indicator now that mind query is done
     if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
-
-    // Log tick input to agent_logs.db (only if mindQuery didn't already log it)
-    const logSessionId = ctx.mindSession.logSessionId?.() ?? null;
     if (logSessionId && !tickInputLogged) {
       try {
         logTickInput({
@@ -673,7 +651,6 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
           tickNumber,
           triggerType: queuedTick.trigger.type,
           triggerContext: queuedTick.trigger,
-          sessionState: gathered.sessionState,
           compiledContext,
         });
       } catch (err) {
@@ -695,6 +672,8 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
         goalManager: ctx.goals?.goalManager ?? null,
         buildSystemPrompt: (persona: CompiledPersona) => buildSystemPrompt(persona, {
           ...(gathered.aiTimezone ? { timezone: gathered.aiTimezone } : {}),
+          energySystemEnabled: gathered.energySystemEnabled,
+          ...(gathered.pluginDecisionDescriptions ? { pluginDecisionDescriptions: gathered.pluginDecisionDescriptions } : {}),
         }),
         pluginManager: getPluginManager(),
         taskScheduler: getTaskScheduler(),
@@ -703,10 +682,20 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
       },
       memoryManager: ctx.memory?.memoryManager ?? null,
       seedManager: ctx.goals?.seedManager ?? null,
-      agentManager: ctx.agents?.agentManager ?? null,
+      completeFn: ctx.agents?.cortexMind?.agent ? ctx.agents.cortexMind.agent.utilityComplete.bind(ctx.agents.cortexMind.agent) : null,
       compiledPersona: ctx.compiledPersona,
       tickQueue,
       deferredQueue: getDeferredQueue(),
+      onIntervalChanged: (newIntervalMs: number) => {
+        const cortexAgent = ctx.agents?.cortexMind?.agent;
+        if (cortexAgent) {
+          const providerName = (systemStore.getSystemSettings(getSystemDb()) as Record<string, unknown>)['cortexProvider'] as string | undefined;
+          if (!providerName) return;
+          const newRetention = resolveCacheRetention(providerName, newIntervalMs);
+          cortexAgent.setCacheRetention(newRetention);
+          log.info(`Cache retention updated: ${newRetention} (interval=${newIntervalMs}ms)`);
+        }
+      },
     }, eventBus, {
       replySentEarly,
       earlyReplyContent,
@@ -741,30 +730,29 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
       }
     }
 
+    // Close the per-tick log session
+    if (logSessionId) {
+      try {
+        agentLogStore.endSession(getAgentLogsDb(), logSessionId, 'completed');
+      } catch (err) {
+        log.warn('Failed to close log session:', err);
+      }
+    }
+
     // Emit for real-time subscription
     eventBus.emit('tick:context_stored', {
       tickNumber,
       triggerType: queuedTick.trigger.type,
-      sessionState: gathered.sessionState,
       durationMs,
       createdAt: now(),
     });
 
-    // Return to idle, set session warm
-    // Only reset warmth timer for interactive triggers (message, agent_complete, scheduled_task)
-    // Interval ticks should NOT extend the warmth window
-    const isInteractiveTrigger = queuedTick.trigger.type !== 'interval';
+    // Return to idle
     heartbeatStore.updateHeartbeatState(hbDb, {
       currentStage: 'idle',
-      sessionState: 'warm',
       triggerType: null,
       triggerContext: null,
-      ...(isInteractiveTrigger ? { sessionWarmSince: now() } : {}),
     });
-
-    if (isInteractiveTrigger) {
-      ctx.mindSession.warmSince = Date.now();
-    }
 
     log.info(`Completed tick #${tickNumber}`);
   } catch (err) {
@@ -794,26 +782,60 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
 // ============================================================================
 
 /**
- * Determine the correct tick interval based on current energy state.
- * If the energy system is enabled and the AI is in the sleeping band,
- * returns the sleep tick interval; otherwise the regular heartbeat interval.
+ * Determine the correct tick interval based on current energy state and budget.
+ *
+ * Layers:
+ *   1. Energy system: sleeping band uses sleepTickIntervalMs
+ *   2. Budget throttle: scales interval by (1 + throttleFactor * 5)
+ *
+ * The budget throttle is layered on top of the energy-based interval,
+ * so a sleeping AI with budget pressure gets an even longer interval.
  */
 function resolveTickInterval(settings: import('@animus-labs/shared').SystemSettings): number {
+  let interval = settings.heartbeatIntervalMs;
+
+  // Layer 1: Energy system
   if (settings.energySystemEnabled) {
     const hbDb = getHeartbeatDb();
     const { energyLevel } = heartbeatStore.getEnergyLevel(hbDb);
     const band = getEnergyBand(energyLevel);
     if (band === 'sleeping') {
       log.info(`Energy band is sleeping (${energyLevel.toFixed(4)}), using sleep interval ${settings.sleepTickIntervalMs}ms`);
-      return settings.sleepTickIntervalMs;
+      interval = settings.sleepTickIntervalMs;
     }
   }
-  return settings.heartbeatIntervalMs;
+
+  // Layer 2: Budget throttle (layered on top of energy interval)
+  // Formula: interval * (1 + throttleFactor * 5)
+  // throttleFactor: 0 at <80% budget, linear 0-1 from 80-95%, 1 at >95%
+  const budgetService = getBudgetService({ getSystemDb, getAgentLogsDb });
+  interval = budgetService.getEffectiveInterval(interval);
+
+  return interval;
 }
 
 // ============================================================================
 // Public API
 // ============================================================================
+
+/**
+ * Wire rate-limit backoff handler on a CortexAgent.
+ * Extracted so it can be called both at startup and on late initialization
+ * (when the user configures a provider after onboarding).
+ */
+function wireCortexRateLimitHandler(cortexAgent: import('@animus-labs/cortex').CortexAgent): void {
+  cortexAgent.onError((classified: { category: string; severity: string; originalMessage: string }) => {
+    if (classified.category === 'rate_limit') {
+      ctx.consecutiveRateLimits++;
+      ctx.rateLimitBackoffMs = Math.min(
+        30_000 * Math.pow(2, ctx.consecutiveRateLimits - 1),
+        300_000,
+      );
+      log.warn(`Rate limit #${ctx.consecutiveRateLimits}: delaying next tick by ${ctx.rateLimitBackoffMs}ms`);
+      tickQueue.delayNext(ctx.rateLimitBackoffMs);
+    }
+  });
+}
 
 /**
  * Initialize the heartbeat system.
@@ -834,67 +856,85 @@ export async function initializeHeartbeat(subsystems: {
   ctx.goals = subsystems.goals;
   ctx.agents = subsystems.agents;
 
+  // Embed messages asynchronously on intake for recall search
+  if (subsystems.memory.messageEmbedder) {
+    const embedder = subsystems.memory.messageEmbedder;
+    const handleEmbed = (msg: { id: string; content: string; createdAt: string }) => {
+      void embedder.embedMessage(msg);
+    };
+    getEventBus().on('message:received', handleEmbed);
+    getEventBus().on('message:sent', handleEmbed);
+  }
+
   // Recover from interrupted tick
   if (state.currentStage !== 'idle') {
     heartbeatStore.updateHeartbeatState(hbDb, {
       currentStage: 'idle',
-      sessionState: 'cold',
       triggerType: null,
       triggerContext: null,
     });
     log.info('Recovered from interrupted tick');
   }
 
-  // Listen for plugin changes to invalidate the session
-  getEventBus().on('plugin:changed', async (payload) => {
-    // Hot-swap Codex skills via JSON-RPC if the app-server is running
-    if (ctx.agents?.agentManager) {
-      try {
-        const settings = systemStore.getSystemSettings(getSystemDb());
-        if (settings.defaultAgentProvider === 'codex') {
-          const { CodexAdapter } = await import('@animus-labs/agents');
-          const adapter = ctx.agents.agentManager.getAdapter('codex');
-          if (adapter instanceof CodexAdapter) {
-            const { getPluginManager } = await import('../plugins/index.js');
-            const pm = getPluginManager();
-            const codexSkillPaths = pm.getDeployedCodexSkillPaths();
-            const enabled = payload?.action !== 'uninstalled' && payload?.action !== 'disabled';
-            for (const skillPath of codexSkillPaths) {
-              await adapter.syncSkill(skillPath, enabled);
-            }
-            if (codexSkillPaths.length > 0) {
-              log.debug(`Synced ${codexSkillPaths.length} Codex skills (enabled=${enabled})`);
-            }
-          }
+  // Cortex startup: attempt to initialize the CortexAgent.
+  // Returns null if no provider is configured yet (fresh install, pre-onboarding).
+  // The agent will be created later via the cortex:provider-changed event
+  // when the user configures a provider through onboarding or settings.
+  if (subsystems.agents.cortexMind.agent == null) {
+    try {
+      const cortexAgent = await createCortexMind(
+        subsystems.agents.cortexMind,
+        { messageEmbedder: subsystems.memory.messageEmbedder },
+      );
+
+      if (cortexAgent) {
+        log.info('CortexAgent initialized at startup');
+
+        if (subsystems.agents.agentOrchestrator) {
+          subsystems.agents.agentOrchestrator.setCortexAgent(cortexAgent);
         }
-      } catch (err) {
-        log.debug('Codex skill hot-swap failed (non-critical):', err);
+
+        wireCortexRateLimitHandler(cortexAgent);
+      } else {
+        log.info('No CortexAgent at startup (no provider configured). Waiting for provider setup.');
       }
+    } catch (err) {
+      log.warn('CortexAgent initialization failed:', err);
     }
+  }
 
-    ctx.mindSession.invalidated = true;
-    log.info('Plugin changed -- next tick will force cold session');
-  });
-
-  // Listen for tool permission changes to invalidate the session.
-  // This ensures permission updates (e.g. off → always_allow) take effect
-  // on the next tick by forcing a cold session rebuild with updated tool lists.
-  getEventBus().on('tool:permission_changed', () => {
-    ctx.mindSession.invalidated = true;
-    log.info('Tool permission changed -- next tick will force cold session');
-  });
-
-  // Listen for provider/model setting changes to force a cold session rebuild.
-  // Nulling mcpServer and cognitiveServer ensures the MCP build guards in
-  // mind-session.ts re-create them for the new provider on the next tick.
-  getEventBus().on('system:settings_updated', (payload) => {
-    if ('defaultAgentProvider' in payload || 'defaultModel' in payload) {
-      ctx.mindSession.invalidated = true;
-      ctx.mindSession.mcpServer = null;
-      ctx.mindSession.cognitiveServer = null;
-      log.info('Provider/model settings changed -- next tick will force cold session');
+  // Late initialization: when the user configures a cortex provider for the
+  // first time (during onboarding or in settings), create the CortexAgent now.
+  // This covers the fresh-install flow where no provider exists at startup.
+  getEventBus().on('cortex:provider-changed', async () => {
+    if (subsystems.agents.cortexMind.agent) return; // Already initialized, model-switch handled by cortex-mind.ts
+    try {
+      const cortexAgent = await createCortexMind(
+        subsystems.agents.cortexMind,
+        { messageEmbedder: subsystems.memory.messageEmbedder },
+      );
+      if (cortexAgent) {
+        if (subsystems.agents.agentOrchestrator) {
+          subsystems.agents.agentOrchestrator.setCortexAgent(cortexAgent);
+        }
+        wireCortexRateLimitHandler(cortexAgent);
+        log.info('CortexAgent initialized after provider setup (late init)');
+      }
+    } catch (err) {
+      log.warn('Late CortexAgent initialization failed:', err);
     }
   });
+
+  // When the cortex provider is removed, disconnect the orchestrator.
+  getEventBus().on('cortex:provider-removed', () => {
+    if (subsystems.agents.agentOrchestrator) {
+      subsystems.agents.agentOrchestrator.setCortexAgent(null);
+      log.info('AgentOrchestrator disconnected from cortex (provider removed)');
+    }
+  });
+
+  // Plugin changes, tool permission changes, and provider/model settings
+  // are handled by cortex-mind.ts (skill registry, tool refresh, model hot-swap).
 
   // Set up the tick queue processor
   tickQueue.setProcessor(executeTick);
@@ -954,8 +994,10 @@ export async function stopHeartbeat(opts?: { preserveDesiredState?: boolean }): 
   tickQueue.stopInterval();
   tickQueue.clear();
 
-  // End mind session
-  await resetMindSession(ctx.mindSession, ctx.agents?.agentManager ?? null);
+  // Note: we do NOT destroy the CortexAgent here. Pausing the heartbeat
+  // only stops interval ticks. Message-triggered, scheduled-task, and
+  // agent-complete ticks can still fire and need a live agent. The agent
+  // is only destroyed during full server shutdown (via the lifecycle manager).
 
   if (!opts?.preserveDesiredState) {
     const hbDb = getHeartbeatDb();
@@ -1071,11 +1113,53 @@ export function getMemoryManager(): import('../memory/index.js').MemoryManager |
   return ctx.memory?.memoryManager ?? null;
 }
 
+export function getMessageEmbedder(): import('../memory/message-embedder.js').MessageEmbedder | null {
+  return ctx.memory?.messageEmbedder ?? null;
+}
+
 /**
  * Update heartbeat interval (from settings change).
  */
 export function updateHeartbeatInterval(intervalMs: number): void {
   tickQueue.updateInterval(intervalMs);
+}
+
+/**
+ * Destroy and recreate the CortexAgent with a clean state.
+ *
+ * Called by soft/full reset to ensure the in-memory agent doesn't carry
+ * stale conversation history or context from the previous session.
+ * The agent is destroyed, then reinitialized from the (now-cleared) DB.
+ */
+export async function resetCortexAgent(): Promise<void> {
+  const cortexMind = ctx.agents?.cortexMind;
+  if (!cortexMind) return;
+
+  // Disconnect orchestrator from the old agent
+  if (ctx.agents?.agentOrchestrator) {
+    ctx.agents.agentOrchestrator.setCortexAgent(null);
+  }
+
+  // Destroy the old agent (releases pi-agent-core resources, MCP connections)
+  await destroyCortexMind(cortexMind);
+
+  // Recreate from scratch (reads provider/model from DB, starts fresh)
+  try {
+    const cortexAgent = await createCortexMind(
+      cortexMind,
+      { messageEmbedder: ctx.memory?.messageEmbedder ?? null },
+    );
+    if (cortexAgent) {
+      // Do NOT restore conversation history; the DB was just cleared
+      if (ctx.agents?.agentOrchestrator) {
+        ctx.agents.agentOrchestrator.setCortexAgent(cortexAgent);
+      }
+      wireCortexRateLimitHandler(cortexAgent);
+      log.info('CortexAgent recreated with clean state after reset');
+    }
+  } catch (err) {
+    log.warn('Failed to recreate CortexAgent after reset:', err);
+  }
 }
 
 /**

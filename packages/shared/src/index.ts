@@ -1,5 +1,5 @@
 /**
- * @animus/shared
+ * @animus-labs/shared
  *
  * Shared types, schemas, and utilities used across the Animus monorepo.
  */

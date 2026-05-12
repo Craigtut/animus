@@ -135,7 +135,7 @@ export function RestoreStep() {
           completeMutation.mutate(undefined, {
             onSuccess: () => {
               // Update the cached onboarding state so AuthGuard sees isComplete: true
-              // when the user navigates to "/" after the AgentProviderStep.
+              // when the user navigates to "/" after the provider step.
               // Without this, the stale cached value (isComplete: false) causes
               // a redirect loop back to the welcome screen.
               utils.onboarding.getState.setData(undefined, { isComplete: true, currentStep: 8 });

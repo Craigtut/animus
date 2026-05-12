@@ -237,7 +237,7 @@ export class PluginManager {
 
     // 4. Deploy skills for active provider
     const settings = systemStore.getSystemSettings(db);
-    await this.deploySkills(settings.defaultAgentProvider);
+    await this.deploySkills(settings.cortexProvider ?? 'cortex');
 
     // 5. Start watcher triggers
     await this.startTriggers();
@@ -299,7 +299,7 @@ export class PluginManager {
       this.registerDecisionTypes(loaded);
 
       const settings = systemStore.getSystemSettings(db);
-      await this.deploySkillsForPlugin(loaded, settings.defaultAgentProvider);
+      await this.deploySkillsForPlugin(loaded, settings.cortexProvider ?? 'cortex');
       await this.startTriggersForPlugin(loaded);
       log.info(`Installed plugin: ${manifest.name}`);
     }
@@ -366,7 +366,7 @@ export class PluginManager {
     pluginStore.updatePlugin(db, name, { enabled: true });
 
     const settings = systemStore.getSystemSettings(db);
-    await this.deploySkillsForPlugin(loaded, settings.defaultAgentProvider);
+    await this.deploySkillsForPlugin(loaded, settings.cortexProvider ?? 'cortex');
     await this.startTriggersForPlugin(loaded);
 
     getEventBus().emit('plugin:changed', { pluginName: name, action: 'enabled' });
@@ -589,7 +589,7 @@ export class PluginManager {
       this.registerDecisionTypes(loaded);
 
       const settings = systemStore.getSystemSettings(db);
-      await this.deploySkillsForPlugin(loaded, settings.defaultAgentProvider);
+      await this.deploySkillsForPlugin(loaded, settings.cortexProvider ?? 'cortex');
       await this.startTriggersForPlugin(loaded);
       log.info(`Installed and enabled plugin from package: ${manifest.name} v${manifest.version}`);
     } else {
@@ -765,7 +765,7 @@ export class PluginManager {
       this.registerDecisionTypes(reloaded);
 
       const settings = systemStore.getSystemSettings(db);
-      await this.deploySkillsForPlugin(reloaded, settings.defaultAgentProvider);
+      await this.deploySkillsForPlugin(reloaded, settings.cortexProvider ?? 'cortex');
       await this.startTriggersForPlugin(reloaded);
       log.info(`Updated and re-enabled plugin from package: ${name} v${currentVersion} → v${manifest.version}`);
     } else {
@@ -901,7 +901,7 @@ export class PluginManager {
         this.registerDecisionTypes(reloaded);
 
         const settings = systemStore.getSystemSettings(db);
-        await this.deploySkillsForPlugin(reloaded, settings.defaultAgentProvider);
+        await this.deploySkillsForPlugin(reloaded, settings.cortexProvider ?? 'cortex');
         await this.startTriggersForPlugin(reloaded);
       } else {
         reloaded.enabled = false;

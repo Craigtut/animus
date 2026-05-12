@@ -5,9 +5,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // ---------------------------------------------------------------------------
 
 const mockDb = {} as any;
+const mockLanceConnection = {} as any;
 
 vi.mock('../../src/db/index.js', () => ({
   getMemoryDb: () => mockDb,
+}));
+
+vi.mock('@lancedb/lancedb', () => ({
+  connect: vi.fn(async () => mockLanceConnection),
 }));
 
 vi.mock('../../src/utils/env.js', () => ({
@@ -31,6 +36,14 @@ vi.mock('../../src/memory/vector-store.js', () => ({
 vi.mock('../../src/memory/memory-manager.js', () => ({
   MemoryManager: class MockMemoryManager {
     constructor(public db: any, public vs: any, public ep: any) {}
+  },
+}));
+
+const mockMessageEmbedderInitialize = vi.fn();
+vi.mock('../../src/memory/message-embedder.js', () => ({
+  MessageEmbedder: class MockMessageEmbedder {
+    initialize = mockMessageEmbedderInitialize;
+    constructor(public connection: any, public ep: any) {}
   },
 }));
 
@@ -67,21 +80,29 @@ describe('MemorySubsystem', () => {
     expect(subsystem.embeddingProvider).toBeNull();
     expect(subsystem.vectorStore).toBeNull();
     expect(subsystem.memoryManager).toBeNull();
+    expect(subsystem.messageEmbedder).toBeNull();
   });
 
   describe('start()', () => {
-    it('creates embeddingProvider, vectorStore, and memoryManager', async () => {
+    it('creates embeddingProvider, vectorStore, memoryManager, and messageEmbedder', async () => {
       await subsystem.start();
 
       expect(subsystem.embeddingProvider).not.toBeNull();
       expect(subsystem.vectorStore).not.toBeNull();
       expect(subsystem.memoryManager).not.toBeNull();
+      expect(subsystem.messageEmbedder).not.toBeNull();
     });
 
     it('calls vectorStore.initialize()', async () => {
       await subsystem.start();
 
       expect(mockInitialize).toHaveBeenCalledOnce();
+    });
+
+    it('calls messageEmbedder.initialize()', async () => {
+      await subsystem.start();
+
+      expect(mockMessageEmbedderInitialize).toHaveBeenCalledOnce();
     });
 
     it('creates VectorStore with LANCEDB_PATH and embedding dimensions', async () => {
@@ -100,6 +121,14 @@ describe('MemorySubsystem', () => {
       expect(mm.vs).toBe(subsystem.vectorStore);
       expect(mm.ep).toBe(subsystem.embeddingProvider);
     });
+
+    it('creates MessageEmbedder with the LanceDB connection and embedding provider', async () => {
+      await subsystem.start();
+
+      const embedder = subsystem.messageEmbedder as any;
+      expect(embedder.connection).toBe(mockLanceConnection);
+      expect(embedder.ep).toBe(subsystem.embeddingProvider);
+    });
   });
 
   describe('stop()', () => {
@@ -112,6 +141,7 @@ describe('MemorySubsystem', () => {
       expect(subsystem.embeddingProvider).toBeNull();
       expect(subsystem.vectorStore).toBeNull();
       expect(subsystem.memoryManager).toBeNull();
+      expect(subsystem.messageEmbedder).toBeNull();
     });
   });
 

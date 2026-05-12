@@ -33,29 +33,54 @@ describe('permission seeder', () => {
     expect(readMemory!.mode).toBe('always_allow');
   });
 
-  it('seeds SDK tools for the active provider', () => {
-    seedToolPermissions(db, 'claude');
+  it('seeds cortex built-in tools', () => {
+    seedToolPermissions(db);
     const perms = systemStore.getToolPermissions(db);
-    const sdkTools = perms.filter((p) => p.toolSource === 'sdk:claude');
+    const cortexTools = perms.filter((p) => p.toolSource === 'cortex:builtin');
 
-    const readTool = sdkTools.find((p) => p.toolName === 'Read');
+    const readTool = cortexTools.find((p) => p.toolName === 'Read');
     expect(readTool).toBeDefined();
     expect(readTool!.riskTier).toBe('safe');
     expect(readTool!.mode).toBe('always_allow');
 
-    const writeTool = sdkTools.find((p) => p.toolName === 'Write');
+    const writeTool = cortexTools.find((p) => p.toolName === 'Write');
     expect(writeTool).toBeDefined();
     expect(writeTool!.riskTier).toBe('acts');
     expect(writeTool!.mode).toBe('ask');
 
-    const bashTool = sdkTools.find((p) => p.toolName === 'Bash');
+    const undoEditTool = cortexTools.find((p) => p.toolName === 'UndoEdit');
+    expect(undoEditTool).toBeDefined();
+    expect(undoEditTool!.riskTier).toBe('acts');
+    expect(undoEditTool!.mode).toBe('ask');
+
+    const bashTool = cortexTools.find((p) => p.toolName === 'Bash');
     expect(bashTool).toBeDefined();
     expect(bashTool!.riskTier).toBe('sensitive');
     expect(bashTool!.mode).toBe('ask');
+
+    const taskOutputTool = cortexTools.find((p) => p.toolName === 'TaskOutput');
+    expect(taskOutputTool).toBeDefined();
+    expect(taskOutputTool!.riskTier).toBe('safe');
+    expect(taskOutputTool!.mode).toBe('always_allow');
+
+    const toolSearchTool = cortexTools.find((p) => p.toolName === 'ToolSearch');
+    expect(toolSearchTool).toBeDefined();
+    expect(toolSearchTool!.riskTier).toBe('safe');
+    expect(toolSearchTool!.mode).toBe('always_allow');
+
+    const loadSkillTool = cortexTools.find((p) => p.toolName === 'load_skill');
+    expect(loadSkillTool).toBeDefined();
+    expect(loadSkillTool!.riskTier).toBe('safe');
+    expect(loadSkillTool!.mode).toBe('always_allow');
+
+    const recallTool = cortexTools.find((p) => p.toolName === 'recall');
+    expect(recallTool).toBeDefined();
+    expect(recallTool!.riskTier).toBe('safe');
+    expect(recallTool!.mode).toBe('always_allow');
   });
 
   it('seeds plugin tools', () => {
-    seedToolPermissions(db, 'claude', [
+    seedToolPermissions(db, [
       {
         name: 'weather',
         tools: [
@@ -114,7 +139,7 @@ describe('permission seeder', () => {
   });
 
   it('skips plugins with no tools', () => {
-    seedToolPermissions(db, 'claude', [
+    seedToolPermissions(db, [
       { name: 'empty-plugin' },
     ]);
     const perms = systemStore.getToolPermissions(db);
