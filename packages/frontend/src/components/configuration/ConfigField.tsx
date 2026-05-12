@@ -10,6 +10,8 @@ import {
   File as FileIcon,
   Trash,
   ArrowsClockwise,
+  Copy,
+  Check,
 } from '@phosphor-icons/react';
 import { Input, Select, Toggle, Typography, Tooltip } from '../ui';
 import { OAuthField } from './OAuthField';
@@ -20,6 +22,40 @@ const glowFade = keyframes`
   100% { box-shadow: 0 0 0 2px transparent; }
 `;
 
+function CopyButton({ value }: { value: string }) {
+  const theme = useTheme();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [value]);
+
+  return (
+    <Tooltip content={copied ? 'Copied!' : 'Copy'} position="top">
+      <button
+        type="button"
+        onClick={handleCopy}
+        css={css`
+          cursor: pointer;
+          padding: 4px;
+          color: ${copied ? theme.colors.success.main : theme.colors.text.hint};
+          background: none;
+          border: none;
+          display: flex;
+          flex-shrink: 0;
+          transition: color 0.15s;
+          &:hover { color: ${copied ? theme.colors.success.main : theme.colors.text.primary}; }
+        `}
+      >
+        {copied ? <Check size={16} weight="bold" /> : <Copy size={16} />}
+      </button>
+    </Tooltip>
+  );
+}
+
 interface ConfigFieldProps {
   field: ConfigFieldType;
   value: unknown;
@@ -28,6 +64,7 @@ interface ConfigFieldProps {
   highlighted?: boolean | undefined;
   onChange: (key: string, value: unknown) => void;
   onToggleSecret?: ((key: string) => void) | undefined;
+  onRefreshPairing?: ((fieldKey: string) => void) | undefined;
   /** Plugin name, needed for OAuth fields to initiate flows */
   pluginName?: string | undefined;
   /** All current config values, needed for OAuth dependsOn checks */
@@ -35,7 +72,7 @@ interface ConfigFieldProps {
 }
 
 export const ConfigField = forwardRef<HTMLDivElement, ConfigFieldProps>(
-  ({ field, value, error, showSecret, highlighted, onChange, onToggleSecret, pluginName, configValues }, ref) => {
+  ({ field, value, error, showSecret, highlighted, onChange, onToggleSecret, onRefreshPairing, pluginName, configValues }, ref) => {
     const theme = useTheme();
 
     const wrapperCss = css`
@@ -284,6 +321,166 @@ export const ConfigField = forwardRef<HTMLDivElement, ConfigFieldProps>(
             configValues={configValues ?? {}}
             highlighted={highlighted}
           />
+        </div>
+      );
+    }
+
+    // Info (read-only display with copy button)
+    if (field.type === 'info') {
+      const displayValue = value != null ? String(value) : '';
+      const isEmpty = !displayValue;
+      return (
+        <div ref={ref} css={wrapperCss}>
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+            <label css={css`
+              font-size: ${theme.typography.fontSize.sm};
+              font-weight: ${theme.typography.fontWeight.medium};
+              color: ${theme.colors.text.secondary};
+            `}>
+              {field.label}
+            </label>
+            <div css={css`
+              display: flex;
+              align-items: center;
+              gap: ${theme.spacing[3]};
+              padding: ${theme.spacing[3]} ${theme.spacing[4]};
+              background: ${theme.colors.background.paper};
+              border: 1px solid ${theme.colors.border.default};
+              border-radius: ${theme.borderRadius.default};
+              min-height: 42px;
+            `}>
+              {isEmpty ? (
+                <Typography.SmallBody css={css`
+                  color: ${theme.colors.text.hint};
+                  font-style: italic;
+                  flex: 1;
+                `}>
+                  {field.placeholder ?? 'Waiting for value...'}
+                </Typography.SmallBody>
+              ) : (
+                <>
+                  <code css={css`
+                    flex: 1;
+                    font-family: ${theme.typography.fontFamily.mono};
+                    font-size: ${theme.typography.fontSize.lg};
+                    font-weight: ${theme.typography.fontWeight.semibold};
+                    color: ${theme.colors.text.primary};
+                    letter-spacing: 0.15em;
+                    user-select: all;
+                  `}>
+                    {displayValue}
+                  </code>
+                  <CopyButton value={displayValue} />
+                </>
+              )}
+            </div>
+            {field.helpText && (
+              <Typography.Caption as="p" color="hint">{field.helpText}</Typography.Caption>
+            )}
+            {helpLinkEl}
+          </div>
+        </div>
+      );
+    }
+
+    // Pairing (read-only generated code with copy + refresh)
+    if (field.type === 'pairing') {
+      const displayValue = value != null ? String(value) : '';
+      const isEmpty = !displayValue;
+      return (
+        <div ref={ref} css={wrapperCss}>
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+            <label css={css`
+              font-size: ${theme.typography.fontSize.sm};
+              font-weight: ${theme.typography.fontWeight.medium};
+              color: ${theme.colors.text.secondary};
+            `}>
+              {field.label}
+            </label>
+            <div css={css`
+              display: flex;
+              align-items: center;
+              gap: ${theme.spacing[3]};
+              padding: ${theme.spacing[4]} ${theme.spacing[5]};
+              background: ${theme.colors.background.elevated};
+              border: 2px dashed ${isEmpty ? theme.colors.border.default : theme.colors.border.focus};
+              border-radius: ${theme.borderRadius.lg};
+              min-height: 56px;
+              justify-content: center;
+            `}>
+              {isEmpty ? (
+                onRefreshPairing ? (
+                  <button
+                    type="button"
+                    onClick={() => onRefreshPairing(field.key)}
+                    css={css`
+                      cursor: pointer;
+                      padding: ${theme.spacing[2]} ${theme.spacing[4]};
+                      background: ${theme.colors.accent};
+                      color: white;
+                      border: none;
+                      border-radius: ${theme.borderRadius.default};
+                      font-size: ${theme.typography.fontSize.sm};
+                      font-weight: ${theme.typography.fontWeight.medium};
+                      display: flex;
+                      align-items: center;
+                      gap: ${theme.spacing[2]};
+                      &:hover { opacity: 0.9; }
+                    `}
+                  >
+                    <ArrowsClockwise size={16} />
+                    Generate Pairing Code
+                  </button>
+                ) : (
+                  <Typography.SmallBody css={css`color: ${theme.colors.text.hint};`}>
+                    {field.placeholder ?? 'No code generated'}
+                  </Typography.SmallBody>
+                )
+              ) : (
+                <>
+                  <code css={css`
+                    flex: 1;
+                    font-family: ${theme.typography.fontFamily.mono};
+                    font-size: 24px;
+                    font-weight: ${theme.typography.fontWeight.bold};
+                    color: ${theme.colors.text.primary};
+                    letter-spacing: 0.25em;
+                    text-align: center;
+                    user-select: all;
+                  `}>
+                    {displayValue}
+                  </code>
+                  <div css={css`display: flex; gap: ${theme.spacing[1]}; flex-shrink: 0;`}>
+                    <CopyButton value={displayValue} />
+                    {onRefreshPairing && (
+                      <Tooltip content="Generate new code" position="top">
+                        <button
+                          type="button"
+                          onClick={() => onRefreshPairing(field.key)}
+                          css={css`
+                            cursor: pointer;
+                            padding: 4px;
+                            color: ${theme.colors.text.hint};
+                            background: none;
+                            border: none;
+                            display: flex;
+                            flex-shrink: 0;
+                            &:hover { color: ${theme.colors.text.primary}; }
+                          `}
+                        >
+                          <ArrowsClockwise size={16} />
+                        </button>
+                      </Tooltip>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+            {field.helpText && (
+              <Typography.Caption as="p" color="hint">{field.helpText}</Typography.Caption>
+            )}
+            {helpLinkEl}
+          </div>
         </div>
       );
     }

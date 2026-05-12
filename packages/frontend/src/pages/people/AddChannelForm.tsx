@@ -35,9 +35,9 @@ export function AddChannelForm({
       });
     }
 
-    // Add installed package types
+    // Add installed package types (skip channels that resolve to primary automatically)
     for (const pkg of packages) {
-      if (!existingChannels.includes(pkg.channelType)) {
+      if (!existingChannels.includes(pkg.channelType) && pkg.identity.resolution !== 'primary' && pkg.identity.identifierLabel) {
         types.push({
           type: pkg.channelType,
           displayName: pkg.displayName,

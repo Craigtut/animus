@@ -13,6 +13,7 @@ import { PHASE_LABELS } from './types';
 // ============================================================================
 
 const PHASE_START_EVENTS: Record<string, PhaseName> = {
+  gather_start: 'gather',
   thought_start: 'thought',
   agentic_start: 'agentic_loop',
   reflect_start: 'reflect',
@@ -20,6 +21,7 @@ const PHASE_START_EVENTS: Record<string, PhaseName> = {
 };
 
 const PHASE_END_EVENTS: Record<string, PhaseName> = {
+  gather_end: 'gather',
   thought_end: 'thought',
   agentic_end: 'agentic_loop',
   reflect_end: 'reflect',
@@ -117,15 +119,17 @@ export function groupEventsIntoPhases(
     phases[currentPhase]!.events.push(event);
   }
 
-  // Infer gather phase timing
-  if (phases.gather.events.length > 0) {
-    phases.gather.startMs = phases.gather.events[0]!.relativeMs;
-    const gatherEnd = phases.thought.startMs ?? phases.gather.events[phases.gather.events.length - 1]!.relativeMs;
-    phases.gather.endMs = gatherEnd;
-    phases.gather.durationMs = gatherEnd - phases.gather.startMs;
-    phases.gather.status = 'complete';
-  } else {
-    phases.gather.status = 'skipped';
+  // Infer gather phase timing (fallback for ticks without explicit gather_start/gather_end)
+  if (phases.gather.status === 'pending' || phases.gather.status === 'running') {
+    if (phases.gather.events.length > 0) {
+      phases.gather.startMs = phases.gather.events[0]!.relativeMs;
+      const gatherEnd = phases.thought.startMs ?? phases.gather.events[phases.gather.events.length - 1]!.relativeMs;
+      phases.gather.endMs = gatherEnd;
+      phases.gather.durationMs = gatherEnd - phases.gather.startMs;
+      phases.gather.status = 'complete';
+    } else {
+      phases.gather.status = 'skipped';
+    }
   }
 
   // Mark phases that never started as skipped

@@ -6,27 +6,39 @@ import {
   Wrench,
   CaretRight,
   CaretDown,
-  ShieldCheck,
-  ChatCircle,
-  Lightning,
-  Warning,
   ShieldWarning,
+  Warning,
+  ChatCircleDots,
+  Globe,
+  FolderOpen,
+  Terminal,
+  Key,
+  PuzzlePiece,
+  Lock,
   type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
-import { Typography, Badge, Button, Modal } from '../ui';
+import { Typography, Badge, Button, Modal, Toggle } from '../ui';
 import { trpc } from '../../utils/trpc';
 import type { Theme } from '../../styles/theme';
-import type { ToolPermission, ToolPermissionMode, RiskTier } from '@animus-labs/shared';
+import type { ToolPermission, ToolPermissionMode } from '@animus-labs/shared';
+import {
+  TOOL_UI_CONFIG,
+  TOOL_CATEGORY_META,
+  getToolUIConfig,
+  type ToolUICategory,
+} from '@animus-labs/shared';
 
 // ============================================================================
-// Risk tier visual config
+// Category visual config
 // ============================================================================
 
-const riskTierConfig: Record<RiskTier, { color: (t: Theme) => string; icon: PhosphorIcon; label: string }> = {
-  safe: { color: (t) => t.colors.success.main, icon: ShieldCheck, label: 'Safe' },
-  communicates: { color: (t) => t.colors.info.main, icon: ChatCircle, label: 'Communicates' },
-  acts: { color: (t) => t.colors.warning.main, icon: Lightning, label: 'Acts' },
-  sensitive: { color: (t) => t.colors.error.main, icon: Warning, label: 'Sensitive' },
+const categoryIcons: Record<ToolUICategory, PhosphorIcon> = {
+  messaging: ChatCircleDots,
+  web: Globe,
+  files: FolderOpen,
+  shell: Terminal,
+  credentials: Key,
+  plugin: PuzzlePiece,
 };
 
 const modeLabels: Record<ToolPermissionMode, string> = {
@@ -69,7 +81,7 @@ const defaultSensitiveWarning = {
 };
 
 // ============================================================================
-// SensitiveToolWarningDialog — confirmation before enabling always_allow
+// SensitiveToolWarningDialog
 // ============================================================================
 
 function SensitiveToolWarningDialog({
@@ -84,20 +96,15 @@ function SensitiveToolWarningDialog({
   toolNames: string[];
 }) {
   const theme = useTheme();
-
   const isBulk = toolNames.length > 1;
 
   return (
     <Modal open={open} onClose={onClose} maxWidth="520px">
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
-        {/* Header */}
         <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
           <div css={css`
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 40px;
-            height: 40px;
+            display: flex; align-items: center; justify-content: center;
+            width: 40px; height: 40px;
             border-radius: ${theme.borderRadius.default};
             background: ${theme.colors.error.main}1a;
             flex-shrink: 0;
@@ -106,9 +113,7 @@ function SensitiveToolWarningDialog({
           </div>
           <div>
             <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
-              {isBulk
-                ? `Unrestrict ${toolNames.length} sensitive tools?`
-                : 'Remove safety gate?'}
+              {isBulk ? `Unrestrict ${toolNames.length} sensitive tools?` : 'Remove safety gate?'}
             </Typography.Subtitle>
             <Typography.Caption color="hint">
               This change has serious security implications
@@ -116,7 +121,6 @@ function SensitiveToolWarningDialog({
           </div>
         </div>
 
-        {/* Per-tool warnings */}
         <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
           {toolNames.map((toolName) => {
             const warning = sensitiveToolWarnings[toolName] ?? defaultSensitiveWarning;
@@ -126,35 +130,19 @@ function SensitiveToolWarningDialog({
                   <Typography.SmallBodyAlt css={css`
                     font-weight: ${theme.typography.fontWeight.medium};
                     margin-bottom: ${theme.spacing[2]};
-                    display: flex;
-                    align-items: center;
-                    gap: ${theme.spacing[1.5]};
+                    display: flex; align-items: center; gap: ${theme.spacing[1.5]};
                   `}>
                     <Warning size={14} css={css`color: ${theme.colors.error.main};`} />
                     {warning.title}
                   </Typography.SmallBodyAlt>
                 )}
-                <div css={css`
-                  display: flex;
-                  flex-direction: column;
-                  gap: ${theme.spacing[2]};
-                `}>
+                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
                   {warning.risks.map((risk, i) => (
-                    <div
-                      key={i}
-                      css={css`
-                        display: flex;
-                        gap: ${theme.spacing[2]};
-                        align-items: flex-start;
-                      `}
-                    >
+                    <div key={i} css={css`display: flex; gap: ${theme.spacing[2]}; align-items: flex-start;`}>
                       <div css={css`
-                        width: 4px;
-                        min-height: 4px;
-                        border-radius: 50%;
+                        width: 4px; min-height: 4px; border-radius: 50%;
                         background: ${theme.colors.error.main};
-                        flex-shrink: 0;
-                        margin-top: 8px;
+                        flex-shrink: 0; margin-top: 8px;
                       `} />
                       <Typography.SmallBody color="secondary" css={css`
                         line-height: ${theme.typography.lineHeight.relaxed};
@@ -169,41 +157,27 @@ function SensitiveToolWarningDialog({
           })}
         </div>
 
-        {/* Caution banner */}
         <div css={css`
           padding: ${theme.spacing[3]} ${theme.spacing[4]};
           background: ${theme.colors.error.main}0d;
           border: 1px solid ${theme.colors.error.main}26;
           border-radius: ${theme.borderRadius.default};
-          display: flex;
-          align-items: flex-start;
-          gap: ${theme.spacing[2]};
+          display: flex; align-items: flex-start; gap: ${theme.spacing[2]};
         `}>
           <Warning size={16} weight="fill" css={css`
-            color: ${theme.colors.error.main};
-            flex-shrink: 0;
-            margin-top: 2px;
+            color: ${theme.colors.error.main}; flex-shrink: 0; margin-top: 2px;
           `} />
           <Typography.SmallBody css={css`color: ${theme.colors.error.main};`}>
             Only change this setting if you fully understand the risks. You can always change it back to "Ask First" later.
           </Typography.SmallBody>
         </div>
 
-        {/* Actions */}
         <div css={css`display: flex; gap: ${theme.spacing[3]}; justify-content: flex-end;`}>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            Keep "Ask First"
-          </Button>
+          <Button variant="ghost" size="sm" onClick={onClose}>Keep "Ask First"</Button>
           <Button
             size="sm"
-            onClick={() => {
-              onConfirm();
-              onClose();
-            }}
-            css={css`
-              background: ${theme.colors.error.main};
-              &:hover { background: ${theme.colors.error.dark}; }
-            `}
+            onClick={() => { onConfirm(); onClose(); }}
+            css={css`background: ${theme.colors.error.main}; &:hover { background: ${theme.colors.error.dark}; }`}
           >
             I understand, allow always
           </Button>
@@ -214,7 +188,7 @@ function SensitiveToolWarningDialog({
 }
 
 // ============================================================================
-// ToolModeSelector — segmented control for permission mode
+// ToolModeSelector — segmented control for Off / Ask / Always Allow
 // ============================================================================
 
 function ToolModeSelector({
@@ -238,14 +212,12 @@ function ToolModeSelector({
   };
 
   return (
-    <div
-      css={css`
-        display: inline-flex;
-        border-radius: ${theme.borderRadius.default};
-        border: 1px solid ${theme.colors.border.default};
-        overflow: hidden;
-      `}
-    >
+    <div css={css`
+      display: inline-flex;
+      border-radius: ${theme.borderRadius.default};
+      border: 1px solid ${theme.colors.border.default};
+      overflow: hidden;
+    `}>
       {modes.map((mode) => {
         const isActive = value === mode;
         const activeColor = getModeColor(mode);
@@ -263,12 +235,8 @@ function ToolModeSelector({
               white-space: nowrap;
               border-right: 1px solid ${theme.colors.border.default};
               &:last-child { border-right: none; }
-
               ${isActive
-                ? css`
-                    background: ${activeColor}1a;
-                    color: ${activeColor};
-                  `
+                ? css`background: ${activeColor}1a; color: ${activeColor};`
                 : css`
                     background: transparent;
                     color: ${theme.colors.text.hint};
@@ -277,10 +245,7 @@ function ToolModeSelector({
                       background: ${theme.colors.background.elevated};
                     }
                   `}
-
-              &:disabled {
-                opacity: 0.5;
-              }
+              &:disabled { opacity: 0.5; }
             `}
           >
             {modeLabels[mode]}
@@ -292,37 +257,18 @@ function ToolModeSelector({
 }
 
 // ============================================================================
-// ToolRow — single tool with risk indicator, name, description, and selector
+// ToolRow — single tool with name, description, and mode selector
 // ============================================================================
 
-function ToolRow({ tool }: { tool: ToolPermission }) {
+function ToolRow({ tool, compact }: { tool: ToolPermission; compact?: boolean }) {
   const theme = useTheme();
   const utils = trpc.useUtils();
   const [showWarning, setShowWarning] = useState(false);
   const mutation = trpc.tools.updatePermission.useMutation({
     onSuccess: () => utils.tools.listTools.invalidate(),
   });
-  const tierConfig = riskTierConfig[tool.riskTier];
-
-  const formatLastUsed = (ts: string | null) => {
-    if (!ts) return null;
-    const diff = Date.now() - new Date(ts).getTime();
-    const hours = Math.floor(diff / 3600000);
-    if (hours < 1) return 'Used just now';
-    if (hours < 24) return `Used ${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `Used ${days}d ago`;
-  };
-
-  const usageText = [
-    tool.usageCount > 0 ? `Used ${tool.usageCount} time${tool.usageCount !== 1 ? 's' : ''}` : null,
-    formatLastUsed(tool.lastUsedAt),
-  ]
-    .filter(Boolean)
-    .join(' \u00b7 ');
 
   const handleModeChange = useCallback((mode: ToolPermissionMode) => {
-    // Gate sensitive tools behind a confirmation dialog when enabling always_allow
     if (mode === 'always_allow' && tool.riskTier === 'sensitive') {
       setShowWarning(true);
       return;
@@ -332,60 +278,34 @@ function ToolRow({ tool }: { tool: ToolPermission }) {
 
   return (
     <>
-      <div
-        css={css`
-          display: flex;
-          align-items: center;
-          gap: ${theme.spacing[3]};
-          padding: ${theme.spacing[2]} 0;
+      <div css={css`
+        display: flex;
+        align-items: center;
+        gap: ${theme.spacing[3]};
+        padding: ${compact ? theme.spacing[1.5] : theme.spacing[2]} 0;
 
-          @media (max-width: ${theme.breakpoints.md}) {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: ${theme.spacing[2]};
-          }
-        `}
-      >
-        {/* Risk tier dot */}
-        <div
-          css={css`
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: ${tierConfig.color(theme)};
-            flex-shrink: 0;
-          `}
-          title={tierConfig.label}
-        />
-
-        {/* Tool info */}
+        @media (max-width: ${theme.breakpoints.md}) {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: ${theme.spacing[2]};
+        }
+      `}>
         <div css={css`flex: 1; min-width: 0;`}>
           <Typography.SmallBody as="div" css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
             {tool.displayName}
           </Typography.SmallBody>
           <Typography.Caption as="div" color="hint" css={css`
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
           `}>
             {tool.description}
           </Typography.Caption>
-          {usageText && (
-            <Typography.Caption as="div" color="hint" css={css`margin-top: 2px;`}>
-              {usageText}
-            </Typography.Caption>
-          )}
         </div>
-
-        {/* Mode selector */}
         <ToolModeSelector
           value={tool.mode}
           onChange={handleModeChange}
           disabled={mutation.isPending}
         />
       </div>
-
-      {/* Sensitive tool warning dialog */}
       <SensitiveToolWarningDialog
         open={showWarning}
         onClose={() => setShowWarning(false)}
@@ -397,97 +317,152 @@ function ToolRow({ tool }: { tool: ToolPermission }) {
 }
 
 // ============================================================================
-// ToolGroup — collapsible group with header and "Set all to" actions
+// ProactiveToggle — simplified on/off for proactive messaging
 // ============================================================================
 
-function ToolGroup({ source, tools }: { source: string; tools: ToolPermission[] }) {
+function ProactiveToggle({ tool }: { tool: ToolPermission }) {
   const theme = useTheme();
-  const [expanded, setExpanded] = useState(true);
-  const [showSetAll, setShowSetAll] = useState(false);
-  const [showBulkWarning, setShowBulkWarning] = useState(false);
   const utils = trpc.useUtils();
-  const groupMutation = trpc.tools.updateGroupPermission.useMutation({
-    onSuccess: () => {
-      utils.tools.listTools.invalidate();
-      setShowSetAll(false);
-    },
+  const mutation = trpc.tools.updatePermission.useMutation({
+    onSuccess: () => utils.tools.listTools.invalidate(),
   });
 
-  const displayName = useMemo(() => {
-    if (source === 'animus:core') return 'Core Tools';
-    if (source.startsWith('cortex:')) return 'Built-in Tools';
-    if (source.startsWith('plugin:')) return `Plugin: ${source.slice(7)}`;
-    return source;
-  }, [source]);
-
-  // Sensitive tools in this group that aren't already always_allow
-  const sensitiveToolNames = useMemo(
-    () => tools
-      .filter((t) => t.riskTier === 'sensitive' && t.mode !== 'always_allow')
-      .map((t) => t.toolName),
-    [tools],
-  );
-
-  const handleSetAll = useCallback((mode: ToolPermissionMode) => {
-    // If setting to always_allow and there are sensitive tools not yet unrestricted, warn first
-    if (mode === 'always_allow' && sensitiveToolNames.length > 0) {
-      setShowBulkWarning(true);
-      return;
-    }
-    groupMutation.mutate({ source, mode });
-  }, [source, sensitiveToolNames, groupMutation]);
+  const isOn = tool.mode === 'always_allow';
 
   return (
-    <div css={css`margin-bottom: ${theme.spacing[4]};`}>
-      {/* Group header */}
-      <div
+    <div css={css`
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: ${theme.spacing[2]} 0;
+    `}>
+      <div css={css`flex: 1; min-width: 0; margin-right: ${theme.spacing[4]};`}>
+        <Typography.SmallBody as="div" css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
+          Proactive messages
+        </Typography.SmallBody>
+        <Typography.Caption as="div" color="hint">
+          Allow Animus to message you first, without waiting for you to start a conversation.
+        </Typography.Caption>
+      </div>
+      <Toggle
+        checked={isOn}
+        onChange={(checked) => mutation.mutate({
+          toolName: tool.toolName,
+          mode: checked ? 'always_allow' : 'off',
+        })}
+        disabled={mutation.isPending}
+      />
+    </div>
+  );
+}
+
+// ============================================================================
+// CategorySection — a functional group of tools
+// ============================================================================
+
+function CategorySection({
+  category,
+  tools,
+  pluginName,
+}: {
+  category: ToolUICategory;
+  tools: ToolPermission[];
+  pluginName?: string;
+}) {
+  const theme = useTheme();
+  const meta = TOOL_CATEGORY_META[category];
+  const Icon = categoryIcons[category];
+
+  if (category === 'messaging') {
+    const proactiveTool = tools.find((t) => t.toolName === 'send_proactive_message');
+    if (!proactiveTool) return null;
+    return (
+      <div css={css`
+        padding: ${theme.spacing[4]};
+        border: 1px solid ${theme.colors.border.light};
+        border-radius: ${theme.borderRadius.default};
+        background: ${theme.colors.background.paper};
+      `}>
+        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; margin-bottom: ${theme.spacing[2]};`}>
+          <Icon size={18} css={css`color: ${theme.colors.text.secondary};`} />
+          <Typography.SmallBody as="div" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+            {meta.label}
+          </Typography.SmallBody>
+        </div>
+        <Typography.Caption as="div" color="hint" css={css`margin-bottom: ${theme.spacing[2]};`}>
+          {meta.description}
+        </Typography.Caption>
+        <ProactiveToggle tool={proactiveTool} />
+      </div>
+    );
+  }
+
+  return (
+    <div css={css`
+      padding: ${theme.spacing[4]};
+      border: 1px solid ${theme.colors.border.light};
+      border-radius: ${theme.borderRadius.default};
+      background: ${theme.colors.background.paper};
+    `}>
+      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; margin-bottom: ${theme.spacing[1]};`}>
+        <Icon size={18} css={css`color: ${theme.colors.text.secondary};`} />
+        <Typography.SmallBody as="div" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
+          {pluginName ?? meta.label}
+        </Typography.SmallBody>
+        {tools.length > 1 && <Badge variant="default">{tools.length}</Badge>}
+      </div>
+      <Typography.Caption as="div" color="hint" css={css`margin-bottom: ${theme.spacing[1]};`}>
+        {pluginName ? `Tools provided by the ${pluginName} plugin.` : meta.description}
+      </Typography.Caption>
+      {tools.map((tool) => (
+        <ToolRow key={tool.toolName} tool={tool} compact={tools.length > 3} />
+      ))}
+    </div>
+  );
+}
+
+// ============================================================================
+// LockedToolsDisclosure — expandable section showing infrastructure tools
+// ============================================================================
+
+function LockedToolsDisclosure({ tools }: { tools: ToolPermission[] }) {
+  const theme = useTheme();
+  const [expanded, setExpanded] = useState(false);
+
+  if (tools.length === 0) return null;
+
+  return (
+    <div css={css`
+      border: 1px solid ${theme.colors.border.light};
+      border-radius: ${theme.borderRadius.default};
+      overflow: hidden;
+    `}>
+      <button
+        onClick={() => setExpanded((e) => !e)}
         css={css`
+          width: 100%;
           display: flex;
           align-items: center;
           gap: ${theme.spacing[2]};
-          padding: ${theme.spacing[1.5]} 0;
+          padding: ${theme.spacing[3]} ${theme.spacing[4]};
+          background: transparent;
+          border: none;
           cursor: pointer;
-          user-select: none;
+          text-align: left;
+          &:hover { background: ${theme.colors.background.elevated}; }
         `}
-        onClick={() => setExpanded((e) => !e)}
       >
         {expanded ? <CaretDown size={14} /> : <CaretRight size={14} />}
-        <Typography.SmallBody as="span" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
-          {displayName}
-        </Typography.SmallBody>
+        <Lock size={14} css={css`color: ${theme.colors.text.hint};`} />
+        <Typography.Caption as="span" color="secondary">
+          Show all tools
+        </Typography.Caption>
         <Badge variant="default">{tools.length}</Badge>
+        <Typography.Caption as="span" color="hint" css={css`margin-left: auto;`}>
+          Always allowed
+        </Typography.Caption>
+      </button>
 
-        {/* Set all button */}
-        <div
-          css={css`margin-left: auto;`}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {showSetAll ? (
-            <div css={css`display: flex; gap: ${theme.spacing[1]};`}>
-              {(['off', 'ask', 'always_allow'] as ToolPermissionMode[]).map((mode) => (
-                <Button
-                  key={mode}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleSetAll(mode)}
-                  disabled={groupMutation.isPending}
-                >
-                  {modeLabels[mode]}
-                </Button>
-              ))}
-              <Button variant="ghost" size="sm" onClick={() => setShowSetAll(false)}>
-                Cancel
-              </Button>
-            </div>
-          ) : (
-            <Button variant="ghost" size="sm" onClick={() => setShowSetAll(true)}>
-              Set all to...
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* Tool rows */}
       <AnimatePresence initial={false}>
         {expanded && (
           <motion.div
@@ -497,28 +472,24 @@ function ToolGroup({ source, tools }: { source: string; tools: ToolPermission[] 
             transition={{ duration: 0.2, ease: 'easeOut' }}
             css={css`overflow: hidden;`}
           >
-            <div
-              css={css`
-                padding-left: ${theme.spacing[3]};
-                border-left: 1px solid ${theme.colors.border.light};
-                margin-left: ${theme.spacing[1]};
-              `}
-            >
+            <div css={css`
+              padding: 0 ${theme.spacing[4]} ${theme.spacing[3]};
+              border-top: 1px solid ${theme.colors.border.light};
+            `}>
+              <Typography.Caption as="div" color="hint" css={css`
+                padding: ${theme.spacing[3]} 0 ${theme.spacing[2]};
+                line-height: ${theme.typography.lineHeight.relaxed};
+              `}>
+                Infrastructure tools that Animus needs to function. These are always allowed and
+                typically do not need to be changed.
+              </Typography.Caption>
               {tools.map((tool) => (
-                <ToolRow key={tool.toolName} tool={tool} />
+                <ToolRow key={tool.toolName} tool={tool} compact />
               ))}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Bulk sensitive warning dialog */}
-      <SensitiveToolWarningDialog
-        open={showBulkWarning}
-        onClose={() => setShowBulkWarning(false)}
-        onConfirm={() => groupMutation.mutate({ source, mode: 'always_allow' })}
-        toolNames={sensitiveToolNames}
-      />
     </div>
   );
 }
@@ -531,75 +502,87 @@ export function ToolsSection() {
   const theme = useTheme();
   const { data: tools, isLoading } = trpc.tools.listTools.useQuery();
 
-  // Group tools by source
-  const groups = useMemo(() => {
-    if (!tools) return [];
-    const map = new Map<string, ToolPermission[]>();
+  const { visibleCategories, lockedTools, pluginGroups } = useMemo(() => {
+    if (!tools) return { visibleCategories: [], lockedTools: [], pluginGroups: [] };
+
+    const locked: ToolPermission[] = [];
+    const categoryMap = new Map<ToolUICategory, ToolPermission[]>();
+    const plugins = new Map<string, ToolPermission[]>();
+
     for (const tool of tools) {
-      const existing = map.get(tool.toolSource) ?? [];
-      existing.push(tool);
-      map.set(tool.toolSource, existing);
+      const config = getToolUIConfig(tool.toolName, tool.toolSource);
+
+      if (config.visibility === 'locked') {
+        locked.push(tool);
+        continue;
+      }
+
+      if (tool.toolSource.startsWith('plugin:')) {
+        const pluginName = tool.toolSource.slice(7);
+        const existing = plugins.get(pluginName) ?? [];
+        existing.push(tool);
+        plugins.set(pluginName, existing);
+        continue;
+      }
+
+      if (config.category) {
+        const existing = categoryMap.get(config.category) ?? [];
+        existing.push(tool);
+        categoryMap.set(config.category, existing);
+      }
     }
-    // Sort: built-in (cortex) first, then core (animus), then plugin:*
-    const entries = Array.from(map.entries());
-    entries.sort(([a], [b]) => {
-      const order = (s: string) => (s.startsWith('cortex:') ? 0 : s === 'animus:core' ? 1 : 2);
-      return order(a) - order(b) || a.localeCompare(b);
-    });
-    return entries;
+
+    const sortedCategories = Array.from(categoryMap.entries())
+      .sort(([a], [b]) => (TOOL_CATEGORY_META[a]?.order ?? 99) - (TOOL_CATEGORY_META[b]?.order ?? 99));
+
+    const sortedPlugins = Array.from(plugins.entries())
+      .sort(([a], [b]) => a.localeCompare(b));
+
+    return {
+      visibleCategories: sortedCategories,
+      lockedTools: locked,
+      pluginGroups: sortedPlugins,
+    };
   }, [tools]);
 
   return (
-    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
+    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
       {/* Header */}
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
         <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
           <Wrench size={20} css={css`color: ${theme.colors.text.secondary};`} />
           <Typography.Subtitle as="h2" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
-            Tools
+            Tools & Permissions
           </Typography.Subtitle>
         </div>
         <Typography.SmallBody color="secondary" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
-          Control which tools Animus can use and when it needs your permission.
+          Control what Animus can do and when it needs your permission.
         </Typography.SmallBody>
       </div>
 
-      {/* Risk tier legend */}
-      <div css={css`
-        display: flex;
-        flex-wrap: wrap;
-        gap: ${theme.spacing[4]};
-        padding: ${theme.spacing[3]} ${theme.spacing[4]};
-        border-radius: ${theme.borderRadius.default};
-        background: ${theme.colors.background.paper};
-        border: 1px solid ${theme.colors.border.light};
-      `}>
-        {(Object.entries(riskTierConfig) as [RiskTier, typeof riskTierConfig[RiskTier]][]).map(([tier, config]) => (
-          <div key={tier} css={css`display: flex; align-items: center; gap: ${theme.spacing[1.5]};`}>
-            <div css={css`
-              width: 8px;
-              height: 8px;
-              border-radius: 50%;
-              background: ${config.color(theme)};
-            `} />
-            <Typography.Caption as="span" color="secondary">{config.label}</Typography.Caption>
-          </div>
-        ))}
-      </div>
-
-      {/* Tool groups */}
+      {/* Content */}
       {isLoading ? (
         <Typography.SmallBody color="hint">Loading tools...</Typography.SmallBody>
-      ) : groups.length === 0 ? (
-        <Typography.SmallBody color="hint">
-          No tools registered yet. Tools will appear here as they are discovered.
-        </Typography.SmallBody>
       ) : (
-        <div>
-          {groups.map(([source, groupTools]) => (
-            <ToolGroup key={source} source={source} tools={groupTools} />
+        <>
+          {/* Visible category sections */}
+          {visibleCategories.map(([category, categoryTools]) => (
+            <CategorySection key={category} category={category} tools={categoryTools} />
           ))}
-        </div>
+
+          {/* Plugin groups */}
+          {pluginGroups.map(([pluginName, pluginTools]) => (
+            <CategorySection
+              key={pluginName}
+              category="plugin"
+              tools={pluginTools}
+              pluginName={pluginName}
+            />
+          ))}
+
+          {/* Locked tools disclosure */}
+          <LockedToolsDisclosure tools={lockedTools} />
+        </>
       )}
     </div>
   );
