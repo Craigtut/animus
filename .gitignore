@@ -6,6 +6,7 @@ dist/
 build/
 target/
 *.tsbuildinfo
+benchmarks/*/Cargo.lock
 
 # Environment files
 .env
