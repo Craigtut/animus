@@ -21,6 +21,7 @@ import {
   type ToolContentDetails,
   type ObservationalMemoryState,
   resolveCacheRetention,
+  type ThinkingLevel,
 } from '@animus-labs/cortex';
 
 import { getSystemDb, getHeartbeatDb, getContactsDb, getMessagesDb, getMemoryDb, getPersonaDb, getAgentLogsDb } from '../db/index.js';
@@ -430,12 +431,14 @@ export async function createCortexMind(
     : undefined;
 
   const cortexDiagnostics = settingsAny['cortexDiagnostics'] === true;
+  const savedThinkingLevel = (settingsAny['cortexThinkingLevel'] as string | undefined) ?? 'high';
 
   const cortexAgent = await CortexAgent.create({
     model,
     workingDirectory: workingDir,
     getApiKey,
     slots: [...MIND_SLOT_NAMES],
+    thinkingLevel: savedThinkingLevel as ThinkingLevel,
     workingTags: { enabled: true },
     budgetGuard: {
       maxTurns: (settingsAny['cortexMaxTurns'] as number | undefined) ?? 50,
@@ -673,7 +676,7 @@ function wireProviderChangeListeners(
 
   eventBus.on('cortex:thinking-level-changed', ({ level }) => {
     log.info(`Thinking level changed to "${level}"`);
-    cortexAgent.setThinkingLevel(level);
+    cortexAgent.setThinkingLevel(level as ThinkingLevel);
   });
 
   eventBus.on('cortex:context-limit-changed', ({ limit }) => {

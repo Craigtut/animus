@@ -112,7 +112,7 @@ export function getCortexSettings(db: Database.Database): CortexSettings {
   return {
     cortexProvider: row?.cortex_provider ?? null,
     cortexModel: row?.cortex_model ?? null,
-    cortexThinkingLevel: row?.cortex_thinking_level ?? 'off',
+    cortexThinkingLevel: row?.cortex_thinking_level ?? 'high',
     cortexContextWindowLimit: row?.cortex_context_window_limit ?? null,
     utilityModel: row?.utility_model ?? 'default',
   };
