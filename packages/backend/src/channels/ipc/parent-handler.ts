@@ -22,6 +22,11 @@ import type {
   PongMessage,
   PresenceUpdateMessage,
   HistoryResponseMessage,
+  SpeechTranscribeMessage,
+  SpeechSynthesizeMessage,
+  SpeechStatusMessage,
+  SpeechVoicesMessage,
+  ConfigUpdateRequestMessage,
 } from './protocol.js';
 
 export interface ParentHandlerDeps {
@@ -40,6 +45,11 @@ export interface ParentHandlerDeps {
   onActionResponse: (msg: ActionResponseMessage) => void;
   onPresenceUpdate: (msg: PresenceUpdateMessage) => void;
   onHistoryResponse: (msg: HistoryResponseMessage) => void;
+  onSpeechTranscribe: (msg: SpeechTranscribeMessage) => void;
+  onSpeechSynthesize: (msg: SpeechSynthesizeMessage) => void;
+  onSpeechStatus: (msg: SpeechStatusMessage) => void;
+  onSpeechVoices: (msg: SpeechVoicesMessage) => void;
+  onConfigUpdateRequest: (msg: ConfigUpdateRequestMessage) => void;
   onError: (msg: ErrorMessage) => void;
   onStopAck: () => void;
   onPong: (msg: PongMessage) => void;
@@ -127,6 +137,31 @@ export function createParentHandler(deps: ParentHandlerDeps): (raw: unknown) => 
       case 'history_response':
         log.debug(`History response [${msg.id}]: ${msg.ok ? 'ok' : msg.error}`);
         deps.onHistoryResponse(msg);
+        break;
+
+      case 'speech_transcribe':
+        log.debug(`Speech transcribe request [${msg.id}]`);
+        deps.onSpeechTranscribe(msg);
+        break;
+
+      case 'speech_synthesize':
+        log.debug(`Speech synthesize request [${msg.id}]`);
+        deps.onSpeechSynthesize(msg);
+        break;
+
+      case 'speech_status':
+        log.debug(`Speech status request [${msg.id}]`);
+        deps.onSpeechStatus(msg);
+        break;
+
+      case 'speech_voices':
+        log.debug(`Speech voices request [${msg.id}]`);
+        deps.onSpeechVoices(msg);
+        break;
+
+      case 'config_update_request':
+        log.debug(`Config update request [${msg.id}]`);
+        deps.onConfigUpdateRequest(msg);
         break;
 
       case 'error':

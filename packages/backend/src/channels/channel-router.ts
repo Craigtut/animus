@@ -57,13 +57,27 @@ export class ChannelRouter {
     const { channel, identifier, content, conversationId, conversationType, media, metadata, participant } = params;
 
     // Step 1: Resolve contact
-    const resolved = resolveContact(channel, identifier);
+    let resolved: { contact: Contact; isNew: boolean } | null = null;
+
+    // Channels with "primary" resolution route all messages to the primary contact
+    const channelManager = getChannelManager();
+    const manifest = channelManager.getChannelManifest(channel);
+    if (manifest?.identity?.resolution === 'primary') {
+      const contactsDb = getContactsDb();
+      const primary = contactStore.getPrimaryContact(contactsDb);
+      if (primary) {
+        resolved = { contact: primary, isNew: false };
+      }
+    }
+
     if (!resolved) {
-      // If we have participant info (and they're not a bot), treat as recognized participant
+      resolved = resolveContact(channel, identifier);
+    }
+
+    if (!resolved) {
       if (participant && !participant.isBot) {
         return this.handleRecognizedParticipant(channel, identifier, content, conversationId, conversationType, media, metadata, participant);
       }
-      // Unknown caller — send canned response, notify primary
       this.handleUnknownCaller(channel, identifier, content);
       return null;
     }
@@ -158,6 +172,7 @@ export class ChannelRouter {
     media?: Array<{ type: 'image' | 'audio' | 'video' | 'file'; path: string; filename?: string }>;
     /** Override content sent to the channel adapter. DB always stores `content`. */
     channelContent?: string;
+    replyTo?: string;
   }): Promise<Message | null> {
     const { contactId, channel, content, metadata, media } = params;
 
@@ -215,7 +230,7 @@ export class ChannelRouter {
     // Deliver via ChannelManager (handles both built-in and package channels)
     const channelManager = getChannelManager();
     try {
-      const result = await channelManager.sendToChannel(channel, contactId, params.channelContent ?? content, metadata, deliveryMedia);
+      const result = await channelManager.sendToChannel(channel, contactId, params.channelContent ?? content, metadata, deliveryMedia, params.replyTo);
       if (result.ok) {
         messageStore.updateDeliveryStatus(msgDb, msg.id, 'sent', result.externalId ? { externalId: result.externalId } : undefined);
         msg.deliveryStatus = 'sent';

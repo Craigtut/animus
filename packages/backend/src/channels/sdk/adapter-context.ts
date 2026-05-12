@@ -33,6 +33,7 @@ interface SendMessage {
   id: string;
   contactId: string;
   content: string;
+  replyTo?: string;
   metadata?: Record<string, unknown>;
   media?: Array<{
     type: 'image' | 'audio' | 'video' | 'file';
@@ -65,6 +66,43 @@ interface MediaDownloadResponseMessage {
   id: string;
   localPath?: string;
   sizeBytes?: number;
+  error?: string;
+}
+
+interface SpeechTranscribeResponseMsg {
+  type: 'speech_transcribe_response';
+  id: string;
+  text?: string;
+  error?: string;
+}
+
+interface SpeechSynthesizeResponseMsg {
+  type: 'speech_synthesize_response';
+  id: string;
+  audioBase64?: string;
+  sampleRate?: number;
+  error?: string;
+}
+
+interface SpeechStatusResponseMsg {
+  type: 'speech_status_response';
+  id: string;
+  sttAvailable: boolean;
+  ttsAvailable: boolean;
+  ffmpegAvailable: boolean;
+  voiceCount: number;
+}
+
+interface SpeechVoicesResponseMsg {
+  type: 'speech_voices_response';
+  id: string;
+  voices?: Array<{ id: string; name: string; type: string; description?: string }>;
+  error?: string;
+}
+
+interface ConfigUpdateResponseMsg {
+  type: 'config_update_response';
+  id: string;
   error?: string;
 }
 
@@ -103,6 +141,11 @@ type ParentMessage =
   | RouteRequestMessage
   | ResolveContactResponseMessage
   | MediaDownloadResponseMessage
+  | SpeechTranscribeResponseMsg
+  | SpeechSynthesizeResponseMsg
+  | SpeechStatusResponseMsg
+  | SpeechVoicesResponseMsg
+  | ConfigUpdateResponseMsg
   | ConfigUpdateMessage
   | ActionMessage
   | PingMessage
@@ -169,6 +212,28 @@ export interface AdapterContext {
     statusText?: string;
     activity?: string;
   }): void;
+  transcribeAudio(params: {
+    audioBase64: string;
+    sampleRate?: number;
+  }): Promise<{ text: string }>;
+  synthesizeText(params: {
+    text: string;
+    voiceId?: string;
+    speed?: number;
+  }): Promise<{ audioBase64: string; sampleRate: number }>;
+  getSpeechStatus(): Promise<{
+    sttAvailable: boolean;
+    ttsAvailable: boolean;
+    ffmpegAvailable: boolean;
+    voiceCount: number;
+  }>;
+  getSpeechVoices(): Promise<Array<{
+    id: string;
+    name: string;
+    type: string;
+    description?: string;
+  }>>;
+  updateConfig(updates: Record<string, unknown>): Promise<void>;
 }
 
 export interface ChannelAction {
@@ -196,7 +261,7 @@ export interface SendResult {
 export interface ChannelAdapter {
   start(): Promise<void>;
   stop(): Promise<void>;
-  send(contactId: string, content: string, metadata?: Record<string, unknown>): Promise<SendResult | void>;
+  send(contactId: string, content: string, metadata?: Record<string, unknown>, replyTo?: string): Promise<SendResult | void>;
   performAction?(action: ChannelAction): Promise<void>;
   getHistory?(params: {
     conversationId: string;
@@ -294,6 +359,31 @@ const pendingResolveContact = new Map<string, {
 
 const pendingMediaDownload = new Map<string, {
   resolve: (result: { localPath: string; sizeBytes: number }) => void;
+  reject: (err: Error) => void;
+}>();
+
+const pendingSpeechTranscribe = new Map<string, {
+  resolve: (result: { text: string }) => void;
+  reject: (err: Error) => void;
+}>();
+
+const pendingSpeechSynthesize = new Map<string, {
+  resolve: (result: { audioBase64: string; sampleRate: number }) => void;
+  reject: (err: Error) => void;
+}>();
+
+const pendingSpeechStatus = new Map<string, {
+  resolve: (result: { sttAvailable: boolean; ttsAvailable: boolean; ffmpegAvailable: boolean; voiceCount: number }) => void;
+  reject: (err: Error) => void;
+}>();
+
+const pendingSpeechVoices = new Map<string, {
+  resolve: (result: Array<{ id: string; name: string; type: string; description?: string }>) => void;
+  reject: (err: Error) => void;
+}>();
+
+const pendingConfigUpdate = new Map<string, {
+  resolve: () => void;
   reject: (err: Error) => void;
 }>();
 
@@ -406,6 +496,121 @@ function createAdapterContext(): AdapterContext {
         activity: params.activity,
       });
     },
+
+    transcribeAudio(params): Promise<{ text: string }> {
+      return new Promise((resolve, reject) => {
+        const id = generateCorrelationId();
+        const timer = setTimeout(() => {
+          pendingSpeechTranscribe.delete(id);
+          reject(new Error('transcribeAudio timeout'));
+        }, 60_000);
+        pendingSpeechTranscribe.set(id, {
+          resolve: (result) => {
+            clearTimeout(timer);
+            pendingSpeechTranscribe.delete(id);
+            resolve(result);
+          },
+          reject: (err) => {
+            clearTimeout(timer);
+            pendingSpeechTranscribe.delete(id);
+            reject(err);
+          },
+        });
+        sendToParent({ type: 'speech_transcribe', id, audioBase64: params.audioBase64, sampleRate: params.sampleRate });
+      });
+    },
+
+    synthesizeText(params): Promise<{ audioBase64: string; sampleRate: number }> {
+      return new Promise((resolve, reject) => {
+        const id = generateCorrelationId();
+        const timer = setTimeout(() => {
+          pendingSpeechSynthesize.delete(id);
+          reject(new Error('synthesizeText timeout'));
+        }, 60_000);
+        pendingSpeechSynthesize.set(id, {
+          resolve: (result) => {
+            clearTimeout(timer);
+            pendingSpeechSynthesize.delete(id);
+            resolve(result);
+          },
+          reject: (err) => {
+            clearTimeout(timer);
+            pendingSpeechSynthesize.delete(id);
+            reject(err);
+          },
+        });
+        sendToParent({ type: 'speech_synthesize', id, text: params.text, voiceId: params.voiceId, speed: params.speed });
+      });
+    },
+
+    getSpeechStatus(): Promise<{ sttAvailable: boolean; ttsAvailable: boolean; ffmpegAvailable: boolean; voiceCount: number }> {
+      return new Promise((resolve, reject) => {
+        const id = generateCorrelationId();
+        const timer = setTimeout(() => {
+          pendingSpeechStatus.delete(id);
+          reject(new Error('getSpeechStatus timeout'));
+        }, 15_000);
+        pendingSpeechStatus.set(id, {
+          resolve: (result) => {
+            clearTimeout(timer);
+            pendingSpeechStatus.delete(id);
+            resolve(result);
+          },
+          reject: (err) => {
+            clearTimeout(timer);
+            pendingSpeechStatus.delete(id);
+            reject(err);
+          },
+        });
+        sendToParent({ type: 'speech_status', id });
+      });
+    },
+
+    getSpeechVoices(): Promise<Array<{ id: string; name: string; type: string; description?: string }>> {
+      return new Promise((resolve, reject) => {
+        const id = generateCorrelationId();
+        const timer = setTimeout(() => {
+          pendingSpeechVoices.delete(id);
+          reject(new Error('getSpeechVoices timeout'));
+        }, 15_000);
+        pendingSpeechVoices.set(id, {
+          resolve: (result) => {
+            clearTimeout(timer);
+            pendingSpeechVoices.delete(id);
+            resolve(result);
+          },
+          reject: (err) => {
+            clearTimeout(timer);
+            pendingSpeechVoices.delete(id);
+            reject(err);
+          },
+        });
+        sendToParent({ type: 'speech_voices', id });
+      });
+    },
+
+    updateConfig(updates: Record<string, unknown>): Promise<void> {
+      return new Promise<void>((resolve, reject) => {
+        const id = generateCorrelationId();
+        const timer = setTimeout(() => {
+          pendingConfigUpdate.delete(id);
+          reject(new Error('Config update timed out'));
+        }, 15_000);
+        pendingConfigUpdate.set(id, {
+          resolve: () => {
+            clearTimeout(timer);
+            pendingConfigUpdate.delete(id);
+            resolve();
+          },
+          reject: (err) => {
+            clearTimeout(timer);
+            pendingConfigUpdate.delete(id);
+            reject(err);
+          },
+        });
+        sendToParent({ type: 'config_update_request', id, updates });
+      });
+    },
   };
 }
 
@@ -492,7 +697,7 @@ function handleParentMessage(raw: unknown): void {
         let lastError: unknown;
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
           try {
-            const result = await adapter!.send(msg.contactId, msg.content, sendMetadata);
+            const result = await adapter!.send(msg.contactId, msg.content, sendMetadata, msg.replyTo);
             const externalId = result && typeof result === 'object' && 'externalId' in result
               ? (result as SendResult).externalId
               : undefined;
@@ -569,6 +774,73 @@ function handleParentMessage(raw: unknown): void {
           pending.resolve({ localPath: msg.localPath, sizeBytes: msg.sizeBytes });
         } else {
           pending.reject(new Error('Invalid media download response'));
+        }
+      }
+      break;
+    }
+
+    case 'speech_transcribe_response': {
+      const pending = pendingSpeechTranscribe.get(msg.id);
+      if (pending) {
+        if (msg.error) {
+          pending.reject(new Error(msg.error));
+        } else if (msg.text != null) {
+          pending.resolve({ text: msg.text });
+        } else {
+          pending.reject(new Error('Invalid speech transcribe response'));
+        }
+      }
+      break;
+    }
+
+    case 'speech_synthesize_response': {
+      const pending = pendingSpeechSynthesize.get(msg.id);
+      if (pending) {
+        if (msg.error) {
+          pending.reject(new Error(msg.error));
+        } else if (msg.audioBase64 != null && msg.sampleRate != null) {
+          pending.resolve({ audioBase64: msg.audioBase64, sampleRate: msg.sampleRate });
+        } else {
+          pending.reject(new Error('Invalid speech synthesize response'));
+        }
+      }
+      break;
+    }
+
+    case 'speech_status_response': {
+      const pending = pendingSpeechStatus.get(msg.id);
+      if (pending) {
+        pending.resolve({
+          sttAvailable: msg.sttAvailable,
+          ttsAvailable: msg.ttsAvailable,
+          ffmpegAvailable: msg.ffmpegAvailable,
+          voiceCount: msg.voiceCount,
+        });
+      }
+      break;
+    }
+
+    case 'speech_voices_response': {
+      const pending = pendingSpeechVoices.get(msg.id);
+      if (pending) {
+        if (msg.error) {
+          pending.reject(new Error(msg.error));
+        } else if (msg.voices != null) {
+          pending.resolve(msg.voices);
+        } else {
+          pending.reject(new Error('Invalid speech voices response'));
+        }
+      }
+      break;
+    }
+
+    case 'config_update_response': {
+      const pending = pendingConfigUpdate.get(msg.id);
+      if (pending) {
+        if (msg.error) {
+          pending.reject(new Error(msg.error));
+        } else {
+          pending.resolve();
         }
       }
       break;
