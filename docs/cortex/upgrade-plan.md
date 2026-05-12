@@ -47,7 +47,7 @@ Why per-(contact, channel) rather than per-contact: from inside a given channel,
 
 Conversation history and Cortex observational state live in `sessions.db`, not heartbeat.db or memory.db. Soft reset clears it (sessions are ephemeral working state). Full reset also clears it. Included in .animus save archives.
 
-The `heartbeat_state.conversation_history` column (legacy single-session model) is deprecated; `loadSessionForTick` is the active path. The legacy `restoreConversationHistory` function remains for backward compatibility during migration.
+The old `heartbeat_state.conversation_history` column (legacy single-session model) has been removed from the current heartbeat schema. `loadSessionForTick` is the active path and restores per-thread history from `sessions.db`.
 
 ### Recall callback over raw messages
 

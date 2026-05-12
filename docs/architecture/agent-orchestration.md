@@ -45,7 +45,7 @@ The mind should develop a bias toward delegation for anything beyond simple, qui
 3. Sub-agent works independently, using `send_message` only for meaningful milestones (not narrating every step).
 4. On `agent_complete`, mind reads the result and delivers a clean synthesis to the user.
 
-When the mind does handle multi-step work inline (borderline cases with 2-3 tool calls), working tags (see `docs/cortex/working-tags.md`) separate internal analysis from user-facing communication. The mind wraps its reasoning in `<working>` tags and keeps progress updates and final answers outside them.
+When the mind does handle multi-step work inline (borderline cases with 2-3 tool calls), Cortex working tags separate internal analysis from user-facing communication. The mind wraps its reasoning in `<working>` tags and keeps progress updates and final answers outside them. Cortex framework details live in `docs/cortex/working-tags.md` in the cortex-mono repository.
 
 **Sub-agents are only spawned for primary contact tasks.** The EXECUTE stage enforces this: `spawn_agent` decisions produced during non-primary contact ticks are dropped. This is a hard permission boundary. See `docs/architecture/contacts.md` for the full permission tier system.
 

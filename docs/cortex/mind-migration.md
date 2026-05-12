@@ -36,7 +36,7 @@ GATHER → THOUGHT → AGENTIC LOOP → REFLECT → EXECUTE
 
 The THOUGHT response is NOT added to `agent.state.messages`. It is processed externally (the thought is persisted to the database and injected into the agentic loop's ephemeral context).
 
-**Phase 3: AGENTIC LOOP** — The `CortexAgent` runs with its full tool set via `agent.prompt(tickPrompt)`. The thought from Phase 2 is available in ephemeral context. The agent focuses purely on reasoning, tool use, decision-making, and replying. No cognitive tools are registered; no bookkeeping is expected from the agent. Reply text can stream immediately (no phase gate needed since the thought was already captured). When working tags are enabled (the default), the agent uses `<working>` tags to separate internal reasoning from user-facing communication. See `working-tags.md` for the full design.
+**Phase 3: AGENTIC LOOP** — The `CortexAgent` runs with its full tool set via `agent.prompt(tickPrompt)`. The thought from Phase 2 is available in ephemeral context. The agent focuses purely on reasoning, tool use, decision-making, and replying. No cognitive tools are registered; no bookkeeping is expected from the agent. Reply text can stream immediately (no phase gate needed since the thought was already captured). When working tags are enabled (the default), the agent uses `<working>` tags to separate internal reasoning from user-facing communication. See `docs/cortex/working-tags.md` in the cortex-mono repository for the full design.
 
 **Phase 4: REFLECT** — A direct `pi-ai` call after the agentic loop finishes. This is a direct migration of the existing `record_cognitive_state` tool: same prompt logic, same schema (`recordCognitiveStateSchema`), same output structure, just invoked programmatically. The existing tool handler (`handleRecordCognitiveState` in `cognitive-tools.ts`) defines exactly what this phase produces:
 
@@ -238,7 +238,7 @@ The system prompt is set once and rarely changes. It contains identity, behavior
 
 ## Context Slot Configuration
 
-See `context-manager.md` for how the slot mechanism works. Slots are ordered by stability: slot 0 rarely changes, later slots change more often. All content is sourced from the current context builder sections.
+See `docs/cortex/context-manager.md` in the cortex-mono repository for how the slot mechanism works. Slots are ordered by stability: slot 0 rarely changes, later slots change more often. All content is sourced from the current context builder sections.
 
 | Slot | Name | Content | Source | Update Trigger |
 |------|------|---------|--------|---------------|
@@ -286,69 +286,73 @@ The trigger context (`buildTriggerSection()`) is NOT ephemeral. It is the actual
 
 Recent messages do NOT go in ephemeral context. During normal operation, user messages from channels flow through the agentic loop as actual conversation turns. They are naturally part of the conversation history that pi-agent-core manages. Observation-compressed older messages live in the observations slot.
 
-On compaction or restart, conversation history is rebuilt by re-seeding from `messages.db` (see Compaction Re-Seeding below).
+On compaction, Cortex's observational memory compresses older turns into its own
+`_observations` slot and trims raw conversation history internally. Animus does
+not re-seed Cortex conversation history from `messages.db`. Durable
+cross-channel message awareness comes from Animus's own `message-observations`
+slot and working memory, while exact historical recall is available through
+Cortex's `recall` tool backed by Animus message embeddings.
 
 Recent thoughts and experiences are different: they are internal cognitive artifacts that never appear as conversation turns, so they belong in ephemeral context.
 
-## Compaction Coordination and Re-Seeding
+## Compaction Coordination
 
-> **Full compaction strategy**: See [compaction-strategy.md](./compaction-strategy.md) for the complete three-layer compaction design, configuration, and resolved decisions.
+> **Full Cortex framework details** live in the cortex-mono repository:
+> `docs/cortex/observational-memory-architecture.md`,
+> `docs/cortex/compaction-strategy.md`, and
+> `docs/cortex/tool-result-persistence.md`.
 
-When cortex compacts the in-session conversation history, the mind (backend) coordinates two additional steps. These are backend operations; cortex has no knowledge of `messages.db`, observational memory, contacts, or watermarks.
+Cortex and Animus now run two separate observation systems:
 
-### 1. Observational Memory Processing
+- **Cortex observational memory** compresses per-thread agent conversation
+  history inside a single `(contact_id, channel)` session. It owns the
+  framework-managed `_observations` slot, raw-turn trimming, reflection cycles,
+  and the optional `recall` tool.
+- **Animus observational memory** compresses domain streams: per-contact
+  cross-channel messages, global thoughts, and global experiences. These
+  summaries are stored in `memory.db.observations` and loaded into the
+  `message-observations`, `thought-observations`, and `experience-observations`
+  slots.
 
-The mind listens to cortex's `onBeforeCompaction` event to trigger observational memory processing **synchronously** before conversation history is lost. This is awaited, not fire-and-forget:
+The two systems are intentionally independent. Cortex observes the live agentic
+loop transcript; Animus observes durable domain records. Animus no longer
+listens to Cortex compaction to synchronously process its own observers, and it
+does not inject database messages back into Cortex conversation history.
 
-```typescript
-agent.onBeforeCompaction(async (target) => {
-  // Run observational memory processing synchronously
-  // so watermarks advance before history is discarded
-  await processAllStreams(gathered, agentManager, stores);
-});
-```
-
-The observer has its own token thresholds that determine whether compression actually fires. The signal from cortex is just "now would be a good time to check." But running it synchronously ensures watermarks advance before re-seeding.
-
-### 2. Conversation History Re-Seeding
-
-After compaction clears old conversation turns, the mind re-seeds the conversation history from `messages.db` to preserve continuity. `messages.db` is the authoritative record of all user-facing messages; the in-session conversation history is a working cache.
-
-Re-seeding follows the same watermark pattern used by the observational memory system. The `observations` table in `memory.db` stores a `lastRawTimestamp` watermark per stream that tracks the newest item compressed into an observation summary. Messages newer than this watermark have not been compressed and need full representation.
-
-The re-seeding flow:
-
-1. Cortex compacts older conversation history into a tagged summary, preserving the most recent ~6 turns as a **preserved tail** (includes recent tool call/result pairs that don't exist in any database).
-2. The `CompactionResult` includes `oldestPreservedTimestamp` from the preserved tail.
-3. Mind's `onPostCompaction` handler queries `messages.db` for the active contact's messages in the **gap**: `createdAt > observation.lastRawTimestamp AND createdAt < oldestPreservedTimestamp`.
-4. Mind formats these as conversation turns and injects them between the compaction summary and the preserved tail.
-5. The re-seeded messages are capped at the `rawTokens` budget (default: 4,000 tokens for messages) to avoid undoing the compaction.
-
-After re-seeding, the conversation history contains: `[compaction summary] + [re-seeded gap messages] + [preserved tail]`. Three layers of coverage with no duplication:
-- **Observation slots**: Compressed coverage of everything older than the watermark
-- **Re-seeded messages**: Fill the gap between watermark and preserved tail
-- **Preserved tail**: Full-fidelity recent context including tool call/result pairs
-
-This same re-seeding approach is used on **startup/restart**: if conversation history from the session checkpoint is unavailable or empty, the mind re-seeds from `messages.db` post-watermark items. This ensures the agent always has recent message context even after a cold start.
+Animus still listens to Cortex observation events for cleanup: when Cortex
+compresses turns that referenced persisted oversized tool-result files, Animus
+deletes dereferenced files from `data/tool-results/` if no remaining history or
+observation text still references them.
 
 ## Session Persistence
 
 Cortex does not own persistence (see `cortex-architecture.md`). It provides lifecycle hooks and serialization helpers; the backend owns storage. The mind implements persistence as follows:
 
-### Checkpointing (After Each Tick)
+### Per-Thread Checkpointing (After Each Tick)
 
-The backend listens to the cortex agent's `onLoopComplete` event. When fired, it snapshots the conversation history to SQLite:
+The backend listens to the cortex agent's `onLoopComplete` event. For ticks with
+an active contact and channel, it snapshots both conversation history and
+Cortex observational memory state to `sessions.db`:
 
 ```typescript
 agent.onLoopComplete(() => {
+  if (!activeSession) return; // inner-life ticks are not persisted
   const history = agent.getConversationHistory();
-  heartbeatStore.updateConversationHistory(hbDb, JSON.stringify(history));
+  const observationalState = agent.getObservationalMemoryState();
+  upsertSession(sessionsDb, contactId, channel, {
+    conversationHistory: JSON.stringify(history),
+    cortexObservationalState: JSON.stringify(observationalState),
+  });
 });
 ```
 
-This writes to `heartbeat_state.conversation_history` (JSON column in `heartbeat.db`). Each snapshot overwrites the previous one. When compaction occurs inside cortex, the next snapshot naturally contains the compacted history. No special compaction handling is needed.
+Session rows are keyed by `(contact_id, channel)`. Inner-life ticks (timer,
+scheduled task, or agent-complete ticks without an originating thread) start
+with empty Cortex history and are not written back.
 
-> **Deprecation note**: The old `heartbeat_state.session_state` column (which stored `'cold'`/`'warm'` string values) is deprecated and will be removed in a future migration. The warm/cold session concept no longer exists. The new `conversation_history` column stores the serialized conversation history JSON.
+The legacy `heartbeat_state.conversation_history` column was removed from the
+current schema by the legacy-session cleanup migration. `sessions.db` is the
+only active persistence location for Cortex conversation history.
 
 ### Startup / Restart
 
@@ -356,8 +360,14 @@ On process startup, the backend reconstructs the agent:
 
 1. Create a new `CortexAgent` with the standard config (tools, context manager, hooks).
 2. **Restore context slots**: Populate slots 0-8 from their source databases (credentials, contacts, core self, working memory, thought-observations, experience-observations, message-observations, goals, tasks). These are always rebuilt from source, never deserialized.
-3. **Restore conversation history**: If `heartbeat_state.conversation_history` exists, parse it and call `agent.restoreConversationHistory(messages)` to inject the saved history after the slot region. If the checkpoint is unavailable, re-seed from `messages.db` post-watermark items (see Compaction Re-Seeding).
-4. **Ephemeral tick context**: Not restored. Rebuilt fresh on the first tick via `transformContext`.
+3. **Restore conversation history for the active thread**: At tick start,
+   `loadSessionForTick()` loads the `(contact_id, channel)` row from
+   `sessions.db`, parses `conversation_history`, and calls
+   `agent.restoreConversationHistory(messages)`.
+4. **Restore Cortex observational state**: If the session row has
+   `cortex_observational_state`, parse it and call
+   `agent.restoreObservationalMemoryState(state)`.
+5. **Ephemeral tick context**: Not restored. Rebuilt fresh on the first tick via `transformContext`.
 
 ### Crash Recovery
 
@@ -381,12 +391,12 @@ If the process crashes mid-tick (before `onLoopComplete` fires), the last checkp
 | `heartbeat/context-builder.ts` | `COGNITIVE_PROCEDURE` instructions in system prompt | Instructions removed. System prompt is simpler |
 | `tools/servers/mcp-bridge.ts` | HTTP bridge for tool routing, cognitive endpoints | **Retained**. Cortex connects as an MCP client; sub-agents on the agents package also use it. Cognitive endpoints (`/cognitive/thought`, `/cognitive/state`) are removed. |
 | `tools/servers/animus-mcp-server.ts` | Stdio subprocess for MCP protocol | **Retained**. Cortex spawns it as an MCP client target. Sub-agents continue using it via SDK MCP integration. |
-| `tools/registry.ts` | Tool registry with MCP-oriented execution | Retained for bridge execution. Cortex accesses tools via MCP client, which routes through the bridge to this registry. |
-| `tools/permission-seeder.ts` | Seeds MCP tool permission entries | Add built-in Cortex tool permission entries (Bash, Read, Write) alongside MCP tool permissions |
-| `tools/tool-gate.ts` | Permission gate (unchanged logic) | Same logic, different integration point (`beforeToolCall`) |
+| `tools/registry.ts` | Tool registry with MCP-oriented execution | Retained as the Animus core tool handler layer. Cortex receives Animus core tools as direct `CortexTool` objects that delegate to this registry. |
+| `tools/permission-seeder.ts` | Seeds Animus/plugin tool permission entries | Seeds Animus core, plugin MCP, and Cortex tool permission entries |
+| `tools/tool-gate.ts` | Permission gate (unchanged logic) | Same logic, integrated through Cortex's `resolvePermission` callback |
 | `heartbeat/agent-orchestrator.ts` | Spawns Claude SDK sessions | Eventually spawns Pi Agent instances |
 | `heartbeat/agent-subsystem.ts` | Creates AgentManager | Creates `CortexAgent`, optionally keeps AgentManager for sub-agents |
-| Streaming | Phase-gated: text only streams after `record_thought` tool call | Direct: text streams as soon as the agentic loop starts. No phase gate. Phase gate module (`cognitive-tools.ts` phase variable) eliminated. Raw text chunks stream with zero latency; at each turn boundary, Cortex emits a structured `AgentTextOutput` with `userFacing`, `working`, and `raw` properties (see `working-tags.md`). |
+| Streaming | Phase-gated: text only streams after `record_thought` tool call | Direct: text streams as soon as the agentic loop starts. No phase gate. Phase gate module (`cognitive-tools.ts` phase variable) eliminated. Raw text chunks stream with zero latency; at each turn boundary, Cortex emits a structured `AgentTextOutput` with `userFacing`, `working`, and `raw` properties. |
 | Mid-tick message injection | `session.injectMessage()` pushes new messages into the active session | Phase-aware queueing with `agent.steer()`. See Mid-Tick Message Handling below. |
 
 ## Mid-Tick Message Handling
@@ -441,7 +451,7 @@ The current `session.injectMessage()` appends to an `AsyncIterable` stream that 
 - **Schemas**: Thought content, experience narration, emotion deltas, decisions, memory candidates stay the same.
 - **Decision registry**: `registerDecisionHandler()` pattern unchanged.
 - **Approval interceptor**: Two-tick approval dance unchanged. Only the hook integration point changes.
-- **Database schema**: All seven databases remain. One migration needed: add `conversation_history` column to `heartbeat_state`, deprecate `session_state` and `session_warm_since` columns.
+- **Database schema**: The active Cortex session model uses `sessions.db` as the eighth database. Legacy `heartbeat_state.conversation_history`, `session_state`, `session_warm_since`, and `mind_session_id` columns have been removed from the current heartbeat schema.
 - **Plugin/Channel system**: Plugins and channels continue to work.
 
 ## Frontend Changes
@@ -467,8 +477,10 @@ The warm/cold session state machine is completely removed. The `CortexAgent` is 
 
 ### Database Changes
 
-- `heartbeat_state.session_state` (`'cold'`/`'warm'` string) column deprecated, to be removed in a future migration.
-- `heartbeat_state.session_warm_since` column deprecated, to be removed in a future migration.
+- `heartbeat_state.session_state` (`'cold'`/`'warm'` string) column removed.
+- `heartbeat_state.session_warm_since` column removed.
+- `heartbeat_state.mind_session_id` column removed.
+- `heartbeat_state.conversation_history` column removed. Per-thread history now lives in `sessions.db`.
 
 ### Frontend Changes
 
@@ -503,10 +515,10 @@ The event bridge feeds into the same `AgentLogStoreAdapter` and EventBus path, p
 
 ## Built-in Tools
 
-Eight tools become native `AgentTool` registrations in Cortex (not MCP tools). They run in-process with no MCP overhead: Bash, Read, Write, Edit, Glob, Grep, WebFetch, and SubAgent.
+Cortex tools are native in-process registrations (not MCP tools). They run with no MCP overhead: Bash, Read, Write, Edit, UndoEdit, Glob, Grep, WebFetch, TaskOutput, SubAgent, ToolSearch, `load_skill`, and `recall` when configured.
 
 - Each has its own permission entry in `tool_permissions` (system.db).
-- The permission seeder needs updating to register all eight built-in Cortex tool permissions alongside MCP tool permissions.
+- The permission seeder registers Cortex tool permissions alongside Animus core and plugin MCP tool permissions.
 - These replace the equivalent SDK built-in tools (which were permission-gated via the `canUseTool` callback).
 
 ## System Prompt Rebuild

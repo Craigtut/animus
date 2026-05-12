@@ -116,19 +116,21 @@ All databases live under `data/databases/` (see `docs/architecture/data-director
 - LanceDB has built-in support, enabling automatic embedding on insert and query
 - OpenAI text-embedding-3-small available as an alternative for users who prefer API-based embedding
 
-### Agent SDKs
+### Agent Frameworks
 
 | Technology | Purpose |
 |------------|---------|
-| **Claude Agent SDK** | Anthropic's agent framework (default) |
-| **Codex SDK** | OpenAI's Codex agent |
-| **OpenCode SDK** | OpenCode.ai agent |
+| **@animus-labs/cortex** | Primary agent framework for the mind: provider management, CortexAgent, tools, compaction, skills, event bridge |
+| **@animus-labs/agents** | Legacy subprocess SDK abstraction used where subprocess-based sub-agents are still needed |
+| **Claude Agent SDK** | Legacy Anthropic subprocess agent provider through `@animus-labs/agents` |
+| **Codex SDK** | Legacy OpenAI Codex subprocess agent provider through `@animus-labs/agents` |
+| **OpenCode SDK** | Legacy OpenCode.ai subprocess agent provider through `@animus-labs/agents` |
 
-All three are wrapped in a unified abstraction layer in the `@animus-labs/agents` package (`/packages/agents/`). This is a separate package from the backend to maintain clear boundaries.
+`@animus-labs/cortex` lives in the sibling `cortex-mono` repository and is consumed via a local `file:` dependency. The backend imports Cortex; Cortex does not import Animus.
 
-**Status**: Claude and Codex adapters are fully implemented and integrated into the backend and frontend. The OpenCode adapter is implemented in the agents package but not yet wired into the backend or frontend.
+The `@animus-labs/agents` abstraction remains available for legacy subprocess providers, but the heartbeat mind uses Cortex.
 
-The abstraction layer provides:
+The agent framework layer provides:
 - Consistent interface across providers
 - Normalized event streaming
 - Token/cost tracking
@@ -451,9 +453,9 @@ Each function accepts the database instance as its first parameter. In productio
 
 ### Database Migrations (`@animus-labs/backend`)
 
-A lightweight, custom migration system for managing schema changes across all seven SQLite databases. Zero external dependencies — just ~50 lines of migration runner code.
+A lightweight, custom migration system for managing schema changes across all eight SQLite databases. Zero external dependencies — just ~50 lines of migration runner code.
 
-**Why not an ORM migration tool (Drizzle, Kysely, Knex)?** Animus uses raw SQL by design (no ORM). Adding an ORM's migration runner purely for migrations introduces a heavy dependency for a narrow use case. The seven separate databases also make ORM migration tools awkward — they typically assume a single database connection.
+**Why not an ORM migration tool (Drizzle, Kysely, Knex)?** Animus uses raw SQL by design (no ORM). Adding an ORM's migration runner purely for migrations introduces a heavy dependency for a narrow use case. The eight separate databases also make ORM migration tools awkward — they typically assume a single database connection.
 
 **Why not Umzug?** Viable option, but for SQLite with better-sqlite3, the migration problem is simple enough that a dependency isn't justified. Our runner is ~50 lines.
 

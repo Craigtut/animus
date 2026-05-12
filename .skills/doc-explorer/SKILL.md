@@ -73,7 +73,7 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/architecture/backend-architecture.md` | Backend modular monolith architecture: store patterns, service layer, subsystem lifecycles, pipeline deps, decision handler registry, anti-patterns |
 | `docs/architecture/release-engineering.md` | Release engineering: versioning policy (lockstep vs independent packages), conventional commits, CI pipeline (typecheck/lint/test), release workflow (tag-triggered Tauri builds for macOS + Windows), bump-version and release scripts, cross-compilation, code signing (future), changelog generation |
 | `docs/architecture/telemetry.md` | Telemetry system: 5 PostHog events (install, app_started, daily_active, feature_used, error_occurred), anonymous ID, deduplication, opt-out mechanisms, privacy guarantees, TelemetryService singleton, event bus integration |
-| `docs/architecture/tech-stack.md` | Full technology overview, frontend stack (Vite, React 19, Zustand, Emotion, Motion), backend stack (Fastify, tRPC, SQLite), seven databases, LanceDB, agent SDKs, deployment paths, shared abstractions (Embedding Provider, Context Builder, Decay Engine, Event Bus, Encryption Service, Database Stores, Migrations) |
+| `docs/architecture/tech-stack.md` | Full technology overview, frontend stack (Vite, React 19, Zustand, Emotion, Motion), backend stack (Fastify, tRPC, SQLite), eight databases, LanceDB, agent SDKs, deployment paths, shared abstractions (Embedding Provider, Context Builder, Decay Engine, Event Bus, Encryption Service, Database Stores, Migrations) |
 
 ### Agent SDKs
 
@@ -95,7 +95,7 @@ Use this index to find the right files to read. Each entry includes the file pat
 
 | File | Covers |
 |------|--------|
-| `docs/cortex/mind-migration.md` | Mind pipeline migration: 5-phase pipeline (GATHER/THOUGHT/AGENTIC LOOP/REFLECT/EXECUTE), context slot configuration, ephemeral context sections, system prompt composition, session persistence (conversation_history checkpointing), warm/cold removal, event bridge, built-in tools, frontend changes, system prompt rebuild |
+| `docs/cortex/mind-migration.md` | Mind pipeline migration: 5-phase pipeline (GATHER/THOUGHT/AGENTIC LOOP/REFLECT/EXECUTE), context slot configuration, ephemeral context sections, system prompt composition, per-thread session persistence in sessions.db, warm/cold removal, event bridge, Cortex tools, frontend changes, system prompt rebuild |
 | `docs/cortex/backend-auth-integration.md` | Backend auth integration: CortexCredentialService, credential storage (system.db), AES-256-GCM encryption, cortex-provider.ts tRPC router, getApiKey callback wiring, OAuth flow coordination, headless/Docker detection, Docker OAuth compatibility matrix (per-provider flow types), system_settings schema, event bus events, legacy auth coexistence |
 | `docs/cortex/frontend-auth-ux.md` | Frontend auth UX: progressive disclosure (OAuth > API key > custom endpoint), CortexProviderStep onboarding component, provider card states, headless device-code variant, settings page AI Provider section, model picker, thinking level, legacy SDK demotion, visual design notes |
 | `docs/cortex/upgrade-plan.md` | Cortex upgrade plan: phase tracking, architectural decisions (dual observation systems, session threading, recall callback), commit log, remaining work (phases 5-7) |
@@ -152,7 +152,7 @@ When you need context for a task, follow this approach:
 25. **For reflex/fast-response (PLANNED)**: Read `docs/research/reflex-system.md`
 26. **For Codex OAuth**: Read `docs/agents/codex/oauth.md`
 27. **For telemetry/analytics/PostHog**: Read `docs/architecture/telemetry.md`
-28. **For Cortex integration (Animus-specific)**: Read `docs/cortex/mind-migration.md` for the 5-phase pipeline, `docs/cortex/backend-auth-integration.md` for credential wiring, `docs/cortex/frontend-auth-ux.md` for the auth UX, `docs/cortex/cortex-integration-patterns.md` for MCP tools, observational memory compaction, error routing, model tier config, and sub-agent orchestration. For Cortex framework docs (architecture, tools, compaction, skills, providers, working tags), see the cortex-mono repository.
+28. **For Cortex integration (Animus-specific)**: Read `docs/cortex/mind-migration.md` for the 5-phase pipeline and session threading, `docs/cortex/backend-auth-integration.md` for credential wiring, `docs/cortex/frontend-auth-ux.md` for the auth UX, and `docs/cortex/upgrade-plan.md` for the latest Animus-side adoption decisions. For Cortex framework docs (architecture, tools, compaction, skills, providers, working tags), see the cortex-mono repository.
 
 ## Topic Keyword Guide
 
