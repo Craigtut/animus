@@ -105,7 +105,7 @@ export const systemSettingsSchema = z.object({
   // Cortex settings (provider/model for the cortex migration)
   cortexProvider: z.string().nullable().default(null),
   cortexModel: z.string().nullable().default(null),
-  cortexThinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']).default('off'),
+  cortexThinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high', 'max']).default('high'),
   cortexContextWindowLimit: z.number().int().min(16_384).nullable().default(null),
   utilityModel: z.string().default('default'),
   // Debug: capture full context snapshots per pipeline phase

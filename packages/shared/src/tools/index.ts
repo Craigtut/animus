@@ -26,3 +26,10 @@ export {
   getAllowedTools,
   getMindTools,
 } from './permissions.js';
+
+export {
+  TOOL_UI_CONFIG,
+  TOOL_CATEGORY_META,
+  getToolUIConfig,
+} from './ui-config.js';
+export type { ToolVisibility, ToolUICategory, ToolUIConfig, ToolCategoryMeta } from './ui-config.js';

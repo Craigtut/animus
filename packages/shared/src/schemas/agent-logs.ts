@@ -51,6 +51,8 @@ export const agentEventTypeSchema = z.enum([
   'tick_output',
   'message_injected',
   // Cortex pipeline phase events
+  'gather_start',
+  'gather_end',
   'thought_start',
   'thought_end',
   'thought_failed',
