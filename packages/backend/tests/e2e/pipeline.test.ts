@@ -27,8 +27,8 @@ import * as memoryStore from '../../src/db/stores/memory-store.js';
 import { buildMindContext, buildSystemPrompt, type TriggerContext, type MindContextParams } from '../../src/heartbeat/context-builder.js';
 import { compilePersona, type PersonaConfig, estimateTokens } from '../../src/heartbeat/persona-compiler.js';
 import { applyDecay, applyDelta, computeBaselines } from '../../src/heartbeat/emotion-engine.js';
-import type { MindOutput, EmotionState, Contact, HeartbeatState } from '@animus/shared';
-import { mindOutputSchema } from '@animus/shared';
+import type { MindOutput, EmotionState, Contact, HeartbeatState } from '@animus-labs/shared';
+import { mindOutputSchema } from '@animus-labs/shared';
 import type Database from 'better-sqlite3';
 
 // ============================================================================
@@ -167,7 +167,8 @@ describe('Full Tick Cycle', () => {
     // System prompt should always be provided
     expect(context.systemPrompt).toBeTruthy();
     expect(context.systemPrompt).toContain('TestAnimus');
-    expect(context.systemPrompt).toContain('OPERATING INSTRUCTIONS');
+    expect(context.systemPrompt).toContain('YOUR INNER LIFE');
+    expect(context.systemPrompt).toContain('DECISIONS');
 
     // User message should contain the trigger
     expect(context.userMessage).toContain('Alice sent a message via web');
@@ -368,7 +369,7 @@ describe('Crash Recovery', () => {
     expect(stuck.currentStage).toBe('gather');
     expect(stuck.tickNumber).toBe(5);
 
-    // Recovery: reset to idle and cold (what initializeHeartbeat does)
+    // Recovery: reset to idle (what initializeHeartbeat does)
     heartbeatStore.updateHeartbeatState(hbDb, {
       currentStage: 'idle',
       triggerType: null,
@@ -387,12 +388,11 @@ describe('Crash Recovery', () => {
       tickNumber: 10,
       currentStage: 'mind',
       triggerType: 'interval',
-      mindSessionId: 'session-abc',
     });
 
     const stuck = heartbeatStore.getHeartbeatState(hbDb);
     expect(stuck.currentStage).toBe('mind');
-    expect(stuck.mindSessionId).toBe('session-abc');
+    expect(stuck.triggerType).toBe('interval');
 
     // Recovery
     heartbeatStore.updateHeartbeatState(hbDb, {
@@ -403,6 +403,7 @@ describe('Crash Recovery', () => {
 
     const recovered = heartbeatStore.getHeartbeatState(hbDb);
     expect(recovered.currentStage).toBe('idle');
+    expect(recovered.triggerType).toBeNull();
     expect(recovered.tickNumber).toBe(10);
   });
 

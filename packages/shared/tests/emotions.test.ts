@@ -109,8 +109,8 @@ describe('EMOTION_DESCRIPTIONS', () => {
 describe('getEmotionDescription', () => {
   it('returns the correct description for a given emotion and intensity', () => {
     expect(getEmotionDescription('joy', 0.0)).toBe('dormant');
-    expect(getEmotionDescription('joy', 0.5)).toBe('a genuine warmth colors your thinking');
-    expect(getEmotionDescription('joy', 1.0)).toBe('an all-consuming elation that fills every thought');
+    expect(getEmotionDescription('joy', 0.5)).toBe('a steady feeling of happiness that noticeably colors your thinking');
+    expect(getEmotionDescription('joy', 1.0)).toBe('an all-consuming feeling of joy that fills every thought');
   });
 
   it('returns different descriptions for different intensity levels', () => {

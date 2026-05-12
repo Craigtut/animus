@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { TriggerType, ChannelManifest } from '@animus/shared';
+import type { TriggerType, ChannelManifest } from '@animus-labs/shared';
 
 // ============================================================================
 // Typing Indicator Tests

@@ -13,11 +13,6 @@ import {
   type MutableToolContext,
   type ToolPermissionLookup,
 } from '../../src/tools/servers/mcp-bridge.js';
-import {
-  resetSnapshot,
-  getSnapshot,
-  getPhase,
-} from '../../src/heartbeat/cognitive-tools.js';
 
 // ---------------------------------------------------------------------------
 // HTTP helpers
@@ -75,7 +70,6 @@ describe('MCP Bridge', () => {
   beforeEach(async () => {
     port = await startBridge();
     updatePermissions(new Map());
-    resetSnapshot();
   });
 
   afterEach(async () => {
@@ -125,12 +119,9 @@ describe('MCP Bridge', () => {
       expect(res.status).toBe(400);
     });
 
-    it('returns cognitive tools', async () => {
+    it('returns 400 for the removed legacy cognitive tool set', async () => {
       const res = await httpGet(port, '/tools?set=cognitive');
-      expect(res.status).toBe(200);
-      const body = res.body as { tools: Array<{ name: string }> };
-      expect(body.tools).toHaveLength(2);
-      expect(body.tools.map((t) => t.name)).toEqual(['record_thought', 'record_cognitive_state']);
+      expect(res.status).toBe(400);
     });
 
     it('returns mind tools', async () => {
@@ -171,51 +162,6 @@ describe('MCP Bridge', () => {
       const body = res.body as { tools: Array<{ name: string }> };
       expect(body.tools.find((t) => t.name === 'send_message')).toBeUndefined();
       expect(body.tools.find((t) => t.name === 'read_memory')).toBeUndefined();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Cognitive tool endpoints
-  // -------------------------------------------------------------------------
-
-  describe('POST /cognitive/thought', () => {
-    it('records a thought and transitions to replying phase', async () => {
-      expect(getPhase()).toBe('pre-thought');
-      const res = await httpPost(port, '/cognitive/thought', {
-        content: 'Test thought',
-        importance: 0.5,
-      });
-      expect(res.status).toBe(200);
-      const body = res.body as { content: Array<{ text: string }> };
-      expect(body.content[0]!.text).toBe('Thought recorded.');
-      expect(getPhase()).toBe('replying');
-      expect(getSnapshot().thoughts).toHaveLength(1);
-      expect(getSnapshot().thoughts[0]!.content).toBe('Test thought');
-    });
-
-    it('accumulates multiple thoughts', async () => {
-      await httpPost(port, '/cognitive/thought', { content: 'First', importance: 0.3 });
-      await httpPost(port, '/cognitive/thought', { content: 'Second', importance: 0.7 });
-      expect(getSnapshot().thoughts).toHaveLength(2);
-    });
-  });
-
-  describe('POST /cognitive/state', () => {
-    it('records cognitive state', async () => {
-      const res = await httpPost(port, '/cognitive/state', {
-        experience: { content: 'Test experience', importance: 0.5 },
-        decisions: [],
-        emotionDeltas: [{ emotion: 'joy', delta: 0.1, reasoning: 'good day' }],
-        energyDelta: null,
-        coreSelfUpdate: null,
-        workingMemoryUpdate: null,
-        memoryCandidate: [],
-      });
-      expect(res.status).toBe(200);
-      const body = res.body as { content: Array<{ text: string }> };
-      expect(body.content[0]!.text).toContain('Cognitive state recorded');
-      expect(getSnapshot().experience).toEqual({ content: 'Test experience', importance: 0.5 });
-      expect(getSnapshot().emotionDeltas).toHaveLength(1);
     });
   });
 
@@ -272,13 +218,6 @@ describe('MCP Bridge', () => {
   // -------------------------------------------------------------------------
 
   describe('getToolDefs', () => {
-    it('returns cognitive tool defs', () => {
-      const defs = getToolDefs('cognitive');
-      expect(defs).toHaveLength(2);
-      expect(defs[0]!.name).toBe('record_thought');
-      expect(defs[1]!.name).toBe('record_cognitive_state');
-    });
-
     it('returns mind tool defs with JSON Schema', () => {
       const defs = getToolDefs('mind');
       expect(defs.length).toBeGreaterThan(0);
@@ -299,17 +238,11 @@ describe('MCP Bridge', () => {
       expect(config.command).toBeTruthy();
       expect(config.args).toBeInstanceOf(Array);
       expect(config.args.length).toBeGreaterThan(0);
-      expect(config.env).toEqual({
+      expect(config.env).toMatchObject({
         BRIDGE_PORT: '12345',
         TOOL_SET: 'mind',
         TASK_ID: 'mind',
       });
-    });
-
-    it('sets correct env for cognitive tools', () => {
-      const config = buildMcpServerConfig(9999, 'cognitive', 'mind');
-      expect(config.env.TOOL_SET).toBe('cognitive');
-      expect(config.env.TASK_ID).toBe('mind');
     });
 
     it('sets correct env for subagent tools', () => {

@@ -8,7 +8,7 @@ import { createTestMemoryDb } from '../helpers.js';
 import { MemoryManager, type ScoredMemory } from '../../src/memory/memory-manager.js';
 import { buildMemoryContext } from '../../src/memory/memory-context.js';
 import type { VectorStore, SearchResult } from '../../src/memory/vector-store.js';
-import type { IEmbeddingProvider, LongTermMemory } from '@animus/shared';
+import type { IEmbeddingProvider, LongTermMemory } from '@animus-labs/shared';
 
 // --------------------------------------------------------------------------
 // Mock factories

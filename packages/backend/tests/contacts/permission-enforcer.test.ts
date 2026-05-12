@@ -6,7 +6,7 @@ import {
   filterAllowedDecisions,
   getAvailableToolTypes,
 } from '../../src/contacts/permission-enforcer.js';
-import type { Contact } from '@animus/shared';
+import type { Contact } from '@animus-labs/shared';
 
 function makeContact(overrides: Partial<Contact> = {}): Contact {
   return {

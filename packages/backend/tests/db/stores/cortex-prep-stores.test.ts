@@ -1,14 +1,15 @@
 /**
  * Tests for Phase 0 cortex prep store additions:
- * - heartbeat-state-store: conversation_history column
+ * - session-store: per-thread Cortex session persistence
  * - settings-store: cortex settings columns
  * - credential-store: cortex credential helpers
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type Database from 'better-sqlite3';
-import { createTestHeartbeatDb, createTestSystemDb } from '../../helpers.js';
+import { createTestSessionsDb, createTestSystemDb } from '../../helpers.js';
 import * as heartbeatStateStore from '../../../src/db/stores/heartbeat-state-store.js';
+import * as sessionStore from '../../../src/db/stores/session-store.js';
 import * as settingsStore from '../../../src/db/stores/settings-store.js';
 
 // Credential store needs encryption mocked
@@ -21,61 +22,70 @@ vi.mock('../../../src/lib/encryption-service.js', () => ({
 const credentialStore = await import('../../../src/db/stores/credential-store.js');
 
 // ============================================================================
-// 0.1: conversation_history column
+// 0.1: per-thread Cortex session persistence
 // ============================================================================
 
-describe('heartbeat-state-store: conversation_history', () => {
+describe('session-store: mind_sessions', () => {
   let db: Database.Database;
 
   beforeEach(() => {
-    db = createTestHeartbeatDb();
+    db = createTestSessionsDb();
   });
 
-  it('returns null when no conversation history has been set', () => {
-    const history = heartbeatStateStore.getConversationHistory(db);
-    expect(history).toBeNull();
+  it('returns null when no session has been set', () => {
+    const session = sessionStore.getSession(db, 'contact-1', 'web');
+    expect(session).toBeNull();
   });
 
-  it('stores and retrieves conversation history', () => {
-    const messages = JSON.stringify([
+  it('stores and retrieves per-thread conversation history', () => {
+    const conversationHistory = JSON.stringify([
       { role: 'user', content: 'Hello' },
       { role: 'assistant', content: 'Hi there' },
     ]);
+    const observationalState = JSON.stringify({ version: 1, observations: [] });
 
-    heartbeatStateStore.updateConversationHistory(db, messages);
-    const result = heartbeatStateStore.getConversationHistory(db);
-    expect(result).toBe(messages);
+    sessionStore.upsertSession(db, 'contact-1', 'web', conversationHistory, observationalState, 1234);
+    const result = sessionStore.getSession(db, 'contact-1', 'web');
 
-    const parsed = JSON.parse(result!);
+    expect(result?.conversationHistory).toBe(conversationHistory);
+    expect(result?.cortexObservationalState).toBe(observationalState);
+    expect(result?.contextTokenCount).toBe(1234);
+
+    const parsed = JSON.parse(result!.conversationHistory!);
     expect(parsed).toHaveLength(2);
     expect(parsed[0].role).toBe('user');
   });
 
-  it('overwrites previous conversation history', () => {
-    heartbeatStateStore.updateConversationHistory(db, '["first"]');
-    heartbeatStateStore.updateConversationHistory(db, '["second"]');
+  it('overwrites only the matching contact/channel thread', () => {
+    sessionStore.upsertSession(db, 'contact-1', 'web', '["first"]', null, 100);
+    sessionStore.upsertSession(db, 'contact-1', 'sms', '["sms"]', null, 200);
+    sessionStore.upsertSession(db, 'contact-1', 'web', '["second"]', null, 300);
 
-    const result = heartbeatStateStore.getConversationHistory(db);
-    expect(result).toBe('["second"]');
+    expect(sessionStore.getSession(db, 'contact-1', 'web')?.conversationHistory).toBe('["second"]');
+    expect(sessionStore.getSession(db, 'contact-1', 'web')?.contextTokenCount).toBe(300);
+    expect(sessionStore.getSession(db, 'contact-1', 'sms')?.conversationHistory).toBe('["sms"]');
   });
 
-  it('clears conversation history when set to null', () => {
-    heartbeatStateStore.updateConversationHistory(db, '["data"]');
-    heartbeatStateStore.updateConversationHistory(db, null);
+  it('clears conversation history while preserving the session row', () => {
+    sessionStore.upsertSession(db, 'contact-1', 'web', '["data"]', '{"state":true}', 100);
+    sessionStore.upsertSession(db, 'contact-1', 'web', null, null, 0);
 
-    const result = heartbeatStateStore.getConversationHistory(db);
-    expect(result).toBeNull();
+    const result = sessionStore.getSession(db, 'contact-1', 'web');
+    expect(result?.conversationHistory).toBeNull();
+    expect(result?.cortexObservationalState).toBeNull();
+    expect(result?.contextTokenCount).toBe(0);
   });
 
-  it('existing heartbeat state columns still work', () => {
-    // Verify the migration didn't break existing columns
-    const state = heartbeatStateStore.getHeartbeatState(db);
-    expect(state.tickNumber).toBe(0);
-    expect(state.currentStage).toBe('idle');
+  it('deletes sessions by thread and globally', () => {
+    sessionStore.upsertSession(db, 'contact-1', 'web', '["web"]', null, 100);
+    sessionStore.upsertSession(db, 'contact-2', 'sms', '["sms"]', null, 200);
 
-    heartbeatStateStore.updateHeartbeatState(db, { tickNumber: 42 });
-    const updated = heartbeatStateStore.getHeartbeatState(db);
-    expect(updated.tickNumber).toBe(42);
+    sessionStore.deleteSession(db, 'contact-1', 'web');
+    expect(sessionStore.getSession(db, 'contact-1', 'web')).toBeNull();
+    expect(sessionStore.listSessions(db)).toHaveLength(1);
+
+    sessionStore.deleteAllSessions(db);
+    expect(sessionStore.listSessions(db)).toHaveLength(0);
   });
 });
 
@@ -94,7 +104,7 @@ describe('settings-store: cortex settings', () => {
     const settings = settingsStore.getCortexSettings(db);
     expect(settings.cortexProvider).toBeNull();
     expect(settings.cortexModel).toBeNull();
-    expect(settings.cortexThinkingLevel).toBe('off');
+    expect(settings.cortexThinkingLevel).toBe('high');
     expect(settings.utilityModel).toBe('default');
   });
 

@@ -6,7 +6,7 @@ import {
   type MindContextParams,
 } from '../../src/heartbeat/context-builder.js';
 import { compilePersona, type PersonaConfig } from '../../src/heartbeat/persona-compiler.js';
-import type { EmotionState, Thought, Experience, Message, TickDecision, Contact, ContactChannel } from '@animus/shared';
+import type { EmotionState, Thought, Experience, Message, TickDecision, Contact, ContactChannel } from '@animus-labs/shared';
 
 function makePersonaConfig(): PersonaConfig {
   return {
@@ -98,7 +98,6 @@ describe('context-builder', () => {
 
       expect(prompt).toContain('Test'); // Name
       expect(prompt).toContain('YOUR INNER LIFE');
-      expect(prompt).toContain('OPERATING INSTRUCTIONS');
       expect(prompt).toContain('YOUR EMOTIONS');
       expect(prompt).toContain('DECISIONS');
       expect(prompt).toContain('YOUR MEMORY');
@@ -447,7 +446,7 @@ describe('context-builder', () => {
 
       expect(msg).toContain('YOUR ENERGY');
       expect(msg).toContain('peak');
-      expect(msg).toContain('sharp and energized');
+      expect(msg).toContain('fully energized');
     });
 
     it('omits energy section when energyLevel is null', () => {
@@ -507,8 +506,8 @@ describe('context-builder', () => {
       const persona = compilePersona(makePersonaConfig());
       const prompt = buildSystemPrompt(persona, { energySystemEnabled: true });
       expect(prompt).toContain('YOUR ENERGY');
-      expect(prompt).toContain('energyDelta');
-      expect(prompt).toContain('circadian rhythm');
+      expect(prompt).toContain('energy level');
+      expect(prompt).toContain('energy colors your thinking');
     });
 
     it('omits ENERGY_GUIDANCE when energySystemEnabled is false', () => {
@@ -660,8 +659,8 @@ describe('context-builder', () => {
 
       // Operational sections
       expect(prompt).toContain('YOUR INNER LIFE');
-      expect(prompt).toContain('OPERATING INSTRUCTIONS');
-      expect(prompt).toContain('record_thought');
+      expect(prompt).toContain('DECISIONS');
+      expect(prompt).toContain('YOUR MEMORY');
     });
 
     it('renders full system prompt for inspection', () => {

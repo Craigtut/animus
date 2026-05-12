@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { MindOutput, IEventBus } from '@animus/shared';
+import type { MindOutput, IEventBus } from '@animus-labs/shared';
 import { executeDecisions, type DecisionExecutorDeps } from '../../src/heartbeat/decision-executor.js';
 
 // ============================================================================

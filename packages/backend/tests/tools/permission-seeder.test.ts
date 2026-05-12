@@ -48,10 +48,35 @@ describe('permission seeder', () => {
     expect(writeTool!.riskTier).toBe('acts');
     expect(writeTool!.mode).toBe('ask');
 
+    const undoEditTool = cortexTools.find((p) => p.toolName === 'UndoEdit');
+    expect(undoEditTool).toBeDefined();
+    expect(undoEditTool!.riskTier).toBe('acts');
+    expect(undoEditTool!.mode).toBe('ask');
+
     const bashTool = cortexTools.find((p) => p.toolName === 'Bash');
     expect(bashTool).toBeDefined();
     expect(bashTool!.riskTier).toBe('sensitive');
     expect(bashTool!.mode).toBe('ask');
+
+    const taskOutputTool = cortexTools.find((p) => p.toolName === 'TaskOutput');
+    expect(taskOutputTool).toBeDefined();
+    expect(taskOutputTool!.riskTier).toBe('safe');
+    expect(taskOutputTool!.mode).toBe('always_allow');
+
+    const toolSearchTool = cortexTools.find((p) => p.toolName === 'ToolSearch');
+    expect(toolSearchTool).toBeDefined();
+    expect(toolSearchTool!.riskTier).toBe('safe');
+    expect(toolSearchTool!.mode).toBe('always_allow');
+
+    const loadSkillTool = cortexTools.find((p) => p.toolName === 'load_skill');
+    expect(loadSkillTool).toBeDefined();
+    expect(loadSkillTool!.riskTier).toBe('safe');
+    expect(loadSkillTool!.mode).toBe('always_allow');
+
+    const recallTool = cortexTools.find((p) => p.toolName === 'recall');
+    expect(recallTool).toBeDefined();
+    expect(recallTool!.riskTier).toBe('safe');
+    expect(recallTool!.mode).toBe('always_allow');
   });
 
   it('seeds plugin tools', () => {

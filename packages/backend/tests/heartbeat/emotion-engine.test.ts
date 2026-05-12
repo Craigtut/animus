@@ -10,7 +10,7 @@ import {
   EMOTION_CATEGORIES,
   type PersonaDimensions,
 } from '../../src/heartbeat/emotion-engine.js';
-import type { EmotionState } from '@animus/shared';
+import type { EmotionState } from '@animus-labs/shared';
 
 function makeNeutralDimensions(): PersonaDimensions {
   return {

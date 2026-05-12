@@ -25,7 +25,7 @@ import {
   isDecisionAllowed,
   filterAllowedDecisions,
 } from '../../src/contacts/permission-enforcer.js';
-import type { IEmbeddingProvider, EmotionState } from '@animus/shared';
+import type { IEmbeddingProvider, EmotionState } from '@animus-labs/shared';
 
 // ============================================================================
 // Helpers

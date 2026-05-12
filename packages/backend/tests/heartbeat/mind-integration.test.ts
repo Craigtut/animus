@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { IEventBus, AnimusEventMap } from '@animus/shared';
+import type { IEventBus, AnimusEventMap } from '@animus-labs/shared';
 
 // ---------------------------------------------------------------------------
 // Test the in-memory agent task store logic (extracted from heartbeat/index.ts)
@@ -502,7 +502,7 @@ describe('createChunkChannel', () => {
 // Test MindOutput validation with the real schema
 // ---------------------------------------------------------------------------
 
-import { mindOutputSchema } from '@animus/shared';
+import { mindOutputSchema } from '@animus-labs/shared';
 
 describe('MindOutput schema validation', () => {
   it('validates a complete MindOutput', () => {
@@ -596,7 +596,7 @@ describe('MindOutput schema validation', () => {
 // Test session cleanup on mind query failure (leak prevention)
 // ---------------------------------------------------------------------------
 
-import { AgentManager } from '@animus/agents';
+import { AgentManager } from '@animus-labs/agents';
 
 describe('AgentManager.removeTrackedSession', () => {
   it('force-removes a tracked session without calling end()', async () => {

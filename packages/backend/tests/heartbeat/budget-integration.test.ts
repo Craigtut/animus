@@ -15,7 +15,7 @@ import {
   type MindContextParams,
 } from '../../src/heartbeat/context-builder.js';
 import { compilePersona, type PersonaConfig } from '../../src/heartbeat/persona-compiler.js';
-import type { EmotionState } from '@animus/shared';
+import type { EmotionState } from '@animus-labs/shared';
 
 // ============================================================================
 // Helpers
@@ -46,11 +46,10 @@ function makeEmotion(emotion: string, intensity: number): EmotionState {
 }
 
 function makeParams(overrides: Partial<MindContextParams> = {}): MindContextParams {
-  return {
-    trigger: { type: 'interval', elapsedMs: 300000 },
-    contact: null,
-    sessionState: 'cold',
-    currentEmotions: [makeEmotion('joy', 0.3)],
+    return {
+      trigger: { type: 'interval', elapsedMs: 300000 },
+      contact: null,
+      currentEmotions: [makeEmotion('joy', 0.3)],
     tickIntervalMs: 300000,
     recentThoughts: [],
     recentExperiences: [],

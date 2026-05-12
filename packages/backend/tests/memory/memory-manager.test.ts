@@ -16,7 +16,7 @@ import {
   CORE_SELF_TOKEN_CAP,
 } from '../../src/memory/memory-manager.js';
 import type { VectorStore, SearchResult } from '../../src/memory/vector-store.js';
-import type { IEmbeddingProvider } from '@animus/shared';
+import type { IEmbeddingProvider } from '@animus-labs/shared';
 import * as memoryStore from '../../src/db/stores/memory-store.js';
 
 // --------------------------------------------------------------------------
