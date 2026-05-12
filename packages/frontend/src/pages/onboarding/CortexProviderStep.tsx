@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { css, keyframes, useTheme } from '@emotion/react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -18,24 +18,7 @@ import { Button, Typography, Tooltip, Select, Slider } from '../../components/ui
 import { useOnboardingStore } from '../../store';
 import { OnboardingNav } from './OnboardingNav';
 import { trpc } from '../../utils/trpc';
-
-// ============================================================================
-// Types
-// ============================================================================
-
-interface ProviderCardInfo {
-  id: string;
-  name: string;
-  description: string;
-}
-
-/** OAuth providers shown as cards in Layer 1. */
-const OAUTH_CARDS: ProviderCardInfo[] = [
-  { id: 'anthropic', name: 'Anthropic (Claude)', description: 'Use your Claude Pro or Max subscription' },
-  { id: 'openai-codex', name: 'OpenAI (ChatGPT)', description: 'Use your ChatGPT Plus or Pro subscription' },
-  { id: 'google-gemini-cli', name: 'Google (Gemini)', description: 'Sign in with your Google account' },
-  { id: 'github-copilot', name: 'GitHub Copilot', description: 'Use your GitHub Copilot subscription' },
-];
+import { buildOAuthCards } from '../../utils/provider-display';
 
 // ============================================================================
 // Component
@@ -50,6 +33,8 @@ export function CortexProviderStep() {
   const { data: statusData } = trpc.cortexProvider.getStatus.useQuery();
   const { data: allProviders } = trpc.cortexProvider.listProviders.useQuery();
 
+  const oauthCards = useMemo(() => buildOAuthCards(allProviders ?? []), [allProviders]);
+
   // OAuth state
   const [oauthProvider, setOauthProvider] = useState<string | null>(null);
   const [oauthState, setOauthState] = useState<'idle' | 'authenticating' | 'success' | 'error'>('idle');
@@ -60,7 +45,7 @@ export function CortexProviderStep() {
 
   // API key state
   const [apiKeyExpanded, setApiKeyExpanded] = useState(false);
-  const [apiKeyProvider, setApiKeyProvider] = useState('anthropic');
+  const [apiKeyProvider, setApiKeyProvider] = useState('');
   const [apiKeyValue, setApiKeyValue] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [apiKeyValidation, setApiKeyValidation] = useState<'idle' | 'validating' | 'success' | 'error'>('idle');
@@ -150,6 +135,12 @@ export function CortexProviderStep() {
     (p) => p.authMethods.includes('api_key')
   );
   const selectedApiProvider = apiKeyProviders.find((p) => p.id === apiKeyProvider);
+
+  useEffect(() => {
+    if (!apiKeyProvider && apiKeyProviders.length > 0) {
+      setApiKeyProvider(apiKeyProviders[0].id);
+    }
+  }, [apiKeyProvider, apiKeyProviders]);
 
   // ── Handlers ──
 
@@ -379,7 +370,7 @@ export function CortexProviderStep() {
 
       {/* Layer 1: OAuth Provider Cards */}
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-        {OAUTH_CARDS.map((card) => {
+        {oauthCards.map((card) => {
           const isConnected = connectedProvider === card.id && connectedMethod === 'oauth';
           const isAuthenticating = oauthProvider === card.id && oauthState === 'authenticating';
           const isError = oauthProvider === card.id && oauthState === 'error';

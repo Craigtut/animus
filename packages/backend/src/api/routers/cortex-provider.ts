@@ -191,7 +191,7 @@ export const cortexProviderRouter = router({
         settingsStore.updateCortexSettings(db, {
           cortexProvider: input.provider,
           cortexModel: defaultModel,
-          cortexThinkingLevel: 'medium',
+          cortexThinkingLevel: 'high',
         });
 
         if (defaultModel) {
@@ -295,7 +295,7 @@ export const cortexProviderRouter = router({
       settingsStore.updateCortexSettings(db, {
         cortexProvider: input.provider,
         cortexModel: defaultModel,
-        cortexThinkingLevel: 'medium',
+        cortexThinkingLevel: 'high',
       });
 
       if (defaultModel) {
@@ -414,7 +414,7 @@ export const cortexProviderRouter = router({
 
   setThinkingLevel: protectedProcedure
     .input(z.object({
-      level: z.enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']),
+      level: z.enum(['off', 'minimal', 'low', 'medium', 'high', 'max']),
     }))
     .mutation(({ input }) => {
       const db = getSystemDb();

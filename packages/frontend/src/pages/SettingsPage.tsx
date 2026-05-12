@@ -47,6 +47,7 @@ import { ToolsSection } from '../components/settings/ToolsSection';
 import { PackageConsentDialog } from '../components/settings/PackageConsentDialog';
 import { Upload, ArrowCounterClockwise, ArrowsClockwise } from '@phosphor-icons/react';
 import { AnpkDropZone } from '../components/settings/AnpkDropZone';
+import { buildOAuthCards } from '../utils/provider-display';
 import { AboutInline } from '../components/settings/AboutSection';
 import { TelemetryInline } from '../components/settings/TelemetrySection';
 import { PasswordsSection } from '../components/settings/PasswordsSection';
@@ -509,18 +510,6 @@ function SleepEnergySettings() {
 // ── Helpers for Cortex Provider Section ──
 
 /** Format a time-until-expiry string from a Unix timestamp (ms). */
-function formatTimeUntilExpiry(expiresAtMs: number): string {
-  const now = Date.now();
-  const diff = expiresAtMs - now;
-  if (diff <= 0) return 'Expired';
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ${minutes % 60}m`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ${hours % 24}h`;
-}
-
 /** Three breathing dots animation for OAuth waiting states. */
 function BreathingDots({ color }: { color: string }) {
   const breathe = keyframes`
@@ -550,10 +539,7 @@ function CortexProviderSection() {
   const theme = useTheme();
   const utils = trpc.useUtils();
 
-  const { data: statusData, isLoading: statusLoading } = trpc.cortexProvider.getStatus.useQuery(
-    undefined,
-    { refetchInterval: 60_000 } // Refresh every 60s to keep expiry display current
-  );
+  const { data: statusData, isLoading: statusLoading } = trpc.cortexProvider.getStatus.useQuery();
   const { data: allProviders } = trpc.cortexProvider.listConfiguredProviders.useQuery();
 
   const removeCredentialMutation = trpc.cortexProvider.removeCredential.useMutation({
@@ -606,7 +592,7 @@ function CortexProviderSection() {
     { enabled: !!activeProvider }
   );
 
-  const [advancedExpanded, setAdvancedExpanded] = useState(false);
+
   const [switchModalOpen, setSwitchModalOpen] = useState(false);
 
   // Reconnect OAuth state
@@ -652,7 +638,6 @@ function CortexProviderSection() {
   const showConnected = isConnected && !showDisconnected;
   const showNotConnected = !isConnected && !showDisconnected;
 
-  // Derive credential type badge and expiry info
   const meta = statusData?.meta as Record<string, unknown> | null;
   const method = statusData?.method;
 
@@ -682,7 +667,7 @@ function CortexProviderSection() {
 
   const handleThinkingChange = (level: string) => {
     setThinkingMutation.mutate(
-      { level: level as 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' },
+      { level: level as 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'max' },
       { onSuccess: () => thinkingSave.flash() }
     );
   };
@@ -751,6 +736,13 @@ function CortexProviderSection() {
     );
   }
 
+  const connectionLabel = method === 'oauth'
+    ? (meta?.['displayName'] ? String(meta['displayName']) : 'Signed in')
+    : method === 'api_key' ? 'API key'
+    : method === 'env_var' ? 'Environment variable'
+    : method === 'custom' ? (meta?.['baseUrl'] ? String(meta['baseUrl']) : 'Custom endpoint')
+    : '';
+
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[6]};`}>
       <Typography.Title3 as="h2">AI Provider</Typography.Title3>
@@ -764,65 +756,45 @@ function CortexProviderSection() {
           &::before { background: linear-gradient(180deg, ${theme.colors.warning.main}18 0%, transparent 100%); }
         `}>
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-            {/* Status header */}
-            <div css={css`display: flex; align-items: flex-start; justify-content: space-between; gap: ${theme.spacing[3]};`}>
-              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-                <Warning size={20} weight="fill" css={css`color: ${theme.colors.warning.main}; flex-shrink: 0;`} />
-                <div>
-                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                    <Typography.SmallBodyAlt>{providerName}</Typography.SmallBodyAlt>
-                    <Badge variant="warning">Disconnected</Badge>
-                  </div>
-                  <Typography.Caption color="hint" css={css`margin-top: ${theme.spacing[0.5]};`}>
-                    {latestAuthError?.message
-                      ? latestAuthError.message.length > 120
-                        ? `${latestAuthError.message.slice(0, 120)}...`
-                        : latestAuthError.message
-                      : method === 'api_key'
-                        ? 'API key is invalid or has been revoked.'
-                        : 'Authentication expired or revoked.'}
-                  </Typography.Caption>
+            <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+              <Warning size={20} weight="fill" css={css`color: ${theme.colors.warning.main}; flex-shrink: 0;`} />
+              <div>
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                  <Typography.SmallBodyAlt>{providerName}</Typography.SmallBodyAlt>
+                  <Badge variant="warning">Disconnected</Badge>
                 </div>
+                <Typography.Caption color="hint" css={css`margin-top: ${theme.spacing[0.5]};`}>
+                  {latestAuthError?.message
+                    ? latestAuthError.message.length > 120
+                      ? `${latestAuthError.message.slice(0, 120)}...`
+                      : latestAuthError.message
+                    : method === 'api_key'
+                      ? 'API key is invalid or has been revoked.'
+                      : 'Authentication expired or revoked.'}
+                </Typography.Caption>
               </div>
             </div>
 
-            {/* Reconnect actions */}
             {reconnectState === 'authenticating' ? (
               <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
                 <BreathingDots color={theme.colors.warning.main} />
                 <Typography.Caption color="secondary">Waiting for authorization...</Typography.Caption>
-                <Button variant="ghost" size="sm" onClick={handleCancelReconnect}>
-                  Cancel
-                </Button>
+                <Button variant="ghost" size="sm" onClick={handleCancelReconnect}>Cancel</Button>
               </div>
             ) : (
               <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
                 {method === 'oauth' && (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={handleReconnect}
-                    loading={initiateOAuthMutation.isPending}
-                  >
+                  <Button variant="primary" size="sm" onClick={handleReconnect} loading={initiateOAuthMutation.isPending}>
                     <ArrowsClockwise size={14} css={css`margin-right: ${theme.spacing[1]};`} />
                     Reconnect
                   </Button>
                 )}
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setSwitchModalOpen(true)}
-                >
-                  Switch Provider
-                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setSwitchModalOpen(true)}>Switch Provider</Button>
               </div>
             )}
 
-            {/* Suggested action from the error */}
             {latestAuthError?.suggestedAction && (
-              <Typography.Tiny color="hint">
-                {latestAuthError.suggestedAction}
-              </Typography.Tiny>
+              <Typography.Tiny color="hint">{latestAuthError.suggestedAction}</Typography.Tiny>
             )}
           </div>
         </Card>
@@ -830,85 +802,45 @@ function CortexProviderSection() {
 
       {/* ── Connected State ── */}
       {showConnected && (
-        <Card css={css`padding: ${theme.spacing[5]};`}>
-          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
-            {/* Status header */}
-            <div css={css`display: flex; align-items: flex-start; justify-content: space-between; gap: ${theme.spacing[3]};`}>
-              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-                <CheckCircle size={20} weight="fill" css={css`color: ${theme.colors.success.main}; flex-shrink: 0;`} />
-                <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[0.5]};`}>
-                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                    <Typography.SmallBodyAlt>{providerName}</Typography.SmallBodyAlt>
-                    <Badge variant="success">Connected</Badge>
-                  </div>
-
-                  {/* Display name */}
-                  {meta?.['displayName'] ? (
-                    <Typography.Caption color="hint">
-                      {`${meta['displayName']}`}
-                    </Typography.Caption>
-                  ) : null}
-
-                  {/* Fix 2: Credential type badge + expiry info */}
-                  <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-wrap: wrap; margin-top: ${theme.spacing[0.5]};`}>
-                    {method === 'oauth' && (
-                      <>
-                        {meta?.['refreshable'] && (
-                          <Badge variant="default">
-                            <ArrowsClockwise size={10} css={css`margin-right: ${theme.spacing[0.5]};`} />
-                            Auto-refreshing
-                          </Badge>
-                        )}
-                        {meta?.['expiresAt'] && typeof meta['expiresAt'] === 'number' && (
-                          <Typography.Tiny color="hint">
-                            Expires in {formatTimeUntilExpiry(meta['expiresAt'] as number)}
-                          </Typography.Tiny>
-                        )}
-                      </>
-                    )}
-                    {method === 'api_key' && (
-                      <Badge variant="default">API Key</Badge>
-                    )}
-                    {method === 'env_var' && (
-                      <Badge variant="default">Environment Variable</Badge>
-                    )}
-                    {method === 'custom' && (
-                      <>
-                        <Badge variant="default">Custom Endpoint</Badge>
-                        {meta?.['baseUrl'] && (
-                          <Typography.Tiny color="hint">
-                            {String(meta['baseUrl'])}
-                          </Typography.Tiny>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
+        <>
+          {/* Connection status */}
+          <Card css={css`padding: ${theme.spacing[3.5]} ${theme.spacing[5]};`}>
+            <div css={css`display: flex; align-items: center; justify-content: space-between; min-height: 32px;`}>
+              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                <div css={css`
+                  width: 8px; height: 8px; border-radius: ${theme.borderRadius.full};
+                  background: ${theme.colors.success.main};
+                  box-shadow: 0 0 6px ${theme.colors.success.main}66;
+                  flex-shrink: 0;
+                `} />
+                <Typography.SmallBodyAlt>{providerName}</Typography.SmallBodyAlt>
+                {connectionLabel && (
+                  <>
+                    <span css={css`color: ${theme.colors.text.disabled}; font-size: ${theme.typography.fontSize.xs};`}>/</span>
+                    <Typography.Caption color="hint">{connectionLabel}</Typography.Caption>
+                  </>
+                )}
               </div>
-
-              {/* Action buttons: Sign Out + Switch Provider */}
-              <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-shrink: 0;`}>
+              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[1]};`}>
+                <Button variant="secondary" size="sm" onClick={() => setSwitchModalOpen(true)}>
+                  Switch Provider
+                </Button>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => removeCredentialMutation.mutate({ provider: activeProvider! })}
                   loading={removeCredentialMutation.isPending}
+                  css={css`color: ${theme.colors.text.hint}; &:hover { color: ${theme.colors.error.main}; }`}
                 >
-                  <SignOut size={14} css={css`margin-right: ${theme.spacing[1]};`} />
-                  Sign Out
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setSwitchModalOpen(true)}
-                >
-                  Switch Provider
+                  <SignOut size={14} />
                 </Button>
               </div>
             </div>
+          </Card>
 
-            {/* Model picker */}
-            {models && models.length > 0 && (
+          {/* Model configuration */}
+          {models && models.length > 0 && (
+            <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
               <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
                 <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
                   <Typography.SmallBodyAlt>Model</Typography.SmallBodyAlt>
@@ -923,10 +855,45 @@ function CortexProviderSection() {
                   }))}
                 />
               </div>
-            )}
 
-            {/* Context window limit */}
-            {models && models.length > 0 && (
+              {/* Thinking level */}
+              {(() => {
+                const activeModelForThinking = models?.find(m => m.id === statusData?.model);
+                if (!activeModelForThinking?.supportsThinking) return null;
+
+                const allLevels = [
+                  { value: 'off', label: 'Off' },
+                  { value: 'minimal', label: 'Minimal' },
+                  { value: 'low', label: 'Low' },
+                  { value: 'medium', label: 'Medium' },
+                  { value: 'high', label: 'High' },
+                  { value: 'max', label: 'Max' },
+                ];
+                const supported = activeModelForThinking.supportedThinkingLevels;
+                const thinkingOptions = supported?.length
+                  ? allLevels.filter(l => supported.includes(l.value))
+                  : allLevels;
+
+                return (
+                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                    <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                      <Typography.SmallBodyAlt>Thinking Level</Typography.SmallBodyAlt>
+                      <SaveIndicator show={thinkingSave.show} />
+                    </div>
+                    <Select
+                      value={statusData?.thinkingLevel ?? 'high'}
+                      onChange={(value) => handleThinkingChange(value)}
+                      maxWidth="200px"
+                      options={thinkingOptions}
+                    />
+                    <Typography.Caption color="hint">
+                      Controls how much the model reasons before responding. Higher levels use more tokens.
+                    </Typography.Caption>
+                  </div>
+                );
+              })()}
+
+              {/* Context window limit */}
               <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
                 <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
                   <Typography.SmallBodyAlt>Context Usage</Typography.SmallBodyAlt>
@@ -945,10 +912,7 @@ function CortexProviderSection() {
                       showNeutral={false}
                     />
                   </div>
-                  <Typography.SmallBodyAlt as="span" css={css`
-                    white-space: nowrap;
-                    min-width: 110px;
-                  `}>
+                  <Typography.SmallBodyAlt as="span" css={css`white-space: nowrap; min-width: 110px;`}>
                     {`${contextPercentage}% · ${formatContextTokens(sliderValue)}`}
                   </Typography.SmallBodyAlt>
                 </div>
@@ -956,10 +920,8 @@ function CortexProviderSection() {
                   Limits how much of the model's context window is used. Lower values trigger compaction sooner, reducing token costs. Default is {formatContextTokens(defaultLimit)}.
                 </Typography.Caption>
               </div>
-            )}
 
-            {/* Utility model picker */}
-            {models && models.length > 0 && (
+              {/* Utility model */}
               <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
                 <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
                   <Typography.SmallBodyAlt>Utility Model</Typography.SmallBodyAlt>
@@ -982,182 +944,25 @@ function CortexProviderSection() {
                   A smaller model used for internal operations like web page summarization and safety checks. Does not affect the quality of the agent's main responses.
                 </Typography.Caption>
               </div>
-            )}
-          </div>
-        </Card>
+            </div>
+          )}
+        </>
       )}
 
       {/* ── Not Connected State ── */}
       {showNotConnected && (
-        <Card css={css`padding: ${theme.spacing[5]};`}>
-          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]}; align-items: center; text-align: center; padding: ${theme.spacing[4]} 0;`}>
-            <Typography.Body color="secondary">No AI provider configured.</Typography.Body>
+        <Card css={css`padding: ${theme.spacing[8]} ${theme.spacing[5]};`}>
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]}; align-items: center; text-align: center;`}>
+            <Typography.Body color="secondary">No AI provider configured</Typography.Body>
             <Typography.Caption color="hint">
               Connect a provider to start using Animus.
             </Typography.Caption>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => setSwitchModalOpen(true)}
-            >
+            <Button variant="primary" size="sm" onClick={() => setSwitchModalOpen(true)}>
               Set Up Provider
             </Button>
           </div>
         </Card>
       )}
-
-      {/* Advanced section */}
-      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
-        <button
-          onClick={() => setAdvancedExpanded(!advancedExpanded)}
-          css={css`
-            display: flex; align-items: center; gap: ${theme.spacing[1]};
-            padding: 0; background: none; border: none; cursor: pointer;
-            font-size: ${theme.typography.fontSize.sm}; font-family: inherit;
-            color: ${theme.colors.text.hint};
-            &:hover { color: ${theme.colors.text.secondary}; }
-          `}
-        >
-          <CaretRight size={12} css={css`
-            transition: transform 150ms ease;
-            transform: rotate(${advancedExpanded ? '90deg' : '0deg'});
-          `} />
-          Advanced
-        </button>
-
-        <AnimatePresence>
-          {advancedExpanded && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              css={css`overflow: hidden;`}
-            >
-              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[5]};`}>
-                {/* Thinking level — only shown when the active model supports thinking */}
-                {(() => {
-                  const activeModelData = models?.find(m => m.id === statusData?.model);
-                  if (!activeModelData?.supportsThinking) return null;
-                  return (
-                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
-                      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                        <Typography.SmallBodyAlt>Thinking Level</Typography.SmallBodyAlt>
-                        <SaveIndicator show={thinkingSave.show} />
-                      </div>
-                      <Select
-                        value={statusData?.thinkingLevel ?? 'off'}
-                        onChange={(value) => handleThinkingChange(value)}
-                        maxWidth="200px"
-                        options={[
-                          { value: 'off', label: 'Off' },
-                          { value: 'minimal', label: 'Minimal' },
-                          { value: 'low', label: 'Low' },
-                          { value: 'medium', label: 'Medium' },
-                          { value: 'high', label: 'High' },
-                          { value: 'xhigh', label: 'Extra High' },
-                        ]}
-                      />
-                      <Typography.Caption color="hint">
-                        Controls how much the model reasons before responding. Higher levels use more tokens.
-                      </Typography.Caption>
-                    </div>
-                  );
-                })()}
-
-                {/* Additional providers list */}
-                {allProviders && (
-                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                    <Typography.SmallBodyAlt>Additional Providers</Typography.SmallBodyAlt>
-                    <Typography.Caption color="hint">
-                      You can configure multiple providers and switch between them at any time.
-                    </Typography.Caption>
-                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
-                      {/* Connected providers */}
-                      {allProviders.filter(p => p.status.connected).map((p) => (
-                        <div
-                          key={p.id}
-                          css={css`
-                            display: flex; align-items: center; justify-content: space-between;
-                            padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                            border-radius: ${theme.borderRadius.sm};
-                            background: ${theme.colors.background.elevated};
-                          `}
-                        >
-                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                            <CheckCircle size={14} weight="fill" css={css`color: ${theme.colors.success.main};`} />
-                            <Typography.SmallBody>{p.name}</Typography.SmallBody>
-                            <Typography.Tiny color="hint">
-                              {p.status.method === 'oauth' ? 'OAuth' :
-                               p.status.method === 'api_key' ? 'API Key' :
-                               p.status.method === 'env_var' ? 'Env Var' :
-                               p.status.method === 'custom' ? 'Custom' : ''}
-                            </Typography.Tiny>
-                          </div>
-                          {activeProvider !== p.id && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                utils.cortexProvider.listModels.fetch({ provider: p.id }).then((m) => {
-                                  const model = m[0]?.id ?? '';
-                                  if (model) {
-                                    setActiveMutation.mutate({ provider: p.id, model });
-                                  }
-                                });
-                              }}
-                            >
-                              Switch
-                            </Button>
-                          )}
-                        </div>
-                      ))}
-                      {/* Unconfigured providers */}
-                      {allProviders.filter(p => !p.status.connected).slice(0, 5).map((p) => (
-                        <div
-                          key={p.id}
-                          css={css`
-                            display: flex; align-items: center; justify-content: space-between;
-                            padding: ${theme.spacing[2]} ${theme.spacing[3]};
-                            border-radius: ${theme.borderRadius.sm};
-                            background: ${theme.colors.background.paper};
-                            opacity: 0.7;
-                          `}
-                        >
-                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                            <div css={css`width: 14px; height: 14px; border-radius: 50%; border: 1px solid ${theme.colors.border.default};`} />
-                            <Typography.SmallBody color="hint">{p.name}</Typography.SmallBody>
-                            <Typography.Tiny color="disabled">Not configured</Typography.Tiny>
-                          </div>
-                          <Button variant="ghost" size="sm" onClick={() => setSwitchModalOpen(true)}>
-                            Add
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Custom endpoint shortcut */}
-                <div css={css`
-                  display: flex; align-items: center; justify-content: space-between;
-                  padding: ${theme.spacing[3]};
-                  border-radius: ${theme.borderRadius.sm};
-                  border: 1px solid ${theme.colors.border.default};
-                `}>
-                  <div>
-                    <Typography.SmallBodyAlt>Custom Endpoint</Typography.SmallBodyAlt>
-                    <Typography.Caption color="hint">Ollama, vLLM, LM Studio, or any OpenAI-compatible API</Typography.Caption>
-                  </div>
-                  <Button variant="ghost" size="sm" onClick={() => setSwitchModalOpen(true)}>
-                    Configure
-                  </Button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
 
       {/* ── Switch Provider Modal ── */}
       <Modal open={switchModalOpen} onClose={handleSwitchModalClose} maxWidth="560px">
@@ -1198,6 +1003,8 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
   const { data: statusData } = trpc.cortexProvider.getStatus.useQuery();
   const { data: allProviders } = trpc.cortexProvider.listProviders.useQuery();
 
+  const oauthCards = useMemo(() => buildOAuthCards(allProviders ?? []), [allProviders]);
+
   // OAuth state
   const [oauthProvider, setOauthProvider] = useState<string | null>(null);
   const [oauthState, setOauthState] = useState<'idle' | 'authenticating' | 'success' | 'error'>('idle');
@@ -1207,7 +1014,7 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
 
   // API key state
   const [apiKeyExpanded, setApiKeyExpanded] = useState(false);
-  const [apiKeyProvider, setApiKeyProvider] = useState('anthropic');
+  const [apiKeyProvider, setApiKeyProvider] = useState('');
   const [apiKeyValue, setApiKeyValue] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [apiKeyValidation, setApiKeyValidation] = useState<'idle' | 'validating' | 'success' | 'error'>('idle');
@@ -1228,14 +1035,6 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
   const saveCustomMutation = trpc.cortexProvider.saveCustomEndpoint.useMutation();
   const testCustomMutation = trpc.cortexProvider.testCustomEndpoint.useMutation();
 
-  // OAuth cards (same as onboarding)
-  const OAUTH_CARDS = [
-    { id: 'anthropic', name: 'Anthropic (Claude)', description: 'Use your Claude Pro or Max subscription' },
-    { id: 'openai-codex', name: 'OpenAI (ChatGPT)', description: 'Use your ChatGPT Plus or Pro subscription' },
-    { id: 'google-gemini-cli', name: 'Google (Gemini)', description: 'Sign in with your Google account' },
-    { id: 'github-copilot', name: 'GitHub Copilot', description: 'Use your GitHub Copilot subscription' },
-  ];
-
   // OAuth subscription
   trpc.cortexProvider.oauthStatus.useSubscription(undefined, {
     enabled: oauthState === 'authenticating',
@@ -1247,7 +1046,6 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
         setOauthState('success');
         utils.cortexProvider.getStatus.invalidate();
         utils.cortexProvider.listConfiguredProviders.invalidate();
-        // Auto-close modal after a brief delay so the user sees the success state
         setTimeout(() => onClose(), 600);
       } else if (event.type === 'error') {
         setOauthState('error');
@@ -1260,6 +1058,12 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
     (p) => p.authMethods.includes('api_key')
   );
   const selectedApiProvider = apiKeyProviders.find((p) => p.id === apiKeyProvider);
+
+  useEffect(() => {
+    if (!apiKeyProvider && apiKeyProviders.length > 0) {
+      setApiKeyProvider(apiKeyProviders[0].id);
+    }
+  }, [apiKeyProvider, apiKeyProviders]);
 
   const handleOAuthStart = useCallback((providerId: string) => {
     setOauthProvider(providerId);
@@ -1358,7 +1162,7 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
 
       {/* OAuth Provider Cards */}
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-        {OAUTH_CARDS.map((card) => {
+        {oauthCards.map((card) => {
           const isAuthenticating = oauthProvider === card.id && oauthState === 'authenticating';
           const isError = oauthProvider === card.id && oauthState === 'error';
           const isCurrent = statusData?.provider === card.id && statusData.connected;

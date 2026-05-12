@@ -218,6 +218,7 @@ interface MindQueryResult {
 async function cortexMindQuery(
   gathered: GatherResult,
   tickNumber: number,
+  gatherDurationMs: number,
 ): Promise<MindQueryResult> {
   const fullPersona = personaStore.getPersona(getPersonaDb());
   if (!ctx.compiledPersona) {
@@ -258,6 +259,37 @@ async function cortexMindQuery(
       provider: cortexMind.model?.provider ?? 'cortex',
       model: cortexMind.model?.modelId ?? 'cortex',
     });
+
+    // Log gather phase events retroactively (session didn't exist during gather)
+    try {
+      const agentLogsDb = getAgentLogsDb();
+      const startEvent = agentLogStore.insertEvent(agentLogsDb, {
+        sessionId: logSessionId,
+        eventType: 'gather_start',
+        data: { tickNumber },
+      });
+      eventBus.emit('agent:event:logged', {
+        id: startEvent.id,
+        sessionId: startEvent.sessionId,
+        eventType: startEvent.eventType,
+        data: startEvent.data,
+        createdAt: startEvent.createdAt,
+      });
+      const endEvent = agentLogStore.insertEvent(agentLogsDb, {
+        sessionId: logSessionId,
+        eventType: 'gather_end',
+        data: { tickNumber, durationMs: gatherDurationMs },
+      });
+      eventBus.emit('agent:event:logged', {
+        id: endEvent.id,
+        sessionId: endEvent.sessionId,
+        eventType: endEvent.eventType,
+        data: endEvent.data,
+        createdAt: endEvent.createdAt,
+      });
+    } catch (err) {
+      log.debug('Failed to log gather phase events:', err);
+    }
   }
 
   // Signal interaction recency for adaptive compaction thresholds.
@@ -385,6 +417,9 @@ async function cortexMindQuery(
     const currentSettings = systemStore.getSystemSettings(getSystemDb());
     const contextDebugMode = currentSettings.contextDebugMode;
 
+    const triggerMeta = gathered.trigger.metadata as Record<string, unknown> | undefined;
+    const lowLatency = triggerMeta?.['lowLatency'] === true;
+
     const pipelineResult = await executeCortexPipeline(
       {
         cortexAgent,
@@ -397,6 +432,7 @@ async function cortexMindQuery(
         contactId: gathered.trigger.contactId ?? null,
         model: cortexMind.model?.modelId ?? 'cortex',
         contextDebugMode,
+        lowLatency,
         existenceParadigm: fullPersona.existenceParadigm ?? 'digital_consciousness',
         existenceLocation: fullPersona.existenceParadigm === 'simulated_life'
           ? fullPersona.location
@@ -549,6 +585,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
     }
 
     // Stage 1: GATHER CONTEXT
+    const gatherStartTime = Date.now();
     const gathered = await gatherContext(effectiveTrigger, {
       tickQueue,
       memoryManager: ctx.memory?.memoryManager ?? null,
@@ -559,6 +596,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
       channelManager: getChannelManager(),
       deferredQueue: getDeferredQueue(),
     });
+    const gatherDurationMs = Date.now() - gatherStartTime;
     const tickStart = Date.now();
 
     // Start typing indicator for message-triggered ticks
@@ -602,7 +640,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
       if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
       return;
     }
-    const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged, allThoughts, replyTurnsSent, logSessionId } = await cortexMindQuery(gathered, tickNumber);
+    const { output, compiledContext, replySentEarly, earlyReplyContent, tickInputLogged, allThoughts, replyTurnsSent, logSessionId } = await cortexMindQuery(gathered, tickNumber, gatherDurationMs);
 
     // Clear typing indicator now that mind query is done
     if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
@@ -651,7 +689,8 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
       onIntervalChanged: (newIntervalMs: number) => {
         const cortexAgent = ctx.agents?.cortexMind?.agent;
         if (cortexAgent) {
-          const providerName = ((systemStore.getSystemSettings(getSystemDb()) as Record<string, unknown>)['cortexProvider'] as string | undefined) ?? 'anthropic';
+          const providerName = (systemStore.getSystemSettings(getSystemDb()) as Record<string, unknown>)['cortexProvider'] as string | undefined;
+          if (!providerName) return;
           const newRetention = resolveCacheRetention(providerName, newIntervalMs);
           cortexAgent.setCacheRetention(newRetention);
           log.info(`Cache retention updated: ${newRetention} (interval=${newIntervalMs}ms)`);
