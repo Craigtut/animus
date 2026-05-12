@@ -1147,7 +1147,7 @@ export async function resetCortexAgent(): Promise<void> {
   try {
     const cortexAgent = await createCortexMind(
       cortexMind,
-      { messageEmbedder: ctx.memory?.messageEmbedder },
+      { messageEmbedder: ctx.memory?.messageEmbedder ?? null },
     );
     if (cortexAgent) {
       // Do NOT restore conversation history; the DB was just cleared

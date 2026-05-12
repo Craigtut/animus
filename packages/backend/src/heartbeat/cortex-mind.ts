@@ -447,9 +447,9 @@ export async function createCortexMind(
     contextWindowLimit: (settingsAny['cortexContextWindowLimit'] as number | null | undefined) ?? null,
     resolvePermission: permissionResolver,
     tools: animusTools,
-    envOverrides,
+    ...(envOverrides ? { envOverrides } : {}),
     persistResult,
-    compaction: recallConfig ? { observational: { recall: recallConfig } } : undefined,
+    ...(recallConfig ? { compaction: { observational: { recall: recallConfig } } } : {}),
     deferredTools: { enabled: true, deferMcp: true },
     ...(cortexDiagnostics ? {
       diagnostics: {
@@ -798,10 +798,10 @@ function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
   const skillRegistry = cortexAgent.getSkillRegistry();
 
   // Set up logging on the MCP manager
-  mcpManager.log = {
+  mcpManager.logger = {
     info: (msg: string) => log.info(`[MCP] ${msg}`),
     warn: (msg: string) => log.warn(`[MCP] ${msg}`),
-    error: (msg: string, err?: unknown) => log.error(`[MCP] ${msg}`, err),
+    error: (msg: string) => log.error(`[MCP] ${msg}`),
     debug: (msg: string) => log.debug(`[MCP] ${msg}`),
   };
 

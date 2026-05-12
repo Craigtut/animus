@@ -138,7 +138,7 @@ export function CortexProviderStep() {
 
   useEffect(() => {
     if (!apiKeyProvider && apiKeyProviders.length > 0) {
-      setApiKeyProvider(apiKeyProviders[0].id);
+      setApiKeyProvider(apiKeyProviders[0]!.id);
     }
   }, [apiKeyProvider, apiKeyProviders]);
 

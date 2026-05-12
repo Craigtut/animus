@@ -194,7 +194,7 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     log.info('Channels stopped');
 
     // 6. Stop plugin triggers
-    const { getPluginManager } = await import('./plugin-manager.js');
+    const { getPluginManager } = await import('../plugins/plugin-manager.js');
     const pluginManager = getPluginManager();
     await pluginManager.stopTriggers();
     log.info('Plugin triggers stopped');

@@ -804,7 +804,7 @@ function CortexProviderSection() {
       {showConnected && (
         <>
           {/* Connection status */}
-          <Card css={css`padding: ${theme.spacing[3.5]} ${theme.spacing[5]};`}>
+          <Card css={css`padding: ${theme.spacing[4]} ${theme.spacing[5]};`}>
             <div css={css`display: flex; align-items: center; justify-content: space-between; min-height: 32px;`}>
               <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
                 <div css={css`
@@ -861,7 +861,7 @@ function CortexProviderSection() {
                 const activeModelForThinking = models?.find(m => m.id === statusData?.model);
                 if (!activeModelForThinking?.supportsThinking) return null;
 
-                const allLevels = [
+                const allLevels: Array<{ value: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'max'; label: string }> = [
                   { value: 'off', label: 'Off' },
                   { value: 'minimal', label: 'Minimal' },
                   { value: 'low', label: 'Low' },
@@ -1061,7 +1061,7 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     if (!apiKeyProvider && apiKeyProviders.length > 0) {
-      setApiKeyProvider(apiKeyProviders[0].id);
+      setApiKeyProvider(apiKeyProviders[0]!.id);
     }
   }, [apiKeyProvider, apiKeyProviders]);
 
