@@ -15,6 +15,15 @@ import type { VoiceManager } from './voice-manager.js';
 
 const log = createLogger('TTSEngine', 'speech');
 
+// Pocket TTS garbles the first syllable due to FlowLM/Mimi cold start.
+// Workaround: prepend a sacrificial prefix, then trim it from the output
+// by scanning for the silence gap between the prefix and real content.
+const SACRIFICIAL_PREFIX = '... ';
+const PREFIX_MIN_SAMPLES = 0.15 * 24000; // don't search before 150ms
+const PREFIX_MAX_SAMPLES = 1.0 * 24000;  // stop searching after 1s
+const SILENCE_THRESHOLD = 0.015;         // amplitude below this = silence
+const SILENCE_GAP_SAMPLES = 0.06 * 24000; // 60ms of consecutive silence = gap found
+
 export interface TTSResult {
   samples: Float32Array;
   sampleRate: number;
@@ -37,16 +46,55 @@ type NativeVoiceState = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type NativePocketTTS = any;
 
+function concatFloat32Arrays(arrays: Float32Array[]): Float32Array {
+  let total = 0;
+  for (const a of arrays) total += a.length;
+  const result = new Float32Array(total);
+  let offset = 0;
+  for (const a of arrays) {
+    result.set(a, offset);
+    offset += a.length;
+  }
+  return result;
+}
+
+/**
+ * Find the end of the sacrificial prefix by scanning for a silence gap.
+ * Returns the sample index where the real content begins, or 0 if no gap found.
+ */
+function findPrefixEnd(samples: Float32Array): number {
+  let silenceRun = 0;
+  const start = Math.min(Math.floor(PREFIX_MIN_SAMPLES), samples.length);
+  const end = Math.min(Math.floor(PREFIX_MAX_SAMPLES), samples.length);
+
+  for (let i = start; i < end; i++) {
+    if (Math.abs(samples[i]!) < SILENCE_THRESHOLD) {
+      silenceRun++;
+      if (silenceRun >= SILENCE_GAP_SAMPLES) {
+        return i + 1;
+      }
+    } else {
+      silenceRun = 0;
+    }
+  }
+  return 0;
+}
+
 export class TTSEngine {
   private config: TTSEngineConfig;
   private voiceManager: VoiceManager;
   private tts: NativePocketTTS | null = null;
   private loaded = false;
   private cachedVoice: { id: string; state: NativeVoiceState } | null = null;
+  private _getConfiguredVoiceId: (() => string | null) | null = null;
 
   constructor(config: TTSEngineConfig, voiceManager: VoiceManager) {
     this.config = config;
     this.voiceManager = voiceManager;
+  }
+
+  setVoiceIdProvider(fn: () => string | null): void {
+    this._getConfiguredVoiceId = fn;
   }
 
   /** Check if TTS model files exist (no model load). */
@@ -99,13 +147,15 @@ export class TTSEngine {
     return state;
   }
 
-  /** Get the default voice from the first available voice entry. */
   private async getDefaultVoice(): Promise<NativeVoiceState> {
-    const voices = this.voiceManager.listVoices();
-    const defaultVoice = voices.length > 0 ? voices[0]! : null;
+    const configuredId = this._getConfiguredVoiceId?.() ?? null;
+    if (configuredId) {
+      return this.loadVoice(configuredId);
+    }
 
-    if (defaultVoice) {
-      return this.loadVoice(defaultVoice.id);
+    const voices = this.voiceManager.listVoices();
+    if (voices.length > 0) {
+      return this.loadVoice(voices[0]!.id);
     }
 
     throw new Error('No voices available. Ensure model files are downloaded.');
@@ -119,10 +169,16 @@ export class TTSEngine {
       ? await this.loadVoice(options.voiceId)
       : await this.getDefaultVoice();
 
-    const samples = await this.tts!.generate(text, voiceState);
+    const rawSamples = await this.tts!.generate(SACRIFICIAL_PREFIX + text, voiceState);
+    const trimStart = findPrefixEnd(rawSamples);
+    const samples = trimStart > 0 ? rawSamples.slice(trimStart) : rawSamples;
+
     const sampleRate = this.tts!.sampleRate;
     const wavBuffer = pcmToWav(samples, sampleRate);
 
+    if (trimStart > 0) {
+      log.debug(`Trimmed ${trimStart} prefix samples (${(trimStart / sampleRate * 1000).toFixed(0)}ms)`);
+    }
     log.debug(`Synthesized ${text.length} chars -> ${samples.length} samples`);
 
     return { samples, sampleRate, wavBuffer };
@@ -138,9 +194,9 @@ export class TTSEngine {
 
     // Check if the native addon supports streaming callback
     if (typeof this.tts!.generateStreamCb !== 'function') {
-      // Fallback: generate all at once and yield as single chunk
-      const samples = await this.tts!.generate(text, voiceState);
-      yield samples;
+      const rawSamples = await this.tts!.generate(SACRIFICIAL_PREFIX + text, voiceState);
+      const trimStart = findPrefixEnd(rawSamples);
+      yield trimStart > 0 ? rawSamples.slice(trimStart) : rawSamples;
       return;
     }
 
@@ -168,7 +224,7 @@ export class TTSEngine {
       return new Promise<void>((r) => { resolve = r; });
     };
 
-    this.tts!.generateStreamCb(text, voiceState, (err: Error | null, chunk: Float32Array) => {
+    this.tts!.generateStreamCb(SACRIFICIAL_PREFIX + text, voiceState, (err: Error | null, chunk: Float32Array) => {
       if (err) {
         push({ type: 'error', error: err });
         return;
@@ -180,25 +236,59 @@ export class TTSEngine {
       push({ type: 'chunk', data: chunk });
     });
 
+    // Buffer initial chunks until we've passed the prefix region,
+    // then find the silence gap and start yielding from there.
+    let prefixBuffer: Float32Array[] = [];
+    let prefixSampleCount = 0;
+    let prefixTrimmed = false;
+
     try {
       while (!finished) {
         await waitForItem();
 
         while (queue.length > 0) {
           const item = queue.shift()!;
-          if (item.type === 'chunk') {
-            yield item.data;
-          } else if (item.type === 'done') {
+          if (item.type === 'done') {
+            // Flush any remaining buffered chunks (prefix gap not found)
+            if (!prefixTrimmed && prefixBuffer.length > 0) {
+              const combined = concatFloat32Arrays(prefixBuffer);
+              const trimStart = findPrefixEnd(combined);
+              if (trimStart > 0) {
+                yield combined.slice(trimStart);
+              } else {
+                yield combined;
+              }
+            }
             finished = true;
             break;
-          } else {
+          } else if (item.type === 'error') {
             throw item.error;
+          }
+
+          if (prefixTrimmed) {
+            yield item.data;
+            continue;
+          }
+
+          // Still buffering for prefix detection
+          prefixBuffer.push(item.data);
+          prefixSampleCount += item.data.length;
+
+          if (prefixSampleCount >= PREFIX_MAX_SAMPLES) {
+            const combined = concatFloat32Arrays(prefixBuffer);
+            const trimStart = findPrefixEnd(combined);
+            if (trimStart > 0) {
+              yield combined.slice(trimStart);
+              log.debug(`Stream: trimmed ${trimStart} prefix samples`);
+            } else {
+              yield combined;
+            }
+            prefixBuffer = [];
+            prefixTrimmed = true;
           }
         }
       }
     } finally {
-      // If consumer aborts early, the Rust thread will get an error
-      // on the next callback call and stop naturally.
       finished = true;
     }
   }

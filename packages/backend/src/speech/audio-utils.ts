@@ -141,15 +141,11 @@ export function generateWaveform(samples: Float32Array, numBuckets = 256): strin
 }
 
 /** Read a WAV file and return Float32 samples + sample rate. */
-export function readWavSamples(wavPath: string): { samples: Float32Array; sampleRate: number } {
-  const buf = readFileSync(wavPath);
-
-  // Parse WAV header
+export function readWavSamplesFromBuffer(buf: Buffer): { samples: Float32Array; sampleRate: number } {
   if (buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') {
-    throw new Error(`Not a valid WAV file: ${wavPath}`);
+    throw new Error('Not a valid WAV buffer');
   }
 
-  // Find fmt chunk
   let offset = 12;
   let sampleRate = 0;
   let bitsPerSample = 0;
@@ -175,10 +171,9 @@ export function readWavSamples(wavPath: string): { samples: Float32Array; sample
   }
 
   if (!sampleRate || !dataOffset) {
-    throw new Error(`Could not parse WAV header: ${wavPath}`);
+    throw new Error('Could not parse WAV header');
   }
 
-  // Convert to Float32Array
   const numSamples = dataSize / (bitsPerSample / 8) / numChannels;
   const samples = new Float32Array(numSamples);
 
@@ -188,7 +183,6 @@ export function readWavSamples(wavPath: string): { samples: Float32Array; sample
       samples[i] = val / 0x8000;
     }
   } else if (bitsPerSample === 32) {
-    // Could be float or int32
     for (let i = 0; i < numSamples; i++) {
       samples[i] = buf.readFloatLE(dataOffset + i * numChannels * 4);
     }
@@ -197,4 +191,9 @@ export function readWavSamples(wavPath: string): { samples: Float32Array; sample
   }
 
   return { samples, sampleRate };
+}
+
+export function readWavSamples(wavPath: string): { samples: Float32Array; sampleRate: number } {
+  const buf = readFileSync(wavPath);
+  return readWavSamplesFromBuffer(buf);
 }
