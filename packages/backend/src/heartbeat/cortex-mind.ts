@@ -173,6 +173,34 @@ export function buildMindToolContext(
 // ============================================================================
 
 /**
+ * Map a runtime MCP tool name back to its server-level permission key.
+ *
+ * Cortex names plugin MCP tools `<namespacedKey>__<mcpToolName>`, where
+ * `namespacedKey` is `<plugin>__<server>` (see mcp-client.ts `wrapMcpTool`).
+ * The permission seeder, however, creates one row per MCP *server*, keyed
+ * `mcp__<namespacedKey>` (see index.ts `collectPluginTools`). Without this
+ * bridge the exact-name lookup always misses for MCP tools, so "ask"/"off"
+ * modes are never enforced for plugin tools.
+ *
+ * Given a runtime tool name and the list of connected MCP server keys,
+ * returns the seeded permKey (`mcp__<namespacedKey>`) for the longest
+ * matching server, or null if the tool is not an MCP tool from a known
+ * server. Longest-match handles servers whose keys share a prefix.
+ */
+export function resolveMcpPermKey(
+  toolName: string,
+  mcpServerKeys: string[],
+): string | null {
+  let best: string | null = null;
+  for (const namespacedKey of mcpServerKeys) {
+    if (toolName === namespacedKey || toolName.startsWith(`${namespacedKey}__`)) {
+      if (best === null || namespacedKey.length > best.length) best = namespacedKey;
+    }
+  }
+  return best ? `mcp__${best}` : null;
+}
+
+/**
  * Build the resolvePermission callback for CortexAgent.
  *
  * This replaces the old canUseTool + PreToolUse hook dual-gate system.
@@ -205,13 +233,53 @@ function buildPermissionResolver(
       }
     }
 
-    // Look up permission record
+    // Look up permission record. Plugin MCP tools are seeded per-server with
+    // an `mcp__<plugin>__<server>` key, but Cortex calls them by their
+    // per-tool runtime name (`<plugin>__<server>__<tool>`). When the exact
+    // lookup misses, map the runtime name back to its server-level permKey
+    // so "ask"/"off" modes are actually enforced for MCP tools.
     const sysDb = getSystemDb();
-    const permission = getToolPermission(sysDb, toolName);
+    let permKey = toolName;
+    let permission = getToolPermission(sysDb, permKey);
 
-    // No permission record: allow (seeder will catch up)
     if (!permission) {
-      return true;
+      let mcpServerKeys: string[] = [];
+      try {
+        mcpServerKeys = Object.keys(getPluginManager().getMcpConfigs());
+      } catch {
+        // Plugin manager not ready; fall through to the fail-safe gate.
+      }
+      const mcpPermKey = resolveMcpPermKey(toolName, mcpServerKeys);
+      if (mcpPermKey) {
+        permKey = mcpPermKey;
+        permission = getToolPermission(sysDb, permKey);
+      }
+    }
+
+    const ctx = toolContextRef.current;
+
+    // No permission record even after MCP mapping. Fail safe: route through
+    // the approval gate ("ask") rather than silently allowing. The seeder
+    // covers core, built-in, and plugin tools, so a genuine miss is rare;
+    // treating the unknown as ask surfaces any future key mismatch instead
+    // of hiding it (this was the original MCP permission-bypass bug).
+    if (!permission) {
+      log.warn(`No permission record for "${toolName}" (permKey=${permKey}); defaulting to ask`);
+      const fallback = resolveToolGate({
+        heartbeatDb: getHeartbeatDb(),
+        permKey,
+        mode: 'ask',
+        displayName: toolName,
+        toolSource: 'unknown',
+        contactId: ctx?.contactId ?? '',
+        sourceChannel: ctx?.sourceChannel ?? 'web',
+        conversationId: ctx?.conversationId ?? '',
+        toolName,
+        toolInput: args,
+        originatingAgent: 'mind',
+        eventBus: ctx?.eventBus ?? getEventBus(),
+      });
+      return fallback.action === 'allow';
     }
 
     // Off: deny
@@ -225,10 +293,9 @@ function buildPermissionResolver(
     }
 
     // Ask mode: delegate to the shared tool gate
-    const ctx = toolContextRef.current;
     const result = resolveToolGate({
       heartbeatDb: getHeartbeatDb(),
-      permKey: toolName,
+      permKey,
       mode: permission.mode,
       displayName: permission.displayName,
       toolSource: permission.toolSource,
