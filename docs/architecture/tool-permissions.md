@@ -72,9 +72,17 @@ Tools provided by the agent SDK itself (`bash`, `read`, `write`, `edit`, `glob`,
 
 ### 3. Plugin MCP Tools (External Servers)
 
-Tools from installed plugins running as external MCP servers. Each plugin server is registered under a namespaced key (e.g., `home-assistant__main`). Permissions are enforced at the **server level**, not per-function.
+Tools from installed plugins running as external MCP servers. Each plugin server is registered under a namespaced key (e.g., `home-assistant__main`).
 
-**Permission key format:** `mcp__<pluginName>__<serverName>` — e.g., `mcp__home-assistant__main`. When a tool call like `mcp__home-assistant__main__turn_on_light` fires, the system extracts the server key and checks permission against that.
+**Granularity:** permissions resolve per-tool with a server-level fallback. The resolver (`buildPermissionResolver` in `cortex-mind.ts`) checks, in order: the exact runtime tool name, then a per-tool key, then the server-level key, then a fail-safe `ask`.
+
+**Permission key formats:**
+- Server-level row: `mcp__<pluginName>__<serverName>` (e.g., `mcp__home-assistant__main`). Always seeded. Covers dynamically discovered tools (such as Home Assistant's, which depend on the user's runtime entities and cannot be enumerated in the manifest).
+- Per-tool row: `mcp__<pluginName>__<serverName>__<toolName>`. Seeded only for tools the plugin manifest statically declares.
+
+When a tool call like `home-assistant__main__turn_on_light` fires, the resolver first tries the per-tool key `mcp__home-assistant__main__turn_on_light`, then falls back to the server key `mcp__home-assistant__main`.
+
+**Manifest-declared tiers (hint + safety floor):** a plugin's MCP server config may declare a server-level `riskTier` and optional per-tool `riskTier` overrides (see the plugin manifest schema). The declared tier is recorded on the permission row (it drives the Settings UI label and ordering and is shown to the user), but it is a hint, not an authoritative grant: the seeder floors the default mode at `ask` so a plugin cannot self-declare its way to `always_allow`. The user can still explicitly set any plugin tool to `always_allow` afterwards.
 
 **Off mode** for plugin MCP tools excludes the entire server from the agent session — it's never started.
 
@@ -272,7 +280,7 @@ Three phases:
 
 1. **Core Animus tools** — Iterates `ANIMUS_TOOL_DEFS`, assigns risk tiers from a hardcoded map
 2. **Active SDK tools** — Seeds tools for the active provider only (e.g., `sdk:claude`). Tool set: `read`, `glob`, `grep`, `write`, `edit`, `bash`, `webfetch`, `websearch`
-3. **Plugin MCP tools** — Iterates installed plugins' MCP configs, assigns `acts` tier by default
+3. **Plugin MCP tools** — Iterates installed plugins' MCP configs. Each server emits a server-level row plus one row per statically declared tool. The tier comes from the manifest (`riskTier`, defaulting to `acts`); the default mode is then floored at `ask` via `floorPluginMode` so a plugin cannot self-grant `always_allow`
 
 ```typescript
 // Risk tier → default mode mapping
