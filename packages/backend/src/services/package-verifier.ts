@@ -16,8 +16,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import extractZip from 'extract-zip';
 import { createLogger } from '../lib/logger.js';
+import { z } from 'zod/v3';
 import {
   PackageManifestSchema,
+  PluginMcpServerSchema,
+  computeMcpToolPreview,
   signatureFileSchema,
   ANIMUS_LABS_PUBLIC_KEY,
   SUPPORTED_FORMAT_VERSION,
@@ -223,6 +226,26 @@ export async function verifyPackage(anpkPath: string): Promise<VerificationResul
     }
 
     log.debug(`All ${result.checksums.verified} checksums verified`);
+
+    // ── Plugin MCP tool permission preview (best-effort) ─────────────────
+    // For plugin packages that ship an MCP server, compute the tool
+    // permission rows the seeder would create so the consent dialog can
+    // show them and let the user adjust before install. Non-fatal: a
+    // preview failure must never block a valid install.
+    if (manifest.packageType === 'plugin' && manifest.components?.tools) {
+      try {
+        const toolsPath = path.join(tempDir, manifest.components.tools);
+        const toolsRaw = await fsp.readFile(toolsPath, 'utf-8');
+        const parsed = z
+          .record(PluginMcpServerSchema)
+          .parse(JSON.parse(toolsRaw));
+        result.toolPreview = computeMcpToolPreview(manifest.name, parsed);
+      } catch (err) {
+        log.warn(
+          `Could not compute MCP tool preview for ${manifest.name}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     // ── All checks passed ────────────────────────────────────────────────
     result.valid = true;

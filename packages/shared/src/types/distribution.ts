@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod/v3';
+import type { McpToolPreview } from '../tools/mcp-tool-preview.js';
 import type {
   pluginPackageManifestSchema,
   channelPackageManifestSchema,
@@ -61,6 +62,12 @@ export interface VerificationResult {
   };
   errors: string[];
   warnings: string[];
+  /**
+   * For plugin packages: the MCP tool permission rows this plugin would
+   * create, with their default modes. Drives the install-time consent
+   * picker. Empty/absent for plugins with no MCP server.
+   */
+  toolPreview?: McpToolPreview[];
 }
 
 // ============================================================================

@@ -33,3 +33,9 @@ export {
   getToolUIConfig,
 } from './ui-config.js';
 export type { ToolVisibility, ToolUICategory, ToolUIConfig, ToolCategoryMeta } from './ui-config.js';
+
+export {
+  riskTierToDefaultMode,
+  computeMcpToolPreview,
+} from './mcp-tool-preview.js';
+export type { McpToolPreview } from './mcp-tool-preview.js';
