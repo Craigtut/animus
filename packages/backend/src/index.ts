@@ -12,11 +12,13 @@ import rateLimit from '@fastify/rate-limit';
 import staticPlugin from '@fastify/static';
 import websocket from '@fastify/websocket';
 import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
-import type { RiskTier } from '@animus-labs/shared';
+import { computeMcpToolPreview } from '@animus-labs/shared';
+import type { ToolPermissionMode, PluginMcpServer } from '@animus-labs/shared';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { initializeDatabases, closeDatabases, getSystemDb, getPersonaDb, DATABASE_COUNT } from './db/index.js';
+import * as pluginStore from './db/stores/plugin-store.js';
 import { createTRPCContext, appRouter } from './api/index.js';
 import authPlugin from './plugins/auth.js';
 import { initializeHeartbeat, stopHeartbeat, handleAgentComplete, handleScheduledTask } from './heartbeat/index.js';
@@ -428,46 +430,57 @@ async function main() {
   const { seedToolPermissions } = await import('./tools/permission-seeder.js');
   const settings = systemStore.getSystemSettings(getSystemDb());
 
-  // Helper: collect plugin MCP tool info for the seeder
+  // Parse the user's install-time per-tool mode choices from a plugin's
+  // stored consent tokens (`toolmode:<seededKey>=<mode>`).
+  function readInstallToolModes(pluginName: string): Map<string, ToolPermissionMode> {
+    const modes = new Map<string, ToolPermissionMode>();
+    try {
+      const rec = pluginStore.getPlugin(getSystemDb(), pluginName);
+      if (!rec?.permissionsGranted) return modes;
+      const tokens: unknown = JSON.parse(rec.permissionsGranted);
+      if (!Array.isArray(tokens)) return modes;
+      for (const tok of tokens) {
+        if (typeof tok !== 'string') continue;
+        const m = /^toolmode:(.+)=(off|ask|always_allow)$/.exec(tok);
+        if (m) modes.set(m[1]!, m[2] as ToolPermissionMode);
+      }
+    } catch {
+      // Malformed token blob: ignore, fall back to manifest defaults.
+    }
+    return modes;
+  }
+
+  // Helper: collect plugin MCP tool info for the seeder. Uses the shared
+  // computeMcpToolPreview so seeded rows match the install-time preview
+  // exactly, then layers any install-time mode choices on top.
   function collectPluginTools() {
     const mcpConfigs = pluginManager.getMcpConfigs();
-    type SeedTool = { name: string; description?: string; riskTier?: RiskTier };
-    const pluginToolMap = new Map<string, SeedTool[]>();
+    // Regroup namespaced configs (`<plugin>__<server>`) into per-plugin
+    // server maps for computeMcpToolPreview.
+    const byPlugin = new Map<string, Record<string, PluginMcpServer>>();
     for (const [namespacedKey, config] of Object.entries(mcpConfigs)) {
-      // Key format: "pluginName__serverName"
       const sepIdx = namespacedKey.indexOf('__');
-      const pluginName = sepIdx > 0 ? namespacedKey.substring(0, sepIdx) : namespacedKey;
-      const entries = pluginToolMap.get(pluginName) ?? [];
-      const serverTier: RiskTier = config.riskTier ?? 'acts';
-
-      // Server-level row: covers dynamically discovered tools (e.g. the
-      // Home Assistant MCP server, whose tools depend on the user's
-      // runtime environment and cannot be enumerated in the manifest).
-      entries.push({
-        name: `mcp__${namespacedKey}`,
-        description: config.description ?? `MCP tools from ${pluginName}`,
-        riskTier: serverTier,
-      });
-
-      // Per-tool rows for statically declared tools. A bare string
-      // inherits the server tier; an object may override it.
-      for (const t of config.tools ?? []) {
-        const toolName = typeof t === 'string' ? t : t.name;
-        const toolTier: RiskTier =
-          typeof t === 'string' ? serverTier : (t.riskTier ?? serverTier);
-        const toolDesc = typeof t === 'string' ? undefined : t.description;
-        entries.push({
-          name: `mcp__${namespacedKey}__${toolName}`,
-          description: toolDesc ?? `${toolName} (from ${pluginName})`,
-          riskTier: toolTier,
-        });
-      }
-
-      pluginToolMap.set(pluginName, entries);
+      const pluginName = sepIdx > 0 ? namespacedKey.slice(0, sepIdx) : namespacedKey;
+      const serverName = sepIdx > 0 ? namespacedKey.slice(sepIdx + 2) : namespacedKey;
+      const servers = byPlugin.get(pluginName) ?? {};
+      servers[serverName] = config;
+      byPlugin.set(pluginName, servers);
     }
-    return Array.from(pluginToolMap.entries()).map(
-      ([name, tools]) => ({ name, tools })
-    );
+    return Array.from(byPlugin.entries()).map(([pluginName, servers]) => {
+      const installModes = readInstallToolModes(pluginName);
+      const tools = computeMcpToolPreview(pluginName, servers).map((p) => {
+        const chosen = installModes.get(p.toolName);
+        return {
+          name: p.toolName,
+          description: p.description,
+          riskTier: p.riskTier,
+          // Only include `mode` when the user actually chose one;
+          // omitting it lets the seeder use the manifest tier default.
+          ...(chosen !== undefined ? { mode: chosen } : {}),
+        };
+      });
+      return { name: pluginName, tools };
+    });
   }
 
   const seededToolPermissions = seedToolPermissions(getSystemDb(), collectPluginTools());

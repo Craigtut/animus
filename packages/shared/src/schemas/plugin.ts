@@ -205,6 +205,10 @@ export const PluginRecordSchema = z.object({
   configEncrypted: z.string().nullable(),
   status: pluginStatusSchema.default('active'),
   lastError: z.string().nullable().default(null),
+  // Raw JSON string of the consent tokens granted at install time
+  // (e.g. `network:*`, `toolmode:mcp__p__s__get_state=always_allow`).
+  // Stored verbatim; parsed by the seeder for per-tool mode choices.
+  permissionsGranted: z.string().nullable().optional(),
 });
 
 // Types are derived and exported from types/index.ts via z.infer<>.

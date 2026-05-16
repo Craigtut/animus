@@ -7,7 +7,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { ANIMUS_TOOL_DEFS } from '@animus-labs/shared';
+import { ANIMUS_TOOL_DEFS, riskTierToDefaultMode } from '@animus-labs/shared';
 import type { RiskTier, ToolPermissionMode } from '@animus-labs/shared';
 import { upsertToolPermission } from '../db/stores/system-store.js';
 import { createLogger } from '../lib/logger.js';
@@ -60,16 +60,13 @@ const CORTEX_BUILTIN_TOOLS: Record<string, SdkToolDef> = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Map a risk tier to its default permission mode. */
+/**
+ * Map a risk tier to its default permission mode. Delegates to the
+ * shared mapping so the install-time preview and the seeded rows can
+ * never disagree.
+ */
 function defaultModeForTier(tier: RiskTier): ToolPermissionMode {
-  switch (tier) {
-    case 'safe':
-    case 'communicates':
-      return 'always_allow';
-    case 'acts':
-    case 'sensitive':
-      return 'ask';
-  }
+  return riskTierToDefaultMode(tier);
 }
 
 /** Convert a snake_case tool name to a human-readable display name. */
@@ -88,7 +85,17 @@ export function seedToolPermissions(
   systemDb: Database.Database,
   plugins?: Array<{
     name: string;
-    tools?: Array<{ name: string; description?: string; riskTier?: RiskTier }>;
+    tools?: Array<{
+      name: string;
+      description?: string;
+      riskTier?: RiskTier;
+      /**
+       * Install-time mode chosen by the user in the consent dialog. When
+       * set, the row is seeded as a locked override (`is_default=0`) so
+       * re-seeds and plugin updates never stomp the user's decision.
+       */
+      mode?: ToolPermissionMode;
+    }>;
   }>,
 ): number {
   let seeded = 0;
@@ -128,21 +135,22 @@ export function seedToolPermissions(
       const pluginSource = `plugin:${plugin.name}`;
       if (!plugin.tools) continue;
       for (const tool of plugin.tools) {
-        // The manifest-declared tier (defaulting to 'acts') is
-        // authoritative: it maps straight to the default mode, exactly
-        // like core and built-in tools. A plugin declaring 'safe' /
-        // 'communicates' therefore defaults to 'always_allow'. This is
-        // only a default; the user can override any tool afterwards and
-        // sees the granted permissions at install time.
         const riskTier: RiskTier = tool.riskTier ?? 'acts';
+        // If the user picked a mode at install time, seed it as a locked
+        // override (is_default=0). upsertToolPermission's ON CONFLICT
+        // preserves is_default=0 rows verbatim, so re-seeds and plugin
+        // updates never overwrite the user's install-time decision.
+        // Otherwise the manifest-declared tier is authoritative for the
+        // default mode (no plugin-specific floor), like core tools.
+        const hasInstallChoice = tool.mode !== undefined;
         upsertToolPermission(systemDb, {
           toolName: tool.name,
           toolSource: pluginSource,
           displayName: toDisplayName(tool.name),
           description: tool.description ?? `Tool from ${plugin.name} plugin`,
           riskTier,
-          mode: defaultModeForTier(riskTier),
-          isDefault: true,
+          mode: tool.mode ?? defaultModeForTier(riskTier),
+          isDefault: !hasInstallChoice,
         });
         seeded++;
       }

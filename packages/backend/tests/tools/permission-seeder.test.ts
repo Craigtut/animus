@@ -135,6 +135,39 @@ describe('permission seeder', () => {
     expect(server!.mode).toBe('ask');
   });
 
+  it('seeds an install-time mode choice as a locked override, preserved across re-seed', () => {
+    // User picked "off" for a tool whose manifest tier is 'safe'
+    // (would otherwise default to always_allow).
+    seedToolPermissions(db, [
+      {
+        name: 'p',
+        tools: [
+          { name: 'mcp__p__s__readonly', riskTier: 'safe', mode: 'off' },
+          { name: 'mcp__p__s__other', riskTier: 'safe' },
+        ],
+      },
+    ]);
+    let perms = systemStore.getToolPermissions(db);
+    const locked = perms.find((p) => p.toolName === 'mcp__p__s__readonly');
+    expect(locked!.mode).toBe('off'); // honored, not the tier default
+    expect(locked!.isDefault).toBe(false); // locked override
+    expect(locked!.riskTier).toBe('safe'); // tier still recorded honestly
+
+    const normal = perms.find((p) => p.toolName === 'mcp__p__s__other');
+    expect(normal!.mode).toBe('always_allow'); // tier default
+    expect(normal!.isDefault).toBe(true);
+
+    // Re-seed WITHOUT the install choice (e.g. plugin update no longer
+    // passes it): the locked override must survive untouched.
+    seedToolPermissions(db, [
+      { name: 'p', tools: [{ name: 'mcp__p__s__readonly', riskTier: 'safe' }] },
+    ]);
+    perms = systemStore.getToolPermissions(db);
+    const still = perms.find((p) => p.toolName === 'mcp__p__s__readonly');
+    expect(still!.mode).toBe('off');
+    expect(still!.isDefault).toBe(false);
+  });
+
   it('defaults plugin tool tier to acts when undeclared', () => {
     seedToolPermissions(db, [
       { name: 'p', tools: [{ name: 'mcp__p__s', description: 'srv' }] },
