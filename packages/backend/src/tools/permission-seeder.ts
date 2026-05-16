@@ -72,20 +72,6 @@ function defaultModeForTier(tier: RiskTier): ToolPermissionMode {
   }
 }
 
-/**
- * Safety floor for plugin-declared tiers.
- *
- * A plugin's manifest risk tier is a hint, not an authoritative grant
- * (plugins are user-installed third-party code). The declared tier is
- * still recorded on the row (it drives the Settings UI label/ordering
- * and honest disclosure), but a plugin may not self-declare its way to
- * `always_allow`: the default mode is floored at `ask`. The user can
- * still explicitly choose `always_allow` per tool afterwards.
- */
-function floorPluginMode(mode: ToolPermissionMode): ToolPermissionMode {
-  return mode === 'always_allow' ? 'ask' : mode;
-}
-
 /** Convert a snake_case tool name to a human-readable display name. */
 function toDisplayName(name: string): string {
   return name
@@ -142,9 +128,12 @@ export function seedToolPermissions(
       const pluginSource = `plugin:${plugin.name}`;
       if (!plugin.tools) continue;
       for (const tool of plugin.tools) {
-        // Record the manifest-declared tier (defaulting to 'acts'), but
-        // floor the default mode at 'ask' so a plugin cannot self-grant
-        // 'always_allow'. See floorPluginMode.
+        // The manifest-declared tier (defaulting to 'acts') is
+        // authoritative: it maps straight to the default mode, exactly
+        // like core and built-in tools. A plugin declaring 'safe' /
+        // 'communicates' therefore defaults to 'always_allow'. This is
+        // only a default; the user can override any tool afterwards and
+        // sees the granted permissions at install time.
         const riskTier: RiskTier = tool.riskTier ?? 'acts';
         upsertToolPermission(systemDb, {
           toolName: tool.name,
@@ -152,7 +141,7 @@ export function seedToolPermissions(
           displayName: toDisplayName(tool.name),
           description: tool.description ?? `Tool from ${plugin.name} plugin`,
           riskTier,
-          mode: floorPluginMode(defaultModeForTier(riskTier)),
+          mode: defaultModeForTier(riskTier),
           isDefault: true,
         });
         seeded++;

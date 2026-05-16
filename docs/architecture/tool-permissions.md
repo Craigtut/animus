@@ -82,7 +82,7 @@ Tools from installed plugins running as external MCP servers. Each plugin server
 
 When a tool call like `home-assistant__main__turn_on_light` fires, the resolver first tries the per-tool key `mcp__home-assistant__main__turn_on_light`, then falls back to the server key `mcp__home-assistant__main`.
 
-**Manifest-declared tiers (hint + safety floor):** a plugin's MCP server config may declare a server-level `riskTier` and optional per-tool `riskTier` overrides (see the plugin manifest schema). The declared tier is recorded on the permission row (it drives the Settings UI label and ordering and is shown to the user), but it is a hint, not an authoritative grant: the seeder floors the default mode at `ask` so a plugin cannot self-declare its way to `always_allow`. The user can still explicitly set any plugin tool to `always_allow` afterwards.
+**Manifest-declared tiers (authoritative default):** a plugin's MCP server config may declare a server-level `riskTier` and optional per-tool `riskTier` overrides (see the plugin manifest schema). The declared tier maps straight to the default permission mode via `defaultModeForTier`, exactly like core and built-in tools: a plugin declaring `safe` or `communicates` defaults to `always_allow`; `acts` / `sensitive` default to `ask`. This is only a **default** (`is_default=1`). The user is shown the granted permissions at install time and can override any tool afterwards (overrides are preserved across re-seeds). The single-user, self-hosted trust model treats an installed plugin's manifest as authoritative for its own defaults.
 
 **Off mode** for plugin MCP tools excludes the entire server from the agent session — it's never started.
 
@@ -280,7 +280,7 @@ Three phases:
 
 1. **Core Animus tools** — Iterates `ANIMUS_TOOL_DEFS`, assigns risk tiers from a hardcoded map
 2. **Active SDK tools** — Seeds tools for the active provider only (e.g., `sdk:claude`). Tool set: `read`, `glob`, `grep`, `write`, `edit`, `bash`, `webfetch`, `websearch`
-3. **Plugin MCP tools** — Iterates installed plugins' MCP configs. Each server emits a server-level row plus one row per statically declared tool. The tier comes from the manifest (`riskTier`, defaulting to `acts`); the default mode is then floored at `ask` via `floorPluginMode` so a plugin cannot self-grant `always_allow`
+3. **Plugin MCP tools** — Iterates installed plugins' MCP configs. Each server emits a server-level row plus one row per statically declared tool. The tier comes from the manifest (`riskTier`, defaulting to `acts`) and maps to the default mode via `defaultModeForTier`, the same as core/built-in tools (no plugin-specific floor)
 
 ```typescript
 // Risk tier → default mode mapping

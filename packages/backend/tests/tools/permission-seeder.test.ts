@@ -99,22 +99,21 @@ describe('permission seeder', () => {
     expect(weather!.mode).toBe('ask');
   });
 
-  it('records the declared plugin tier but floors the default mode at ask', () => {
+  it('treats the declared plugin tier as authoritative for the default mode', () => {
     seedToolPermissions(db, [
       {
         name: 'home-assistant',
         tools: [
           // Server-level row (dynamic tool set): declared 'acts'
           { name: 'mcp__home-assistant__ha', riskTier: 'acts' },
-          // Per-tool override: plugin claims 'safe' for a read tool.
-          // The tier is recorded honestly, but the mode is floored: a
-          // plugin cannot self-grant always_allow.
+          // Per-tool 'safe' -> always_allow by default (plugin can
+          // self-grant; the manifest is authoritative).
           {
             name: 'mcp__home-assistant__ha__get_state',
             riskTier: 'safe',
             description: 'Read entity state',
           },
-          // Per-tool sensitive tool stays ask.
+          // Per-tool 'sensitive' -> ask.
           { name: 'mcp__home-assistant__ha__unlock_door', riskTier: 'sensitive' },
         ],
       },
@@ -124,8 +123,8 @@ describe('permission seeder', () => {
     expect(ha).toHaveLength(3);
 
     const getState = ha.find((p) => p.toolName === 'mcp__home-assistant__ha__get_state');
-    expect(getState!.riskTier).toBe('safe'); // declared tier preserved
-    expect(getState!.mode).toBe('ask'); // floored: never always_allow from a plugin
+    expect(getState!.riskTier).toBe('safe');
+    expect(getState!.mode).toBe('always_allow'); // authoritative: not floored
 
     const unlock = ha.find((p) => p.toolName === 'mcp__home-assistant__ha__unlock_door');
     expect(unlock!.riskTier).toBe('sensitive');
