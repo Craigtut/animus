@@ -12,6 +12,7 @@ import rateLimit from '@fastify/rate-limit';
 import staticPlugin from '@fastify/static';
 import websocket from '@fastify/websocket';
 import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
+import type { RiskTier } from '@animus-labs/shared';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -430,17 +431,39 @@ async function main() {
   // Helper: collect plugin MCP tool info for the seeder
   function collectPluginTools() {
     const mcpConfigs = pluginManager.getMcpConfigs();
-    const pluginToolMap = new Map<string, Array<{ name: string; description?: string }>>();
+    type SeedTool = { name: string; description?: string; riskTier?: RiskTier };
+    const pluginToolMap = new Map<string, SeedTool[]>();
     for (const [namespacedKey, config] of Object.entries(mcpConfigs)) {
       // Key format: "pluginName__serverName"
       const sepIdx = namespacedKey.indexOf('__');
       const pluginName = sepIdx > 0 ? namespacedKey.substring(0, sepIdx) : namespacedKey;
-      const tools = pluginToolMap.get(pluginName) ?? [];
-      tools.push({
+      const entries = pluginToolMap.get(pluginName) ?? [];
+      const serverTier: RiskTier = config.riskTier ?? 'acts';
+
+      // Server-level row: covers dynamically discovered tools (e.g. the
+      // Home Assistant MCP server, whose tools depend on the user's
+      // runtime environment and cannot be enumerated in the manifest).
+      entries.push({
         name: `mcp__${namespacedKey}`,
         description: config.description ?? `MCP tools from ${pluginName}`,
+        riskTier: serverTier,
       });
-      pluginToolMap.set(pluginName, tools);
+
+      // Per-tool rows for statically declared tools. A bare string
+      // inherits the server tier; an object may override it.
+      for (const t of config.tools ?? []) {
+        const toolName = typeof t === 'string' ? t : t.name;
+        const toolTier: RiskTier =
+          typeof t === 'string' ? serverTier : (t.riskTier ?? serverTier);
+        const toolDesc = typeof t === 'string' ? undefined : t.description;
+        entries.push({
+          name: `mcp__${namespacedKey}__${toolName}`,
+          description: toolDesc ?? `${toolName} (from ${pluginName})`,
+          riskTier: toolTier,
+        });
+      }
+
+      pluginToolMap.set(pluginName, entries);
     }
     return Array.from(pluginToolMap.entries()).map(
       ([name, tools]) => ({ name, tools })

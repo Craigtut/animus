@@ -369,6 +369,46 @@ describe('PluginMcpServerSchema', () => {
     expect(result.args).toEqual([]);
     expect(result.env).toEqual({});
   });
+
+  it('accepts a server-level riskTier', () => {
+    const result = PluginMcpServerSchema.parse({
+      type: 'http',
+      url: 'https://example.com/mcp',
+      riskTier: 'sensitive',
+    });
+    expect(result.riskTier).toBe('sensitive');
+  });
+
+  it('rejects an invalid riskTier', () => {
+    expect(() =>
+      PluginMcpServerSchema.parse({ command: 'node', riskTier: 'dangerous' }),
+    ).toThrow();
+  });
+
+  it('accepts per-tool entries as bare strings or objects with tiers', () => {
+    const result = PluginMcpServerSchema.parse({
+      command: 'node',
+      riskTier: 'acts',
+      tools: [
+        'toggle_switch',
+        { name: 'get_state', riskTier: 'safe', description: 'Read state' },
+        { name: 'unlock_door', riskTier: 'sensitive' },
+      ],
+    });
+    expect(result.tools).toHaveLength(3);
+    expect(result.tools![0]).toBe('toggle_switch');
+    expect(result.tools![1]).toEqual({
+      name: 'get_state',
+      riskTier: 'safe',
+      description: 'Read state',
+    });
+  });
+
+  it('omits riskTier and tools when not provided (back-compatible)', () => {
+    const result = PluginMcpServerSchema.parse({ command: 'node' });
+    expect(result.riskTier).toBeUndefined();
+    expect(result.tools).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

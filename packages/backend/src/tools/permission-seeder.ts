@@ -72,6 +72,20 @@ function defaultModeForTier(tier: RiskTier): ToolPermissionMode {
   }
 }
 
+/**
+ * Safety floor for plugin-declared tiers.
+ *
+ * A plugin's manifest risk tier is a hint, not an authoritative grant
+ * (plugins are user-installed third-party code). The declared tier is
+ * still recorded on the row (it drives the Settings UI label/ordering
+ * and honest disclosure), but a plugin may not self-declare its way to
+ * `always_allow`: the default mode is floored at `ask`. The user can
+ * still explicitly choose `always_allow` per tool afterwards.
+ */
+function floorPluginMode(mode: ToolPermissionMode): ToolPermissionMode {
+  return mode === 'always_allow' ? 'ask' : mode;
+}
+
 /** Convert a snake_case tool name to a human-readable display name. */
 function toDisplayName(name: string): string {
   return name
@@ -86,7 +100,10 @@ function toDisplayName(name: string): string {
 
 export function seedToolPermissions(
   systemDb: Database.Database,
-  plugins?: Array<{ name: string; tools?: Array<{ name: string; description?: string }> }>,
+  plugins?: Array<{
+    name: string;
+    tools?: Array<{ name: string; description?: string; riskTier?: RiskTier }>;
+  }>,
 ): number {
   let seeded = 0;
 
@@ -125,14 +142,17 @@ export function seedToolPermissions(
       const pluginSource = `plugin:${plugin.name}`;
       if (!plugin.tools) continue;
       for (const tool of plugin.tools) {
-        const riskTier: RiskTier = 'acts';
+        // Record the manifest-declared tier (defaulting to 'acts'), but
+        // floor the default mode at 'ask' so a plugin cannot self-grant
+        // 'always_allow'. See floorPluginMode.
+        const riskTier: RiskTier = tool.riskTier ?? 'acts';
         upsertToolPermission(systemDb, {
           toolName: tool.name,
           toolSource: pluginSource,
           displayName: toDisplayName(tool.name),
           description: tool.description ?? `Tool from ${plugin.name} plugin`,
           riskTier,
-          mode: defaultModeForTier(riskTier),
+          mode: floorPluginMode(defaultModeForTier(riskTier)),
           isDefault: true,
         });
         seeded++;

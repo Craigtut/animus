@@ -142,6 +142,14 @@ export const TriggerDefinitionSchema = z.object({
 // MCP Server Config
 // ============================================================================
 
+/** Tool risk tier, mirrors the `RiskTier` type in ../types. */
+export const RiskTierSchema = z.enum([
+  'safe',
+  'communicates',
+  'acts',
+  'sensitive',
+]);
+
 export const PluginMcpServerSchema = z.object({
   // Transport type (inferred from fields if omitted)
   type: z.enum(['stdio', 'http']).optional(),
@@ -154,7 +162,24 @@ export const PluginMcpServerSchema = z.object({
   headers: z.record(z.string()).default({}),
   // Common
   description: z.string().optional(),
-  tools: z.array(z.string()).optional(),
+  // Server-level default risk tier applied to every tool from this
+  // server, including dynamically discovered ones. Defaults to 'acts'
+  // when omitted. A plugin-declared tier is a hint: the seeder records
+  // it but floors the default permission mode at 'ask' (a plugin cannot
+  // self-grant 'always_allow').
+  riskTier: RiskTierSchema.optional(),
+  // Per-tool entries. A bare string keeps prior behavior (the tool
+  // inherits the server riskTier). An object adds a per-tool override.
+  tools: z.array(
+    z.union([
+      z.string(),
+      z.object({
+        name: z.string(),
+        riskTier: RiskTierSchema.optional(),
+        description: z.string().optional(),
+      }),
+    ]),
+  ).optional(),
 }).refine(
   (data) => data.command || data.url,
   { message: 'Either "command" (stdio) or "url" (http) must be provided' },

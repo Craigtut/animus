@@ -99,6 +99,54 @@ describe('permission seeder', () => {
     expect(weather!.mode).toBe('ask');
   });
 
+  it('records the declared plugin tier but floors the default mode at ask', () => {
+    seedToolPermissions(db, [
+      {
+        name: 'home-assistant',
+        tools: [
+          // Server-level row (dynamic tool set): declared 'acts'
+          { name: 'mcp__home-assistant__ha', riskTier: 'acts' },
+          // Per-tool override: plugin claims 'safe' for a read tool.
+          // The tier is recorded honestly, but the mode is floored: a
+          // plugin cannot self-grant always_allow.
+          {
+            name: 'mcp__home-assistant__ha__get_state',
+            riskTier: 'safe',
+            description: 'Read entity state',
+          },
+          // Per-tool sensitive tool stays ask.
+          { name: 'mcp__home-assistant__ha__unlock_door', riskTier: 'sensitive' },
+        ],
+      },
+    ]);
+    const perms = systemStore.getToolPermissions(db);
+    const ha = perms.filter((p) => p.toolSource === 'plugin:home-assistant');
+    expect(ha).toHaveLength(3);
+
+    const getState = ha.find((p) => p.toolName === 'mcp__home-assistant__ha__get_state');
+    expect(getState!.riskTier).toBe('safe'); // declared tier preserved
+    expect(getState!.mode).toBe('ask'); // floored: never always_allow from a plugin
+
+    const unlock = ha.find((p) => p.toolName === 'mcp__home-assistant__ha__unlock_door');
+    expect(unlock!.riskTier).toBe('sensitive');
+    expect(unlock!.mode).toBe('ask');
+
+    const server = ha.find((p) => p.toolName === 'mcp__home-assistant__ha');
+    expect(server!.riskTier).toBe('acts');
+    expect(server!.mode).toBe('ask');
+  });
+
+  it('defaults plugin tool tier to acts when undeclared', () => {
+    seedToolPermissions(db, [
+      { name: 'p', tools: [{ name: 'mcp__p__s', description: 'srv' }] },
+    ]);
+    const row = systemStore
+      .getToolPermissions(db)
+      .find((p) => p.toolName === 'mcp__p__s');
+    expect(row!.riskTier).toBe('acts');
+    expect(row!.mode).toBe('ask');
+  });
+
   it('is idempotent — running twice does not duplicate', () => {
     seedToolPermissions(db);
     const count1 = systemStore.getToolPermissions(db).length;

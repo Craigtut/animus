@@ -249,10 +249,20 @@ function buildPermissionResolver(
       } catch {
         // Plugin manager not ready; fall through to the fail-safe gate.
       }
-      const mcpPermKey = resolveMcpPermKey(toolName, mcpServerKeys);
-      if (mcpPermKey) {
-        permKey = mcpPermKey;
-        permission = getToolPermission(sysDb, permKey);
+      const serverPermKey = resolveMcpPermKey(toolName, mcpServerKeys);
+      if (serverPermKey) {
+        // It is an MCP tool from a connected server. Prefer a per-tool
+        // row (`mcp__<plugin>__<server>__<tool>`), then fall back to the
+        // server-level row (`mcp__<plugin>__<server>`).
+        const perToolKey = `mcp__${toolName}`;
+        const perToolPerm = getToolPermission(sysDb, perToolKey);
+        if (perToolPerm) {
+          permKey = perToolKey;
+          permission = perToolPerm;
+        } else {
+          permKey = serverPermKey;
+          permission = getToolPermission(sysDb, permKey);
+        }
       }
     }
 
