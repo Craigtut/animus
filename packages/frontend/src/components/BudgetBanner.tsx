@@ -45,7 +45,7 @@ export function BudgetBanner() {
         Agent paused until {resetDate} or increase budget.
       </span>
       <Link
-        to="/usage"
+        to="/settings/usage"
         css={css`
           color: inherit;
           font-weight: ${theme.typography.fontWeight.medium};

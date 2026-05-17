@@ -2,7 +2,7 @@
 import { css, useTheme } from '@emotion/react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Pulse, Brain, User, Sparkle, ChartBar, GearSix } from '@phosphor-icons/react';
+import { Pulse, Brain, User, Sparkle, GearSix } from '@phosphor-icons/react';
 import { useShellStore } from '../../store';
 import { Typography } from '../ui';
 
@@ -11,7 +11,6 @@ const spaces = [
   { name: 'mind' as const, label: 'Mind', icon: Brain, path: '/mind' },
   { name: 'people' as const, label: 'People', icon: User, path: '/people' },
   { name: 'persona' as const, label: 'Persona', icon: Sparkle, path: '/persona' },
-  { name: 'usage' as const, label: 'Usage', icon: ChartBar, path: '/usage' },
   { name: 'settings' as const, label: 'Settings', icon: GearSix, path: '/settings' },
 ] as const;
 
@@ -27,7 +26,6 @@ export function NavigationPill() {
     if (path.startsWith('/mind')) return 'mind';
     if (path.startsWith('/people')) return 'people';
     if (path.startsWith('/persona')) return 'persona';
-    if (path.startsWith('/usage')) return 'usage';
     if (path.startsWith('/settings')) return 'settings';
     return 'presence';
   };

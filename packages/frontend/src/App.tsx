@@ -47,7 +47,6 @@ import { MindPage } from './pages/MindPage';
 import { PeoplePage } from './pages/PeoplePage';
 import { PersonaPage } from './pages/PersonaPage';
 import { SettingsPage } from './pages/SettingsPage';
-import { UsagePage } from './pages/UsagePage';
 import { ConfigurationPage } from './pages/ConfigurationPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { MaintenanceOverlay } from './components/MaintenanceOverlay';
@@ -204,7 +203,6 @@ export function App() {
                 <Route path="/persona/*" element={<PersonaPage />} />
                 <Route path="/settings/channels/:name/configure" element={<ConfigurationPage extensionType="channel" />} />
                 <Route path="/settings/plugins/:name/configure" element={<ConfigurationPage extensionType="plugin" />} />
-                <Route path="/usage" element={<UsagePage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/settings/*" element={<SettingsPage />} />
               </Route>

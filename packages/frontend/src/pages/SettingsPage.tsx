@@ -34,6 +34,7 @@ import {
   SignOut,
   Key,
   Brain,
+  ChartBar,
   type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
 import { Card, SelectionCard, Button, Input, Select, Modal, Badge, Toggle, Slider, Typography, Tooltip } from '../components/ui';
@@ -51,6 +52,7 @@ import { buildOAuthCards } from '../utils/provider-display';
 import { AboutInline } from '../components/settings/AboutSection';
 import { TelemetryInline } from '../components/settings/TelemetrySection';
 import { PasswordsSection } from '../components/settings/PasswordsSection';
+import { UsagePage } from './UsagePage';
 import { toast } from '../store/toast-store';
 import { useHeartbeatStore } from '../store/heartbeat-store';
 import DOMPurify from 'dompurify';
@@ -59,7 +61,7 @@ import DOMPurify from 'dompurify';
 // Types
 // ============================================================================
 
-type SettingsSection = 'heartbeat' | 'cortex_provider' | 'channels' | 'plugins' | 'passwords' | 'tools' | 'goals' | 'saves' | 'system';
+type SettingsSection = 'heartbeat' | 'cortex_provider' | 'usage' | 'channels' | 'plugins' | 'passwords' | 'tools' | 'goals' | 'saves' | 'system';
 
 interface SidebarItem {
   id: SettingsSection;
@@ -70,6 +72,7 @@ interface SidebarItem {
 const sections: SidebarItem[] = [
   { id: 'heartbeat', label: 'Heartbeat', icon: HeartbeatIcon },
   { id: 'cortex_provider', label: 'AI Provider', icon: Brain },
+  { id: 'usage', label: 'Usage', icon: ChartBar },
   { id: 'channels', label: 'Channels', icon: ChatCircle },
   { id: 'plugins', label: 'Plugins', icon: PuzzlePiece },
   { id: 'passwords', label: 'Passwords', icon: Key },
@@ -581,13 +584,20 @@ function CortexProviderSection() {
 
   // Utility model
   const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
-  const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation({
+  const setUtilityModelMutation = trpc.cortexProvider.setUtilityModel.useMutation({
     onSuccess: () => utils.settings.getSystemSettings.invalidate(),
   });
 
   // Model list for the active provider
   const activeProvider = statusData?.provider ?? null;
   const { data: models } = trpc.cortexProvider.listModels.useQuery(
+    { provider: activeProvider! },
+    { enabled: !!activeProvider }
+  );
+
+  // The model Cortex programmatically recommends as the utility model for
+  // the active provider (used to label the "Recommended" option).
+  const { data: recommendedUtility } = trpc.cortexProvider.getRecommendedUtilityModel.useQuery(
     { provider: activeProvider! },
     { enabled: !!activeProvider }
   );
@@ -652,15 +662,15 @@ function CortexProviderSection() {
         onSuccess: () => {
           modelSave.flash();
           // When primary model (and thus provider) changes, reset utility model to recommended
-          updateSettingsMutation.mutate({ utilityModel: 'default' });
+          setUtilityModelMutation.mutate({ model: 'default' });
         },
       }
     );
   };
 
   const handleUtilityModelChange = (value: string) => {
-    updateSettingsMutation.mutate(
-      { utilityModel: value },
+    setUtilityModelMutation.mutate(
+      { model: value },
       { onSuccess: () => utilityModelSave.flash() }
     );
   };
@@ -931,7 +941,12 @@ function CortexProviderSection() {
                   value={systemSettings?.utilityModel ?? 'default'}
                   onChange={(value) => handleUtilityModelChange(value)}
                   options={[
-                    { value: 'default', label: 'Recommended' },
+                    {
+                      value: 'default',
+                      label: recommendedUtility?.modelName
+                        ? `Recommended (${recommendedUtility.modelName})`
+                        : 'Recommended',
+                    },
                     ...[...models]
                       .sort((a, b) => (a.pricing?.input ?? Infinity) - (b.pricing?.input ?? Infinity))
                       .map((m) => ({
@@ -941,7 +956,7 @@ function CortexProviderSection() {
                   ]}
                 />
                 <Typography.Caption color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
-                  A smaller model used for internal operations like web page summarization and safety checks. Does not affect the quality of the agent's main responses.
+                  A smaller model used for internal operations like web page summarization and safety checks. Recommended automatically picks the best fast model for your provider. Does not affect the quality of the agent's main responses.
                 </Typography.Caption>
               </div>
             </div>
@@ -3608,6 +3623,7 @@ export function SettingsPage() {
     switch (activeSection) {
       case 'heartbeat': return <HeartbeatSection />;
       case 'cortex_provider': return <CortexProviderSection />;
+      case 'usage': return <UsagePage />;
       case 'channels': return <ChannelsSection />;
       case 'plugins': return <PluginsSection />;
       case 'passwords': return <PasswordsSection />;

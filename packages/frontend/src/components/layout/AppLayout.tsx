@@ -24,7 +24,6 @@ export function AppLayout() {
     if (path.startsWith('/mind')) return 'mind';
     if (path.startsWith('/people')) return 'people';
     if (path.startsWith('/persona')) return 'persona';
-    if (path.startsWith('/usage')) return 'usage';
     if (path.startsWith('/settings')) return 'settings';
     return 'presence';
   };
