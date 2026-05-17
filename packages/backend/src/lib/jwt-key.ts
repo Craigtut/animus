@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { DATA_DIR } from '../utils/env.js';
+import { DATA_DIR, env } from '../utils/env.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('JwtKey', 'server');
@@ -47,9 +47,16 @@ export function loadJwtSecret(): string | null {
 
 /**
  * Generate and persist a new JWT secret.
- * Called once during first user registration.
+ *
+ * Idempotent: if a key already exists (on disk or cached), reuse it instead
+ * of generating a new one. Multiple callers (startup resolver, first-run
+ * registration, vault migration) may reach this; rotating the secret here
+ * would invalidate every live session, so we only ever create it once.
  */
 export function createJwtSecret(): string {
+  const existing = loadJwtSecret();
+  if (existing) return existing;
+
   const secret = randomBytes(32).toString('hex');
   const keyPath = getJwtKeyPath();
 
@@ -59,6 +66,27 @@ export function createJwtSecret(): string {
   cachedSecret = secret;
   log.info('JWT secret generated and stored');
   return secret;
+}
+
+/**
+ * Resolve the JWT secret for BOTH signing (fastify-jwt registration) and
+ * WebSocket verification (api/trpc.ts), guaranteeing a single shared value.
+ *
+ * Precedence:
+ *   1. Persisted data/jwt.key — the normal case after first run
+ *   2. JWT_SECRET env var — legacy installs; used as-is, not persisted
+ *   3. First run: generate and persist now
+ *
+ * Called at server startup (auth plugin registration) so the key exists
+ * before the first register/login/unlock signs a cookie. This is what keeps
+ * the HTTP and WebSocket auth paths from diverging onto different secrets
+ * (the cause of dead WS subscriptions on a fresh first run).
+ */
+export function resolveJwtSecret(): string {
+  const fromFile = loadJwtSecret();
+  if (fromFile) return fromFile;
+  if (env.JWT_SECRET) return env.JWT_SECRET;
+  return createJwtSecret();
 }
 
 /**

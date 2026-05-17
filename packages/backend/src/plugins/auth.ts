@@ -4,16 +4,17 @@
  * Registers @fastify/jwt with cookie-based transport.
  * Decorates fastify with an `authenticate` preHandler hook.
  *
- * JWT secret is loaded from data/jwt.key (separate from the vault DEK).
- * On first run (before registration), the secret won't exist yet;
- * a temporary secret is used until registration creates the real one.
+ * JWT secret is resolved from data/jwt.key (separate from the vault DEK),
+ * falling back to the legacy JWT_SECRET env var. On first run it is
+ * generated and persisted here, before any cookie is signed, so the HTTP
+ * and WebSocket auth paths always share the same secret.
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import fastifyJwt from '@fastify/jwt';
 import fp from 'fastify-plugin';
 import { env } from '../utils/env.js';
-import { loadJwtSecret } from '../lib/jwt-key.js';
+import { resolveJwtSecret } from '../lib/jwt-key.js';
 
 export interface JwtPayload {
   userId: string;
@@ -23,9 +24,9 @@ export interface JwtPayload {
 const COOKIE_NAME = 'animus_session';
 
 async function authPlugin(fastify: FastifyInstance): Promise<void> {
-  // Load JWT secret from file. Falls back to env var for legacy installs,
-  // then to a temporary secret for first-run (before registration creates jwt.key).
-  const jwtSecret = loadJwtSecret() ?? env.JWT_SECRET ?? 'animus-temp-jwt-secret-pre-registration';
+  // Resolve (and on first run, persist) the JWT secret before fastify-jwt
+  // is configured, so signing and WebSocket verification share one secret.
+  const jwtSecret = resolveJwtSecret();
 
   await fastify.register(fastifyJwt, {
     secret: jwtSecret,

@@ -9,7 +9,7 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import type { CreateFastifyContextOptions } from '@trpc/server/adapters/fastify';
 import { createVerifier } from 'fast-jwt';
 import type { JwtPayload } from '../plugins/auth.js';
-import { loadJwtSecret } from '../lib/jwt-key.js';
+import { resolveJwtSecret } from '../lib/jwt-key.js';
 
 // ============================================================================
 // WebSocket Auth Helpers
@@ -22,9 +22,9 @@ const COOKIE_NAME = 'animus_session';
 let _verifyJwt: ReturnType<typeof createVerifier> | null = null;
 function verifyJwt(token: string) {
   if (!_verifyJwt) {
-    const secret = loadJwtSecret();
-    if (!secret) throw new Error('JWT secret not available');
-    _verifyJwt = createVerifier({ key: secret });
+    // Same resolver the auth plugin uses to configure fastify-jwt, so the
+    // WebSocket verify path can never diverge onto a different secret.
+    _verifyJwt = createVerifier({ key: resolveJwtSecret() });
   }
   return _verifyJwt(token);
 }
