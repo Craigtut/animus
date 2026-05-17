@@ -1,6 +1,6 @@
 # Runtime SDK Installation Architecture
 
-> **Status**: Planned
+> **Status**: Retired reference. The subprocess SDK stack is no longer part of Animus production runtime, and the desktop app no longer bundles npm or installs the Claude Agent SDK at runtime.
 > **Created**: 2026-03-07
 > **Affects**: Tauri desktop app, Docker image, prepare-tauri.mjs, Claude adapter, frontend onboarding
 

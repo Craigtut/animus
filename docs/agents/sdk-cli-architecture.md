@@ -1,5 +1,7 @@
 # SDK CLI Architecture
 
+> STATUS: Legacy reference. Animus production runtime now uses Cortex. Desktop and Docker production builds do not bundle these subprocess SDK CLIs, and they do not install the Claude Agent SDK at runtime.
+
 Both the Claude Agent SDK and Codex SDK are subprocess wrappers, not direct API clients. They spawn CLI binaries and communicate via JSON-lines IPC over stdin/stdout. This document covers the subprocess architecture, binary resolution strategy, and deployment considerations.
 
 ## Overview
@@ -98,9 +100,9 @@ _resetCache(): void
 
 | Mode | Claude SDK `cli.js` | Claude Native Binary | Codex Bundled Binary |
 |------|--------------------|--------------------|---------------------|
-| **Dev** (monorepo) | `node_modules/@anthropic-ai/...` | User-installed (`~/.local/bin/` etc.) | `node_modules/@openai/...` |
-| **Tauri** (production) | Runtime-installed to `data/sdks/claude/` | User-installed (if present) | `resources/node_modules/@openai/...` |
-| **Docker** | `node_modules/@anthropic-ai/...` | Not typically available | `node_modules/@openai/...` |
+| **Dev** (legacy package only) | `node_modules/@anthropic-ai/...` if installed for `packages/agents` work | User-installed (`~/.local/bin/` etc.) | `node_modules/@openai/...` if installed for `packages/agents` work |
+| **Tauri** (production) | Not bundled or runtime-installed | Not managed by Animus | Not bundled |
+| **Docker** | Not bundled or runtime-installed | Not managed by Animus | Not bundled |
 
 In Docker, API keys are the expected auth method. The native Claude binary and CLI auth flows are for desktop users.
 
@@ -125,11 +127,9 @@ The agent execution itself uses the SDK-bundled `cli.js`, which does NOT need th
 
 ## Tauri Build Verification
 
-The `scripts/prepare-tauri.mjs` verification step confirms SDK CLIs and npm are present in the production bundle:
-- `resources/npm/bin/npm` and `resources/npm/lib/node_modules/npm/` (bundled npm for runtime SDK installation)
-- `resources/node_modules/@openai/codex-sdk/vendor/`
+The `scripts/prepare-tauri.mjs` verification step confirms the current production sidecar payload: backend entry point, Fastify, local workspace runtime packages, FFmpeg, and macOS dock icon suppression files. It no longer verifies bundled npm or SDK CLI payloads.
 
-The Claude Agent SDK is NOT bundled in the Tauri production build. It is installed at runtime to `data/sdks/claude/` on first launch using the bundled npm. This avoids redistributing the proprietary SDK. See `docs/agents/claude/runtime-sdk-installation.md` for details.
+The Claude Agent SDK is not bundled in the Tauri production build and is not installed at runtime.
 
 ---
 

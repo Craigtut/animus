@@ -148,7 +148,7 @@ The `v` prefix from Git tags is stripped automatically (Docker convention). No `
 docker pull ghcr.io/craigtut/animus:0.2.4
 ```
 
-**SDK licensing note:** The Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) has a proprietary license and is excluded from the published Docker image. On first container startup, the SDK manager installs it at runtime via npm into the `/app/data/sdks/claude/` directory (persisted on the data volume). This is the same mechanism used by the desktop app.
+**Legacy SDK note:** The retired subprocess SDK stack is not part of the production runtime. Published Docker images and desktop bundles do not include the Claude Agent SDK, Codex SDK, OpenCode SDK, or a runtime npm installer for those SDKs.
 
 ### Cross-compilation
 

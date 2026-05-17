@@ -67,10 +67,8 @@ async function main() {
   const startupStartedAt = Date.now();
 
   // macOS dock icon suppression: propagate the addon path into DYLD_INSERT_LIBRARIES
-  // so ALL child processes (including Observer/Reflector sessions that don't pass
-  // explicit env) automatically inherit it. The Claude SDK uses { ...process.env }
-  // as the default env for child processes, but strips NODE_OPTIONS. By setting
-  // DYLD_INSERT_LIBRARIES in process.env here, we ensure universal coverage.
+  // so child processes that inherit process.env receive the same background policy.
+  // This avoids relying on NODE_OPTIONS, which is stripped by some child launchers.
   // This runs AFTER the sidecar's own native addons are loaded, so it won't
   // interfere with onnxruntime or other native modules in this process.
   if (process.platform === 'darwin') {
@@ -84,7 +82,6 @@ async function main() {
   const fsMod = await import('node:fs');
   fsMod.mkdirSync(path.join(DATA_DIR, 'logs'), { recursive: true });
   fsMod.mkdirSync(path.join(DATA_DIR, 'workspace'), { recursive: true });
-  fsMod.mkdirSync(path.join(DATA_DIR, 'sdks'), { recursive: true });
 
   // Log process identity for production diagnostics
   logProcessIdentity('sidecar');

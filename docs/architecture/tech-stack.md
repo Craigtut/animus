@@ -121,14 +121,11 @@ All databases live under `data/databases/` (see `docs/architecture/data-director
 | Technology | Purpose |
 |------------|---------|
 | **@animus-labs/cortex** | Primary agent framework for the mind: provider management, CortexAgent, tools, compaction, skills, event bridge |
-| **@animus-labs/agents** | Legacy subprocess SDK abstraction used where subprocess-based sub-agents are still needed |
-| **Claude Agent SDK** | Legacy Anthropic subprocess agent provider through `@animus-labs/agents` |
-| **Codex SDK** | Legacy OpenAI Codex subprocess agent provider through `@animus-labs/agents` |
-| **OpenCode SDK** | Legacy OpenCode.ai subprocess agent provider through `@animus-labs/agents` |
+| **@animus-labs/agents** | Retired legacy subprocess SDK abstraction, kept in the monorepo as reference and compatibility code |
 
 `@animus-labs/cortex` lives in the sibling `cortex-mono` repository and is published on npm. The backend imports Cortex; Cortex does not import Animus.
 
-The `@animus-labs/agents` abstraction remains available for legacy subprocess providers, but the heartbeat mind uses Cortex.
+The backend production runtime does not depend on `@animus-labs/agents`. Desktop builds do not bundle the Claude Agent SDK, Codex SDK, OpenCode SDK, or a runtime npm installer for those SDKs.
 
 The agent framework layer provides:
 - Consistent interface across providers
@@ -643,7 +640,7 @@ Tauri is preferred over Electron for:
 - Rust-based security model
 - Better fit for the project's self-hosted ethos
 
-Since Animus requires a Node.js sidecar regardless (for agent SDKs), Electron's advantage of native Node.js support is less relevant — both approaches end up bundling Node.js.
+Since Animus requires a Node.js sidecar for the backend runtime, local ML, database access, and speech pipeline, Electron's advantage of native Node.js support is less relevant. Both approaches end up bundling Node.js.
 
 ### Sidecar Approach: Ship Node.js Binary (Option D)
 
@@ -659,8 +656,8 @@ The Tauri scaffold at `/packages/tauri/` implements this:
 
 The prepare script includes two pruning passes that run after `npm install` to reduce the sidecar payload:
 
-1. **Platform binary pruning** — Packages like `@openai/codex-sdk`, `onnxruntime-node`, and `@anthropic-ai/claude-agent-sdk` bundle binaries for all platforms in a single npm package (rather than using the `optionalDependencies` pattern). The script maps `process.platform`/`process.arch` to each package's directory naming convention and removes all non-matching platform directories. Also removes `onnxruntime-web` entirely (WASM runtime unused by the Node.js backend).
-2. **Non-essential file pruning** — Removes source maps, TypeScript declarations, test directories, C/C++ source files, documentation, build artifacts, and the `typescript` package from `node_modules`. Cleans up dangling symlinks in `.bin/` afterward.
+1. **Platform binary pruning** — `onnxruntime-node` bundles binaries for multiple platforms in a single npm package. The script maps `process.platform` and `process.arch` to the target directory naming convention and removes all non-matching platform directories. It also removes `onnxruntime-web` entirely because the Node.js backend uses the native runtime.
+2. **Non-essential file pruning** — Removes source maps, TypeScript declarations, test directories, C/C++ source files, documentation, build artifacts, and the `typescript` package from packaged resources. Cleans up dangling symlinks in `.bin/` afterward.
 
 These passes reduce the sidecar `node_modules` by roughly 680 MB (varies by platform).
 

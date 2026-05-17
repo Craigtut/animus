@@ -15,7 +15,7 @@
     "build": "npm run build --workspaces --if-present",
     "build:frontend": "npm run build -w @animus-labs/frontend",
     "build:backend": "npm run build -w @animus-labs/backend",
-    "build:prod": "npm run build -w @animus-labs/shared && npm run build -w @animus-labs/agents && npm run build:frontend && npm run build:backend",
+    "build:prod": "npm run build -w @animus-labs/shared && npm run build:frontend && npm run build:backend",
     "build:tauri": "npm run build:prod && npm run prepare:tauri && cd packages/tauri && cargo tauri build",
     "prepare:tauri": "node scripts/prepare-tauri.mjs",
     "start": "npm start -w @animus-labs/backend",
