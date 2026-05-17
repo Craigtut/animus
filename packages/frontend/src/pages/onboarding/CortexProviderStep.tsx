@@ -120,11 +120,18 @@ export function CortexProviderStep() {
     },
   });
 
-  // Initialize from existing status
+  // Initialize from existing status. The status query is the source of truth:
+  // OAuth can complete via the HTTP callback route without the subscription
+  // delivering a `success` event, so clear any in-flight OAuth UI here too.
   useEffect(() => {
     if (statusData?.connected) {
       setConnectedProvider(statusData.provider ?? null);
       setConnectedMethod(statusData.method ?? null);
+      setOauthState('idle');
+      setOauthProvider(null);
+      setOauthAuthUrl(null);
+      setOauthDeviceCode(null);
+      setOauthPromptMessage(null);
     }
   }, [statusData]);
 
@@ -372,8 +379,8 @@ export function CortexProviderStep() {
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
         {oauthCards.map((card) => {
           const isConnected = connectedProvider === card.id && connectedMethod === 'oauth';
-          const isAuthenticating = oauthProvider === card.id && oauthState === 'authenticating';
-          const isError = oauthProvider === card.id && oauthState === 'error';
+          const isAuthenticating = !isConnected && oauthProvider === card.id && oauthState === 'authenticating';
+          const isError = !isConnected && oauthProvider === card.id && oauthState === 'error';
 
           return (
             <div
@@ -425,9 +432,6 @@ export function CortexProviderStep() {
                           label: m.name || m.id,
                         }))}
                       />
-                      <Typography.Caption color="hint">
-                        You can change this later in Settings.
-                      </Typography.Caption>
                     </div>
                   )}
                 </div>
@@ -823,9 +827,6 @@ export function CortexProviderStep() {
                       &::placeholder { color: ${theme.colors.text.hint}; }
                     `}
                   />
-                  <Typography.Tiny color="disabled">
-                    Running in Docker? Use http://host.docker.internal:PORT instead of localhost.
-                  </Typography.Tiny>
                 </div>
 
                 <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
