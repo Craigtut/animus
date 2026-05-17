@@ -514,7 +514,7 @@ fn main() {
             .build(context)
             .expect("Error while building Animus");
 
-        app.run(|app_handle, event| {
+        app.run(move |app_handle, event| {
             if let tauri::RunEvent::Exit = event {
                 // Graceful shutdown: SIGTERM to process group → wait 5s → SIGKILL
                 let state = app_handle.state::<Sidecar>();
