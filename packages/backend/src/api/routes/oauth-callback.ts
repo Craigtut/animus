@@ -12,6 +12,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import type {} from '@fastify/rate-limit';
 import { createLogger } from '../../lib/logger.js';
 import { renderOAuthCallbackPage } from '../../lib/oauth-callback-page.js';
 

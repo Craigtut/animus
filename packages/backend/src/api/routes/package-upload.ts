@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
+import type {} from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
 import { generateUUID } from '@animus-labs/shared';
 import { createLogger } from '../../lib/logger.js';

@@ -8,6 +8,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import type {} from '@fastify/rate-limit';
 import { exportSave, importSave } from '../../services/save-service.js';
 import { createLogger } from '../../lib/logger.js';
 
