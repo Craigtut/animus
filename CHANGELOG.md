@@ -4,6 +4,16 @@ All notable changes to the Animus Engine will be documented in this file.
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
 
+## [0.4.2](https://github.com/Craigtut/animus/compare/v0.4.1...v0.4.2) (2026-05-17)
+
+### Bug Fixes
+
+* **agents:** use crypto random session ids ([26ae1e7](https://github.com/Craigtut/animus/commit/26ae1e7af9c519d86fb8f6863cb06a6156a78570))
+* **backend:** harden file paths and rate limits ([cfea408](https://github.com/Craigtut/animus/commit/cfea40816e8a1aef2a0a3897a6e88a8ed184d2c6))
+* **ci:** restrict workflow permissions ([6487337](https://github.com/Craigtut/animus/commit/6487337b7e6a843b3200a89b465f957223eb7c4e))
+* **tauri:** export saves through desktop app ([17ea625](https://github.com/Craigtut/animus/commit/17ea625a60035a727d4f5680327e869b50228aa0))
+* **tauri:** own port in app run callback ([eccc90e](https://github.com/Craigtut/animus/commit/eccc90e9d387202b4ca4ddb70957133077085f51))
+
 ## [0.4.1](https://github.com/Craigtut/animus/compare/v0.3.3...v0.4.1) (2026-05-17)
 
 ### Features
