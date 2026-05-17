@@ -47,6 +47,6 @@
     "@openai/codex-sdk": "^0.87.0",
     "@opencode-ai/sdk": "^1.1.23",
     "@types/node": "^22.0.0",
-    "vitest": "^2.1.0"
+    "vitest": "^3.2.4"
   }
 }
