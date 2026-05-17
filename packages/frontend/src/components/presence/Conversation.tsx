@@ -795,6 +795,9 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
     return () => clearInterval(interval);
   }, []);
 
+  const isEmpty =
+    sortedMessages.length === 0 && !isThinking && !isAnyTurnStreaming;
+
   return (
     <div
       ref={scrollRef}
@@ -806,7 +809,9 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
         &::-webkit-scrollbar { display: none; }
       `}
     >
-      {/* Inner wrapper: fills height, pushes sparse messages to bottom */}
+      {/* Inner wrapper: fills height, pushes sparse messages to bottom.
+          When empty, the prompt is centered in the visible area instead
+          (offset upward to clear the floating message input). */}
       <div
         css={css`
           max-width: 720px;
@@ -814,10 +819,11 @@ export function Conversation({ messages, replyStream, isThinking, onReplyStreamC
           min-height: 100%;
           display: flex;
           flex-direction: column;
-          justify-content: flex-end;
+          justify-content: ${isEmpty ? 'center' : 'flex-end'};
+          ${isEmpty ? 'padding-bottom: 96px;' : ''}
         `}
       >
-        {sortedMessages.length === 0 && !isThinking && !isAnyTurnStreaming ? (
+        {isEmpty ? (
           <Typography.Body
             color="hint"
             css={css`
