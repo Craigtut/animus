@@ -150,6 +150,7 @@ export interface AnimusEventMap {
   'cortex:thinking-level-changed': { level: string };
   'cortex:provider-removed': Record<string, never>;
   'cortex:context-limit-changed': { limit: number | null };
+  'cortex:utility-model-changed': { utilityModel: string };
   'cortex:auth-failed': { provider?: string; message: string };
 
   // System

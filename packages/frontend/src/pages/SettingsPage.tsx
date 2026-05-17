@@ -607,6 +607,7 @@ function CortexProviderSection() {
 
   // Reconnect OAuth state
   const [reconnectState, setReconnectState] = useState<'idle' | 'authenticating'>('idle');
+  const [reconnectError, setReconnectError] = useState<string | null>(null);
 
   // Subscribe to OAuth status when reconnecting
   trpc.cortexProvider.oauthStatus.useSubscription(undefined, {
@@ -614,6 +615,7 @@ function CortexProviderSection() {
     onData: (event) => {
       if (event.type === 'success') {
         setReconnectState('idle');
+        setReconnectError(null);
         utils.cortexProvider.getStatus.invalidate();
         utils.cortexProvider.listConfiguredProviders.invalidate();
         // Dismiss any auth errors from the store
@@ -623,6 +625,7 @@ function CortexProviderSection() {
           .forEach((e) => useHeartbeatStore.getState().dismissSystemError(e.id));
       } else if (event.type === 'error') {
         setReconnectState('idle');
+        setReconnectError(event.message);
       }
     },
   });
@@ -716,11 +719,15 @@ function CortexProviderSection() {
 
   const handleReconnect = useCallback(() => {
     if (!activeProvider) return;
+    setReconnectError(null);
     setReconnectState('authenticating');
     initiateOAuthMutation.mutate(
       { provider: activeProvider },
       {
-        onError: () => setReconnectState('idle'),
+        onError: (err) => {
+          setReconnectState('idle');
+          setReconnectError(err.message || 'Sign-in failed.');
+        },
       }
     );
   }, [activeProvider, initiateOAuthMutation]);
@@ -792,14 +799,21 @@ function CortexProviderSection() {
                 <Button variant="ghost" size="sm" onClick={handleCancelReconnect}>Cancel</Button>
               </div>
             ) : (
-              <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
-                {method === 'oauth' && (
-                  <Button variant="primary" size="sm" onClick={handleReconnect} loading={initiateOAuthMutation.isPending}>
-                    <ArrowsClockwise size={14} css={css`margin-right: ${theme.spacing[1]};`} />
-                    Reconnect
-                  </Button>
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                {reconnectError && (
+                  <Typography.Caption css={css`color: ${theme.colors.error.main};`}>
+                    {reconnectError}
+                  </Typography.Caption>
                 )}
-                <Button variant="secondary" size="sm" onClick={() => setSwitchModalOpen(true)}>Switch Provider</Button>
+                <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
+                  {method === 'oauth' && (
+                    <Button variant="primary" size="sm" onClick={handleReconnect} loading={initiateOAuthMutation.isPending}>
+                      <ArrowsClockwise size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+                      Reconnect
+                    </Button>
+                  )}
+                  <Button variant="secondary" size="sm" onClick={() => setSwitchModalOpen(true)}>Switch Provider</Button>
+                </div>
               </div>
             )}
 

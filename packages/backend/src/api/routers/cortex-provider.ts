@@ -28,8 +28,26 @@ import {
 } from '../../services/cortex-credential-service.js';
 import { getEventBus } from '../../lib/event-bus.js';
 import { createLogger } from '../../lib/logger.js';
+import { renderOAuthCallbackPage } from '../../lib/oauth-callback-page.js';
+import { inferUtilityModelId, OAuthError } from '@animus-labs/cortex';
+import type { OAuthCallbackPageContext } from '@animus-labs/cortex';
 
 const log = createLogger('CortexProvider', 'server');
+
+/**
+ * Render the Animus-branded OAuth callback page for a model provider.
+ * Wired into Cortex's `renderCallbackPage` hook so the localhost callback
+ * page a user lands on after signing in matches the rest of Animus.
+ */
+function renderProviderCallbackPage(ctx: OAuthCallbackPageContext): string {
+  const providerName = ctx.providerName?.trim()
+    || (ctx.provider ? ctx.provider.charAt(0).toUpperCase() + ctx.provider.slice(1) : undefined);
+  return renderOAuthCallbackPage({
+    status: ctx.status,
+    providerName,
+    ...(ctx.status === 'error' && ctx.details ? { details: ctx.details } : {}),
+  });
+}
 
 /**
  * Open a URL in the system browser. Uses platform-native commands
@@ -77,6 +95,24 @@ export const cortexProviderRouter = router({
     .input(z.object({ provider: z.string() }))
     .query(async ({ input }) => {
       return getCortexCredentialService().listModels(input.provider);
+    }),
+
+  /**
+   * The utility model Cortex recommends for a provider, inferred
+   * programmatically from the provider's current model catalog
+   * (Cortex 0.2.3 `inferUtilityModelId`). Used by the settings UI to
+   * label the "Recommended" option with the model that actually resolves.
+   */
+  getRecommendedUtilityModel: protectedProcedure
+    .input(z.object({ provider: z.string() }))
+    .query(async ({ input }) => {
+      const models = await getCortexCredentialService().listModels(input.provider);
+      const modelId = inferUtilityModelId(models as unknown as Record<string, unknown>[]);
+      const match = modelId ? models.find((m) => m.id === modelId) : undefined;
+      return {
+        modelId,
+        modelName: match?.name ?? modelId,
+      };
     }),
 
   // ── Status ──
@@ -169,6 +205,8 @@ export const cortexProviderRouter = router({
             };
             oauthEmitter.emit('status', event);
           },
+
+          renderCallbackPage: renderProviderCallbackPage,
         });
 
         // Success: emit to subscription and update settings
@@ -204,8 +242,41 @@ export const cortexProviderRouter = router({
         log.info(`OAuth flow completed for "${input.provider}"`);
         return { success: true, provider: input.provider, model: defaultModel };
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'OAuth flow failed';
-        log.error(`OAuth flow failed for "${input.provider}":`, err);
+        // Cortex (>=0.2.4) performs the callback-port preflight, timeout,
+        // cancellation, and callback-failure detection and surfaces them as
+        // typed OAuthError. Map each to an actionable message + tRPC code.
+        let code: 'INTERNAL_SERVER_ERROR' | 'CONFLICT' | 'BAD_REQUEST' | 'TIMEOUT' =
+          'INTERNAL_SERVER_ERROR';
+        let message = err instanceof Error ? err.message : 'OAuth flow failed';
+
+        if (err instanceof OAuthError) {
+          switch (err.code) {
+            case 'callback_port_in_use':
+              code = 'CONFLICT';
+              message = input.provider === 'anthropic'
+                ? `The Anthropic sign-in port (${err.port}) is in use by another app — commonly Claude Desktop or Claude Code — or a previous sign-in is stuck. Quit those apps (or restart Animus), then try again.`
+                : `The sign-in port (${err.port}) is in use by another application. Close it and try again.`;
+              break;
+            case 'cancelled':
+              code = 'BAD_REQUEST';
+              message = 'Sign-in was cancelled.';
+              break;
+            case 'timed_out':
+              code = 'TIMEOUT';
+              message = 'Sign-in timed out — the browser callback never completed. Please try again.';
+              break;
+            case 'callback_failed':
+              code = 'BAD_REQUEST';
+              message = `Sign-in failed: ${err.message.replace(/^OAuth callback for "[^"]+" reported a failure:\s*/, '')}`;
+              break;
+            case 'unsupported_provider':
+              code = 'BAD_REQUEST';
+              message = `Provider "${input.provider}" does not support OAuth sign-in.`;
+              break;
+          }
+        }
+
+        log.error(`OAuth flow failed for "${input.provider}" (${message})`, err);
 
         const errorEvent: OAuthStatusEvent = {
           type: 'error',
@@ -213,10 +284,7 @@ export const cortexProviderRouter = router({
         };
         oauthEmitter.emit('status', errorEvent);
 
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message,
-        });
+        throw new TRPCError({ code, message });
       } finally {
         activeOAuthProvider = null;
         pendingPromptResolve = null;
@@ -445,6 +513,28 @@ export const cortexProviderRouter = router({
       });
 
       log.info(`Context window limit set to ${input.limit === null ? 'unlimited' : input.limit}`);
+      return { success: true };
+    }),
+
+  /**
+   * Set the utility model used for internal operations (thought, reflect,
+   * WebFetch summarization, safety checks). `'default'` lets Cortex infer
+   * the recommended fast model for the active provider; any other value is
+   * an explicit model id from that provider. Applies live without a restart.
+   */
+  setUtilityModel: protectedProcedure
+    .input(z.object({ model: z.string().min(1) }))
+    .mutation(({ input }) => {
+      const db = getSystemDb();
+      settingsStore.updateCortexSettings(db, {
+        utilityModel: input.model,
+      });
+
+      getEventBus().emit('cortex:utility-model-changed', {
+        utilityModel: input.model,
+      });
+
+      log.info(`Utility model set to "${input.model}"`);
       return { success: true };
     }),
 
