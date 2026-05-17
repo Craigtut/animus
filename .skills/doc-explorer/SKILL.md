@@ -108,6 +108,7 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/research/voice-mode.md` | Frontend voice mode UX design: mic button, voice visualization, VAD, listening/speaking states. **STATUS: PLANNED, not implemented.** |
 | `docs/research/tauri-v2-os-features.md` | Tauri v2 desktop features research: system tray, autostart, global shortcuts, background audio. **STATUS: RESEARCH, not implemented.** |
 | `docs/research/twilio-mms-media-hosting.md` | Twilio MMS media hosting options: ImgBB, Cloudflare R2, pluggable hosting. **STATUS: RESEARCH, not implemented.** |
+| `docs/research/docker-agent-environment.md` | Docker agent environment persistence proposal: persistent `/app/data/agent-env`, install wrappers, manifest replay, fat base image, security and reliability tradeoffs. **STATUS: Proposal, not implemented.** |
 | `docs/research/Claude-Agent-SDK-Research.md` | Deep Claude Agent SDK API reference. **STATUS: REFERENCE** |
 | `docs/research/opencode-sdk-research.md` | Deep OpenCode SDK API reference. **STATUS: REFERENCE** |
 | `docs/research/agentic-loop-architecture.md` | Blueprint for building Animus's own agentic loop. Covers Pi Agent Core patterns, Claude Code internals comparison, missing features checklist (compaction, budget guards, permissions, MCP, sub-agents), implementation phases, single-vs-double loop analysis. **STATUS: RESEARCH, active design.** |
@@ -201,3 +202,4 @@ Use this to quickly map user questions to the right docs:
 - **pi, pi-ai, transformContext, multi-provider** -> `docs/agents/pi/research/sdk-research.md`
 - **reflex, fast response, voice latency, dual path, Vercel AI SDK** -> `docs/research/reflex-system.md`
 - **voice mode UI, voice UX, voice visualization, barge-in** -> `docs/research/voice-mode.md`
+- **docker, container, agent environment, agent-env, persistent tools, install wrappers, fat base image** -> `docs/research/docker-agent-environment.md`
