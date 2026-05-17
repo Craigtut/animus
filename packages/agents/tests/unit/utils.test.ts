@@ -74,7 +74,7 @@ describe('getProviderFromSessionId', () => {
 describe('createPendingSessionId', () => {
   it('creates pending ID with correct prefix', () => {
     const id = createPendingSessionId('claude');
-    expect(id).toMatch(/^claude:pending-\d+-[a-z0-9]+$/);
+    expect(id).toMatch(/^claude:pending-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
   it('creates unique IDs', () => {

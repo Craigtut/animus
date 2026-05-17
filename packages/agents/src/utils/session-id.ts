@@ -5,6 +5,7 @@
  * This allows routing to the correct adapter when resuming sessions.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { AgentProvider } from '@animus-labs/shared';
 
 /**
@@ -103,7 +104,7 @@ export function getProviderFromSessionId(sessionId: string): AgentProvider {
  * @returns A temporary session ID
  */
 export function createPendingSessionId(provider: AgentProvider): string {
-  return `${provider}:pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `${provider}:pending-${randomUUID()}`;
 }
 
 /**
