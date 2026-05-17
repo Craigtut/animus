@@ -253,7 +253,7 @@ interface InstallOptions {
 │                                                              │
 │ Delegates to existing enable flow:                            │
 │   Plugin: PluginManager.enable(name)                         │
-│     → Load components, deploy skills, start triggers, etc.   │
+│     → Load components, register Cortex skills, start triggers │
 │   Channel: ChannelManager.enable(name)                       │
 │     → Fork child process with --permission flags              │
 │                                                              │

@@ -75,14 +75,14 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/architecture/telemetry.md` | Telemetry system: 5 PostHog events (install, app_started, daily_active, feature_used, error_occurred), anonymous ID, deduplication, opt-out mechanisms, privacy guarantees, TelemetryService singleton, event bus integration |
 | `docs/architecture/tech-stack.md` | Full technology overview, frontend stack (Vite, React 19, Zustand, Emotion, Motion), backend stack (Fastify, tRPC, SQLite), eight databases, LanceDB, agent SDKs, deployment paths, shared abstractions (Embedding Provider, Context Builder, Decay Engine, Event Bus, Encryption Service, Database Stores, Migrations) |
 
-### Agent SDKs
+### Retired Agent SDK Reference
 
 | File | Covers |
 |------|--------|
-| `docs/agents/README.md` | Overview of agent SDK docs, per-provider structure, quick reference comparison, design decisions, implementation priority |
-| `docs/agents/sdk-comparison.md` | Consolidated comparison of Claude vs Codex vs OpenCode: authentication, streaming, tools, sessions, cost tracking, trade-offs, when to use each |
-| `docs/agents/architecture-overview.md` | Unified abstraction layer design, SDK comparison matrix, critical concerns (auth, streaming, sessions), design decisions, event normalization, built-in tools mapping |
-| `docs/agents/sdk-cli-architecture.md` | How agent SDK CLIs are bundled and resolved (Claude bundled cli.js, Codex native binaries, path resolution) |
+| `docs/agents/README.md` | Retired subprocess SDK reference docs. The active runtime is Cortex. |
+| `docs/agents/sdk-comparison.md` | Historical comparison of Claude, Codex, and OpenCode subprocess SDKs |
+| `docs/agents/architecture-overview.md` | Historical unified abstraction layer design |
+| `docs/agents/sdk-cli-architecture.md` | Historical SDK CLI bundling and resolution notes |
 | `docs/agents/claude/sdk-research.md` | Claude Agent SDK deep dive: query() async generator, subprocess architecture, auth, session management, streaming, hooks, MCP support. **STATUS: REFERENCE** |
 | `docs/agents/codex/sdk-research.md` | Codex SDK: thread-based model, auth (ChatGPT OAuth or API key), approval policies. **STATUS: REFERENCE** |
 | `docs/agents/codex/oauth.md` | Codex OAuth device code flow: OpenAI endpoints, device auth protocol, token lifecycle, auth.json format, Animus proxy architecture, tRPC procedures. **STATUS: REFERENCE** |
@@ -127,7 +127,7 @@ When you need context for a task, follow this approach:
 1. **Identify the topic area** from the index above
 2. **Read the most relevant file(s)**, don't read everything, be targeted
 3. **For architecture questions**: Start with `docs/architecture/tech-stack.md` for overview, then drill into specific docs
-4. **For agent/SDK work**: Start with `docs/agents/sdk-comparison.md` for the comparison, then read the specific provider doc
+4. **For retired agent SDK reference work**: Start with `docs/agents/sdk-comparison.md` for the historical comparison, then read the specific provider doc
 5. **For frontend work**: Read `docs/design-principles.md` and `docs/brand-vision.md`. Frontend page specs have been removed; the code in `packages/frontend/src/` is the authoritative source.
 6. **For persona/personality**: Read `docs/architecture/persona.md` and `docs/brand-vision.md`
 7. **For heartbeat/inner life**: Read `docs/architecture/heartbeat.md` and `docs/product-vision.md`
@@ -150,7 +150,7 @@ When you need context for a task, follow this approach:
 23. **For backend architecture patterns**: Read `docs/architecture/backend-architecture.md`
 24. **For new contributors**: Read `docs/guides/getting-started.md`
 25. **For reflex/fast-response (PLANNED)**: Read `docs/research/reflex-system.md`
-26. **For Codex OAuth**: Read `docs/agents/codex/oauth.md`
+26. **For historical Codex OAuth reference**: Read `docs/agents/codex/oauth.md`
 27. **For telemetry/analytics/PostHog**: Read `docs/architecture/telemetry.md`
 28. **For Cortex integration (Animus-specific)**: Read `docs/cortex/mind-migration.md` for the 5-phase pipeline and session threading, `docs/cortex/backend-auth-integration.md` for credential wiring, `docs/cortex/frontend-auth-ux.md` for the auth UX, and `docs/cortex/upgrade-plan.md` for the latest Animus-side adoption decisions. For Cortex framework docs (architecture, tools, compaction, skills, providers, working tags), see the cortex-mono repository.
 
@@ -187,7 +187,7 @@ Use this to quickly map user questions to the right docs:
 - **package installation, .anpk, store browser, update checking** -> `docs/architecture/package-installation.md`
 - **backend architecture, modular monolith, store pattern, service layer, decision handler** -> `docs/architecture/backend-architecture.md`
 - **telemetry, analytics, PostHog, usage tracking, anonymous, opt-out, DO_NOT_TRACK** -> `docs/architecture/telemetry.md`
-- **agent SDK, sdk comparison, claude vs codex vs opencode** -> `docs/agents/sdk-comparison.md`
+- **retired agent SDK, sdk comparison, claude vs codex vs opencode** -> `docs/agents/sdk-comparison.md`
 - **agent abstraction, unified interface, event normalization** -> `docs/agents/architecture-overview.md`
 - **claude sdk, anthropic, query, async generator** -> `docs/agents/claude/sdk-research.md`
 - **codex, openai, thread, codex sdk** -> `docs/agents/codex/sdk-research.md`

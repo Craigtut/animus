@@ -1,11 +1,11 @@
 export interface StartupSummaryData {
   dbCount: number;
-  credentialsStored: number;
-  cliDetectedProviders: string[];
+  cortexProvider: string | null;
+  cortexModel: string | null;
   modelDataCount: number;
   pluginsLoaded: number;
   pluginsEnabled: number;
-  deployedSkills: number;
+  pluginSkills: number;
   toolsSeeded: number;
   channelsInstalled: number;
   channelsRunning: number;
@@ -28,7 +28,9 @@ function row(label: string, value: string, width: number): string {
 
 export function formatStartupSummary(data: StartupSummaryData): string {
   const innerWidth = 70;
-  const cli = data.cliDetectedProviders.length > 0 ? data.cliDetectedProviders.join(', ') : 'none';
+  const provider = data.cortexProvider
+    ? `${data.cortexProvider}${data.cortexModel ? ` / ${data.cortexModel}` : ''}`
+    : 'not configured';
   const heartbeatLine = data.resumedAfterRestart
     ? `resumed after restart${data.nextTickInMs ? ` | next tick in ${data.nextTickInMs}ms` : ''}`
     : 'fresh start';
@@ -37,9 +39,9 @@ export function formatStartupSummary(data: StartupSummaryData): string {
     '| Animus Startup                                                         |',
     '+------------------------------------------------------------------------+',
     row('Databases', `${data.dbCount} ready`, innerWidth),
-    row('Credentials', `${data.credentialsStored} stored | CLI detected: ${cli}`, innerWidth),
+    row('AI Provider', provider, innerWidth),
     row('Model Data', `${data.modelDataCount} entries loaded`, innerWidth),
-    row('Plugins', `${data.pluginsLoaded} loaded | ${data.pluginsEnabled} enabled | ${data.deployedSkills} skills deployed`, innerWidth),
+    row('Plugins', `${data.pluginsLoaded} loaded | ${data.pluginsEnabled} enabled | ${data.pluginSkills} skills`, innerWidth),
     row('Tools', `${data.toolsSeeded} tool permissions seeded`, innerWidth),
     row('Channels', `${data.channelsInstalled} installed | ${data.channelsRunning} running`, innerWidth),
     row('Speech', `STT: ${data.speechSttReady ? 'ready' : 'unavailable'} | TTS: ${data.speechTtsReady ? 'ready' : 'pending download'} | ffmpeg: ${data.speechFfmpegAvailable ? 'yes' : 'missing'}`, innerWidth),

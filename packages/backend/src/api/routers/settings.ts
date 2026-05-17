@@ -17,6 +17,7 @@ import { isConfigured, verifyEncryptionKey } from '../../lib/encryption-service.
 import { APP_VERSION, DATA_DIR } from '../../utils/env.js';
 import { getChannelManager } from '../../channels/channel-manager.js';
 import { getSettingsService } from '../../services/settings-service.js';
+import { getCortexCredentialService } from '../../services/cortex-credential-service.js';
 
 // ============================================================================
 // Health Check Types & Implementation
@@ -77,20 +78,42 @@ function runHealthChecks(): { status: 'healthy' | 'degraded' | 'unhealthy'; chec
     checks.push({ id: 'user_registered', label: 'User registered', status: 'fail', severity: 'critical', detail: String(err) });
   }
 
-  // 4. Provider configured (Cortex credentials, legacy credentials, or env vars)
+  // 4. Cortex provider configured
   try {
     const cortexSettings = settingsStore.getCortexSettings(systemDb);
-    const hasCortexProvider = !!cortexSettings.cortexProvider;
-    const legacyProviders = ['claude', 'codex', 'opencode'];
-    const hasLegacyCredential = legacyProviders.some(p => systemStore.getCredential(systemDb, p) !== null);
-    const hasEnvKey = !!(process.env['ANTHROPIC_API_KEY'] || process.env['CLAUDE_CODE_OAUTH_TOKEN'] || process.env['OPENAI_API_KEY']);
-    if (hasCortexProvider || hasLegacyCredential || hasEnvKey) {
-      checks.push({ id: 'provider_configured', label: 'Agent provider', status: 'pass', severity: 'critical' });
+    const provider = cortexSettings.cortexProvider;
+    const model = cortexSettings.cortexModel;
+
+    if (!provider || !model) {
+      checks.push({
+        id: 'provider_configured',
+        label: 'AI provider',
+        status: 'fail',
+        severity: 'critical',
+        detail: 'No Cortex provider and model configured',
+      });
     } else {
-      checks.push({ id: 'provider_configured', label: 'Agent provider', status: 'fail', severity: 'critical', detail: 'No provider configured' });
+      const providerStatus = getCortexCredentialService().getProviderStatus(provider);
+      if (providerStatus.connected) {
+        checks.push({
+          id: 'provider_configured',
+          label: 'AI provider',
+          status: 'pass',
+          severity: 'critical',
+          detail: `${provider} / ${model}`,
+        });
+      } else {
+        checks.push({
+          id: 'provider_configured',
+          label: 'AI provider',
+          status: 'fail',
+          severity: 'critical',
+          detail: `No Cortex credentials configured for ${provider}`,
+        });
+      }
     }
   } catch (err) {
-    checks.push({ id: 'provider_configured', label: 'Agent provider', status: 'fail', severity: 'critical', detail: String(err) });
+    checks.push({ id: 'provider_configured', label: 'AI provider', status: 'fail', severity: 'critical', detail: String(err) });
   }
 
   // 5. Sensitive tools not set to always_allow

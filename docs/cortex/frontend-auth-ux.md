@@ -37,10 +37,10 @@ A collapsed section below Layer 2: "Configure a custom endpoint". For self-hoste
 
 ## Onboarding Flow
 
-### Current Flow
+### Previous Flow
 
 ```
-Welcome → Agent Provider (Claude/Codex CLI auth) → Identity → About You → Persona (8 steps)
+Welcome → Agent Provider (retired subprocess SDK auth) → Identity → About You → Persona (8 steps)
 ```
 
 ### New Flow
@@ -364,20 +364,6 @@ Expanding "Advanced" shows:
 
 **Custom Endpoint:** Opens the custom endpoint configuration form.
 
-### Legacy Section: "Legacy Agent SDKs"
-
-The existing Claude CLI and Codex CLI configuration moves to a collapsed section below the AI Provider section:
-
-```
-┌───────────────────────────────────────────────────────┐
-│  ▸ Legacy Agent SDKs (Claude CLI / Codex CLI)         │
-│    Used for sub-agents. Will be deprecated in a       │
-│    future release.                                    │
-└───────────────────────────────────────────────────────┘
-```
-
-Expanding reveals the existing provider settings UI (credential status, CLI auth, API key input, model selection) unchanged. This section is hidden entirely once the agents package is fully deprecated.
-
 ## State Management
 
 ### tRPC Queries and Mutations
@@ -507,7 +493,7 @@ Users can authenticate with multiple providers. The UI shows all connected provi
 | Step name | "Agent Provider" | "Connect Your AI" (or similar) |
 | Component | `AgentProviderStep.tsx` | `CortexProviderStep.tsx` |
 | Auth methods | CLI detection, CLI OAuth, device code, API key | OAuth sign-in, API key, custom endpoint |
-| Providers | Claude, Codex (2) | Anthropic, OpenAI, Google, GitHub Copilot, + 10 API key providers (20+) |
+| Providers | Retired subprocess SDK providers | Anthropic, OpenAI, Google, GitHub Copilot, + 10 API key providers (20+) |
 | Default path | CLI detection (auto-connect if CLI installed) | OAuth sign-in (browser-based) |
 | Store fields | `agentProvider: 'claude' \| 'codex'` | `cortexProvider: string, cortexModel: string` |
 | Backend router | `provider.ts`, `claude-auth.ts`, `codex-auth.ts` | `cortex-provider.ts` |
@@ -521,9 +507,9 @@ Users can authenticate with multiple providers. The UI shows all connected provi
 
 ### What's Removed
 
-- CLI binary detection (`claude`, `codex` CLI checks)
-- CLI-based OAuth (`claude auth login`, `codex login` subprocess spawning)
-- The `@animus-labs/agents` auth providers (`ClaudeAuthProvider`, `CodexAuthProvider`) from the onboarding path (they remain for legacy settings)
+- CLI binary detection
+- CLI-based OAuth subprocess spawning
+- Retired subprocess SDK auth providers from the onboarding and Settings paths
 
 ## Open Questions
 

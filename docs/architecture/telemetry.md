@@ -37,7 +37,7 @@ Fires on every server startup, after subsystems initialize.
 | `os` | `darwin` | Platform |
 | `arch` | `arm64` | Architecture |
 | `nodeVersion` | `v24.1.0` | Node.js version |
-| `provider` | `claude` | Default agent provider (`claude`, `codex`, `opencode`) |
+| `provider` | `anthropic` | Configured Cortex provider ID |
 | `channelCount` | `2` | Number of installed channels |
 | `pluginCount` | `5` | Number of loaded plugins |
 

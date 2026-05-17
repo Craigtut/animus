@@ -1,6 +1,8 @@
 # Agent SDK Documentation
 
-This folder contains comprehensive research and design documentation for the four agent SDKs that the `@animus-labs/agents` package unifies.
+> **Status**: Legacy reference. Animus production runtime uses Cortex (`@animus-labs/cortex`). The `@animus-labs/agents` package remains in the monorepo as dormant reference code and is not bundled into Docker or desktop production builds.
+
+This folder contains historical research and design documentation for the subprocess SDK stack that `@animus-labs/agents` unified.
 
 ## Structure
 

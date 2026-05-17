@@ -127,7 +127,7 @@ All databases live under `data/databases/` (see `docs/architecture/data-director
 
 The backend production runtime does not depend on `@animus-labs/agents`. Desktop builds do not bundle the Claude Agent SDK, Codex SDK, OpenCode SDK, or a runtime npm installer for those SDKs.
 
-The agent framework layer provides:
+The Cortex agent framework layer provides:
 - Consistent interface across providers
 - Normalized event streaming
 - Token/cost tracking

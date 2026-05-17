@@ -386,9 +386,9 @@ export function buildMcpServerConfig(
     args = [scriptPath];
   }
 
-  // The Claude SDK's CLI spawns MCP servers by merging a default env allowlist
-  // (HOME, PATH, USER, etc.) with our config env. We include vars that aren't
-  // on the allowlist but are needed for correct behavior.
+  // MCP stdio clients often merge a default env allowlist (HOME, PATH, USER,
+  // etc.) with server config env. Include vars that may not be on that
+  // allowlist but are needed for correct behavior.
   const env: Record<string, string> = {
     BRIDGE_PORT: String(port),
     TOOL_SET: toolSet,

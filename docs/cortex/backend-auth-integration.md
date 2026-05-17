@@ -48,12 +48,12 @@ CREATE TABLE credentials (
 
 | Column | Value | Notes |
 |--------|-------|-------|
-| `provider` | Pi-ai provider ID (e.g., `'anthropic'`, `'openai'`, `'github-copilot'`) | Expanded from the current `'claude'` / `'codex'` values |
-| `credential_type` | `'cortex_api_key'`, `'cortex_oauth'`, `'cortex_custom'` | Prefixed with `cortex_` to avoid collision with legacy credential types |
+| `provider` | Pi-ai provider ID (e.g., `'anthropic'`, `'openai'`, `'github-copilot'`) | Cortex provider selected by onboarding or Settings |
+| `credential_type` | `'cortex_api_key'`, `'cortex_oauth'`, `'cortex_custom'` | Prefixed with `cortex_` for unambiguous queries |
 | `encrypted_data` | AES-256-GCM ciphertext (`{iv}:{ciphertext}:{authTag}`) | For API keys: the raw key. For OAuth: the serialized credential blob from ProviderManager. For custom: the optional API key. |
 | `metadata` | JSON string | For OAuth: `OAuthMeta` from ProviderManager (displayName, expiresAt, refreshable). For custom: endpoint config (baseUrl, modelId, compat). |
 
-**Why prefix with `cortex_`:** The legacy `@animus-labs/agents` credential types (`api_key`, `oauth_token`, `cli_detected`, `codex_oauth`) remain in the table for backward compatibility. Cortex credentials coexist alongside them. The prefix makes queries unambiguous.
+**Why prefix with `cortex_`:** Older databases may still contain retired subprocess SDK credential rows. The backend no longer loads those rows into `process.env` or treats them as configured providers, so active provider credentials are selected by the `cortex_` prefix.
 
 ### Migration
 
@@ -66,7 +66,7 @@ ALTER TABLE system_settings ADD COLUMN cortex_model TEXT DEFAULT NULL;
 ALTER TABLE system_settings ADD COLUMN cortex_thinking_level TEXT DEFAULT 'off';
 ```
 
-`cortex_provider` and `cortex_model` default to `NULL`, meaning no Cortex provider is configured. The onboarding flow sets these when the user authenticates. The existing `default_agent_provider` and `default_model` columns continue to serve the legacy agents package.
+`cortex_provider` and `cortex_model` default to `NULL`, meaning no Cortex provider is configured. The onboarding flow sets these when the user authenticates.
 
 No migration is needed for the `credentials` table itself; the new `cortex_*` credential types are just new values in the existing `credential_type` column.
 
@@ -566,13 +566,11 @@ For technical users running the project locally, environment variables continue 
 
 The onboarding flow should detect this: if `resolveApiKey` succeeds for a provider without stored credentials, the provider is marked as "connected via environment variable" in the UI. The user can still go through the full auth flow to store credentials explicitly.
 
-### Difference from Legacy Credential Loading
+### No Startup Credential Loading
 
-The legacy `@animus-labs/agents` system uses `loadCredentialsIntoEnv()` at startup to decrypt stored credentials and set them as environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.). The Claude/Codex SDKs then read these env vars when spawning subprocess sessions.
+Cortex does not load stored provider credentials into `process.env` at startup. Pi-agent-core's `getApiKey` callback provides credentials dynamically per call, so `CortexCredentialService.resolveApiKey()` decrypts or refreshes credentials on demand. This is more secure, keeps stored credentials scoped to the active request, and supports OAuth token refresh without restarting the process.
 
-Cortex does **not** use this pattern. Pi-agent-core's `getApiKey` callback provides credentials dynamically per-call, so there is no need to load them into `process.env`. The `resolveApiKey` callback decrypts on demand. This is more secure (credentials exist in memory only for the duration of the call) and supports OAuth token refresh without restarting the process.
-
-`loadCredentialsIntoEnv()` continues to run at startup for the legacy agents package. It does not interact with Cortex credentials (which use the `cortex_` type prefix and are invisible to the legacy loader).
+The old `loadCredentialsIntoEnv()` path has been removed from the backend startup and unlock flows.
 
 ### Vault Sealed State
 
@@ -583,11 +581,11 @@ The `CortexCredentialService` depends on the `EncryptionService`, which requires
 - `getProviderStatus` does not decrypt, so it works regardless of vault state. It reads the `metadata` column (plaintext JSON) to report connection status.
 - `checkEnvApiKey` also works regardless of vault state since it reads environment variables directly.
 
-This matches the existing behavior: the legacy `loadCredentialsIntoEnv()` also fails gracefully when the vault is sealed, and the heartbeat waits for the vault to be unsealed before starting.
+The heartbeat waits for the vault to be unsealed before running full Cortex mind ticks that require stored credentials.
 
 ## OAuth Flow Coordination
 
-The OAuth flow involves asynchronous coordination between the tRPC router (which the frontend calls) and the ProviderManager (which drives the OAuth login). This uses the same pattern as the existing `claude-auth.ts` and `codex-auth.ts` routers: an EventEmitter that bridges the async login callbacks to tRPC subscriptions.
+The OAuth flow involves asynchronous coordination between the tRPC router (which the frontend calls) and the ProviderManager (which drives the OAuth login). An EventEmitter bridges async login callbacks to tRPC subscriptions.
 
 ### Flow Sequence
 
@@ -654,15 +652,7 @@ The following columns are added to `system_settings`:
 | `cortex_model` | TEXT | NULL | Active model ID (e.g., `'claude-sonnet-4-20250514'`) |
 | `cortex_thinking_level` | TEXT | `'off'` | Thinking/reasoning level for the active model |
 
-These are separate from the existing `default_agent_provider` and `default_model` columns which serve the legacy agents package. Both sets of settings coexist.
-
-## Relationship to Legacy Auth
-
-The existing credential system for the `@animus-labs/agents` package (Claude CLI auth, Codex CLI auth, Codex device-code OAuth) remains fully functional. Legacy credentials are stored with their existing `credential_type` values (`api_key`, `oauth_token`, `cli_detected`, `codex_oauth`). Cortex credentials use the `cortex_` prefix.
-
-The existing tRPC routers (`provider.ts`, `claude-auth.ts`, `codex-auth.ts`, `codex-cli-auth.ts`) remain for sub-agent configuration. Over time, as sub-agents migrate from the agents package to Cortex (Phase 4 of the migration), these routers will be deprecated.
-
-In the frontend settings, the legacy auth is demoted to a "Legacy Agent SDKs" section (see `frontend-auth-ux.md`).
+These are the active provider settings for the mind and Cortex sub-agents.
 
 ## Credential Store Additions
 
@@ -750,5 +740,3 @@ This means OAuth login technically works in Docker, but requires the user to man
 1. **Credential rotation/expiry monitoring**: Should the backend proactively check OAuth token expiry (e.g., on a timer) and refresh before it's needed? Or is lazy refresh (on the next `getApiKey` call) sufficient? Lazy refresh is simpler but means the first tick after expiry pays a refresh latency cost.
 
 2. **Multiple stored providers**: The current design supports storing credentials for multiple providers simultaneously (e.g., Anthropic OAuth + OpenAI API key). Should there be a UI for managing all stored credentials, or just the active one?
-
-3. **Credential migration from legacy**: Should there be a one-time migration that converts existing Claude/Codex credentials to Cortex format? Or keep them completely separate? Recommendation: keep separate, as the credential formats differ and the legacy system continues to serve sub-agents.

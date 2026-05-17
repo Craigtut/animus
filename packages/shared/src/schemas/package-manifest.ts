@@ -114,7 +114,6 @@ export const channelPackageManifestSchema = z.object({
   identity: channelIdentitySchema,
   capabilities: z.array(channelCapabilitySchema),
   replyGuidance: z.string().optional(),
-  skills: z.string().optional(),
 });
 
 // ============================================================================

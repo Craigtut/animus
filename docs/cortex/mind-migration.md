@@ -4,7 +4,7 @@
 >
 > **Note:** This is an Animus-specific integration doc. Cortex framework documentation (architecture, tools, compaction, skills, providers) lives in the [cortex-mono](https://github.com/Craigtut/cortex-mono) repository.
 
-This document describes how the mind (the heartbeat's persistent agent session) migrates from the current `@animus-labs/agents` abstraction to `@animus-labs/cortex`. This covers the new 5-phase pipeline, context slot configuration, and what changes in the backend.
+This document describes the implemented Cortex mind pipeline: the heartbeat's persistent CortexAgent session, the 5-phase tick flow, context slot configuration, and backend integration points.
 
 ## Pipeline Restructure
 
@@ -385,17 +385,17 @@ If the process crashes mid-tick (before `onLoopComplete` fires), the last checkp
 | Component | Current | After |
 |-----------|---------|-------|
 | `heartbeat/index.ts` | `mindQuery()` runs one agent session covering thought + reply + state | Pipeline splits into `thought()` → `agenticLoop()` → `reflect()` with explicit data flow between phases |
-| `heartbeat/mind-session.ts` | Creates Claude/Codex/OpenCode sessions via AgentManager | Creates `CortexAgent` from `@animus-labs/cortex`, configures with mind-specific tools and context slots |
+| `heartbeat/cortex-mind.ts` | Cortex mind implementation | Creates `CortexAgent` from `@animus-labs/cortex`, configures with mind-specific tools and context slots |
 | `heartbeat/cognitive-tools.ts` | MCP tool handlers, phase gate, snapshotBox singleton | **Removed or restructured**. THOUGHT and REFLECT are direct pi-ai calls, not tool handlers |
 | `heartbeat/gather-context.ts` | `determineSessionState()` manages cold/warm transitions | Removed. Session warmth logic eliminated; the session is always warm. |
 | `heartbeat/context-builder.ts` | `COGNITIVE_PROCEDURE` instructions in system prompt | Instructions removed. System prompt is simpler |
-| `tools/servers/mcp-bridge.ts` | HTTP bridge for tool routing, cognitive endpoints | **Retained**. Cortex connects as an MCP client; sub-agents on the agents package also use it. Cognitive endpoints (`/cognitive/thought`, `/cognitive/state`) are removed. |
-| `tools/servers/animus-mcp-server.ts` | Stdio subprocess for MCP protocol | **Retained**. Cortex spawns it as an MCP client target. Sub-agents continue using it via SDK MCP integration. |
+| `tools/servers/mcp-bridge.ts` | HTTP bridge for tool routing | **Retained**. Cortex connects as an MCP client. Cognitive endpoints (`/cognitive/thought`, `/cognitive/state`) are removed. |
+| `tools/servers/animus-mcp-server.ts` | Stdio subprocess for MCP protocol | **Retained**. Cortex spawns it as an MCP client target. |
 | `tools/registry.ts` | Tool registry with MCP-oriented execution | Retained as the Animus core tool handler layer. Cortex receives Animus core tools as direct `CortexTool` objects that delegate to this registry. |
 | `tools/permission-seeder.ts` | Seeds Animus/plugin tool permission entries | Seeds Animus core, plugin MCP, and Cortex tool permission entries |
 | `tools/tool-gate.ts` | Permission gate (unchanged logic) | Same logic, integrated through Cortex's `resolvePermission` callback |
-| `heartbeat/agent-orchestrator.ts` | Spawns Claude SDK sessions | Eventually spawns Pi Agent instances |
-| `heartbeat/agent-subsystem.ts` | Creates AgentManager | Creates `CortexAgent`, optionally keeps AgentManager for sub-agents |
+| `heartbeat/agent-orchestrator.ts` | Sub-agent orchestration | Delegates to Cortex `SubAgentManager` |
+| `heartbeat/agent-subsystem.ts` | Mind subsystem lifecycle | Creates and manages `CortexAgent` |
 | Streaming | Phase-gated: text only streams after `record_thought` tool call | Direct: text streams as soon as the agentic loop starts. No phase gate. Phase gate module (`cognitive-tools.ts` phase variable) eliminated. Raw text chunks stream with zero latency; at each turn boundary, Cortex emits a structured `AgentTextOutput` with `userFacing`, `working`, and `raw` properties. |
 | Mid-tick message injection | `session.injectMessage()` pushes new messages into the active session | Phase-aware queueing with `agent.steer()`. See Mid-Tick Message Handling below. |
 
@@ -458,8 +458,8 @@ The current `session.injectMessage()` appends to an `AsyncIterable` stream that 
 
 The migration affects several frontend concerns:
 
-- **Auth/provider configuration**: pi-ai uses a different authentication model than the Claude/Codex SDKs. The frontend needs updated provider configuration UI for pi-ai's multi-provider auth (API keys per provider: Anthropic, OpenAI, Google, etc.).
-- **Model selection**: pi-ai provides its own model listing. The current `provider.ts` router that lists models per SDK needs to be updated or replaced with pi-ai's model catalog.
+- **Auth/provider configuration**: Cortex uses provider-specific OAuth, API key, and custom endpoint flows through `cortex-provider.ts`.
+- **Model selection**: Cortex provides provider and model listing through `ProviderManager`.
 - **Warm/cold session UI removal**: Any UI that displays or references warm/cold session state needs to be updated. The `heartbeat_state.sessionState` field shown in the Mind page should be removed or replaced with connection status.
 - **Provider switching**: pi-ai supports runtime model switching via `setModel()`, which could enable a more fluid provider selection UX.
 
@@ -507,7 +507,7 @@ The existing `AgentEventType` enum in `@animus-labs/shared` is preserved. Cortex
 | `tool_execution_update` | *(dropped or new)* | Tool progress; can be added or omitted |
 | `tool_execution_end` | `tool_call_end` | Direct mapping |
 
-`thinking_start`/`thinking_end` are dropped from active use. These were Claude SDK-specific; pi-agent-core does not distinguish thinking from response content.
+`thinking_start`/`thinking_end` are not active Cortex events. Pi-agent-core does not distinguish thinking from response content in that way.
 
 Each pipeline phase (THOUGHT, AGENTIC LOOP, REFLECT) creates its own log session scope for traceability. The backend continues emitting pipeline events (`tick_input`, `tick_output`, `execute_*`) directly, outside the event bridge.
 
@@ -519,7 +519,7 @@ Cortex tools are native in-process registrations (not MCP tools). They run with 
 
 - Each has its own permission entry in `tool_permissions` (system.db).
 - The permission seeder registers Cortex tool permissions alongside Animus core and plugin MCP tool permissions.
-- These replace the equivalent SDK built-in tools (which were permission-gated via the `canUseTool` callback).
+- These replace the previous provider-specific built-in tool paths and are permission-gated through Cortex `resolvePermission`.
 
 ## System Prompt Rebuild
 

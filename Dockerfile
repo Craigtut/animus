@@ -6,22 +6,19 @@ WORKDIR /app
 # Copy package files for dependency installation
 COPY package.json package-lock.json* ./
 COPY packages/shared/package.json packages/shared/
-COPY packages/agents/package.json packages/agents/
 COPY packages/backend/package.json packages/backend/
 COPY packages/frontend/package.json packages/frontend/
 COPY packages/channel-sdk/package.json packages/channel-sdk/
 COPY packages/tts-native/package.json packages/tts-native/
 
-# Install all dependencies
+# Install dependencies for the production runtime workspaces.
 # NOTE: @animus-labs/cortex must be published to npm before Docker builds work.
 # The file: protocol dependency in backend/package.json won't resolve in Docker context. (including devDependencies for build).
 # onnxruntime-node's postinstall downloads optional CUDA GPU libraries (~500MB)
 # from GitHub. CPU binaries are already bundled in the package. Skip the GPU
 # download since we use CPU inference in Docker.
 ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
-# NOTE: npm ci fetches the Claude Agent SDK from the npm registry during build.
-# This is a user-initiated install (you are building the image), not redistribution.
-# If publishing pre-built images, exclude the SDK and install at container startup.
+RUN node -e "const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); pkg.workspaces=['packages/shared','packages/backend','packages/frontend','packages/channel-sdk','packages/tts-native']; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2)+'\n')"
 RUN npm install
 
 # Download pre-built tts-native binary from GitHub release.
@@ -34,13 +31,12 @@ RUN TTS_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "x64") && \
 
 # Copy source code
 COPY packages/shared/ packages/shared/
-COPY packages/agents/ packages/agents/
 COPY packages/backend/ packages/backend/
 COPY packages/frontend/ packages/frontend/
 COPY packages/channel-sdk/ packages/channel-sdk/
 COPY tsconfig.base.json tsconfig.json ./
 
-# Build in dependency order: shared → agents → frontend → backend
+# Build in dependency order: shared -> frontend -> backend
 # Cortex is an external npm dependency (installed via npm install above).
 # .dockerignore excludes **/dist and **/*.tsbuildinfo to prevent stale build
 # artifacts from poisoning the Docker build. Each step also cleans dist/ as
@@ -48,7 +44,6 @@ COPY tsconfig.base.json tsconfig.json ./
 # defaults to false) so we allow its exit code.
 RUN cd packages/shared && rm -rf dist && npx tsc && \
     test -f dist/index.d.ts && \
-    cd ../agents && rm -rf dist && npx tsc && cp src/models.json dist/models.json && \
     cd ../frontend && npx vite build && \
     cd ../backend && rm -rf dist && (npx tsc -p tsconfig.build.json || true) && \
     rm -rf dist/db/migrations && cp -r src/db/migrations dist/db/migrations && \
@@ -57,11 +52,8 @@ RUN cd packages/shared && rm -rf dist && npx tsc && \
 # Prune dev dependencies after build (keeps native addons intact).
 # LanceDB, sharp, and sherpa-onnx platform binaries are optionalDeps that get
 # removed during prune. Re-install the correct ones for the container's arch.
-# The Claude Agent SDK has a proprietary license and cannot be redistributed in
-# pre-built images. It is installed at container startup via the SDK manager.
-RUN mkdir -p packages/shared/node_modules packages/agents/node_modules packages/backend/node_modules && \
+RUN mkdir -p packages/shared/node_modules packages/backend/node_modules && \
     npm prune --omit=dev && \
-    rm -rf node_modules/@anthropic-ai/claude-agent-sdk && \
     LANCE_VER=$(node -p "JSON.parse(require('fs').readFileSync('node_modules/@lancedb/lancedb/package.json','utf8')).version") && \
     SHARP_VER=$(node -p "JSON.parse(require('fs').readFileSync('node_modules/sharp/package.json','utf8')).version") && \
     SHERPA_VER=$(node -p "JSON.parse(require('fs').readFileSync('node_modules/sherpa-onnx-node/package.json','utf8')).version") && \
@@ -69,7 +61,11 @@ RUN mkdir -p packages/shared/node_modules packages/agents/node_modules packages/
     npm install --no-save \
       "@lancedb/lancedb-linux-${ARCH}-gnu@${LANCE_VER}" \
       "@img/sharp-linux-${ARCH}@${SHARP_VER}" \
-      "sherpa-onnx-linux-${ARCH}@${SHERPA_VER}"
+      "sherpa-onnx-linux-${ARCH}@${SHERPA_VER}" && \
+    rm -rf \
+      node_modules/@anthropic-ai/claude-agent-sdk \
+      node_modules/@openai/codex-sdk \
+      node_modules/@opencode-ai/sdk
 
 # Stage 2: Production runtime
 FROM node:25 AS runtime
@@ -89,7 +85,6 @@ WORKDIR /app
 # Copy package files (needed for Node module resolution)
 COPY package.json package-lock.json* ./
 COPY packages/shared/package.json packages/shared/
-COPY packages/agents/package.json packages/agents/
 COPY packages/backend/package.json packages/backend/
 COPY packages/channel-sdk/package.json packages/channel-sdk/
 COPY packages/tts-native/package.json packages/tts-native/
@@ -97,13 +92,12 @@ COPY packages/tts-native/package.json packages/tts-native/
 # Copy pruned node_modules from builder (preserves native addons).
 # Hoisted workspace deps live in root node_modules; per-package dirs may not
 # exist after prune, so we create empty fallbacks before copying.
-RUN mkdir -p packages/shared/node_modules packages/agents/node_modules packages/backend/node_modules
+RUN mkdir -p packages/shared/node_modules packages/backend/node_modules
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/backend/node_modules packages/backend/node_modules
 
 # Copy built artifacts
 COPY --from=builder /app/packages/shared/dist packages/shared/dist
-COPY --from=builder /app/packages/agents/dist packages/agents/dist
 COPY --from=builder /app/packages/backend/dist packages/backend/dist
 
 # Copy tts-native package (index.js loader, type definitions, native binary)

@@ -242,15 +242,6 @@ export class ChannelManager {
       this.processes.delete(pkg.channelType);
     }
 
-    // Clean up channel-provided skills
-    const manifest = this.manifests.get(pkg.channelType);
-    if (manifest) {
-      await this.cleanupChannelSkills(pkg, manifest);
-      if (manifest.skills) {
-        getEventBus().emit('plugin:changed', { pluginName: pkg.name, action: 'uninstalled' });
-      }
-    }
-
     // Clean up contact_channels for this channel type
     const removedChannels = contactStore.deleteContactChannelsByChannel(getContactsDb(), pkg.channelType);
     if (removedChannels > 0) {
@@ -312,12 +303,6 @@ export class ChannelManager {
 
     await this.startProcess(pkg, manifest);
 
-    // Deploy channel-provided skills
-    await this.deployChannelSkills(pkg, manifest);
-    if (manifest.skills) {
-      getEventBus().emit('plugin:changed', { pluginName: pkg.name, action: 'enabled' });
-    }
-
     systemStore.updateChannelPackage(db, name, { enabled: true });
   }
 
@@ -331,20 +316,10 @@ export class ChannelManager {
       throw new Error(`Channel package "${name}" not found`);
     }
 
-    const manifest = this.manifests.get(pkg.channelType);
-
     const host = this.processes.get(pkg.channelType);
     if (host) {
       await host.stop();
       this.processes.delete(pkg.channelType);
-    }
-
-    // Clean up channel-provided skills
-    if (manifest) {
-      await this.cleanupChannelSkills(pkg, manifest);
-      if (manifest.skills) {
-        getEventBus().emit('plugin:changed', { pluginName: pkg.name, action: 'disabled' });
-      }
     }
 
     systemStore.updateChannelPackage(db, name, { enabled: false, status: 'disabled' });
@@ -534,12 +509,6 @@ export class ChannelManager {
       this.processes.delete(existing.channelType);
     }
 
-    // Clean up skills from old version
-    const oldManifest = this.manifests.get(existing.channelType);
-    if (oldManifest) {
-      await this.cleanupChannelSkills(existing, oldManifest);
-    }
-
     // 3. Extract to packages directory (replaces existing files)
     const packagesDir = path.join(DATA_DIR, 'packages');
     const extractDir = path.join(packagesDir, manifest.name);
@@ -612,7 +581,6 @@ export class ChannelManager {
       const updatedPkg = systemStore.getChannelPackage(db, name);
       if (updatedPkg && this.hasRequiredConfig(updatedPkg)) {
         await this.startProcess(updatedPkg, channelManifest);
-        await this.deployChannelSkills(updatedPkg, channelManifest);
         systemStore.updateChannelPackage(db, name, { enabled: true });
         log.info(`Updated and re-enabled channel from package: ${name} v${currentVersion} → v${manifest.version}`);
       } else {
@@ -689,12 +657,6 @@ export class ChannelManager {
         this.processes.delete(pkg.channelType);
       }
 
-      // Clean up skills
-      const oldManifest = this.manifests.get(pkg.channelType);
-      if (oldManifest) {
-        await this.cleanupChannelSkills(pkg, oldManifest);
-      }
-
       // 2. Remove current extracted directory
       const extractDir = path.join(DATA_DIR, 'packages', packageName);
       await fsp.rm(extractDir, { recursive: true, force: true });
@@ -742,7 +704,6 @@ export class ChannelManager {
         const updatedPkg = systemStore.getChannelPackage(db, packageName);
         if (updatedPkg && this.hasRequiredConfig(updatedPkg)) {
           await this.startProcess(updatedPkg, channelManifest);
-          await this.deployChannelSkills(updatedPkg, channelManifest);
           systemStore.updateChannelPackage(db, packageName, { enabled: true });
         } else {
           systemStore.updateChannelPackage(db, packageName, { enabled: false, status: 'disabled' });
@@ -1045,73 +1006,6 @@ export class ChannelManager {
       ...(bestStatusText != null ? { statusText: bestStatusText } : {}),
       ...(bestActivity != null ? { activity: bestActivity } : {}),
     };
-  }
-
-  // ---- Skills Deployment ----
-
-  /**
-   * Deploy channel-provided skills (symlinks to the skill bridge directory).
-   * Reuses the same discovery path as the plugin system.
-   */
-  private async deployChannelSkills(pkg: ChannelPackage, manifest: ChannelManifest): Promise<void> {
-    if (!manifest.skills) return;
-
-    const skillsDir = path.join(pkg.path, manifest.skills);
-    if (!fs.existsSync(skillsDir)) {
-      log.warn(`Channel ${pkg.name} declares skills at "${manifest.skills}" but directory not found`);
-      return;
-    }
-
-    const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
-    const { getPluginManager } = await import('../plugins/index.js');
-    const pluginManager = getPluginManager();
-    const bridgePath = pluginManager.getSkillBridgePath();
-    const targetSkillsDir = path.join(bridgePath, 'skills');
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const skillMdPath = path.join(skillsDir, entry.name, 'SKILL.md');
-      if (!fs.existsSync(skillMdPath)) continue;
-
-      const sourcePath = path.join(skillsDir, entry.name);
-      const targetPath = path.join(targetSkillsDir, entry.name);
-
-      try {
-        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-        try {
-          fs.rmSync(targetPath, { recursive: true, force: true });
-        } catch { /* doesn't exist */ }
-        fs.symlinkSync(sourcePath, targetPath, 'dir');
-        log.info(`Deployed channel skill "${entry.name}" from ${pkg.name}`);
-      } catch (err) {
-        log.error(`Failed to deploy channel skill ${entry.name} (${pkg.name}):`, err);
-      }
-    }
-  }
-
-  /**
-   * Remove channel-provided skill symlinks.
-   */
-  private async cleanupChannelSkills(pkg: ChannelPackage, manifest: ChannelManifest): Promise<void> {
-    if (!manifest.skills) return;
-
-    const skillsDir = path.join(pkg.path, manifest.skills);
-    if (!fs.existsSync(skillsDir)) return;
-
-    const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
-    const { getPluginManager } = await import('../plugins/index.js');
-    const pluginManager = getPluginManager();
-    const bridgePath = pluginManager.getSkillBridgePath();
-    const targetSkillsDir = path.join(bridgePath, 'skills');
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const targetPath = path.join(targetSkillsDir, entry.name);
-      try {
-        fs.rmSync(targetPath, { recursive: true, force: true });
-        log.debug(`Removed channel skill "${entry.name}" from ${pkg.name}`);
-      } catch { /* ignore */ }
-    }
   }
 
   // ---- Internal ----

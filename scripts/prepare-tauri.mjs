@@ -463,6 +463,7 @@ function generatePackageJson() {
   delete deps['@animus-labs/tts-native'];
   delete deps['@openai/codex-sdk'];
   delete deps['@anthropic-ai/claude-agent-sdk'];
+  delete deps['@opencode-ai/sdk'];
 
   const resourcePkg = {
     private: true,

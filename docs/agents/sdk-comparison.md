@@ -1,5 +1,7 @@
 # Agent SDK Comparison
 
+> **Status**: Legacy reference. Cortex is the active Animus agent runtime. This document is retained for historical comparison only.
+>
 > **Purpose**: Practical comparison of the three agent SDKs supported by the Animus abstraction layer.
 > For unified interface design, see [architecture-overview.md](./architecture-overview.md).
 > For deep dives into each provider, see the individual research docs linked below.
@@ -11,10 +13,10 @@
 | **Package** | `@anthropic-ai/claude-agent-sdk` | `@openai/codex-sdk` | `@opencode-ai/sdk` |
 | **Provider** | Anthropic (Claude models) | OpenAI (GPT/Codex models) | 75+ providers (multi-model) |
 | **Source** | Proprietary | Proprietary | Open source |
-| **Role in Animus** | **Default / Primary** | Alternative | Alternative |
+| **Role in Animus** | Retired legacy provider | Retired legacy provider | Retired legacy provider |
 | **Maturity** | Production | Production | Production |
 
-Claude Agent SDK is the default provider for Animus. It has the most comprehensive feature set and is the first adapter implemented. Codex and OpenCode serve as alternatives for users who prefer different model providers or need specific capabilities.
+The active Animus runtime is Cortex. These SDKs are retained only as historical reference for a possible future plugin-style reintroduction.
 
 ## Architecture Comparison
 

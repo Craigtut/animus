@@ -33,7 +33,7 @@ BINARIES_DIR="$TAURI_DIR/binaries"
 RESOURCES_DIR="$TAURI_DIR/resources"
 BACKEND_DIST="$REPO_ROOT/packages/backend/dist"
 SHARED_PKG="$REPO_ROOT/packages/shared"
-AGENTS_PKG="$REPO_ROOT/packages/agents"
+TTS_NATIVE_PKG="$REPO_ROOT/packages/tts-native"
 BACKEND_PKG_JSON="$REPO_ROOT/packages/backend/package.json"
 
 NODE_VERSION="v24.0.0"
@@ -122,37 +122,36 @@ info "Copying backend dist..."
 mkdir -p "$RESOURCES_DIR/backend"
 cp -R "$BACKEND_DIST"/* "$RESOURCES_DIR/backend/"
 
-# B.4 — Copy @animus/shared workspace package
-info "Copying @animus/shared..."
-mkdir -p "$RESOURCES_DIR/node_modules/@animus/shared"
-cp "$SHARED_PKG/package.json" "$RESOURCES_DIR/node_modules/@animus/shared/"
+# B.4 — Copy local workspace runtime packages
+info "Copying @animus-labs/shared..."
+mkdir -p "$RESOURCES_DIR/node_modules/@animus-labs/shared"
+cp "$SHARED_PKG/package.json" "$RESOURCES_DIR/node_modules/@animus-labs/shared/"
 if [ -d "$SHARED_PKG/dist" ]; then
-  cp -R "$SHARED_PKG/dist" "$RESOURCES_DIR/node_modules/@animus/shared/dist"
+  cp -R "$SHARED_PKG/dist" "$RESOURCES_DIR/node_modules/@animus-labs/shared/dist"
 else
-  fail "@animus/shared not built. Expected: $SHARED_PKG/dist"
+  fail "@animus-labs/shared not built. Expected: $SHARED_PKG/dist"
 fi
 
-# B.5 — Copy @animus/agents workspace package
-info "Copying @animus/agents..."
-mkdir -p "$RESOURCES_DIR/node_modules/@animus/agents"
-cp "$AGENTS_PKG/package.json" "$RESOURCES_DIR/node_modules/@animus/agents/"
-if [ -d "$AGENTS_PKG/dist" ]; then
-  cp -R "$AGENTS_PKG/dist" "$RESOURCES_DIR/node_modules/@animus/agents/dist"
-else
-  fail "@animus/agents not built. Expected: $AGENTS_PKG/dist"
-fi
+info "Copying @animus-labs/tts-native..."
+mkdir -p "$RESOURCES_DIR/node_modules/@animus-labs/tts-native"
+cp "$TTS_NATIVE_PKG/package.json" "$RESOURCES_DIR/node_modules/@animus-labs/tts-native/"
+for file in "$TTS_NATIVE_PKG"/index.js "$TTS_NATIVE_PKG"/index.d.ts "$TTS_NATIVE_PKG"/*.node; do
+  if [ -f "$file" ]; then
+    cp "$file" "$RESOURCES_DIR/node_modules/@animus-labs/tts-native/"
+  fi
+done
 
-# B.6 — Generate minimal package.json for third-party deps
+# B.5 — Generate minimal package.json for third-party deps
 info "Generating resources/package.json..."
 node -e "
   const pkg = JSON.parse(require('fs').readFileSync('$BACKEND_PKG_JSON', 'utf8'));
-  const deps = {};
-  for (const [name, version] of Object.entries(pkg.dependencies || {})) {
-    // Exclude @animus/* workspace references
-    if (!name.startsWith('@animus/')) {
-      deps[name] = version;
-    }
-  }
+  const deps = { ...(pkg.dependencies || {}) };
+  delete deps['@animus-labs/shared'];
+  delete deps['@animus-labs/agents'];
+  delete deps['@animus-labs/tts-native'];
+  delete deps['@openai/codex-sdk'];
+  delete deps['@anthropic-ai/claude-agent-sdk'];
+  delete deps['@opencode-ai/sdk'];
   const output = {
     name: 'animus-backend-resources',
     version: '0.1.0',
@@ -166,7 +165,7 @@ node -e "
   );
 "
 
-# B.7 — Install third-party production dependencies
+# B.6 — Install third-party production dependencies
 info "Installing production dependencies in resources/..."
 cd "$RESOURCES_DIR"
 npm install --omit=dev --ignore-scripts=false 2>&1 | tail -5
@@ -189,13 +188,13 @@ if [ ! -d "$RESOURCES_DIR/node_modules/fastify" ]; then
   ERRORS=$((ERRORS + 1))
 fi
 
-if [ ! -d "$RESOURCES_DIR/node_modules/@animus/shared/dist" ]; then
-  warn "Missing: resources/node_modules/@animus/shared/dist"
+if [ ! -d "$RESOURCES_DIR/node_modules/@animus-labs/shared/dist" ]; then
+  warn "Missing: resources/node_modules/@animus-labs/shared/dist"
   ERRORS=$((ERRORS + 1))
 fi
 
-if [ ! -d "$RESOURCES_DIR/node_modules/@animus/agents/dist" ]; then
-  warn "Missing: resources/node_modules/@animus/agents/dist"
+if [ ! -f "$RESOURCES_DIR/node_modules/@animus-labs/tts-native/index.js" ]; then
+  warn "Missing: resources/node_modules/@animus-labs/tts-native/index.js"
   ERRORS=$((ERRORS + 1))
 fi
 

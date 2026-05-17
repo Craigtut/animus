@@ -237,20 +237,14 @@ describe('PluginManager', () => {
   });
 
   // ========================================================================
-  // Skill Deployment
+  // Skills
   // ========================================================================
 
-  describe('skill deployment', () => {
-    it('creates symlinks for skills to provider discovery path', async () => {
-      // Setup a plugin with a skill
+  describe('skills', () => {
+    it('indexes plugin skills without deploying provider-specific files', async () => {
       mockReaddir.mockImplementation(async (dir: string) => {
-        // The skill subdirectory scan (loadSkills finds skill directories)
         if (dir.includes('skill-plugin') && dir.endsWith('skills')) {
           return [{ name: 'my-skill', isDirectory: () => true, isFile: () => false }];
-        }
-        // Inside the skill directory (deploySkillsForPlugin reads entries)
-        if (dir.includes('my-skill')) {
-          return ['SKILL.md', 'helpers'];
         }
         return [];
       });
@@ -278,97 +272,23 @@ describe('PluginManager', () => {
       const pm = getPluginManager();
       await pm.loadAll();
 
-      // Verify symlink was created for non-SKILL.md entries (SKILL.md is copied, others are symlinked)
-      expect(mockSymlink).toHaveBeenCalled();
-      const symlinkCall = mockSymlink.mock.calls.find(
-        (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('helpers')
-      );
-      expect(symlinkCall).toBeDefined();
+      const loaded = pm.getPlugin('skill-plugin');
+      expect(loaded?.skills).toEqual([
+        { name: 'my-skill', absolutePath: '/plugins/skill-plugin/skills/my-skill' },
+      ]);
+      expect(pm.getRuntimeStats().pluginSkills).toBe(1);
+      expect(mockSymlink).not.toHaveBeenCalled();
+      expect(mockWriteFile).not.toHaveBeenCalled();
     });
 
-    it('cleans up skills on cleanupSkills()', async () => {
-      // Setup: deploy a skill first
-      mockReaddir.mockImplementation(async (dir: string) => {
-        if (dir.endsWith('backend/plugins')) {
-          return [{ name: 'cleanup-test', isDirectory: () => true, isFile: () => false }];
-        }
-        if (dir.includes('cleanup-test') && dir.endsWith('skills')) {
-          return [{ name: 'doomed', isDirectory: () => true, isFile: () => false }];
-        }
-        return [];
-      });
-
-      mockReadFile.mockImplementation(async (filePath: string) => {
-        if (filePath.endsWith('plugin.json')) {
-          return JSON.stringify({
-            name: 'cleanup-test',
-            displayName: 'Cleanup Test',
-            version: '1.0.0',
-            description: 'Cleanup test',
-            author: { name: 'Test' },
-            components: { skills: './skills/' },
-          });
-        }
-        throw new Error('File not found');
-      });
-
-      mockAccess.mockResolvedValue(undefined);
-      registerPluginRecord('cleanup-test', '/plugins/cleanup-test', 'built-in');
-
+    it('cleans up legacy provider skill artifacts', async () => {
       const pm = getPluginManager();
-      await pm.loadAll();
-
-      // Reset rm mock to track cleanup calls
-      mockRm.mockClear();
       await pm.cleanupSkills();
 
-      expect(mockRm).toHaveBeenCalled();
-    });
-
-    it('builds isolated CODEX_HOME with skills directory (no config.toml)', async () => {
-      mockReaddir.mockImplementation(async (dir: string) => {
-        if (dir.endsWith('backend/plugins')) {
-          return [{ name: 'codex-skill-plugin', isDirectory: () => true, isFile: () => false }];
-        }
-        if (dir.includes('codex-skill-plugin') && dir.endsWith('skills')) {
-          return [{ name: 'codex-skill', isDirectory: () => true, isFile: () => false }];
-        }
-        return [];
-      });
-
-      mockReadFile.mockImplementation(async (filePath: string) => {
-        if (filePath.endsWith('plugin.json')) {
-          return JSON.stringify({
-            name: 'codex-skill-plugin',
-            displayName: 'Codex Skill Plugin',
-            version: '1.0.0',
-            description: 'Codex skills',
-            author: { name: 'Test' },
-            components: { skills: './skills/' },
-          });
-        }
-        throw new Error('File not found');
-      });
-
-      mockAccess.mockResolvedValue(undefined); // SKILL.md exists
-      registerPluginRecord('codex-skill-plugin', '/plugins/codex-skill-plugin', 'built-in');
-
-      const pm = getPluginManager();
-      await pm.loadAll();
-
-      mockMkdir.mockClear();
-      const runtimeEnv = await pm.buildCodexRuntimeEnv();
-
-      expect(runtimeEnv['CODEX_HOME']).toContain('runtime/providers/codex/home');
-      // Should create CODEX_HOME and its skills/ subdirectory
-      const mkdirCalls = mockMkdir.mock.calls.map((call: unknown[]) => call[0]);
-      expect(mkdirCalls.some((p: unknown) => typeof p === 'string' && p === runtimeEnv['CODEX_HOME'])).toBe(true);
-      expect(mkdirCalls.some((p: unknown) => typeof p === 'string' && (p as string).endsWith('/skills'))).toBe(true);
-      // Should NOT write a config.toml (skills are synced via JSON-RPC at runtime)
-      const configWrite = mockWriteFile.mock.calls.find(
-        (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).endsWith('/config.toml')
-      );
-      expect(configWrite).toBeUndefined();
+      const removed = mockRm.mock.calls.map((call: unknown[]) => call[0]);
+      expect(removed.some((p: unknown) => typeof p === 'string' && p.includes('animus-skill-bridge'))).toBe(true);
+      expect(removed.some((p: unknown) => typeof p === 'string' && p.includes('runtime/providers/codex/home/skills'))).toBe(true);
+      expect(removed.some((p: unknown) => typeof p === 'string' && p.includes('runtime/providers/opencode/skills'))).toBe(true);
     });
   });
 

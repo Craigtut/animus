@@ -434,7 +434,7 @@ Each channel adapter runs in its own child process via `child_process.fork()`. T
 | Worker threads | Partial — V8 OOM kills process | None — cannot differ from main thread | Medium |
 | **Child processes** | **Full — adapter crash doesn't affect engine** | **Full — independent `--permission` flags** | Medium |
 
-The main Animus process needs unrestricted access (the Claude Agent SDK reads/writes files, runs commands). Channel adapter processes don't need any of that — they only need network access to their specific external service. Child processes let us enforce this boundary.
+The main Animus process needs broad local access for the Cortex agent, MCP tools, speech, storage, and package management. Channel adapter processes don't need that access. They only need network access to their specific external service. Child processes let us enforce this boundary.
 
 **Node.js version requirement**: The `--permission` flag is stable in Node.js 24+. Animus requires Node.js 24.0 or higher.
 
@@ -1133,7 +1133,7 @@ For a self-hosted, single-user application:
 
 ### Why Not In-Process
 
-The main Animus process runs the Claude Agent SDK, which requires unrestricted file system and process access. Applying `--permission` to the main process would break the agent. Channel adapters don't need any of that access, so isolating them in child processes with restricted permissions is the right boundary.
+The main Animus process runs the Cortex-backed mind and local tool infrastructure, which requires broad file system and process access. Applying `--permission` to the main process would break core agent behavior. Channel adapters don't need that access, so isolating them in child processes with restricted permissions is the right boundary.
 
 ---
 

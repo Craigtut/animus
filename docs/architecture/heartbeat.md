@@ -12,7 +12,7 @@ Think of it like a biological heart pumping blood in a steady rhythm. The heartb
 
 ## The Mind
 
-The mind is an **agent session that persists across ticks** using the `@animus-labs/agents` abstraction layer. It is not a series of disconnected LLM calls. When the session is warm, it maintains full conversational context across ticks via the underlying agent SDK (Claude Agent SDK or Codex). Sessions cycle through cold, active, and warm states to balance continuity with context window management (see Session States below).
+The mind is a **CortexAgent session that persists across ticks** using `@animus-labs/cortex`. It is not a series of disconnected LLM calls. Cortex keeps per-contact and per-channel session state in `sessions.db`, while the heartbeat provides fresh tick context, memory, emotions, goals, tasks, plugins, and channel state.
 
 The mind serves as the **top-level orchestrator**. It thinks, feels, decides, and replies — but it does not perform long-running work itself. When a complex task needs execution (research, multi-step workflows, code generation), the mind kicks off **sub-agents** to handle that work autonomously. The mind stays fast and responsive, never blocked by heavy operations.
 
@@ -95,7 +95,7 @@ When a session completes a tick, it enters the **warm** state with a configurabl
 - **User-facing triggers** (message received, scheduled task, sub-agent completion) **reset** the warmth timer — the session stays warm as long as the user is actively engaged
 - **Interval ticks** use a warm session if available but **do not extend** the warmth window — idle thinking shouldn't keep a session warm indefinitely
 
-When the warmth window expires with no trigger, the session transitions to **cold** and the SDK session is released.
+When the warmth window expires with no trigger, the session transitions to **cold** and Cortex session state is checkpointed for later restoration.
 
 #### Context Budget
 
@@ -231,7 +231,7 @@ The structured output includes:
 
 This replaces the old sequential THINK → FEEL → DECIDE → REFLECT pipeline. The model handles all of these concerns holistically in a single pass, which is both faster and more natural — a human mind doesn't think, then feel, then decide sequentially. It all happens together.
 
-The mind's output is enforced via **structured output** (JSON schema). The `@animus-labs/agents` abstraction layer exposes an `outputSchema` option that maps to each SDK's native mechanism (Claude's `outputFormat`, Codex's `outputSchema`, or prompt injection + validation for providers without native support). The MindOutput schema is defined as a Zod schema in the shared package and compiled to JSON Schema for SDK consumption. See `docs/architecture/open-questions.md` for open questions about structured output reliability across providers.
+The mind output is assembled by the Cortex 5-phase pipeline. THOUGHT and REFLECT are direct structured model calls, while the AGENTIC LOOP runs through `CortexAgent`. EXECUTE combines those results into persisted thoughts, experiences, emotions, memories, decisions, and replies. See `docs/cortex/mind-migration.md` for the detailed phase contracts.
 
 ### Stage 3: EXECUTE (System)
 
@@ -246,7 +246,7 @@ A system-level operation that processes the structured output from the mind quer
 - Store messages in messages.db tagged with `contact_id`
 - Mark delivery failures as notified (so they are not shown again on the next tick)
 - Run TTL cleanup on expired data (thoughts, experiences, emotions)
-- **Log agent events to agent_logs.db** — the backend orchestrator subscribes to the mind session's event stream via `session.onEvent()` and writes selected events to `agent_logs.db`. This is non-blocking (fire-and-forget with error logging). Not all events are stored — `session_start`, `session_end`, `tool_call`, `thinking`, `turn_end`, and `error` events are persisted; individual `response_chunk` events are skipped to avoid excessive write volume. The session row in `agent_logs.db` is created before the SDK session starts, ensuring we have a record even if the session fails immediately.
+- **Log agent events to agent_logs.db** — Cortex event bridge events are normalized and persisted. This is non-blocking (fire-and-forget with error logging). Individual response chunks are skipped to avoid excessive write volume.
 - Log the tick for observability
 - Persist heartbeat state for crash recovery
 
@@ -588,21 +588,23 @@ interface MessageReply {
 
 ### Combined MindOutput Schema
 
-The mind captures structured cognitive state via **cognitive MCP tools** — two in-process tools that bracket every response. The model calls `record_thought` first, speaks naturally (reply streams to the user), then calls `record_cognitive_state` last to capture experience, emotions, decisions, and memory updates.
+The mind output is assembled across the Cortex 5-phase pipeline:
 
-Internally, the tool outputs are accumulated into a `CognitiveSnapshot` and converted to a `MindOutput` type for the EXECUTE stage via `snapshotToMindOutput()`.
+1. **THOUGHT** produces a structured thought and importance score through a direct model call.
+2. **AGENTIC LOOP** runs `CortexAgent`, streams user-facing reply text, calls MCP tools, and may make decisions.
+3. **REFLECT** produces structured experience, emotion deltas, energy delta, memory candidates, working memory updates, and core self updates through a direct model call.
+4. **EXECUTE** persists and applies the combined output.
 
 ```typescript
-// Internal type assembled from CognitiveSnapshot + reply context
 interface MindOutput {
-  thought: { content: string; importance: number };   // Last thought from the tick
+  thought: { content: string; importance: number } | null;
   reply: {
-    content: string;           // Accumulated natural language from reply phase
-    contactId: string;         // From trigger context
-    channel: ChannelType;      // From trigger context
+    content: string;
+    contactId: string;
+    channel: ChannelType;
     replyToMessageId: string | null;
   } | null;
-  experience: { content: string; importance: number };
+  experience: { content: string; importance: number } | null;
   emotionDeltas: Array<{ emotion: EmotionName; delta: number; reasoning: string }>;
   energyDelta?: { delta: number; reasoning: string };
   decisions: Array<{ type: DecisionType; description: string; parameters: Record<string, unknown> }>;
@@ -618,155 +620,31 @@ interface MindOutput {
 }
 ```
 
-**Why Think, Speak, Reflect:** The cognitive tools enforce a natural order — the model thinks (via `record_thought`), then speaks naturally (reply streams to user), then reflects on the full experience (via `record_cognitive_state`). This mirrors how humans process: internal thought shapes what you say, and reflection follows action. The model's experience narration can include the act of having replied.
+The old cognitive MCP tools were retired. Thought and reflection are now programmatic phases, which makes structured inner-life capture deterministic and keeps the Cortex agentic loop focused on reasoning, tool use, decisions, and replies.
 
----
-
-## Cognitive MCP Tools & Reply Streaming
-
-Instead of forcing the entire mind output into a single JSON blob, the mind uses **cognitive MCP tools** to capture structured cognitive state while speaking naturally. This approach eliminates JSON parsing failures, enables natural reply streaming, and lets the model think and speak like a person rather than a JSON generator.
-
-### The Two Tools
-
-**`record_thought`** — Called FIRST, before any reply or other tool use.
-- Captures the model's inner monologue for this moment
-- Sets the streaming phase to `'replying'` — text after this tool call streams to the user
-- Accumulates into an array (supports multiple thoughts per tick via mid-tick re-entry)
-
-**`record_cognitive_state`** — Called LAST, after the reply is complete.
-- Captures experience, emotion deltas, energy delta, decisions, memory candidates, working memory, and core self updates
-- Sets the streaming phase to `'done'` — text after this is filtered out
-- Uses Zod-validated schemas for each field (no JSON parsing needed)
-
-### Phase-Based Reply Streaming
-
-The cognitive tools manage a phase state machine that controls which text streams to the user:
+### Cortex Runtime Architecture
 
 ```
-                     ┌─────────────────────────────────────────────────┐
-                     │         (mid-tick re-entry)                     │
-                     │                                                 │
-pre-thought ──[record_thought]──► replying ──[record_cognitive_state]──► done
-  (filtered)                      (STREAMS)                             (filtered)
+GATHER
+  -> THOUGHT direct model call
+  -> CortexAgent AGENTIC LOOP
+       -> streams reply text
+       -> calls built-in and plugin MCP tools
+       -> records Cortex event bridge events
+  -> REFLECT direct model call
+  -> EXECUTE
 ```
 
-- **`pre-thought`**: Any text before `record_thought` is filtered (not sent to user)
-- **`replying`**: Natural language streams to the frontend via `reply:chunk` events
-- **`done`**: Any text after `record_cognitive_state` is filtered
-
-The `onChunk` callback in `mindQuery()` checks the phase before emitting:
-
-```typescript
-state.cognitiveServer.resetSnapshot();
-let replyAccumulated = '';
-
-await session.promptStreaming(
-  context.userMessage,
-  (chunk: string) => {
-    if (cogServer.getPhase() === 'replying') {
-      replyAccumulated += chunk;
-      eventBus.emit('reply:chunk', { content: chunk, accumulated: replyAccumulated });
-    }
-  },
-);
-
-const snapshot = cogServer.getSnapshot();
-const output = snapshotToMindOutput(snapshot, replyAccumulated, gathered);
-```
-
-### Architecture
-
-```
-┌──────────────────────┐
-│   @animus-labs/agents     │   Adapter streams text chunks via
-│   (SDK Adapter)      │   promptStreaming() onChunk callback
-└──────────┬───────────┘
-           │ text chunks + tool calls (MCP via stdio)
-           ▼
-┌──────────────────────────────────────┐
-│   @animus-labs/backend (Mind Query Stage) │
-│                                      │
-│   ┌─────────────────────────┐        │
-│   │ Cognitive MCP Server    │        │
-│   │ (stdio → HTTP bridge)   │        │
-│   │                         │        │
-│   │ record_thought ────────►│ phase = 'replying'
-│   │                         │        │
-│   │ (natural language) ─────┼──────► reply:chunk events → tRPC → frontend
-│   │                         │        │
-│   │ record_cognitive_state ─│──────► CognitiveSnapshot accumulated
-│   └─────────────────────────┘        │
-│                                      │
-│   snapshotToMindOutput() ───────────► MindOutput → EXECUTE stage
-└──────────────────────────────────────┘
-```
-
-**The cognitive tools live in `@animus-labs/backend`** (`heartbeat/cognitive-tools.ts`). Tool calls arrive via the unified stdio MCP bridge (see `docs/architecture/mcp-tools.md`), while the cognitive state (`CognitiveSnapshot`) accumulates in a module-level singleton and is read directly in-process by the mind session via `getSnapshot()`, `resetSnapshot()`, and `getPhase()`. The agents package remains a stateless SDK abstraction; it doesn't know about cognitive state or `MindOutput`.
-
-### Three-Layer Prompt Architecture
-
-The cognitive tools use a three-layer design for guiding model behavior:
-
-| Layer | Location | Purpose |
-|-------|----------|---------|
-| System prompt | `context-builder.ts` → `COGNITIVE_PROCEDURE` | **When** to call tools, in what **order** |
-| Tool descriptions | `cognitive-tools.ts` → `sdk.tool()` name/description | **How important** each call is, when to stop |
-| Schema `.describe()` | `cognitive-tools.ts` → Zod schema descriptions | **What** to write in each field |
-
-This separation prevents redundancy and lets each layer focus on its purpose.
-
-### Mid-Tick Re-Entry (Multiple Cycles)
-
-When a message is injected mid-tick (e.g., user sends a follow-up while the model is responding), the model may run multiple thought→reply→state cycles within a single prompt. The phase state machine is re-entrant:
-
-- `record_thought` **always** resets phase to `'replying'` (even from `'done'`)
-- `record_cognitive_state` **always** sets phase to `'done'`
-- Accumulated state uses **accumulation semantics**:
-
-| Field | Accumulation |
-|-------|-------------|
-| `thoughts` | Array — every call pushes |
-| `emotionDeltas` | Array — every call appends |
-| `decisions` | Array — every call appends |
-| `memoryCandidate` | Array — every call appends |
-| `experience` | Overwrite — latest wins (narrative progresses forward) |
-| `energyDelta` | Sum — deltas add together |
-| `workingMemoryUpdate` | Overwrite — latest wins |
-| `coreSelfUpdate` | Overwrite — latest wins |
-
-The `snapshotToMindOutput()` converter takes the **last** thought as `MindOutput.thought`. The EXECUTE stage persists **all** thoughts via the `allThoughts` option.
-
-### Turn-Aware Streaming in the Agents Layer
-
-The `@animus-labs/agents` abstraction layer tracks **turns** within a single prompt call. When the agent uses tools, the SDK produces multiple assistant turns — each with its own streamed text. The agents layer exposes this via:
-
-- **`StreamChunkMeta`** on `onChunk` callbacks — includes `turnIndex` so consumers know which turn a chunk belongs to
-- **`turn_end` events** — emitted when an assistant turn completes (before `tool_call_start`), carrying the full turn text and metadata
-- **`AgentResponse.turns`** — after completion, the full per-turn breakdown is available
-
-For the **heartbeat mind session**, the turn structure maps directly to the cognitive tool phases: turn 1 is the `record_thought` tool call, turn 2 is the natural language reply, turn 3 is the `record_cognitive_state` tool call. For **sub-agent sessions** (which use tools heavily), intermediate turn text represents meaningful user-facing content.
-
-See `docs/agents/architecture-overview.md` → [Turn-Aware Streaming] for the full interface definitions.
+Cortex events are normalized into existing agent log rows. MCP tools use the backend bridge described in `docs/architecture/mcp-tools.md`. Plugin skills are registered with Cortex `SkillRegistry`, not copied to provider-specific directories.
 
 ### Validation Strategy
 
-Structured data is validated at the **tool call level**, not via post-hoc JSON parsing:
+Structured data is validated at phase boundaries:
 
-1. **Tool inputs**: Validated by Zod schemas registered with the MCP server. Invalid tool calls are rejected by the SDK before reaching the handler.
-2. **snapshotToMindOutput()**: Converts validated tool data to `MindOutput`. Provides fallback defaults for missing thoughts/experience.
-3. **safeMindOutput()**: Fallback when the agent session fails entirely — produces a minimal valid `MindOutput` from trigger context.
-4. **No JSON parsing**: The model never outputs raw JSON. All structured data flows through Zod-validated MCP tool inputs.
-
-### Cross-Provider Behavior
-
-Cognitive MCP tools use the unified stdio MCP bridge pattern (see `docs/architecture/mcp-tools.md`). All providers are supported:
-
-- **Claude**: Full support via stdio MCP subprocess.
-- **Codex**: Full support via stdio MCP subprocess.
-- **OpenCode**: Full support via stdio MCP subprocess.
-- **Pi**: Full support planned. Pi's in-process architecture supports MCP tool registration natively.
-
-The HTTP bridge is a singleton started once per process. The `CognitiveSnapshot` is reset before each tick via `resetSnapshot()`. Tool calls from the subprocess are routed to the bridge's `/cognitive/*` endpoints, which mutate the in-process snapshot directly.
+1. **THOUGHT output**: Validated against the thought schema.
+2. **Tool inputs**: Validated by MCP schemas before backend handlers execute.
+3. **REFLECT output**: Validated against the reflection schema.
+4. **EXECUTE**: Applies contact permission checks and persists only validated data.
 
 ## Error Handling Strategy
 
@@ -804,7 +682,7 @@ Failures that must be surfaced to the user because they affect the user's experi
 System-level failures that prevent normal operation:
 - **Database corruption** → log critical error, pause the heartbeat. Do not attempt to continue with corrupted state.
 - **Missing encryption key** (`ANIMUS_ENCRYPTION_KEY`) → refuse to start channel adapters that need credentials. Log clear error message.
-- **Agent SDK authentication failure** → disable that provider, log error. If it's the configured provider, pause the heartbeat and notify on next web UI visit.
+- **Cortex provider authentication failure** → mark the provider unhealthy, log error, pause the heartbeat if the configured provider cannot be used, and notify on next web UI visit.
 
 ### General Principles
 
@@ -838,7 +716,7 @@ The heartbeat system persists state to survive crashes gracefully. The design pr
 
 4. **Messages are safe regardless.** Inbound messages are written to `messages.db` at ingestion time (before tick processing), not during EXECUTE. A crash never loses messages — they'll be picked up by the next tick's GATHER CONTEXT.
 
-5. **Sub-agent re-check on startup.** The orchestrator queries SQLite for tasks with `status = 'running'` and checks each against the agent SDK:
+5. **Sub-agent re-check on startup.** The orchestrator queries SQLite for tasks with `status = 'running'` and checks each against Cortex sub-agent state:
    - If the session completed during downtime: store results, trigger an `agent_complete` tick
    - If the session died: mark as `failed`, let the mind learn about it on the next tick
    - If the session is still running: re-attach event handlers and continue tracking
@@ -958,7 +836,7 @@ The heartbeat system uses several shared abstractions (see `docs/architecture/te
 
 1. **Variable Tick Rate** — Adjust heartbeat interval based on activity level (faster when engaged, slower when idle)
 2. **Sleep Mode** — Reduced tick rate during quiet hours. During sleep, emotion decay should accelerate or snap to baseline, serving as the primary emotion reset mechanism
-3. **Context Window Management** — As the mind session grows, the agent SDK handles auto-compaction, but we may want to proactively summarize older context
+3. **Context Window Management** — As the mind session grows, Cortex handles compaction, but we may want to proactively summarize older context
 4. **Multi-Model Mind** — Use a cheaper/faster model for idle interval ticks, a more capable model when processing messages or complex tasks
 5. **Sub-Agent Orchestration** — See `docs/architecture/agent-orchestration.md` for the full design of how the mind delegates to sub-agents, tracks their lifecycle, forwards updates, and processes results
 6. **Contact System** — See `docs/architecture/contacts.md` for the full design of identity resolution, permission tiers, message isolation, and cross-contact information boundaries

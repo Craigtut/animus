@@ -67,7 +67,6 @@ export const channelManifestSchema = z.object({
   replyGuidance: z.string().min(1),
   permissions: channelPermissionsSchema.optional(),
   store: channelStoreMetadataSchema.optional(),
-  skills: z.string().optional(),
 });
 
 // ============================================================================

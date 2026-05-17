@@ -490,7 +490,7 @@ Anything not explicitly saved will be lost when the session resets.
 4. The mind's structured output from that tick includes any memory saves (working memory updates, core self updates, memory candidates)
 5. EXECUTE processes them normally, then the session transitions to cold
 
-This is inspired by OpenClaw's pre-compaction memory flush. The key difference: we trigger it based on our own token tracking rather than SDK signals, since the underlying agent SDKs (Claude, Codex, OpenCode) don't expose pre-compaction hooks.
+This is inspired by OpenClaw's pre-compaction memory flush. The key difference: Animus triggers it from its own token tracking and Cortex integration points rather than relying on provider-specific SDK signals.
 
 ### No Special Tick Required
 

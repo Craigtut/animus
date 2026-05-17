@@ -1,8 +1,10 @@
 # Agent Abstraction Layer Architecture
 
+> **Status**: Legacy reference. Cortex is the active Animus agent runtime. This document describes the retired subprocess SDK abstraction.
+
 ## Executive Summary
 
-This document outlines the architectural approach for building a unified abstraction layer over three agent SDKs:
+This document outlines the historical architectural approach for building a unified abstraction layer over three agent SDKs:
 - **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`)
 - **OpenAI Codex SDK** (`@openai/codex-sdk`)
 - **OpenCode SDK** (`@opencode-ai/sdk`)

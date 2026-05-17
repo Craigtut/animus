@@ -2,7 +2,7 @@
  * Preload script for macOS dock icon suppression.
  *
  * Loaded via NODE_OPTIONS="--require=/path/to/preload-bg-policy.js" so that
- * every Node.js child process (Claude Agent SDK, MCP stdio servers, etc.)
+ * every Node.js child process (MCP stdio servers, channel adapters, etc.)
  * inherits the policy. The native addon sets
  * NSApp.setActivationPolicy(.prohibited) via a constructor attribute that fires
  * during dlopen(), before any JS runs.

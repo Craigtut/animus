@@ -326,7 +326,7 @@ The deny list is enforced in the agent session's `canUseTool` callback and `PreT
    d. setSealState('unsealed', dek)     — store DEK in module scope
    e. scrubPasswordSources()            — delete from process.env
    f. initializeDatabases()             — open 7 DBs, run migrations
-   g. loadCredentialsIntoEnv(systemDb)  — decrypt provider keys into process.env
+   g. Cortex credentials remain encrypted until resolved by CortexCredentialService
    h. Start Fastify server + heartbeat
 5. If no password:
    a. setSealState('sealed')

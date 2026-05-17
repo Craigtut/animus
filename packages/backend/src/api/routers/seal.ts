@@ -22,7 +22,6 @@ import {
   getDek,
 } from '../../lib/vault-manager.js';
 import { setDek } from '../../lib/encryption-service.js';
-import { loadCredentialsIntoEnv } from '../../services/credential-service.js';
 import { getSystemDb } from '../../db/index.js';
 import * as systemStore from '../../db/stores/system-store.js';
 import { COOKIE_OPTIONS } from '../../plugins/auth.js';
@@ -43,7 +42,7 @@ export const sealRouter = router({
   /**
    * Unlock the vault with a password.
    * Derives the password key, unwraps the DEK, verifies the sentinel,
-   * loads credentials, and issues a JWT session.
+   * and issues a JWT session.
    */
   unlock: publicProcedure
     .input(z.object({ password: z.string().min(1) }))
@@ -66,7 +65,8 @@ export const sealRouter = router({
         });
       }
 
-      // Vault is now unsealed: verify encryption sentinel and load credentials
+      // Vault is now unsealed: verify encryption sentinel. Cortex credentials
+      // are resolved lazily through CortexCredentialService.
       const db = getSystemDb();
       try {
         const { verifyEncryptionKey } = await import('../../lib/encryption-service.js');
@@ -74,8 +74,6 @@ export const sealRouter = router({
       } catch (err) {
         log.error('Encryption sentinel verification failed after unlock:', err);
       }
-
-      loadCredentialsIntoEnv(db);
 
       // Start deferred subsystems (channels, plugins, heartbeat full mode)
       try {
@@ -230,9 +228,6 @@ export const sealRouter = router({
 
       try {
         const result = await migrateToVault(input.password, db);
-
-        // Load credentials now that the vault is unsealed
-        loadCredentialsIntoEnv(db);
 
         // Start channels
         try {

@@ -3,8 +3,8 @@
  *
  * The MCP protocol requires tool input schemas to produce `{ type: "object" }`
  * at the JSON Schema root. Zod types like discriminatedUnion() and union()
- * produce `anyOf`/`oneOf` instead, which causes the Claude SDK to silently
- * drop the entire MCP server's tools. This test catches that at CI time.
+ * produce `anyOf`/`oneOf` instead, which can cause MCP clients to reject
+ * the server's tools. This test catches that at CI time.
  */
 
 import { describe, it, expect } from 'vitest';

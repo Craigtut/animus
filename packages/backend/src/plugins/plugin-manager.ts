@@ -3,7 +3,7 @@
  * plugin components to the rest of the system.
  *
  * Singleton via getPluginManager(). Handles the full plugin lifecycle:
- * scanning, manifest validation, component loading, skill deployment,
+ * scanning, manifest validation, component loading, skill indexing,
  * hook/decision/trigger registration, and install/uninstall.
  *
  * See docs/architecture/plugin-system.md for the full design.
@@ -19,7 +19,6 @@ import { env, DATA_DIR } from '../utils/env.js';
 
 import { getSystemDb } from '../db/index.js';
 import * as pluginStore from '../db/stores/plugin-store.js';
-import * as systemStore from '../db/stores/system-store.js';
 import { encrypt, decrypt } from '../lib/encryption-service.js';
 import { isUnsealed, getSealState } from '../lib/vault-manager.js';
 import { getEventBus } from '../lib/event-bus.js';
@@ -95,7 +94,7 @@ interface WatcherProcess {
 export interface PluginRuntimeStats {
   loaded: number;
   enabled: number;
-  deployedSkills: number;
+  pluginSkills: number;
 }
 
 // ============================================================================
@@ -108,7 +107,6 @@ export class PluginManager {
   private hookRegistry = new Map<string, Array<{ definition: HookDefinition; pluginName: string; command: string }>>();
   private watchers: WatcherProcess[] = [];
   private staticContentCache = new Map<string, string>();
-  private deployedSkillPaths: string[] = [];
 
   // -------------------------------------------------------------------------
   // Lifecycle
@@ -235,9 +233,8 @@ export class PluginManager {
       }
     }
 
-    // 4. Deploy skills for active provider
-    const settings = systemStore.getSystemSettings(db);
-    await this.deploySkills(settings.cortexProvider ?? 'cortex');
+    // 4. Remove stale provider-specific skill artifacts from retired SDKs.
+    await this.cleanupSkills();
 
     // 5. Start watcher triggers
     await this.startTriggers();
@@ -297,9 +294,6 @@ export class PluginManager {
       });
       this.registerHooks(loaded);
       this.registerDecisionTypes(loaded);
-
-      const settings = systemStore.getSystemSettings(db);
-      await this.deploySkillsForPlugin(loaded, settings.cortexProvider ?? 'cortex');
       await this.startTriggersForPlugin(loaded);
       log.info(`Installed plugin: ${manifest.name}`);
     }
@@ -321,7 +315,6 @@ export class PluginManager {
       await this.stopTriggersForPlugin(name);
       this.deregisterHooks(name);
       this.deregisterDecisionTypes(name);
-      await this.removeSkillsForPlugin(loaded);
       this.plugins.delete(name);
     } else {
       // Plugin might be errored (not in memory but still in DB)
@@ -365,8 +358,6 @@ export class PluginManager {
     const db = getSystemDb();
     pluginStore.updatePlugin(db, name, { enabled: true });
 
-    const settings = systemStore.getSystemSettings(db);
-    await this.deploySkillsForPlugin(loaded, settings.cortexProvider ?? 'cortex');
     await this.startTriggersForPlugin(loaded);
 
     getEventBus().emit('plugin:changed', { pluginName: name, action: 'enabled' });
@@ -384,7 +375,6 @@ export class PluginManager {
     await this.stopTriggersForPlugin(name);
     this.deregisterHooks(name);
     this.deregisterDecisionTypes(name);
-    await this.removeSkillsForPlugin(loaded);
 
     loaded.enabled = false;
     loaded.skills = [];
@@ -588,8 +578,6 @@ export class PluginManager {
       this.registerHooks(loaded);
       this.registerDecisionTypes(loaded);
 
-      const settings = systemStore.getSystemSettings(db);
-      await this.deploySkillsForPlugin(loaded, settings.cortexProvider ?? 'cortex');
       await this.startTriggersForPlugin(loaded);
       log.info(`Installed and enabled plugin from package: ${manifest.name} v${manifest.version}`);
     } else {
@@ -655,7 +643,6 @@ export class PluginManager {
       await this.stopTriggersForPlugin(name);
       this.deregisterHooks(name);
       this.deregisterDecisionTypes(name);
-      await this.removeSkillsForPlugin(loaded);
     }
 
     // 3. Extract to packages directory (replaces existing files)
@@ -764,8 +751,6 @@ export class PluginManager {
       this.registerHooks(reloaded);
       this.registerDecisionTypes(reloaded);
 
-      const settings = systemStore.getSystemSettings(db);
-      await this.deploySkillsForPlugin(reloaded, settings.cortexProvider ?? 'cortex');
       await this.startTriggersForPlugin(reloaded);
       log.info(`Updated and re-enabled plugin from package: ${name} v${currentVersion} → v${manifest.version}`);
     } else {
@@ -841,7 +826,6 @@ export class PluginManager {
         await this.stopTriggersForPlugin(packageName);
         this.deregisterHooks(packageName);
         this.deregisterDecisionTypes(packageName);
-        await this.removeSkillsForPlugin(loaded);
       }
 
       // 2. Remove current extracted directory
@@ -900,8 +884,6 @@ export class PluginManager {
         this.registerHooks(reloaded);
         this.registerDecisionTypes(reloaded);
 
-        const settings = systemStore.getSystemSettings(db);
-        await this.deploySkillsForPlugin(reloaded, settings.cortexProvider ?? 'cortex');
         await this.startTriggersForPlugin(reloaded);
       } else {
         reloaded.enabled = false;
@@ -934,203 +916,26 @@ export class PluginManager {
   // Skills
   // -------------------------------------------------------------------------
 
-  async deploySkills(provider: string): Promise<void> {
-    await this.cleanupSkills();
-    // Create/refresh the Claude SDK bridge for skill discovery
-    if (provider === 'claude') {
-      await this.ensureSkillBridge();
-    }
-    for (const loaded of this.plugins.values()) {
-      if (!loaded.enabled) continue;
-      await this.deploySkillsForPlugin(loaded, provider);
-    }
-  }
-
+  /**
+   * Remove skill deployment artifacts left behind by the retired subprocess SDK
+   * integration. Cortex registers plugin skills directly from each plugin's
+   * source SKILL.md path in cortex-mind.ts, so no provider-specific copies or
+   * symlinks are created anymore.
+   */
   async cleanupSkills(): Promise<void> {
-    for (const skillPath of this.deployedSkillPaths) {
+    const legacyPaths = [
+      path.join(DATA_DIR, 'runtime', 'providers', 'claude', 'animus-skill-bridge'),
+      path.join(DATA_DIR, 'runtime', 'providers', 'codex', 'home', 'skills'),
+      path.join(DATA_DIR, 'runtime', 'providers', 'opencode', 'skills'),
+    ];
+
+    for (const skillPath of legacyPaths) {
       try {
         await fs.rm(skillPath, { recursive: true, force: true });
       } catch {
-        // Ignore — may already be removed
+        // Ignore, may already be removed.
       }
     }
-    this.deployedSkillPaths = [];
-  }
-
-  /**
-   * Get the path to the Claude SDK skill bridge directory.
-   *
-   * The bridge is a minimal pseudo-plugin that the Claude Agent SDK loads via
-   * its `plugins` config. It contains a `skills/` directory where Animus
-   * deploys plugin skill symlinks directly.
-   * This allows the SDK to discover skills without needing
-   * `settingSources: ['project']` (which would also load CLAUDE.md).
-   */
-  getSkillBridgePath(): string {
-    return path.join(this.getProviderRuntimeDir('claude'), 'animus-skill-bridge');
-  }
-
-  /**
-   * Create or refresh the Claude SDK skill bridge directory.
-   *
-   * Structure:
-   *   <data>/runtime/providers/claude/animus-skill-bridge/
-   *   ├── .claude-plugin/
-   *   │   └── plugin.json          # Minimal manifest for the Claude SDK
-   *   └── skills/
-   */
-  private async ensureSkillBridge(): Promise<void> {
-    const bridgePath = this.getSkillBridgePath();
-    const manifestDir = path.join(bridgePath, '.claude-plugin');
-    const manifestPath = path.join(manifestDir, 'plugin.json');
-    const bridgeSkillsDir = path.join(bridgePath, 'skills');
-
-    try {
-      // Create bridge directory and .claude-plugin/ manifest dir
-      await fs.mkdir(manifestDir, { recursive: true });
-
-      // Write the Claude SDK plugin manifest with explicit skills path
-      const manifest = JSON.stringify({
-        name: 'animus-skills',
-        description: 'Animus plugin skills bridge',
-        version: '1.0.0',
-        skills: './skills/',
-      }, null, 2);
-      await fs.writeFile(manifestPath, manifest, 'utf-8');
-
-      // Ensure skills/ is a real directory under the bridge plugin.
-      // If an older install left a symlink here, replace it.
-      try {
-        const existing = await fs.lstat(bridgeSkillsDir);
-        if (existing.isSymbolicLink()) {
-          await fs.rm(bridgeSkillsDir, { recursive: true, force: true });
-        }
-      } catch {
-        // Doesn't exist — fine
-      }
-      await fs.mkdir(bridgeSkillsDir, { recursive: true });
-
-      log.debug(`Claude SDK skill bridge ready: ${bridgePath}`);
-    } catch (err) {
-      log.error('Failed to create Claude SDK skill bridge:', err);
-    }
-  }
-
-  private async deploySkillsForPlugin(loaded: LoadedPlugin, provider: string): Promise<void> {
-    log.debug(`Deploying ${loaded.skills.length} skills for ${loaded.manifest.name} (provider: ${provider})`);
-    for (const skill of loaded.skills) {
-      // Use skill name directly (Agent Skills spec: name must match parent dir)
-      const targetPath = this.getProviderSkillPath(provider, skill.name);
-      log.debug(`Deploying skill "${skill.name}": ${skill.absolutePath} → ${targetPath}`);
-
-      // Collision detection: check if another plugin already deployed this skill name
-      if (this.deployedSkillPaths.includes(targetPath)) {
-        const owner = this.findSkillOwner(skill.name, loaded.manifest.name);
-        log.warn(`Skill name collision: "${skill.name}" from "${loaded.manifest.name}" conflicts with "${owner}" — skipping`);
-        continue;
-      }
-
-      try {
-        await fs.mkdir(path.dirname(targetPath), { recursive: true });
-        // Remove existing symlink/dir if present
-        try {
-          await fs.rm(targetPath, { recursive: true, force: true });
-        } catch {
-          // Doesn't exist — fine
-        }
-
-        // Create target as a real directory so we can process SKILL.md
-        await fs.mkdir(targetPath, { recursive: true });
-
-        // Read skill directory entries and deploy each one
-        const entries = await fs.readdir(skill.absolutePath);
-        for (const entry of entries) {
-          const srcEntry = path.join(skill.absolutePath, entry);
-          const destEntry = path.join(targetPath, entry);
-          if (entry === 'SKILL.md') {
-            // Process SKILL.md: substitute ${PLUGIN_ROOT} with the plugin's absolute path
-            const content = await fs.readFile(srcEntry, 'utf-8');
-            const processed = this.substitutePluginRoot(content, loaded.absolutePath);
-            await fs.writeFile(destEntry, processed, 'utf-8');
-          } else {
-            // Symlink all other entries (scripts/, references/, etc.)
-            await fs.symlink(srcEntry, destEntry, 'dir');
-          }
-        }
-
-        this.deployedSkillPaths.push(targetPath);
-        log.debug(`Deployed skill "${skill.name}" → ${targetPath}`);
-      } catch (err) {
-        log.error(`Failed to deploy skill ${skill.name} (${loaded.manifest.name}):`, err);
-      }
-    }
-  }
-
-  private async removeSkillsForPlugin(loaded: LoadedPlugin): Promise<void> {
-    for (const skill of loaded.skills) {
-      // Check all provider paths since we may not know which is active
-      for (const provider of ['claude', 'codex', 'opencode']) {
-        const targetPath = this.getProviderSkillPath(provider, skill.name);
-        try {
-          await fs.rm(targetPath, { recursive: true, force: true });
-          this.deployedSkillPaths = this.deployedSkillPaths.filter(p => p !== targetPath);
-        } catch {
-          // Ignore
-        }
-      }
-    }
-  }
-
-  private getProviderSkillPath(provider: string, skillName: string): string {
-    if (provider === 'claude') {
-      return path.join(this.getSkillBridgePath(), 'skills', skillName);
-    }
-    if (provider === 'codex') {
-      // Skills must land inside $CODEX_HOME/skills/ for auto-discovery.
-      // CODEX_HOME is <runtime>/codex/home/, so the skill path is:
-      //   <runtime>/codex/home/skills/<skillName>
-      return path.join(this.getProviderRuntimeDir('codex'), 'home', 'skills', skillName);
-    }
-    return path.join(this.getProviderRuntimeDir(provider), 'skills', skillName);
-  }
-
-  private getProviderRuntimeRoot(): string {
-    return path.join(DATA_DIR, 'runtime', 'providers');
-  }
-
-  private getProviderRuntimeDir(provider: string): string {
-    const name = provider === 'codex' || provider === 'opencode' || provider === 'claude'
-      ? provider
-      : 'claude';
-    return path.join(this.getProviderRuntimeRoot(), name);
-  }
-
-  /**
-   * Build a Codex runtime env that points to an isolated CODEX_HOME.
-   *
-   * Creates the CODEX_HOME and its skills/ subdirectory so the app-server
-   * auto-discovers skills deployed there. Skill registration at runtime
-   * is handled via JSON-RPC `skills/config/write` (hot-swap), not via
-   * config.toml which is only read at process start.
-   *
-   * If an existing env already provides CODEX_HOME (e.g. OAuth temp session),
-   * that path is reused so auth.json lives in the same directory.
-   */
-  async buildCodexRuntimeEnv(
-    existingEnv?: Record<string, string>,
-  ): Promise<Record<string, string>> {
-    const codexHome = existingEnv?.['CODEX_HOME']
-      ?? path.join(this.getProviderRuntimeDir('codex'), 'home');
-
-    await fs.mkdir(codexHome, { recursive: true });
-    await fs.mkdir(path.join(codexHome, 'skills'), { recursive: true });
-
-    log.debug(`Prepared Codex runtime: CODEX_HOME=${codexHome}`);
-
-    return {
-      ...(existingEnv ?? {}),
-      CODEX_HOME: codexHome,
-    };
   }
 
   // -------------------------------------------------------------------------
@@ -1442,50 +1247,21 @@ export class PluginManager {
     return configs;
   }
 
-  /**
-   * Get all currently deployed skill paths that live under the Codex
-   * provider's CODEX_HOME/skills/ directory.
-   */
-  getDeployedCodexSkillPaths(): string[] {
-    const codexSkillsPrefix = path.join(this.getProviderRuntimeDir('codex'), 'home', 'skills');
-    return this.deployedSkillPaths.filter(p => p.startsWith(codexSkillsPrefix));
-  }
-
   getRuntimeStats(): PluginRuntimeStats {
     let enabled = 0;
+    let pluginSkills = 0;
     for (const plugin of this.plugins.values()) {
-      if (plugin.enabled) enabled++;
+      if (plugin.enabled) {
+        enabled++;
+        pluginSkills += plugin.skills.length;
+      }
     }
 
     return {
       loaded: this.plugins.size,
       enabled,
-      deployedSkills: this.deployedSkillPaths.length,
+      pluginSkills,
     };
-  }
-
-  /**
-   * Convert resolved plugin MCP configs into the format the Claude SDK expects.
-   * Returns mcpServers config objects and wildcard allowedTools patterns.
-   */
-  getPluginMcpServersForSdk(): {
-    mcpServers: Record<string, Record<string, unknown>>;
-    allowedTools: string[];
-  } {
-    const resolved = this.getMcpConfigs();
-    const mcpServers: Record<string, Record<string, unknown>> = {};
-    const allowedTools: string[] = [];
-
-    for (const [key, config] of Object.entries(resolved)) {
-      if (config.url) {
-        mcpServers[key] = { type: 'http', url: config.url, headers: config.headers };
-      } else if (config.command) {
-        mcpServers[key] = { command: config.command, args: config.args, env: config.env };
-      }
-      allowedTools.push(`mcp__${key}__*`);
-    }
-
-    return { mcpServers, allowedTools };
   }
 
   /**
@@ -2224,16 +2000,6 @@ export class PluginManager {
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
-
-  private findSkillOwner(skillName: string, excludePlugin: string): string {
-    for (const loaded of this.plugins.values()) {
-      if (loaded.manifest.name === excludePlugin) continue;
-      if (loaded.skills.some(s => s.name === skillName)) {
-        return loaded.manifest.name;
-      }
-    }
-    return 'unknown';
-  }
 
   private substitutePluginRoot(value: string, pluginPath: string): string {
     return value.replace(/\$\{PLUGIN_ROOT\}/g, pluginPath);

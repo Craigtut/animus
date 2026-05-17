@@ -5,12 +5,12 @@ describe('startup summary', () => {
   it('renders model data and tool counts', () => {
     const output = formatStartupSummary({
       dbCount: 6,
-      credentialsStored: 3,
-      cliDetectedProviders: ['claude'],
+      cortexProvider: 'anthropic',
+      cortexModel: 'claude-sonnet-4-5',
       modelDataCount: 21,
       pluginsLoaded: 4,
       pluginsEnabled: 3,
-      deployedSkills: 7,
+      pluginSkills: 7,
       toolsSeeded: 29,
       channelsInstalled: 2,
       channelsRunning: 1,
@@ -37,6 +37,7 @@ describe('startup summary', () => {
     expect(output).toContain('enabled');
     expect(output).toContain('Heartbeat');
     expect(output).toContain('resumed after restart');
-    expect(output).toContain('CLI detected: claude');
+    expect(output).toContain('AI Provider');
+    expect(output).toContain('anthropic / claude-sonnet-4-5');
   });
 });

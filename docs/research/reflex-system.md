@@ -1,16 +1,18 @@
 # Reflex System
 
 > **STATUS: PLANNED** - This feature is not yet implemented. This is a design specification for a future fast-response layer.
+>
+> **Runtime note**: This document was written before the Cortex migration. Animus now uses Cortex for the heartbeat and mind runtime. Historical Agent SDK latency numbers below are retained as background only; future Reflex work should benchmark the active Cortex path.
 
 The Reflex is a fast-response layer that enables low-latency voice conversations while preserving the heartbeat as the cognitive core. It uses direct LLM API calls via the Vercel AI SDK to generate quick conversational replies (~300-500ms TTFT), bypassing the agentic SDK subprocess overhead (~4-9 seconds) that makes the heartbeat too slow for natural voice interaction.
 
 ## Why This Exists
 
-The heartbeat pipeline (Gather -> Mind -> Execute) is the soul of Animus -- it thinks, feels, remembers, and decides. But the Agent SDKs it uses (Claude Agent SDK, Codex SDK, OpenCode SDK) spawn CLI subprocesses, adding ~580ms of spawn time plus ~3,500ms of internal initialization before any LLM inference begins. Total round-trip: 4-9 seconds.
+The heartbeat pipeline (Gather -> Mind -> Execute) is the soul of Animus -- it thinks, feels, remembers, and decides. Reflex exists because deep heartbeat processing is not optimized for natural voice latency. Earlier subprocess Agent SDK builds added several seconds of startup overhead; Cortex should be re-benchmarked before this planned feature is implemented.
 
 For voice conversation, users expect <500ms time-to-first-token. The reflex provides this fast path while the heartbeat continues processing the full cognitive cycle in the background.
 
-**Benchmarked latency (Claude Agent SDK, February 2026):**
+**Historical benchmark (Claude Agent SDK, February 2026):**
 
 | Configuration | Cold Start | First Response | Total |
 |---|---|---|---|
@@ -18,7 +20,7 @@ For voice conversation, users expect <500ms time-to-first-token. The reflex prov
 | Persona prompt (~200 tokens) | 591ms | 4,296ms | 4,968ms |
 | Full mind prompt (~500 tokens) | 598ms | 7,396ms | 8,875ms |
 
-The Agent SDK returns complete responses with no streaming -- the "first response" time effectively equals TTFT. This is unusable for voice.
+The retired Agent SDK path returned complete responses with no streaming, so the "first response" time effectively equaled TTFT. This was unusable for voice.
 
 ---
 
@@ -40,7 +42,7 @@ Voice Message Arrives (STT transcription complete)
            |
            v
 +---------------------+
-|   HEARTBEAT TICK    |  Agent SDK (Claude/Codex/OpenCode)
+|   HEARTBEAT TICK    |  Cortex
 |   ~4-9s total       |  Full context (~8,000-18,000 tokens)
 |   Full MindOutput   |  Thoughts, emotions, memories, decisions
 +---------------------+
@@ -463,7 +465,7 @@ Each reflex query loads observational memory + recent raw messages from the DB. 
 
 ### Model Mismatch
 
-The reflex uses a potentially different model than the heartbeat (e.g., reflex uses local Ollama, heartbeat uses Claude via subscription). This means personality expression may differ slightly between the fast reply and the heartbeat's cognitive style. This is acceptable -- the persona prompt in the reflex context ensures basic personality consistency, and any significant drift is caught by the heartbeat's correction path.
+The reflex uses a potentially different model than the heartbeat (for example, reflex uses local Ollama while heartbeat uses the configured Cortex provider). This means personality expression may differ slightly between the fast reply and the heartbeat's cognitive style. This is acceptable -- the persona prompt in the reflex context ensures basic personality consistency, and any significant drift is caught by the heartbeat's correction path.
 
 ---
 
@@ -473,10 +475,10 @@ The reflex uses a potentially different model than the heartbeat (e.g., reflex u
 
 | Path | Auth Method | Cost Model | Use Case |
 |---|---|---|---|
-| **Heartbeat** (Agent SDKs) | Subscription-based (Claude/Codex) or API key | Covered by subscription OR per-token | Deep cognition, every tick |
+| **Heartbeat** (Cortex) | Cortex provider credentials | Provider-specific | Deep cognition, every tick |
 | **Reflex** (Vercel AI SDK) | API key or local model | Per-token OR free (Ollama) | Voice replies only |
 
-**Key insight:** The heartbeat continues using Agent SDKs, which support subscription-based authentication (Claude Agent SDK via `sessionKey`, Codex SDK via ChatGPT OAuth). Users who rely on their subscriptions keep that benefit for the expensive heartbeat processing.
+**Key insight:** The heartbeat continues using Cortex credentials as the source of truth. Reflex may require separate provider configuration if it uses a different provider stack.
 
 The reflex requires separate API keys for cloud providers (Anthropic, OpenAI, Google). However:
 - Reflex outputs are tiny (~50-200 tokens per reply) -- cost is ~$0.001 per voice reply
@@ -486,10 +488,10 @@ The reflex requires separate API keys for cloud providers (Anthropic, OpenAI, Go
 
 ### Provider Policy Summary
 
-| Provider | Subscription via Agent SDK? | API Key via Reflex? | Local/Free Option? |
+| Provider | Cortex Credentials? | API Key via Reflex? | Local/Free Option? |
 |---|---|---|---|
-| Anthropic | Yes (personal use, gray area for 3rd party) | Yes | No |
-| OpenAI | Yes (Codex OAuth, 3rd party supported) | Yes | No |
+| Anthropic | Yes | Yes | No |
+| OpenAI | Yes | Yes | No |
 | Google | N/A | Yes (generous free tier) | No |
 | Ollama | N/A | N/A (no key needed) | Yes (fully local) |
 
@@ -597,8 +599,8 @@ Compare to heartbeat-only path:
 |---|---|---|
 | STT | ~1,500ms | ~1,500ms |
 | Heartbeat context assembly | ~50-100ms | ~1,600ms |
-| Agent SDK cold start | ~580ms | ~2,180ms |
-| Agent SDK initialization | ~3,500ms | ~5,680ms |
+| Historical Agent SDK cold start | ~580ms | ~2,180ms |
+| Historical Agent SDK initialization | ~3,500ms | ~5,680ms |
 | LLM inference (full output) | ~2,000-4,000ms | ~8,680ms |
 | JSON parse + Pocket TTS | ~300ms | ~8,980ms |
 | **User hears first words** | | **~9s** |
@@ -619,7 +621,7 @@ Compare to heartbeat-only path:
 | **Agent Orchestration** | Reflex doesn't spawn/manage agents; heartbeat handles all orchestration |
 | **Voice Channel** | Voice adapter routes to reflex when configured |
 | **Vercel AI SDK** | New dependency for direct LLM calls (provider-agnostic) |
-| **Agent SDKs** | Unchanged; heartbeat continues using Claude/Codex/OpenCode SDKs |
+| **Cortex** | Heartbeat continues using the configured Cortex provider and tools |
 
 ---
 
@@ -643,4 +645,4 @@ Compare to heartbeat-only path:
 - `docs/architecture/agent-orchestration.md` -- Sub-agent management (heartbeat's domain)
 - `docs/architecture/tech-stack.md` -- Shared abstractions and dependencies
 - `docs/research/voice-mode.md` -- Voice mode UX and frontend behavior
-- `docs/agents/architecture-overview.md` -- Agent SDK abstraction layer
+- `docs/agents/architecture-overview.md` -- Retired Agent SDK abstraction reference

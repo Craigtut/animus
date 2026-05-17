@@ -301,27 +301,26 @@ When a plugin is installed, uninstalled, or toggled at runtime, the `plugin:chan
 ```typescript
 // In packages/backend/src/index.ts
 getEventBus().on('plugin:changed', () => {
-  seedToolPermissions(getSystemDb(), currentSettings.defaultAgentProvider ?? 'claude',
-    collectPluginTools());
+  seedToolPermissions(getSystemDb(), collectPluginTools());
 });
 ```
 
 ---
 
-## The `canUseTool` Callback
+## Cortex Permission Resolver
 
-The primary permission enforcement point for SDK-level tools (built-in + plugin MCP). This is a callback passed to the agent SDK session that fires for **every tool call**, including external MCP servers.
+The primary permission enforcement point for agent-visible tools is the Cortex permission resolver passed to `CortexAgent`.
 
-**File:** `packages/backend/src/heartbeat/mind-session.ts`
+**File:** `packages/backend/src/heartbeat/cortex-mind.ts`
 
-### Why canUseTool, Not Hooks
+### Why Cortex Resolver, Not Provider Hooks
 
-The Claude Agent SDK provides two permission mechanisms:
+Cortex gives Animus one provider-neutral gate for tool calls. This replaces the retired dual system of provider hooks plus SDK-specific callbacks.
 
-1. **`PreToolUse` hooks** — Only fire for SDK built-in tools. In `bypassPermissions` mode (our previous approach), hooks don't fire at all for external MCP tools.
-2. **`canUseTool` callback** — Fires for **all** tool calls regardless of type, including external MCP servers. Works with `default` permission mode.
-
-We use `canUseTool` with `approvalLevel: 'normal'` (which maps to `default` permission mode in the SDK). This ensures the callback fires for every tool type.
+- Cortex invokes `resolvePermission` for tool calls before execution.
+- The resolver maps runtime MCP tool names back to the seeded permission key.
+- `off`, `ask`, and `always_allow` all route through the shared tool gate.
+- The same path works for built-in MCP tools and plugin MCP tools.
 
 ### Resolution Logic
 
@@ -575,21 +574,19 @@ interface ToolApprovalRequest {
 - Shared types: `ToolPermission`, `ToolApprovalRequest`, `RiskTier`, `ToolPermissionMode`
 - Event bus: Four tool permission events
 - Permission gate: `checkToolPermission()` in `registry.ts` for core MCP tools
-- `canUseTool` callback: Gates SDK built-in + plugin MCP tools in `mind-session.ts`
+- Cortex permission resolver: Gates agent-visible tools in `cortex-mind.ts`
 - One-at-a-time enforcement: Only one pending approval per contact at any time
 - Deterministic approval interceptor: Text-based approval/denial via phrase matching (pre-pipeline)
 - Permission seeder: Seeds defaults on startup + runtime re-seeding on `plugin:changed`
 - Approval notifier: Delivers prompts via channel router with structured metadata
 - Context builder: Trust ramp observations
 - tRPC router: Full CRUD + real-time subscriptions
-- SDK adapter: `canUseTool` support in `@animus-labs/agents` Claude adapter
 - Sub-agent filtering: Excludes both `off` and `ask` tools from sub-agent sessions
 - Channel adapters: Discord (embed + buttons), SMS (text), API (JSON) support
 - Frontend: Settings > Tools page + inline approval card in chat (Allow Once / Always Allow / Deny)
 - Trust ramp: Eligibility query + context injection + anti-nag mechanism
 
 ### Not Yet Implemented
-- Codex/OpenCode adapter integration (pending adapter implementations)
 - Approval expiration cleanup in heartbeat EXECUTE stage (schema supports it)
 
 ---
@@ -609,12 +606,10 @@ interface ToolApprovalRequest {
 | `packages/backend/src/tools/registry.ts` | Permission gate for core Animus MCP tools |
 | `packages/backend/src/tools/approval-interceptor.ts` | Deterministic text-based approval resolution (pre-pipeline) |
 | `packages/backend/src/tools/approval-phrases.ts` | Recognized approval/denial phrase sets and matcher |
-| `packages/backend/src/heartbeat/mind-session.ts` | `canUseTool` callback, plugin MCP filtering |
+| `packages/backend/src/heartbeat/cortex-mind.ts` | Cortex permission resolver, plugin MCP filtering |
 | `packages/backend/src/heartbeat/agent-orchestrator.ts` | Sub-agent tool filtering (off + ask) |
 | `packages/backend/src/heartbeat/context-builder.ts` | Trust ramp observations in context |
 | `packages/backend/src/api/routers/tools.ts` | tRPC router for permissions + approvals |
-| `packages/agents/src/types.ts` | `canUseTool` in `AgentSessionConfig` |
-| `packages/agents/src/adapters/claude.ts` | `canUseTool` wired through to SDK |
 
 ---
 

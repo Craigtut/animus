@@ -6,15 +6,15 @@
 
 ## Executive Summary
 
-This document defines the Animus plugin system — a cross-provider plugin architecture that operates above the SDK layer and is designed from the ground up for an eventual plugin store where both humans and AIs can discover, purchase, and install plugins.
+This document defines the Animus plugin system, a Cortex-integrated plugin architecture designed from the ground up for an eventual plugin store where both humans and AIs can discover, purchase, and install plugins.
 
-An Animus plugin is a **directory with a manifest** that bundles up to seven component types: **skills** (knowledge injection via the Agent Skills standard), **tools** (MCP servers), **context sources** (dynamic data providers), **hooks** (lifecycle interceptors), **agents** (sub-agent templates), **decision types** (custom EXECUTE handlers), and **triggers** (custom tick trigger sources). Plugins operate at the Animus orchestrator level, not at the SDK level — hooks, decisions, triggers, and context sources work identically across Claude, Codex, and OpenCode. Skills use native SDK passthrough (all three SDKs now support the Agent Skills SKILL.md standard), and tools use MCP (universally supported).
+An Animus plugin is a **directory with a manifest** that bundles up to seven component types: **skills** (knowledge injection via the Agent Skills standard), **tools** (MCP servers), **context sources** (dynamic data providers), **hooks** (lifecycle interceptors), **agents** (sub-agent templates), **decision types** (custom EXECUTE handlers), and **triggers** (custom tick trigger sources). Plugins operate at the Animus orchestrator level. Cortex registers skills from plugin source paths through `SkillRegistry`, and Cortex connects plugin MCP servers through its MCP client manager.
 
 ### Design Principles
 
-1. **Orchestrator-level for control, SDK-level for skills.** Hooks, decisions, triggers, and context sources operate at the heartbeat pipeline level (Gather → Mind → Execute). Skills use native SDK progressive disclosure for same-turn loading. MCP tools pass through to all SDKs natively.
+1. **Orchestrator-level lifecycle, Cortex runtime integration.** Hooks, decisions, triggers, and context sources operate at the heartbeat pipeline level. Skills are registered with Cortex `SkillRegistry`, and MCP tools are connected through Cortex.
 
-2. **Agent Skills standard for knowledge.** Skills use the open [Agent Skills SKILL.md specification](https://agentskills.io/specification) — the cross-vendor standard adopted by Anthropic, OpenAI, Microsoft, Google, Cursor, GitHub, and others. One SKILL.md works in all three SDKs. Skills can also bundle CLI tools via `scripts/` directories.
+2. **Agent Skills standard for knowledge.** Skills use the open [Agent Skills SKILL.md specification](https://agentskills.io/specification), the cross-vendor standard adopted by Anthropic, OpenAI, Microsoft, Google, Cursor, GitHub, and others. Cortex reads standard SKILL.md files. Skills can also bundle CLI tools via `scripts/` directories.
 
 3. **MCP for structured tool access.** Tools use MCP with **stdio** transport for bundled/local servers (universally supported) and **Streamable HTTP** for remote servers. Skills with bundled CLI tools offer a lighter alternative for simple integrations.
 
@@ -65,13 +65,13 @@ This gradient — from pure documentation to bundled scripts to MCP servers — 
 
 As of February 2026, the landscape has converged:
 
-- **MCP is the universal tool standard** — 97M monthly SDK downloads, 10,000+ active servers, under Linux Foundation governance (AAIF). All three SDKs support it natively. **stdio** for local tools, **Streamable HTTP** for remote — both universally supported.
+- **MCP is the universal tool standard** — 97M monthly SDK downloads, 10,000+ active servers, under Linux Foundation governance (AAIF). Cortex supports MCP stdio for local tools and Streamable HTTP for remote tools.
 
-- **Agent Skills (SKILL.md) is the universal knowledge standard** — adopted by Claude, Codex, OpenCode, Cursor, GitHub Copilot, Gemini CLI, and 20+ other tools. All three of our SDKs support it natively with progressive disclosure (metadata at startup, full content on-demand within the same turn). One SKILL.md works everywhere.
+- **Agent Skills (SKILL.md) is the universal knowledge standard** — adopted by major agent products and CLIs. Cortex implements progressive disclosure through `SkillRegistry` and the `load_skill` tool.
 
 - **Skills are replacing MCP for simple integrations** — a growing pattern where skills bundle CLI tools in `scripts/` and teach agents to use Bash instead of MCP servers. 4x more token-efficient for equivalent tasks. MCP remains essential for credential isolation, persistent connections, and structured access control.
 
-- **Hooks remain provider-dependent** — Claude has full pre/post hooks, Codex has observe-only, OpenCode has partial hooks with unresolved subagent interception bugs (#5894, #2319). Our Animus-level hooks bypass all of this by operating at the orchestrator level.
+- **Provider hooks are not the integration boundary** — Animus-level hooks operate at the orchestrator level, independent of provider-specific hook support.
 
 - **No complete cross-platform plugin format exists** — Claude's `.claude-plugin` is the closest, but it's Claude-specific. Our format fills this gap for the Animus ecosystem, combining Agent Skills + MCP + orchestrator-level extensions into a single manifest.
 
@@ -79,7 +79,7 @@ As of February 2026, the landscape has converged:
 
 | Source | Lesson Applied |
 |--------|---------------|
-| **Agent Skills standard** | Use SKILL.md as-is for cross-platform skill portability. Native SDK progressive disclosure. |
+| **Agent Skills standard** | Use SKILL.md as-is for portable skill content. Cortex handles progressive disclosure. |
 | **Skills + CLI pattern** | Skills can bundle CLI tools in `scripts/`, teaching agents to use Bash. Lighter than MCP for simple tools. |
 | **MCP standard** | Universal tool transport. stdio for local, Streamable HTTP for remote. |
 | **ACI.dev** | Dynamic tool discovery via search meta-function — reduces context window load |
@@ -212,7 +212,7 @@ my-plugin/
 
 ### 1. Skills — Knowledge Injection (Agent Skills Standard)
 
-Skills use the open [Agent Skills SKILL.md specification](https://agentskills.io/specification), the cross-vendor standard now supported natively by all three SDKs (Claude, Codex, OpenCode). The SDK handles progressive disclosure: metadata loaded at startup (~100 tokens per skill), full instructions loaded on-demand within the same turn when the agent decides a skill is relevant.
+Skills use the open [Agent Skills SKILL.md specification](https://agentskills.io/specification). Cortex handles progressive disclosure: metadata is registered in `SkillRegistry`, and full instructions are loaded on-demand through the `load_skill` tool when the agent decides a skill is relevant.
 
 **Skill definition (`skills/code-review/SKILL.md`):**
 ```yaml
@@ -258,26 +258,22 @@ For each issue found, report:
 | `allowed-tools` | No | Space-delimited list of pre-approved tools (experimental). E.g. `Read Grep Glob Bash` |
 | `metadata` | No | Arbitrary key-value pairs (author, version, tags, etc.) |
 
-**How skills flow through the system (native SDK passthrough):**
+**How skills flow through the system:**
 
 ```
 Engine Startup
   └→ Plugin Manager scans plugin skills/ directories
-      └→ Symlinks or copies SKILL.md directories to the active provider's
-         discovery path:
-           • Claude:   .claude/skills/{skill}/SKILL.md
-           • Codex:    .agents/skills/{skill}/SKILL.md
-           • OpenCode: .opencode/skills/{skill}/SKILL.md
+      └→ Cortex startup loader registers each SKILL.md with SkillRegistry
+         using source "plugin:{pluginName}" and PLUGIN_ROOT variables
 
 Per Session (Mind or Sub-Agent)
-  └→ SDK discovers skills automatically
-      └→ Parses frontmatter (name + description) → ~100 tokens per skill
-      └→ Makes skill catalog available to the LLM
+  └→ Cortex exposes a skill catalog through the load_skill tool description
+      └→ Frontmatter name + description consume ~100 tokens per visible skill
 
-When Skill Is Needed (same turn — no round-trip)
+When Skill Is Needed
   └→ LLM decides skill is relevant based on metadata
-      └→ Calls built-in "Skill" tool (Claude) or equivalent
-          └→ Full SKILL.md body loaded into conversation context
+      └→ Calls load_skill
+          └→ Cortex loads and preprocesses the full SKILL.md body
               └→ Agent acts on enriched instructions immediately
                   └→ If skill references scripts/, agent runs them via Bash
 ```
@@ -309,11 +305,11 @@ skills/twitter-research/
 | Agent self-modification | Possible — agent can edit its own scripts | Not possible |
 | Token efficiency | ~4x better (only script output in context) | JSON schemas consume significant tokens |
 
-**Cross-provider compatibility**: One SKILL.md works natively in all three SDKs. The Plugin Manager handles placing skills in the correct provider-specific directory.
+**Provider portability**: One SKILL.md works across Cortex-supported providers because Animus registers skills with Cortex rather than copying them into provider-specific directories.
 
 ### 2. Tools — MCP Servers
 
-Tools use MCP as the universal mechanism. All three SDKs support MCP natively.
+Tools use MCP as the universal mechanism. Cortex connects plugin MCP servers and exposes their tools to the mind.
 
 **Transport**: Plugins MUST use **stdio** for bundled/local MCP servers. This is universally supported and recommended by the MCP spec. Remote MCP servers (future store scenario) use **Streamable HTTP**.
 
@@ -335,18 +331,15 @@ Tools use MCP as the universal mechanism. All three SDKs support MCP natively.
 
 1. Plugin Manager reads `tools/mcp.json` from each enabled plugin
 2. `${PLUGIN_ROOT}` is substituted with the plugin's absolute path
-3. MCP server definitions are merged into the session's `mcpServers` config
-4. Config is translated to each SDK's format:
-   - Claude: `{ command, args, env }` (identical)
-   - Codex: `{ command, args, env }` (identical)
-   - OpenCode: `{ type: "local", command: [command, ...args], environment: env }`
-5. Tools are filtered by contact permission tier before session creation
+3. `cortex-mind.ts` converts the resolved config to a Cortex `McpTransportConfig`
+4. Cortex connects, disconnects, or reconnects the MCP server on plugin lifecycle events
+5. Tools are filtered by contact permission tier and tool permission mode before use
 
 **Tool naming**: Tools from plugins are namespaced as `{plugin-name}__{tool-name}` to prevent collisions across plugins.
 
 ### 3. Context Sources — Dynamic Data Providers
 
-Context sources provide **dynamic data** that changes per tick — external knowledge bases, API data, live system state. Unlike skills (which are instructions handled by the SDK), context sources are Animus-managed and injected into the system prompt by the Context Builder.
+Context sources provide **dynamic data** that changes per tick — external knowledge bases, API data, live system state. Unlike skills (which are instructions handled by Cortex `SkillRegistry`), context sources are Animus-managed and injected into the system prompt by the Context Builder.
 
 **Context source config (`context/context.json`):**
 ```json
@@ -393,11 +386,11 @@ Per Tick (GATHER CONTEXT)
               └→ Content injected into context, subject to token budget
 ```
 
-**Why separate from skills?** Skills are _instructions_ (how to do something) and are handled by the SDK's native progressive disclosure. Context sources are _information_ (what to know) and are Animus-managed with per-tick dynamic retrieval. This distinction matters for token budgeting and lifecycle management.
+**Why separate from skills?** Skills are _instructions_ (how to do something) and are handled by Cortex progressive disclosure. Context sources are _information_ (what to know) and are Animus-managed with per-tick dynamic retrieval. This distinction matters for token budgeting and lifecycle management.
 
 ### 4. Hooks — Lifecycle Interceptors
 
-Hooks operate at the **Animus orchestrator level**, completely independent of SDK-internal hooks. This means they work identically regardless of which provider is active. This bypasses Codex's lack of hooks and OpenCode's unresolved subagent interception bugs.
+Hooks operate at the **Animus orchestrator level**, completely independent of provider-internal hooks. This means they work identically regardless of which Cortex provider is active.
 
 **Hook config (`hooks/hooks.json`):**
 ```json
@@ -483,7 +476,7 @@ You are a security-focused code reviewer. Your expertise covers:
 |-------|----------|-------------|
 | `name` | Yes | Agent name, used by mind when requesting delegation |
 | `description` | Yes | Shown in agent catalog for mind's delegation decisions |
-| `tools` | No | SDK-native tools this agent needs (read, write, bash, etc.) |
+| `tools` | No | Tool names this agent needs (read, write, bash, etc.) |
 | `maxTurns` | No | Maximum turns for this agent type. Default from system settings. |
 
 ### 6. Decision Types — Custom EXECUTE Handlers
@@ -699,7 +692,7 @@ Engine Startup
 │  2. Validate manifests (Zod schemas)                   │
 │  3. Check engine version compatibility                 │
 │  4. Resolve plugin dependencies                        │
-│  5. Deploy skills to active provider's discovery dir   │
+│  5. Index skills for Cortex SkillRegistry              │
 │  6. Collect MCP server configs                         │
 │  7. Prepare context source providers                   │
 │  8. Register hooks                                     │
@@ -717,7 +710,7 @@ Runtime (per tick)
   │   ├─→ Agent catalog (for delegation decisions)
   │   └─→ Context source content (static + retrieval results)
   │
-  ├─→ SDK sessions automatically discover deployed skills
+  ├─→ Cortex SkillRegistry exposes registered plugin skills
   │
   ├─→ Orchestrator requests:
   │   ├─→ MCP server configs for session
@@ -740,7 +733,7 @@ Plugins can be installed, enabled, disabled, and uninstalled **while the engine 
 Plugin Install (runtime)
   │
   ├─→ Plugin Manager validates manifest
-  ├─→ Deploy skills to active provider's discovery path (symlink)
+  ├─→ Index skills for Cortex registration
   ├─→ Register hooks on EventBus                          ← immediate
   ├─→ Start MCP servers                                   ← immediate
   ├─→ Register custom decision types in registry           ← immediate
@@ -751,7 +744,7 @@ Plugin Install (runtime)
   │   └─→ Heartbeat sets sessionInvalidated = true
   │
   └─→ Next tick: forces cold session start (no warm session reuse)
-      └─→ New session discovers deployed skills
+      └─→ Cortex SkillRegistry exposes new plugin skills
       └─→ Context Builder includes new decision types
       └─→ Mind has full access to new plugin capabilities
 ```
@@ -764,13 +757,13 @@ Plugin Uninstall (runtime)
   ├─→ Stop MCP servers                                              ← immediate
   ├─→ Deregister custom decision types                              ← immediate
   ├─→ Remove agent templates                                        ← immediate
-  ├─→ Remove skill symlinks from provider discovery path
+  ├─→ Remove plugin skills from Cortex SkillRegistry
   │
   ├─→ Emit 'plugin:changed' on EventBus
   │   └─→ Heartbeat sets sessionInvalidated = true
   │
   └─→ Next tick: forces cold session start
-      └─→ Skills no longer discoverable
+      └─→ Skills no longer visible through Cortex SkillRegistry
       └─→ Decision types no longer in context
       └─→ Removed cleanly — no stale references
 ```
@@ -786,7 +779,7 @@ Message-received ticks may keep a **warm session** (continuing an existing conve
 
 | Component | When Available | Mechanism |
 |-----------|---------------|-----------|
-| **Skills** | Next tick (cold session) | Symlinks added/removed from SDK discovery path |
+| **Skills** | Next tick | Registered or removed in Cortex `SkillRegistry` on plugin lifecycle events |
 | **MCP Tools** | Process starts immediately, mind access on next tick | MCP server processes started/stopped immediately; mind needs cold session to see new tools |
 | **Context Sources** | Next tick | Context Builder evaluates sources fresh each tick |
 | **Hooks** | Immediately | Event listeners added/removed from EventBus |
@@ -794,62 +787,20 @@ Message-received ticks may keep a **warm session** (continuing an existing conve
 | **Triggers** | Immediately | HTTP routes added/removed, watcher processes started/stopped |
 | **Agents** | Next tick | Agent catalog refreshed, mind sees new options |
 
-**OpenCode adapter reinitialization:**
-
-OpenCode caches discovered skills at startup with no hot-reload. When `plugin:changed` fires, the OpenCode adapter reinitializes its connection with updated `config.skills.paths`, ensuring the next session sees the new skill set. Claude and Codex adapters don't need special handling — they scan the filesystem per session.
-
-**Provider switching:**
-
-When the user switches providers (e.g., Claude → Codex) via Settings, the Plugin Manager must redeploy all skills:
+**Cortex skill registration:**
 
 ```
-Provider Switch (Settings UI)
-  │
-  ├─→ Plugin Manager cleans up old provider's skill symlinks
-  │     (remove all from .claude/skills/)
-  │
-  ├─→ Plugin Manager deploys skills to new provider's discovery path
-  │     (symlink to .agents/skills/)
-  │
-  ├─→ If switching to OpenCode: reinitialize adapter with config.skills.paths
-  │
-  ├─→ Emit 'plugin:changed' on EventBus
-  │
-  └─→ Next tick starts cold session with new provider + correct skills
+Plugin installed/enabled
+  └→ EventBus emits plugin:changed
+      └→ cortex-mind removes stale skills with source "plugin:{name}"
+      └→ cortex-mind registers current plugin SKILL.md files in SkillRegistry
+
+Plugin disabled/uninstalled
+  └→ EventBus emits plugin:changed
+      └→ cortex-mind removes all skills with source "plugin:{name}"
 ```
 
-The provider switch handler (wherever it lives in the settings/orchestrator) must call `pluginManager.cleanupSkills()` then `pluginManager.deploySkills(newProvider)`. This is the same code path used during hot-swap — provider switching is just a special case of skill redeployment.
-
-### Skill Deployment
-
-At startup (and when plugins are installed/enabled), the Plugin Manager deploys skills to the active SDK's discovery directory:
-
-```typescript
-async function deploySkills(plugin: PluginManifest, provider: 'claude' | 'codex' | 'opencode') {
-  const skillDirs = await scanSkillDirectories(plugin.path, plugin.components.skills);
-
-  for (const skillDir of skillDirs) {
-    // Use skill name directly — Agent Skills spec requires name to match parent dir
-    const targetPath = getProviderSkillPath(provider, skillDir.name);
-    // Collision detection: error if another plugin already has a skill with this name
-    if (deployedSkills.has(skillDir.name)) {
-      throw new Error(`Skill name collision: "${skillDir.name}"`);
-    }
-    await symlink(skillDir.absolutePath, targetPath);
-    deployedSkills.add(skillDir.name);
-  }
-}
-
-function getProviderSkillPath(provider: string, skillName: string): string {
-  switch (provider) {
-    case 'claude':   return path.join(process.cwd(), '.claude', 'skills', skillName);
-    case 'codex':    return path.join(process.cwd(), '.agents', 'skills', skillName);
-    case 'opencode': return path.join(process.cwd(), '.opencode', 'skills', skillName);
-  }
-}
-```
-
-Skills are cleaned up when plugins are disabled or uninstalled. Both deployment and cleanup happen at runtime without engine restart — the `plugin:changed` event ensures the next session picks up the changes.
+The Plugin Manager no longer deploys provider-specific skill symlinks or copies. `cleanupSkills()` only removes stale artifacts from the retired subprocess SDK integration.
 
 ### Plugin Storage
 
@@ -927,8 +878,7 @@ interface IPluginManager {
   install(source: PluginSource): Promise<PluginManifest>;
   uninstall(name: string): Promise<void>;
 
-  // Skills (native SDK passthrough)
-  deploySkills(provider: string): Promise<void>;
+  // Skills
   cleanupSkills(): Promise<void>;
 
   // Tools
@@ -987,7 +937,7 @@ System Prompt Composition
 └── Session Notes (conditional)
 ```
 
-**Skills are NOT in the system prompt.** The SDK handles skill discovery and progressive disclosure natively. Skills are deployed to the filesystem and the SDK's built-in Skill tool manages loading them on-demand.
+**Skills are NOT in the system prompt.** Cortex handles skill discovery and progressive disclosure through `SkillRegistry` and the `load_skill` tool. The Plugin Manager indexes plugin skill paths, and `cortex-mind.ts` registers them with Cortex.
 
 **Custom decision types** are included in the operational instructions section so the mind knows what actions are available. The Context Builder formats decision descriptions and payload schemas into concise text.
 
@@ -1029,8 +979,8 @@ spawn_agent decision
   │   └─→ Merge plugin MCP servers with built-in tools
   │   └─→ Filter by contact permission tier
   │
-  ├─→ Skills are already deployed to provider discovery directory
-  │   └─→ SDK discovers them automatically for sub-agent sessions
+  ├─→ Skills are registered with Cortex SkillRegistry
+  │   └─→ Cortex exposes them to mind and sub-agent sessions
   │
   └─→ Create session via adapter with merged config
 ```
@@ -1140,7 +1090,7 @@ Plugins declare required permissions in `plugin.json`. Users review these before
 
 | Permission | Values | Description |
 |-----------|--------|-------------|
-| `tools` | Tool name list | SDK-native tools the plugin's agents/skills need |
+| `tools` | Tool name list | Tools the plugin's agents/skills need |
 | `network` | `true/false` | Whether MCP servers need network access |
 | `filesystem` | `none/read-only/read-write` | File system access for MCP servers |
 | `contacts` | `true/false` | Whether the plugin can access contact information |
@@ -1376,7 +1326,7 @@ export type TriggerDefinition = z.infer<typeof TriggerDefinitionSchema>;
 export type PluginMcpServer = z.infer<typeof PluginMcpServerSchema>;
 ```
 
-**Note**: Skills use the Agent Skills SKILL.md standard format and are validated by the SDK, not by Animus Zod schemas. The plugin manifest only references the skills directory path.
+**Note**: Skills use the Agent Skills SKILL.md standard format and are parsed by Cortex, not by Animus Zod schemas. The plugin manifest only references the skills directory path.
 
 ---
 
@@ -1392,8 +1342,8 @@ export type PluginMcpServer = z.infer<typeof PluginMcpServerSchema>;
 | **Plugin Store (DB)** | Complete | `packages/backend/src/db/stores/plugin-store.ts` |
 | **tRPC API** | Complete (list, get, install, uninstall, enable, disable, getConfig, setConfig, validatePath) | `packages/backend/src/api/routers/plugins.ts` |
 | **Frontend UI** | Complete (list, detail, configure, install, enable/disable) | `packages/frontend/src/pages/SettingsPage.tsx` |
-| **Skills** | Complete (symlink deployment, collision detection, provider switching) | Plugin Manager |
-| **MCP Tools** | Complete (namespacing, `${config.*}` resolution, SDK merge) | Plugin Manager |
+| **Skills** | Complete (Plugin Manager indexing + Cortex SkillRegistry registration) | Plugin Manager, `cortex-mind.ts` |
+| **MCP Tools** | Complete (namespacing, `${config.*}` resolution, Cortex MCP connection lifecycle) | Plugin Manager, `cortex-mind.ts` |
 | **Context Sources** | Complete (static + retrieval) | Plugin Manager |
 | **Hooks** | Complete (10 events, blocking/non-blocking, timeout management) | Plugin Manager |
 | **Decision Types** | Complete (registration, schema validation, contact tier enforcement, handler execution) | Plugin Manager |
@@ -1419,16 +1369,16 @@ export type PluginMcpServer = z.infer<typeof PluginMcpServerSchema>;
 
 ## Decisions & Rationale
 
-### Skills: Native SDK Passthrough (Not System Prompt Injection)
+### Skills: Cortex SkillRegistry (Not System Prompt Injection)
 
-**Decision**: Skills use the Agent Skills SKILL.md standard and are loaded by the SDK's native progressive disclosure mechanism. The Plugin Manager deploys skills to the active provider's discovery directory.
+**Decision**: Skills use the Agent Skills SKILL.md standard and are registered with Cortex `SkillRegistry`. Cortex exposes visible skill metadata through the `load_skill` tool and loads full skill content on demand.
 
-**Rationale**: All three SDKs (Claude, Codex, OpenCode) now support the Agent Skills standard natively. Native loading provides:
-- Same-turn activation (no round-trip delay)
-- SDK-managed context budgeting and progressive disclosure
+**Rationale**: Cortex gives Animus one provider-neutral skill path. SkillRegistry loading provides:
+- Same-turn activation through the `load_skill` tool
+- Cortex-managed context budgeting and progressive disclosure
 - Token efficiency (~100 tokens per skill for metadata, full content on-demand)
-- Cross-platform compatibility (one SKILL.md works everywhere)
-- Support for scripts/ and references/ directories via SDK conventions
+- Provider portability
+- Support for scripts/ and references/ directories through skill preprocessing
 
 System prompt injection was the previous approach but has critical flaws:
 - Clouds the system prompt, competing for token budget with persona, memory, goals
@@ -1464,13 +1414,13 @@ System prompt injection was the previous approach but has critical flaws:
 
 **Decision**: Plugin MCP servers use stdio transport. Future remote/hosted servers use Streamable HTTP.
 
-**Rationale**: stdio is universally supported by all three SDKs, recommended by the MCP spec for local tools, and requires no port management, auth, or network configuration. Streamable HTTP (which replaced deprecated SSE in the Nov 2025 spec) is now universally supported for remote servers by all three SDKs.
+**Rationale**: stdio is supported by Cortex, recommended by the MCP spec for local tools, and requires no port management, auth, or network configuration. Streamable HTTP is the preferred transport for remote MCP servers.
 
 ### Hot-Swap: No Engine Restart Required
 
 **Decision**: Plugins can be installed, enabled, disabled, and uninstalled at runtime. The `plugin:changed` EventBus event forces session invalidation so the next tick starts cold.
 
-**Rationale**: The heartbeat architecture naturally supports hot-swapping because each tick creates discrete agent sessions. Skills, decision types, and context sources take effect on the next tick. Hooks, triggers, and MCP servers take effect immediately. The only complication is warm sessions (message ticks reusing conversation context) — session invalidation solves this by forcing a cold start after any plugin change. OpenCode's memoized skill cache requires adapter reinitialization, which we control. Running sub-agents are not interrupted — they complete with their existing capabilities, and new sub-agents get the updated state.
+**Rationale**: The heartbeat architecture naturally supports hot-swapping because each tick creates discrete Cortex calls over persistent session state. Skills, decision types, and context sources take effect on the next tick. Hooks, triggers, and MCP servers take effect immediately. Running sub-agents are not interrupted. They complete with their existing capabilities, and new sub-agents get the updated state.
 
 ### Plugin Configuration: Channels Pattern
 
@@ -1510,7 +1460,7 @@ System prompt injection was the previous approach but has critical flaws:
 - `docs/architecture/mcp-tools.md` — 5-layer tool architecture, registry pattern
 - `docs/architecture/channel-packages.md` — Channel system architecture, config pattern (encrypted config, typed schemas, dynamic UI forms)
 - `docs/architecture/package-installation.md` — Package install flow, rollback, updates, AI self-management
-- `docs/agents/architecture-overview.md` — Adapter interface, session lifecycle
+- `docs/cortex/mind-migration.md` — Cortex mind integration
 
 ### External References
 - [Agent Skills — agentskills.io](https://agentskills.io/home) (cross-vendor standard)
@@ -1518,10 +1468,6 @@ System prompt injection was the previous approach but has critical flaws:
 - [MCP Specification (Jun 2025)](https://modelcontextprotocol.io/specification/2025-06-18)
 - [Claude Code Plugins](https://code.claude.com/docs/en/plugins)
 - [Claude Code Skills](https://code.claude.com/docs/en/skills)
-- [Codex Skills](https://developers.openai.com/codex/skills)
-- [OpenCode Skills](https://opencode.ai/docs/skills)
-- [Codex SDK](https://developers.openai.com/codex/sdk/)
-- [OpenCode Plugins](https://opencode.ai/docs/plugins/)
 - [Oracle Agent Spec](https://github.com/oracle/agent-spec)
 - [ACI.dev — Dynamic Tool Discovery](https://github.com/aipotheosis-labs/aci)
 - [Semantic Kernel Plugins](https://learn.microsoft.com/en-us/semantic-kernel/concepts/plugins/)

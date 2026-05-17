@@ -31,7 +31,7 @@ cd animus
 npm install
 ```
 
-This will install dependencies for all packages (shared, agents, backend, frontend) via npm workspaces.
+This installs dependencies for all npm workspaces. The retired `packages/agents` workspace is kept in the repo for reference, but production Docker and desktop packaging paths do not bundle it.
 
 ### 3. Environment Configuration
 
@@ -80,7 +80,7 @@ animus/
 │   │       ├── schemas/ # Zod validation schemas
 │   │       └── utils/   # Shared utilities
 │   │
-│   ├── agents/          # Agent SDK abstraction layer
+│   ├── agents/          # Retired Agent SDK abstraction, reference code only
 │   │   └── src/
 │   │       ├── index.ts # Package entry point
 │   │       └── types.ts # Unified agent interfaces
@@ -271,7 +271,7 @@ rm data/databases/heartbeat.db
 
 ## Configuring Agent Providers
 
-Animus supports multiple agent providers, including Claude (default) and Codex. Configure your preferred provider and API keys through the Settings page after first launch.
+Animus uses Cortex for AI provider management. Configure your preferred Cortex provider, model, and credentials through the Settings page after first launch.
 
 ## Next Steps
 

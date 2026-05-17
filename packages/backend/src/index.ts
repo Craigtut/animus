@@ -28,7 +28,6 @@ import { GoalSubsystem } from './goals/index.js';
 import { TaskSubsystem } from './tasks/index.js';
 import { AgentSubsystem } from './heartbeat/agent-subsystem.js';
 import { getAutosaveSubsystem } from './services/autosave-subsystem.js';
-import { loadCredentialsIntoEnv } from './services/credential-service.js';
 import { env, DATA_DIR } from './utils/env.js';
 import {
   loadVault,
@@ -131,14 +130,13 @@ async function main() {
   telemetry.captureInstall();
   telemetry.printFirstRunNotice();
 
-  // Verify encryption + load credentials only when unsealed
-  let credentialSummary = { storedCount: 0, envLoadedCount: 0, cliDetectedProviders: [] as string[] };
+  // Verify encryption only when unsealed. Cortex credentials are resolved
+  // lazily through CortexCredentialService rather than loaded into process.env.
   if (isUnsealed()) {
     const { verifyEncryptionKey } = await import('./lib/encryption-service.js');
     verifyEncryptionKey(getSystemDb());
-    credentialSummary = loadCredentialsIntoEnv(getSystemDb());
   } else {
-    log.info('Vault is sealed or absent: skipping credential loading');
+    log.info('Vault is sealed or absent: skipping encryption verification');
   }
 
   // Model registry and provider management are handled by the Cortex package.
@@ -595,12 +593,12 @@ async function main() {
   const speechStatus = speechService.getStatus();
   const startupSummary = formatStartupSummary({
     dbCount: DATABASE_COUNT,
-    credentialsStored: credentialSummary.storedCount,
-    cliDetectedProviders: credentialSummary.cliDetectedProviders,
+    cortexProvider: settings.cortexProvider,
+    cortexModel: settings.cortexModel,
     modelDataCount: 0,
     pluginsLoaded: pluginStats.loaded,
     pluginsEnabled: pluginStats.enabled,
-    deployedSkills: pluginStats.deployedSkills,
+    pluginSkills: pluginStats.pluginSkills,
     toolsSeeded: seededToolPermissions,
     channelsInstalled: channelStats.installed,
     channelsRunning: channelStats.running,

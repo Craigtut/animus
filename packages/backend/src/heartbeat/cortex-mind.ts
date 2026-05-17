@@ -510,8 +510,21 @@ export async function createCortexMind(
   const cortexDiagnostics = settingsAny['cortexDiagnostics'] === true;
   const savedThinkingLevel = (settingsAny['cortexThinkingLevel'] as string | undefined) ?? 'high';
 
+  // Resolve the utility model (thought/reflect/WebFetch summarization/safety).
+  // 'default' lets Cortex programmatically infer the recommended fast model
+  // for this provider (Cortex 0.2.3 inferUtilityModel).
+  const utilityModelConfig = await resolveUtilityModelConfig(
+    state,
+    provider,
+    settingsAny['utilityModel'] as string | undefined | null,
+  );
+  log.info(
+    `Utility model: ${utilityModelConfig === 'default' ? 'default (auto-inferred)' : utilityModelConfig.modelId}`,
+  );
+
   const cortexAgent = await CortexAgent.create({
     model,
+    utilityModel: utilityModelConfig,
     workingDirectory: workingDir,
     getApiKey,
     slots: [...MIND_SLOT_NAMES],
@@ -721,6 +734,70 @@ function wireCompactionHandlers(cortexAgent: CortexAgent): void {
 }
 
 // ============================================================================
+// Utility Model Resolution
+// ============================================================================
+
+/**
+ * Resolve the utility model config to pass to / apply on a CortexAgent.
+ *
+ * - `'default'` (or unset) -> Cortex programmatically infers the recommended
+ *   fast model for the provider (Cortex 0.2.3 inferUtilityModel).
+ * - An explicit model id -> resolved to a CortexModel for that provider.
+ *   The id must belong to `provider`; on any failure we fall back to
+ *   `'default'` so a stale/invalid setting never breaks the agent.
+ */
+async function resolveUtilityModelConfig(
+  state: CortexMindState,
+  provider: string,
+  utilityModelSetting: string | undefined | null,
+): Promise<CortexModel | 'default'> {
+  const setting = (utilityModelSetting ?? '').trim();
+  if (!setting || setting === 'default' || setting === 'recommended') {
+    return 'default';
+  }
+  if (!state.providerManager) return 'default';
+  try {
+    return await state.providerManager.resolveModel(provider, setting);
+  } catch (err) {
+    log.warn(
+      `Failed to resolve utility model "${setting}" for provider "${provider}"; using recommended:`,
+      err,
+    );
+    return 'default';
+  }
+}
+
+/**
+ * Apply the current utility-model setting to a live CortexAgent.
+ * Reads the freshest setting/provider so it is correct even after a
+ * provider switch (where a stale explicit id would belong to the old
+ * provider and must degrade to the recommended model).
+ */
+async function applyUtilityModel(
+  cortexAgent: CortexAgent,
+  state: CortexMindState,
+): Promise<void> {
+  const sysDb = getSystemDb();
+  const settingsAny = systemStore.getSystemSettings(sysDb) as Record<string, unknown>;
+  const provider = settingsAny['cortexProvider'] as string | undefined | null;
+  if (!provider) return;
+
+  const config = await resolveUtilityModelConfig(
+    state,
+    provider,
+    settingsAny['utilityModel'] as string | undefined | null,
+  );
+
+  if (config === 'default') {
+    cortexAgent.resetUtilityModel();
+    log.info('Utility model: default (auto-inferred)');
+  } else {
+    cortexAgent.setUtilityModel(config);
+    log.info(`Utility model: ${config.modelId}`);
+  }
+}
+
+// ============================================================================
 // Provider Change Listeners
 // ============================================================================
 
@@ -745,9 +822,22 @@ function wireProviderChangeListeners(
       const newModel = await state.providerManager.resolveModel(provider, modelId);
       state.model = newModel;
       cortexAgent.setModel(newModel);
+      // The utility model is provider-scoped; re-resolve it for the new
+      // provider so an explicit selection from the old provider does not
+      // leak across (it degrades to the recommended model).
+      await applyUtilityModel(cortexAgent, state);
       log.info(`CortexAgent model updated to ${provider}/${modelId}`);
     } catch (err) {
       log.error('Failed to switch model:', err);
+    }
+  });
+
+  eventBus.on('cortex:utility-model-changed', async ({ utilityModel }) => {
+    try {
+      log.info(`Utility model changed to "${utilityModel}", updating CortexAgent`);
+      await applyUtilityModel(cortexAgent, state);
+    } catch (err) {
+      log.error('Failed to switch utility model:', err);
     }
   });
 
@@ -882,11 +972,25 @@ function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
     debug: (msg: string) => log.debug(`[MCP] ${msg}`),
   };
 
+  const removePluginSkillsFromRegistry = (pluginName: string): void => {
+    const source = `plugin:${pluginName}`;
+    for (const entry of skillRegistry.getAll()) {
+      if (entry.source === source) {
+        skillRegistry.removeSkill(entry.name);
+        log.info(`Removed plugin skill: ${entry.name} (${source})`);
+      }
+    }
+  };
+
   eventBus.on('plugin:changed', async ({ pluginName, action }) => {
     const pluginManager = getPluginManager();
     if (!pluginManager) return;
 
     if (action === 'installed' || action === 'enabled') {
+      // Clear any stale skills for this plugin first. This handles upgrades
+      // where a plugin renames or removes skills.
+      removePluginSkillsFromRegistry(pluginName);
+
       // Connect new plugin's MCP servers
       const configs = pluginManager.getMcpConfigs();
       for (const [namespacedKey, serverConfig] of Object.entries(configs)) {
@@ -931,14 +1035,7 @@ function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
         }
       }
 
-      // Remove plugin skills from the SkillRegistry
-      const loaded = pluginManager.getPlugin(pluginName);
-      if (loaded && loaded.skills.length > 0) {
-        for (const skill of loaded.skills) {
-          skillRegistry.removeSkill(skill.name);
-          log.info(`Removed plugin skill: ${skill.name} (plugin: ${pluginName})`);
-        }
-      }
+      removePluginSkillsFromRegistry(pluginName);
     }
 
   });

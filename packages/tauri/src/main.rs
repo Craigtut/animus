@@ -317,8 +317,8 @@ fn main() {
             }
         }
 
-        // Ensure node binary directories are on PATH so that child processes
-        // (Claude Agent SDK, MCP stdio servers) can find `node`.
+        // Ensure node binary directories are on PATH so child processes
+        // (MCP stdio servers, channel adapters) can find `node`.
         // On macOS, the helper app's directory comes FIRST so `node` resolves
         // to the LSBackgroundOnly-protected binary. The original MacOS/ dir
         // is kept as fallback.
@@ -360,7 +360,7 @@ fn main() {
         //
         // Layer 3: ANIMUS_DOCK_SUPPRESS_ADDON=<path>
         //    The sidecar propagates DYLD_INSERT_LIBRARIES to grandchild processes
-        //    (Claude Agent SDK, MCP servers) via process.env.
+        //    (MCP servers, channel adapters) via process.env.
         let mut node_options = std::env::var("NODE_OPTIONS").unwrap_or_default();
         let mut dock_addon_path = String::new();
         #[cfg(target_os = "macos")]
@@ -433,7 +433,7 @@ fn main() {
         }
 
         // Put the sidecar in its own process group so we can kill ALL descendant
-        // processes (Claude SDK, MCP servers, channels, FFmpeg) on exit, even if
+        // processes (MCP servers, channels, FFmpeg) on exit, even if
         // the sidecar has already crashed.
         #[cfg(unix)]
         {
@@ -524,8 +524,8 @@ fn main() {
                     #[cfg(unix)]
                     {
                         // Send SIGTERM to the entire process group (negative PID).
-                        // This ensures ALL descendant processes (Claude SDK,
-                        // MCP servers, channels, FFmpeg) receive SIGTERM, even
+                        // This ensures ALL descendant processes (MCP servers,
+                        // channels, FFmpeg) receive SIGTERM, even
                         // if the sidecar has already crashed.
                         unsafe {
                             libc::kill(-(child_pid as i32), libc::SIGTERM);

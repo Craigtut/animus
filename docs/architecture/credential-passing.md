@@ -135,28 +135,22 @@ One credential per `(provider, credential_type)` pair. Upsert on save.
 ### Credential Types
 
 ```typescript
-type CredentialType = 'api_key' | 'oauth_token' | 'codex_oauth' | 'cli_detected';
+type CortexCredentialType = 'cortex_api_key' | 'cortex_oauth' | 'cortex_custom';
 ```
 
-Auto-detected from key prefix:
+Active provider credentials are Cortex credentials. Legacy rows from the retired subprocess SDK stack may still exist in older databases, but the backend no longer loads them into `process.env` or treats them as an active provider configuration source.
 
-| Provider | Key Prefix | Inferred Type |
-|----------|------------|---------------|
-| Claude | `sk-ant-oat01-*` | `oauth_token` |
-| Claude | `sk-ant-api03-*` or `sk-ant-*` | `api_key` |
-| Codex | `sk-proj-*` | `api_key` |
+| Type | Purpose |
+|------|---------|
+| `cortex_api_key` | API key for a Cortex provider such as Anthropic, OpenAI, Google, or a compatible provider |
+| `cortex_oauth` | Opaque OAuth credential blob managed by Cortex `ProviderManager` |
+| `cortex_custom` | Custom OpenAI-compatible endpoint metadata plus optional API key |
 
-### Environment Variable Mapping
+### Cortex Credential Resolution
 
-**File:** `packages/backend/src/services/credential-service.ts`
+**File:** `packages/backend/src/services/cortex-credential-service.ts`
 
-```typescript
-const ENV_MAP: Record<string, string> = {
-  'claude:api_key':     'ANTHROPIC_API_KEY',
-  'claude:oauth_token': 'CLAUDE_CODE_OAUTH_TOKEN',
-  'codex:api_key':      'OPENAI_API_KEY',
-};
-```
+Cortex credentials are resolved lazily through `CortexCredentialService.resolveApiKey(provider)`. The service checks stored `cortex_*` credentials first, then lets Cortex's `ProviderManager` check provider-specific environment variables as a fallback. Stored credentials stay encrypted at rest and are decrypted only while the vault is unsealed.
 
 ### Startup Flow
 
@@ -167,50 +161,33 @@ const ENV_MAP: Record<string, string> = {
 2. resolveUnlockPassword()          — check Docker secret / env var
 3. If password: deriveAndUnwrap()   — Argon2id + AES-256-GCM unseal
 4. initializeDatabases()            — open 7 DBs, run migrations
-5. If unsealed: loadCredentialsIntoEnv(systemDb) — decrypt all → set process.env
+5. If unsealed: verifyEncryptionKey(systemDb)
 6. Start Fastify server + heartbeat (full or degraded based on seal state)
 ```
 
 See `docs/architecture/encryption-architecture.md` for the complete startup flow, including sealed-state behavior, first-run registration, and migration from legacy `.secrets` files.
 
-`loadCredentialsIntoEnv()` iterates all rows in `credentials`, decrypts each, and sets the corresponding `process.env` variable. Special handling:
-
-- `codex_oauth`: Sets `CODEX_OAUTH_CONFIGURED='true'` sentinel
-- `cli_detected`: Sets `CLAUDE_CLI_CONFIGURED` or `CODEX_CLI_CONFIGURED` sentinel
-
-After this, agent SDKs (Claude Agent SDK, Codex SDK) read credentials from `process.env` automatically. The mind never touches these values — they're used by the SDK transport layer.
+Provider credentials are not loaded into `process.env` at startup. Cortex requests credentials through the `getApiKey` callback before LLM calls, and `CortexCredentialService` decrypts or refreshes them at that point.
 
 ### Save Flow
 
-When a user saves a key via the Settings UI:
+When a user saves a provider key via onboarding or Settings:
 
 ```
-Frontend: trpc.provider.saveKey.mutate({ provider, key })
-  → credentialService.saveCredential(db, provider, key)
-    → inferCredentialType(provider, key)  // auto-detect from prefix
-    → systemStore.saveCredential(db, provider, type, key)
-      → encrypt(key)  // AES-256-GCM
-      → UPSERT into credentials table
-    → process.env[ENV_MAP[...]] = key  // immediate effect, no restart needed
+Frontend: trpc.cortexProvider.saveApiKey.mutate({ provider, apiKey })
+  -> CortexCredentialService.saveApiKey(provider, apiKey)
+    -> credentialStore.upsertCredential(db, 'cortex_api_key', provider, apiKey)
+      -> encrypt(apiKey)  // AES-256-GCM
+      -> UPSERT into credentials table
 ```
 
 ### Validation
 
-Before saving, `validateCredential()` makes a real API call to the provider:
-
-- **Claude:** `GET https://api.anthropic.com/v1/models` (403 counts as valid — key works, permissions limited)
-- **Codex:** `GET https://api.openai.com/v1/models`
+Before saving, `CortexCredentialService.validateApiKey()` delegates to Cortex `ProviderManager`, which validates using the selected provider's current API contract.
 
 ### Detection
 
-`detectProviderAuth()` checks multiple sources:
-
-1. `process.env` (direct environment variables)
-2. `credentials` table (database)
-3. Filesystem (`~/.claude/.credentials`, `~/.codex/auth.json`)
-4. CLI binary in PATH (`claude`, `codex`)
-
-Returns an array of detected methods per provider, used by the onboarding UI to guide setup.
+`CortexCredentialService.getProviderStatus(provider)` checks metadata-only `cortex_*` rows first, then asks Cortex `ProviderManager` whether a provider-specific environment variable is available. It works while the vault is sealed because it does not decrypt stored credential data.
 
 ### Store Methods
 
@@ -662,10 +639,10 @@ All three credential types (providers, plugins, channels) follow the same UI pat
 
 **File:** `packages/frontend/src/pages/SettingsPage.tsx`
 
-- Provider cards (Claude, Codex) with expandable config panels
-- Client-side prefix inference shows badge (API Key / OAuth Token)
-- "Validate & Save" button makes API call to verify, then stores
-- Codex OAuth device code flow with real-time WebSocket status updates
+- Cortex AI Provider section with provider, model, OAuth, API key, and custom endpoint options
+- Provider status is backed by `cortex_*` credential rows or Cortex-supported environment variables
+- "Validate & Save" makes a provider-specific validation call through Cortex before storage
+- OAuth flows stream status through the Cortex provider router
 
 ### Plugin Config
 
@@ -769,18 +746,17 @@ All three credential types (providers, plugins, channels) follow the same UI pat
 | `packages/backend/src/lib/encryption-service.ts` | AES-256-GCM encrypt/decrypt, receives DEK from vault |
 | `packages/backend/src/lib/secrets-manager.ts` | Legacy secrets resolution (migration support) |
 | `packages/backend/src/utils/env.ts` | `DATA_DIR` resolution, derived database paths |
-| `packages/backend/src/index.ts` | Startup order: vault load → unseal → migrations → credential load |
+| `packages/backend/src/index.ts` | Startup order: vault load → unseal → migrations → Cortex-backed services |
 
-### Agent Provider Keys
+### Cortex Provider Credentials
 
 | File | Purpose |
 |------|---------|
-| `packages/backend/src/services/credential-service.ts` | Save, validate, detect, load-into-env |
+| `packages/backend/src/services/cortex-credential-service.ts` | Save, validate, status, OAuth, custom endpoint, and lazy credential resolution |
 | `packages/backend/src/db/stores/credential-store.ts` | Credential CRUD (re-exported via `system-store.ts` barrel) |
 | `packages/backend/src/db/migrations/system/003_credentials.sql` | Table schema |
 | `packages/backend/src/db/migrations/system/008_encryption_key_check.sql` | Sentinel column |
-| `packages/backend/src/api/routers/provider.ts` | tRPC endpoints |
-| `packages/backend/src/api/routers/codex-auth.ts` | Codex OAuth device code flow |
+| `packages/backend/src/api/routers/cortex-provider.ts` | tRPC endpoints for Cortex providers and credentials |
 
 ### Plugin Credentials
 

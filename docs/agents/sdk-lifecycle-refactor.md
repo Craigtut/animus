@@ -1,6 +1,6 @@
 # SDK Lifecycle Refactor: Moving SDK Management into the Agents Package
 
-> STATUS: Planned. Implementation guide for consolidating SDK binary detection, installation, and authentication into `@animus-labs/agents`.
+> STATUS: Retired reference. The subprocess SDK stack is no longer part of Animus production runtime. Cortex is the active provider and agent runtime.
 
 ## Problem Statement
 
