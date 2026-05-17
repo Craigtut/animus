@@ -33,6 +33,27 @@ const log = createLogger('SaveService', 'saves');
 
 const SAVES_DIR = path.join(DATA_DIR, 'saves');
 const AUTOSAVE_DIR = path.join(SAVES_DIR, 'autosave');
+const SAVE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function assertValidSaveId(saveId: string): void {
+  if (!SAVE_ID_PATTERN.test(saveId)) {
+    throw new Error(`Invalid save ID: "${saveId}"`);
+  }
+}
+
+function isPathInside(parentDir: string, targetPath: string): boolean {
+  const relative = path.relative(path.resolve(parentDir), path.resolve(targetPath));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function saveFilePath(dir: string, saveId: string, extension: 'animus' | 'json'): string {
+  assertValidSaveId(saveId);
+  const filePath = path.join(dir, `${saveId}.${extension}`);
+  if (!isPathInside(dir, filePath)) {
+    throw new Error(`Resolved save path escaped save directory: "${saveId}"`);
+  }
+  return filePath;
+}
 
 /**
  * Resolve the .animus file path for a save ID, checking both manual and autosave directories.
@@ -40,7 +61,7 @@ const AUTOSAVE_DIR = path.join(SAVES_DIR, 'autosave');
  */
 export async function getArchivePath(saveId: string): Promise<string | null> {
   for (const dir of [SAVES_DIR, AUTOSAVE_DIR]) {
-    const p = path.join(dir, `${saveId}.animus`);
+    const p = saveFilePath(dir, saveId, 'animus');
     try {
       await fs.access(p);
       return p;
@@ -314,8 +335,12 @@ export async function listSaves(): Promise<SaveInfo[]> {
 
   for (const file of animusFiles) {
     const id = file.replace('.animus', '');
-    const sidecarPath = path.join(SAVES_DIR, `${id}.json`);
-    const animusPath = path.join(SAVES_DIR, file);
+    if (!SAVE_ID_PATTERN.test(id)) {
+      log.warn(`Skipping save with invalid file name: ${file}`);
+      continue;
+    }
+    const sidecarPath = saveFilePath(SAVES_DIR, id, 'json');
+    const animusPath = saveFilePath(SAVES_DIR, id, 'animus');
 
     const manifest = await readSidecar(sidecarPath);
     if (!manifest) {
@@ -341,8 +366,8 @@ export async function listSaves(): Promise<SaveInfo[]> {
 export async function getSave(saveId: string): Promise<SaveInfo | null> {
   // Check manual saves first, then autosaves
   for (const [dir, isAutosave] of [[SAVES_DIR, false], [AUTOSAVE_DIR, true]] as const) {
-    const sidecarPath = path.join(dir, `${saveId}.json`);
-    const animusPath = path.join(dir, `${saveId}.animus`);
+    const sidecarPath = saveFilePath(dir, saveId, 'json');
+    const animusPath = saveFilePath(dir, saveId, 'animus');
 
     const manifest = await readSidecar(sidecarPath);
     if (!manifest) continue;
@@ -361,8 +386,8 @@ export async function getSave(saveId: string): Promise<SaveInfo | null> {
  * Delete a save (both .animus and .json sidecar).
  */
 export async function deleteSave(saveId: string): Promise<void> {
-  const animusPath = path.join(SAVES_DIR, `${saveId}.animus`);
-  const sidecarPath = path.join(SAVES_DIR, `${saveId}.json`);
+  const animusPath = saveFilePath(SAVES_DIR, saveId, 'animus');
+  const sidecarPath = saveFilePath(SAVES_DIR, saveId, 'json');
 
   try {
     await fs.access(animusPath);
@@ -383,8 +408,8 @@ export async function deleteSave(saveId: string): Promise<void> {
 export async function exportSave(saveId: string): Promise<{ buffer: Buffer; name: string }> {
   // Check manual saves first, then autosaves
   for (const dir of [SAVES_DIR, AUTOSAVE_DIR]) {
-    const animusPath = path.join(dir, `${saveId}.animus`);
-    const sidecarPath = path.join(dir, `${saveId}.json`);
+    const animusPath = saveFilePath(dir, saveId, 'animus');
+    const sidecarPath = saveFilePath(dir, saveId, 'json');
 
     const manifest = await readSidecar(sidecarPath);
     if (!manifest) continue;
@@ -496,8 +521,12 @@ export async function listAutosaves(): Promise<SaveInfo[]> {
 
   for (const file of animusFiles) {
     const id = file.replace('.animus', '');
-    const sidecarPath = path.join(AUTOSAVE_DIR, `${id}.json`);
-    const animusPath = path.join(AUTOSAVE_DIR, file);
+    if (!SAVE_ID_PATTERN.test(id)) {
+      log.warn(`Skipping autosave with invalid file name: ${file}`);
+      continue;
+    }
+    const sidecarPath = saveFilePath(AUTOSAVE_DIR, id, 'json');
+    const animusPath = saveFilePath(AUTOSAVE_DIR, id, 'animus');
 
     const manifest = await readSidecar(sidecarPath);
     if (!manifest) {
@@ -542,8 +571,8 @@ export async function rotateAutosaves(maxCount: number): Promise<void> {
  * Delete an autosave (both .animus and .json sidecar).
  */
 export async function deleteAutosave(saveId: string): Promise<void> {
-  const animusPath = path.join(AUTOSAVE_DIR, `${saveId}.animus`);
-  const sidecarPath = path.join(AUTOSAVE_DIR, `${saveId}.json`);
+  const animusPath = saveFilePath(AUTOSAVE_DIR, saveId, 'animus');
+  const sidecarPath = saveFilePath(AUTOSAVE_DIR, saveId, 'json');
 
   try {
     await fs.access(animusPath);

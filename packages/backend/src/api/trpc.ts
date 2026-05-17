@@ -92,6 +92,56 @@ const t = initTRPC.context<TRPCContext>().create();
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
+interface RateLimitOptions {
+  key: string;
+  max: number;
+  windowMs: number;
+}
+
+interface RateLimitBucket {
+  count: number;
+  resetAt: number;
+}
+
+const trpcRateLimitBuckets = new Map<string, RateLimitBucket>();
+
+function getClientRateLimitKey(ctx: TRPCContext, bucketKey: string): string {
+  const req = ctx.req as any;
+  const ip = req.ip ?? req.socket?.remoteAddress ?? req.headers?.['x-forwarded-for'] ?? 'unknown';
+  return `${bucketKey}:${ip}`;
+}
+
+function enforceRateLimit(ctx: TRPCContext, options: RateLimitOptions): void {
+  const now = Date.now();
+  const key = getClientRateLimitKey(ctx, options.key);
+  const existing = trpcRateLimitBuckets.get(key);
+
+  if (!existing || existing.resetAt <= now) {
+    trpcRateLimitBuckets.set(key, { count: 1, resetAt: now + options.windowMs });
+    return;
+  }
+
+  existing.count += 1;
+  if (existing.count > options.max) {
+    throw new TRPCError({
+      code: 'TOO_MANY_REQUESTS',
+      message: 'Too many attempts. Please wait and try again.',
+    });
+  }
+
+  if (trpcRateLimitBuckets.size > 1000) {
+    for (const [bucket, value] of trpcRateLimitBuckets) {
+      if (value.resetAt <= now) trpcRateLimitBuckets.delete(bucket);
+    }
+  }
+}
+
+export const rateLimitedPublicProcedure = (options: RateLimitOptions) =>
+  publicProcedure.use(async ({ ctx, next }) => {
+    enforceRateLimit(ctx, options);
+    return next();
+  });
+
 export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
   if (!ctx.userId) {
     throw new TRPCError({ code: 'UNAUTHORIZED' });

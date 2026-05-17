@@ -12,7 +12,7 @@
 import { z } from 'zod/v3';
 import * as argon2 from 'argon2';
 import { TRPCError } from '@trpc/server';
-import { router, publicProcedure, protectedProcedure } from '../trpc.js';
+import { router, publicProcedure, protectedProcedure, rateLimitedPublicProcedure } from '../trpc.js';
 import {
   getSealState,
   loadVault,
@@ -44,7 +44,7 @@ export const sealRouter = router({
    * Derives the password key, unwraps the DEK, verifies the sentinel,
    * and issues a JWT session.
    */
-  unlock: publicProcedure
+  unlock: rateLimitedPublicProcedure({ key: 'seal.unlock', max: 10, windowMs: 5 * 60 * 1000 })
     .input(z.object({ password: z.string().min(1) }))
     .mutation(async ({ input, ctx }) => {
       const vault = loadVault();
@@ -213,7 +213,7 @@ export const sealRouter = router({
    * Migrate from legacy .secrets file to vault.json.
    * User provides a password to protect the new vault.
    */
-  migrate: publicProcedure
+  migrate: rateLimitedPublicProcedure({ key: 'seal.migrate', max: 5, windowMs: 60 * 60 * 1000 })
     .input(z.object({ password: z.string().min(8) }))
     .mutation(async ({ input, ctx }) => {
       if (getSealState() !== 'needs-migration') {

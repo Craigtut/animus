@@ -386,16 +386,60 @@ function stripPwaArtifacts() {
     if (fs.existsSync(indexPath)) {
       let html = fs.readFileSync(indexPath, 'utf-8');
       const original = html;
-      // Remove: <script id="vite-plugin-pwa:register-sw" src="/registerSW.js"></script>
-      html = html.replace(/<script\s+id="vite-plugin-pwa:register-sw"[^>]*><\/script>/g, '');
-      // Remove: <link rel="manifest" href="/manifest.webmanifest">
-      html = html.replace(/<link\s+rel="manifest"[^>]*>/g, '');
+      html = stripPwaHtmlTags(html);
       if (html !== original) {
         fs.writeFileSync(indexPath, html);
         console.log(`      Cleaned ${path.relative(ROOT, indexPath)}`);
       }
     }
   }
+}
+
+function stripPwaHtmlTags(html) {
+  let output = '';
+  let cursor = 0;
+
+  while (cursor < html.length) {
+    const tagStart = html.indexOf('<', cursor);
+    if (tagStart === -1) {
+      output += html.slice(cursor);
+      break;
+    }
+
+    output += html.slice(cursor, tagStart);
+    const tagEnd = html.indexOf('>', tagStart);
+    if (tagEnd === -1) {
+      output += html.slice(tagStart);
+      break;
+    }
+
+    const tag = html.slice(tagStart, tagEnd + 1);
+    const lowerTag = tag.toLowerCase();
+
+    if (
+      lowerTag.startsWith('<script') &&
+      tag.includes('vite-plugin-pwa:register-sw')
+    ) {
+      const closeTag = '</script>';
+      const closeStart = html.toLowerCase().indexOf(closeTag, tagEnd + 1);
+      cursor = closeStart === -1 ? tagEnd + 1 : closeStart + closeTag.length;
+      continue;
+    }
+
+    if (
+      lowerTag.startsWith('<link') &&
+      lowerTag.includes('rel="manifest"') &&
+      tag.includes('manifest.webmanifest')
+    ) {
+      cursor = tagEnd + 1;
+      continue;
+    }
+
+    output += tag;
+    cursor = tagEnd + 1;
+  }
+
+  return output;
 }
 
 function copyBackendDist() {

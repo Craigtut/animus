@@ -1623,13 +1623,13 @@ export class PluginManager {
       loaded.configSchema = await this.loadConfigSchema(absolutePath, manifest.configSchema);
     }
 
-    // Icon
-    if (manifest.icon) {
-      try {
-        const iconPath = path.resolve(absolutePath, manifest.icon);
-        loaded.iconSvg = await fs.readFile(iconPath, 'utf-8');
-      } catch {
-        log.debug(`No icon found for ${manifest.name}`);
+      // Icon
+      if (manifest.icon) {
+        try {
+          const iconPath = this.resolvePluginPath(absolutePath, manifest.icon, 'icon');
+          loaded.iconSvg = await fs.readFile(iconPath, 'utf-8');
+        } catch {
+          log.debug(`No icon found for ${manifest.name}`);
       }
     }
 
@@ -1669,12 +1669,12 @@ export class PluginManager {
     }
 
     // Cache static context source content
-    for (const cs of loaded.contextSources) {
-      if (cs.type === 'static' && cs.content) {
-        try {
-          const contentPath = this.substitutePluginRoot(cs.content, absolutePath);
-          const content = await fs.readFile(contentPath, 'utf-8');
-          this.staticContentCache.set(`${manifest.name}:${cs.name}`, content);
+      for (const cs of loaded.contextSources) {
+        if (cs.type === 'static' && cs.content) {
+          try {
+            const contentPath = this.resolvePluginPath(absolutePath, cs.content, `context source ${cs.name}`);
+            const content = await fs.readFile(contentPath, 'utf-8');
+            this.staticContentCache.set(`${manifest.name}:${cs.name}`, content);
         } catch (err) {
           log.warn(`Failed to cache static content for ${cs.name} (${manifest.name}):`, err);
         }
@@ -1686,7 +1686,7 @@ export class PluginManager {
     pluginDir: string,
     schemaPath: string,
   ): Promise<ConfigSchema | null> {
-    const filePath = path.resolve(pluginDir, schemaPath);
+    const filePath = this.resolvePluginPath(pluginDir, schemaPath, 'config schema');
     try {
       const raw = await fs.readFile(filePath, 'utf-8');
       const json = JSON.parse(raw);
@@ -1700,9 +1700,9 @@ export class PluginManager {
   private async loadSkills(
     pluginDir: string,
     skillsPath: string,
-  ): Promise<Array<{ name: string; absolutePath: string }>> {
+    ): Promise<Array<{ name: string; absolutePath: string }>> {
     const skills: Array<{ name: string; absolutePath: string }> = [];
-    const dir = path.resolve(pluginDir, skillsPath);
+    const dir = this.resolvePluginPath(pluginDir, skillsPath, 'skills');
     log.debug(`Loading skills from: ${dir}`);
 
     try {
@@ -1732,7 +1732,7 @@ export class PluginManager {
     pluginDir: string,
     toolsPath: string,
   ): Promise<Record<string, PluginMcpServer>> {
-    const filePath = path.resolve(pluginDir, toolsPath);
+    const filePath = this.resolvePluginPath(pluginDir, toolsPath, 'tools');
     try {
       const raw = await fs.readFile(filePath, 'utf-8');
       const json = JSON.parse(raw) as Record<string, unknown>;
@@ -1773,7 +1773,7 @@ export class PluginManager {
     pluginDir: string,
     contextPath: string,
   ): Promise<ContextSource[]> {
-    const filePath = path.resolve(pluginDir, contextPath);
+    const filePath = this.resolvePluginPath(pluginDir, contextPath, 'context');
     try {
       const raw = await fs.readFile(filePath, 'utf-8');
       const json = JSON.parse(raw);
@@ -1787,7 +1787,7 @@ export class PluginManager {
   }
 
   private async loadHooks(pluginDir: string, hooksPath: string): Promise<HookDefinition[]> {
-    const filePath = path.resolve(pluginDir, hooksPath);
+    const filePath = this.resolvePluginPath(pluginDir, hooksPath, 'hooks');
     try {
       const raw = await fs.readFile(filePath, 'utf-8');
       const json = JSON.parse(raw);
@@ -1804,7 +1804,7 @@ export class PluginManager {
     pluginDir: string,
     decisionsPath: string,
   ): Promise<DecisionTypeDefinition[]> {
-    const filePath = path.resolve(pluginDir, decisionsPath);
+    const filePath = this.resolvePluginPath(pluginDir, decisionsPath, 'decisions');
     try {
       const raw = await fs.readFile(filePath, 'utf-8');
       const json = JSON.parse(raw);
@@ -1821,7 +1821,7 @@ export class PluginManager {
     pluginDir: string,
     triggersPath: string,
   ): Promise<TriggerDefinition[]> {
-    const filePath = path.resolve(pluginDir, triggersPath);
+    const filePath = this.resolvePluginPath(pluginDir, triggersPath, 'triggers');
     try {
       const raw = await fs.readFile(filePath, 'utf-8');
       const json = JSON.parse(raw);
@@ -1839,7 +1839,7 @@ export class PluginManager {
     agentsPath: string,
   ): Promise<Array<{ frontmatter: AgentFrontmatter; prompt: string }>> {
     const agents: Array<{ frontmatter: AgentFrontmatter; prompt: string }> = [];
-    const dir = path.resolve(pluginDir, agentsPath);
+    const dir = this.resolvePluginPath(pluginDir, agentsPath, 'agents');
 
     try {
       const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -1997,13 +1997,47 @@ export class PluginManager {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // Helpers
-  // -------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
 
-  private substitutePluginRoot(value: string, pluginPath: string): string {
-    return value.replace(/\$\{PLUGIN_ROOT\}/g, pluginPath);
-  }
+    private resolvePluginPath(pluginPath: string, value: string, label: string): string {
+      if (!value || value.includes('\0')) {
+        throw new Error(`Invalid plugin path for ${label}`);
+      }
+
+      const root = path.resolve(pluginPath);
+      const substituted = this.substitutePluginRoot(value, root);
+      const resolved = path.isAbsolute(substituted)
+        ? path.resolve(substituted)
+        : path.resolve(root, substituted);
+      const relative = path.relative(root, resolved);
+
+      if (relative.startsWith('..') || path.isAbsolute(relative)) {
+        throw new Error(`Plugin path for ${label} escapes plugin root: ${value}`);
+      }
+
+      return resolved;
+    }
+
+    private substitutePluginRoot(value: string, pluginPath: string): string {
+      const substituted = value.replace(/\$\{PLUGIN_ROOT\}/g, pluginPath);
+      if (!pluginPath || !value.includes('${PLUGIN_ROOT}')) return substituted;
+
+      const root = path.resolve(pluginPath);
+      for (const token of substituted.split(/\s+/)) {
+        const cleaned = token.replace(/^['"]|['"]$/g, '');
+        if (!cleaned.startsWith(root)) continue;
+
+        const resolved = path.resolve(cleaned);
+        const relative = path.relative(root, resolved);
+        if (relative.startsWith('..') || path.isAbsolute(relative)) {
+          throw new Error(`Plugin root substitution escapes plugin root: ${value}`);
+        }
+      }
+
+      return substituted;
+    }
 
   private getDecryptedConfig(pluginName: string): Record<string, unknown> | null {
     const db = getSystemDb();

@@ -30,6 +30,16 @@ const PENDING_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 export const MEDIA_DIR = path.join(DATA_DIR, 'media');
 
+function isPathInside(parentDir: string, targetPath: string): boolean {
+  const relative = path.relative(path.resolve(parentDir), path.resolve(targetPath));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function resolveMediaPath(filePath: string): string | null {
+  const resolved = path.resolve(filePath);
+  return isPathInside(MEDIA_DIR, resolved) ? resolved : null;
+}
+
 const ALLOWED_MIME_TYPES = new Set([
   // Images
   'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/avif',
@@ -142,11 +152,17 @@ export async function registerMediaRoutes(app: FastifyInstance): Promise<void> {
      * Files are saved to disk and tracked in memory as pending uploads.
      * Returns an array of pending attachment metadata (id, type, mimeType, etc.).
      */
-    instance.post(
-      '/api/media/upload',
-      {
-        preHandler: (instance as any).authenticate,
-      },
+      instance.post(
+        '/api/media/upload',
+        {
+          preHandler: (instance as any).authenticate,
+          config: {
+            rateLimit: {
+              max: 20,
+              timeWindow: '5 minutes',
+            },
+          },
+        },
       async (request, reply) => {
       try {
         const parts = request.parts();
@@ -239,11 +255,17 @@ export async function registerMediaRoutes(app: FastifyInstance): Promise<void> {
    * Serves a media file by its attachment ID.
    * First checks persisted media_attachments table, then falls back to pending uploads.
    */
-  instance.get<{ Params: { id: string } }>(
-    '/api/media/:id',
-    {
-      preHandler: (instance as any).authenticate,
-    },
+    instance.get<{ Params: { id: string } }>(
+      '/api/media/:id',
+      {
+        preHandler: (instance as any).authenticate,
+        config: {
+          rateLimit: {
+            max: 300,
+            timeWindow: '1 minute',
+          },
+        },
+      },
     async (request, reply) => {
       const { id } = request.params;
 
@@ -271,16 +293,23 @@ export async function registerMediaRoutes(app: FastifyInstance): Promise<void> {
           fileSize = pending.sizeBytes;
         }
 
-        if (!fs.existsSync(filePath)) {
-          log.warn(`Media file missing from disk: ${filePath}`);
-          return reply.status(404).send({ error: 'FILE_MISSING', message: 'File not found on disk' });
-        }
+          const safePath = resolveMediaPath(filePath);
+          if (!safePath) {
+            log.warn(`Rejected media path outside media directory for attachment ${id}: ${filePath}`);
+            return reply.status(404).send({ error: 'NOT_FOUND', message: 'Attachment not found' });
+          }
 
-        const stream = fs.createReadStream(filePath);
-        return reply
-          .header('Content-Type', mimeType)
-          .header('Content-Length', fileSize)
-          .header('Cache-Control', 'private, max-age=86400')
+          if (!fs.existsSync(safePath)) {
+            log.warn(`Media file missing from disk: ${safePath}`);
+            return reply.status(404).send({ error: 'FILE_MISSING', message: 'File not found on disk' });
+          }
+
+          const stream = fs.createReadStream(safePath);
+          return reply
+            .header('Content-Type', mimeType)
+            .header('X-Content-Type-Options', 'nosniff')
+            .header('Content-Length', fileSize)
+            .header('Cache-Control', 'private, max-age=86400')
           .send(stream);
       } catch (err) {
         log.error('Media serve failed:', err);

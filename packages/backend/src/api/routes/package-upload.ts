@@ -43,11 +43,17 @@ export async function registerPackageUploadRoutes(app: FastifyInstance): Promise
      * Accepts a single .anpk file via multipart form data.
      * Saves it to disk and returns the file path for the verify + install flow.
      */
-    instance.post(
-      '/api/packages/upload',
-      {
-        preHandler: (instance as any).authenticate,
-      },
+      instance.post(
+        '/api/packages/upload',
+        {
+          preHandler: (instance as any).authenticate,
+          config: {
+            rateLimit: {
+              max: 10,
+              timeWindow: '10 minutes',
+            },
+          },
+        },
       async (request, reply) => {
         try {
           const data = await request.file();

@@ -18,7 +18,17 @@ import { renderOAuthCallbackPage } from '../../lib/oauth-callback-page.js';
 const log = createLogger('OAuthCallback', 'auth');
 
 export async function registerOAuthCallbackRoute(fastify: FastifyInstance): Promise<void> {
-  fastify.get('/api/oauth/callback', async (request, reply) => {
+  fastify.get(
+    '/api/oauth/callback',
+    {
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: '5 minutes',
+        },
+      },
+    },
+    async (request, reply) => {
     const { code, state, error, error_description } = request.query as Record<string, string>;
 
     if (error) {
@@ -63,5 +73,6 @@ export async function registerOAuthCallbackRoute(fastify: FastifyInstance): Prom
         }),
       );
     }
-  });
+    }
+  );
 }

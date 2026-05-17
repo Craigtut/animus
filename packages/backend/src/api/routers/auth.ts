@@ -7,7 +7,7 @@
 import { TRPCError } from '@trpc/server';
 import * as argon2 from 'argon2';
 import { loginInputSchema, registerInputSchema } from '@animus-labs/shared';
-import { router, publicProcedure, protectedProcedure } from '../trpc.js';
+import { router, publicProcedure, protectedProcedure, rateLimitedPublicProcedure } from '../trpc.js';
 import * as systemStore from '../../db/stores/system-store.js';
 import * as contactStore from '../../db/stores/contact-store.js';
 import { getSystemDb, getContactsDb } from '../../db/index.js';
@@ -39,7 +39,9 @@ export const authRouter = router({
   /**
    * Register the first user. Fails if a user already exists.
    */
-  register: publicProcedure.input(registerInputSchema).mutation(async ({ input, ctx }) => {
+  register: rateLimitedPublicProcedure({ key: 'auth.register', max: 5, windowMs: 60 * 60 * 1000 })
+    .input(registerInputSchema)
+    .mutation(async ({ input, ctx }) => {
     const db = getSystemDb();
 
     if (systemStore.getUserCount(db) > 0) {
@@ -100,12 +102,14 @@ export const authRouter = router({
     });
 
     return { userId: user.id, email: user.email };
-  }),
+    }),
 
   /**
    * Login with email and password.
    */
-  login: publicProcedure.input(loginInputSchema).mutation(async ({ input, ctx }) => {
+  login: rateLimitedPublicProcedure({ key: 'auth.login', max: 10, windowMs: 5 * 60 * 1000 })
+    .input(loginInputSchema)
+    .mutation(async ({ input, ctx }) => {
     const db = getSystemDb();
 
     const user = systemStore.getUserByEmail(db, input.email);
@@ -136,7 +140,7 @@ export const authRouter = router({
     });
 
     return { userId: user.id, email: user.email };
-  }),
+    }),
 
   /**
    * Logout — clear the session cookie.

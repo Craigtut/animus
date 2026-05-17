@@ -68,10 +68,7 @@ export async function verifyPackage(anpkPath: string): Promise<VerificationResul
   }
 
   // Extract to a temporary directory for inspection
-  const tempDir = path.join(
-    path.dirname(anpkPath),
-    `.anpk-verify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-  );
+  const tempDir = path.join(path.dirname(anpkPath), `.anpk-verify-${crypto.randomUUID()}`);
 
   try {
     await fsp.mkdir(tempDir, { recursive: true });
@@ -171,7 +168,12 @@ export async function verifyPackage(anpkPath: string): Promise<VerificationResul
       return result;
     }
 
-    result.manifest = manifest;
+      result.manifest = manifest;
+      const manifestPathErrors = validateManifestPaths(manifest);
+      if (manifestPathErrors.length > 0) {
+        result.errors.push(...manifestPathErrors);
+        return result;
+      }
 
     // Check format version compatibility
     if (manifest.formatVersion > SUPPORTED_FORMAT_VERSION) {
@@ -198,13 +200,18 @@ export async function verifyPackage(anpkPath: string): Promise<VerificationResul
     // ── Layer 4: Checksum Verification ───────────────────────────────────
     log.debug('Verifying file checksums...');
 
-    const checksumsRaw = await fsp.readFile(checksumsPath, 'utf-8');
-    const checksumEntries = parseChecksums(checksumsRaw);
+      const checksumsRaw = await fsp.readFile(checksumsPath, 'utf-8');
+      const parsedChecksums = parseChecksums(checksumsRaw);
+      if (parsedChecksums.errors.length > 0) {
+        result.errors.push(...parsedChecksums.errors);
+        return result;
+      }
+      const checksumEntries = parsedChecksums.entries;
 
-    result.checksums.total = checksumEntries.length;
+      result.checksums.total = checksumEntries.length;
 
-    for (const entry of checksumEntries) {
-      const filePath = path.join(tempDir, entry.path);
+      for (const entry of checksumEntries) {
+        const filePath = resolveInside(tempDir, entry.path, 'CHECKSUMS entry');
 
       if (!fs.existsSync(filePath)) {
         result.checksums.failures.push(entry.path);
@@ -221,9 +228,25 @@ export async function verifyPackage(anpkPath: string): Promise<VerificationResul
       }
     }
 
-    if (result.checksums.failures.length > 0) {
-      return result;
-    }
+      if (result.checksums.failures.length > 0) {
+        return result;
+      }
+
+      const expectedFiles = new Set(checksumEntries.map(entry => entry.path));
+      expectedFiles.add('CHECKSUMS');
+      if (fs.existsSync(signaturePath)) expectedFiles.add('SIGNATURE');
+
+      const extractedFiles = await collectFiles(tempDir);
+      for (const file of extractedFiles) {
+        const relativePath = normalizeArchivePath(path.relative(tempDir, file));
+        if (!expectedFiles.has(relativePath)) {
+          result.errors.push(`Package contains unexpected file not listed in CHECKSUMS: ${relativePath}`);
+        }
+      }
+
+      if (result.errors.length > 0) {
+        return result;
+      }
 
     log.debug(`All ${result.checksums.verified} checksums verified`);
 
@@ -233,9 +256,9 @@ export async function verifyPackage(anpkPath: string): Promise<VerificationResul
     // show them and let the user adjust before install. Non-fatal: a
     // preview failure must never block a valid install.
     if (manifest.packageType === 'plugin' && manifest.components?.tools) {
-      try {
-        const toolsPath = path.join(tempDir, manifest.components.tools);
-        const toolsRaw = await fsp.readFile(toolsPath, 'utf-8');
+        try {
+          const toolsPath = resolveInside(tempDir, manifest.components.tools, 'components.tools');
+          const toolsRaw = await fsp.readFile(toolsPath, 'utf-8');
         const parsed = z
           .record(PluginMcpServerSchema)
           .parse(JSON.parse(toolsRaw));
@@ -289,6 +312,58 @@ async function computeArchiveHash(dir: string, excludeFile: string): Promise<str
   return hash.digest('hex');
 }
 
+function normalizeArchivePath(filePath: string): string {
+  return filePath.replaceAll('\\', '/');
+}
+
+function isSafeArchivePath(filePath: string): boolean {
+  if (!filePath || filePath.includes('\0')) return false;
+  if (path.isAbsolute(filePath)) return false;
+  if (/^[A-Za-z]:[\\/]/.test(filePath) || filePath.startsWith('\\\\')) return false;
+
+  const normalized = path.posix.normalize(normalizeArchivePath(filePath));
+  return normalized !== '..' && !normalized.startsWith('../') && !normalized.startsWith('/');
+}
+
+function resolveInside(rootDir: string, relativePath: string, label: string): string {
+  if (!isSafeArchivePath(relativePath)) {
+    throw new Error(`Unsafe package path for ${label}: ${relativePath}`);
+  }
+
+  const root = path.resolve(rootDir);
+  const resolved = path.resolve(root, normalizeArchivePath(relativePath));
+  const rel = path.relative(root, resolved);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`Package path for ${label} escapes package root: ${relativePath}`);
+  }
+  return resolved;
+}
+
+function validateManifestPaths(manifest: PackageManifest): string[] {
+  const errors: string[] = [];
+  const paths: Array<[string, string | undefined]> = [
+    ['icon', manifest.icon],
+    ['configSchema', manifest.configSchema],
+  ];
+
+  if (manifest.packageType === 'plugin') {
+    for (const [name, componentPath] of Object.entries(manifest.components)) {
+      paths.push([`components.${name}`, componentPath]);
+    }
+  } else {
+    paths.push(['adapter', manifest.adapter]);
+  }
+
+  for (const [label, filePath] of paths) {
+    if (!filePath) continue;
+    if (!isSafeArchivePath(filePath)) {
+      errors.push(`Unsafe package path for ${label}: ${filePath}`);
+    }
+  }
+
+  return errors;
+}
+
 /** Compute SHA-256 hash of a single file. */
 async function computeFileHash(filePath: string): Promise<string> {
   const content = await fsp.readFile(filePath);
@@ -317,8 +392,12 @@ async function collectFiles(dir: string): Promise<string[]> {
  * Parse the CHECKSUMS file format.
  * Each line: "sha256:<hex-digest> <relative-path>"
  */
-function parseChecksums(content: string): Array<{ digest: string; path: string }> {
+function parseChecksums(content: string): {
+  entries: Array<{ digest: string; path: string }>;
+  errors: string[];
+} {
   const entries: Array<{ digest: string; path: string }> = [];
+  const errors: string[] = [];
 
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
@@ -326,14 +405,20 @@ function parseChecksums(content: string): Array<{ digest: string; path: string }
 
     const match = trimmed.match(/^sha256:([a-f0-9]{64})\s+(.+)$/);
     if (!match || !match[1] || !match[2]) {
-      log.warn(`Invalid CHECKSUMS entry: ${trimmed}`);
+      errors.push(`Invalid CHECKSUMS entry: ${trimmed}`);
       continue;
     }
 
-    entries.push({ digest: match[1], path: match[2] });
+    const entryPath = normalizeArchivePath(match[2]);
+    if (!isSafeArchivePath(entryPath)) {
+      errors.push(`Unsafe CHECKSUMS path: ${match[2]}`);
+      continue;
+    }
+
+    entries.push({ digest: match[1], path: entryPath });
   }
 
-  return entries;
+  return { entries, errors };
 }
 
 /**
