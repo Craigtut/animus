@@ -527,27 +527,23 @@ export function SavesSection() {
 
   const handleExport = async (saveId: string, saveName: string) => {
     setExportingId(saveId);
-    const fileName = `${saveName.replace(/[^a-zA-Z0-9_-]/g, '_')}.animus`;
-    try {
-      if (isTauri()) {
-        // Tauri: use native save dialog, then tell backend to copy the file directly
-        const { save } = await import('@tauri-apps/plugin-dialog');
-        const destPath = await save({
-          defaultPath: fileName,
-          filters: [{ name: 'Animus Save', extensions: ['animus'] }],
-        });
-        if (!destPath) return; // User cancelled
-        const response = await fetch(`/api/saves/${saveId}/export-to-path`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ destPath }),
-        });
-        if (!response.ok) throw new Error('Export failed');
-        toast.success('Save exported successfully.');
-      } else {
-        // Browser: download via blob URL
-        const response = await fetch(`/api/saves/${saveId}/export`, { credentials: 'include' });
+      const fileName = `${saveName.replace(/[^a-zA-Z0-9_-]/g, '_')}.animus`;
+      try {
+        if (isTauri()) {
+          const response = await fetch(`/api/saves/${saveId}/export`, { credentials: 'include' });
+          if (!response.ok) throw new Error('Export failed');
+
+          const blob = await response.blob();
+          const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+          const { invoke } = await import('@tauri-apps/api/core');
+          const exported = await invoke<boolean>('export_animus_save', {
+            defaultFileName: fileName,
+            bytes,
+          });
+          if (exported) toast.success('Save exported successfully.');
+        } else {
+          // Browser: download via blob URL
+          const response = await fetch(`/api/saves/${saveId}/export`, { credentials: 'include' });
         if (!response.ok) throw new Error('Export failed');
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
@@ -559,11 +555,13 @@ export function SavesSection() {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       }
-    } catch (err) {
-      if (err instanceof Error && err.message === 'Export failed') {
-        toast.error('Failed to export save.');
-      }
-    } finally {
+      } catch (err) {
+        if (err instanceof Error && err.message === 'Export failed') {
+          toast.error('Failed to export save.');
+        } else {
+          toast.error('Failed to export save.');
+        }
+      } finally {
       setExportingId(null);
     }
   };

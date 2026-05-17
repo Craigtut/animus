@@ -3,6 +3,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
@@ -12,6 +13,7 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::Emitter;
 use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
 
 struct Sidecar(Mutex<Option<Child>>);
 
@@ -144,6 +146,97 @@ fn should_start_minimized() -> bool {
     std::env::args().any(|a| a == "--minimized")
 }
 
+fn sanitize_animus_file_name(file_name: &str) -> String {
+    let normalized = file_name.replace('\\', "/");
+    let base = normalized
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("animus-save.animus");
+    let mut sanitized: String = base
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    if !sanitized.to_ascii_lowercase().ends_with(".animus") {
+        sanitized.push_str(".animus");
+    }
+    sanitized
+}
+
+fn ensure_animus_extension(mut path: PathBuf) -> PathBuf {
+    let has_animus_extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("animus"))
+        .unwrap_or(false);
+
+    if !has_animus_extension {
+        path.set_extension("animus");
+    }
+    path
+}
+
+#[tauri::command]
+async fn export_animus_save(
+    app: tauri::AppHandle,
+    default_file_name: String,
+    bytes: Vec<u8>,
+) -> Result<bool, String> {
+    const MAX_SAVE_EXPORT_BYTES: usize = 500 * 1024 * 1024;
+
+    if bytes.len() > MAX_SAVE_EXPORT_BYTES {
+        return Err("Save export is too large".to_string());
+    }
+
+    if bytes.len() < 4 || &bytes[0..2] != b"PK" {
+        return Err("Save export is not a valid .animus archive".to_string());
+    }
+
+    let file_name = sanitize_animus_file_name(&default_file_name);
+    let selected = app
+        .dialog()
+        .file()
+        .set_title("Export Animus Save")
+        .set_file_name(file_name)
+        .set_can_create_directories(true)
+        .add_filter("Animus Save", &["animus"])
+        .blocking_save_file();
+
+    let Some(file_path) = selected else {
+        return Ok(false);
+    };
+
+    let path = ensure_animus_extension(
+        file_path
+            .into_path()
+            .map_err(|_| "Selected save path is not a local filesystem path".to_string())?,
+    );
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("Failed to create destination directory: {}", err))?;
+    }
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&path)
+        .map_err(|err| format!("Failed to open save destination: {}", err))?;
+
+    file.write_all(&bytes)
+        .map_err(|err| format!("Failed to write save export: {}", err))?;
+
+    Ok(true)
+}
+
 fn main() {
     let context = tauri::generate_context!();
     let start_minimized = should_start_minimized();
@@ -160,6 +253,7 @@ fn main() {
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_process::init())
             .plugin(tauri_plugin_dialog::init())
+            .invoke_handler(tauri::generate_handler![export_animus_save])
             .setup(move |app| {
                 setup_tray(app).expect("Failed to setup tray");
 
@@ -481,6 +575,7 @@ fn main() {
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_process::init())
             .plugin(tauri_plugin_dialog::init())
+            .invoke_handler(tauri::generate_handler![export_animus_save])
             .manage(sidecar)
             .setup(move |app| {
                 setup_tray(app).expect("Failed to setup tray");
