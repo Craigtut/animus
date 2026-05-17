@@ -3,7 +3,7 @@
 > How Animus protects credentials at rest using password-derived encryption, sealed/unsealed server states, and a layered defense model that keeps the encryption key out of reach of the AI agent.
 
 **Status:** Implemented
-**Last Updated:** 2026-03-02
+**Last Updated:** 2026-05-17
 
 ---
 
@@ -26,7 +26,7 @@
 
 ## Design Goals
 
-1. **No key material on the filesystem.** The encryption key is derived from the user's password and exists only in process memory. There is no `.secrets` file, no key file, no recoverable key on disk.
+1. **No encryption key material on the filesystem.** The encryption key (DEK) is derived from the user's password and exists only in process memory. There is no `.secrets` file and no recoverable DEK on disk. (The JWT *session* secret is a deliberate exception: it lives in `data/jwt.key`, is independent of the DEK, and protects only session authentication, not credentials. See [JWT Secret](#jwt-secret).)
 2. **Agent cannot access the key.** The agent's tools (Read, Write, Bash) cannot read the encryption key because it exists only in the Node.js process heap, not in any file, environment variable, or OS service the agent can query.
 3. **Graceful degradation.** When the server is sealed (key not in memory), the heartbeat still runs, channels still receive messages, and the system responds with clear unlock instructions rather than crashing.
 4. **Zero friction for Docker/headless.** Automated environments provide the unlock password via environment variable or Docker secret. The user configures it once and never interacts with an unlock screen.
@@ -44,7 +44,7 @@
 | **Prompt injection: "read the key from env vars"** | Unlock password scrubbed from `process.env` after key derivation. DEK never in `process.env`. |
 | **Prompt injection: "read the key from process memory"** | Agent tools (Read, Bash) run in subprocesses that cannot access the parent Node.js process heap. |
 | **Prompt injection: "read the key from OS keyring"** | No key stored in the OS keyring (default configuration). |
-| **Malicious plugin reads filesystem** | No key file on disk. Database files are encrypted ciphertext. |
+| **Malicious plugin reads filesystem** | No encryption key (DEK) on disk. Database files are encrypted ciphertext. The JWT session secret (`data/jwt.key`) is on disk but cannot decrypt any credential; it is also on the file deny list. |
 | **Malicious plugin reads process memory** | Plugins run as child processes. Cannot access parent process heap. |
 | **Physical disk theft / backup exfiltration** | Attacker gets `vault.json` (salt + wrapped DEK) plus encrypted databases. Must brute-force the password through Argon2id to decrypt. |
 | **Data directory copied to another machine** | Wrapped DEK requires the password. Ciphertext is useless without it. |
@@ -123,7 +123,17 @@ This file is safe to include in backups. Without the password, the wrapped DEK c
 
 ### JWT Secret
 
-The JWT secret follows the same pattern. It is generated as a separate random value, wrapped alongside the DEK in `vault.json`, and unwrapped at unlock time. The JWT secret is independent of the DEK to maintain separation of concerns (session authentication vs. credential encryption).
+The JWT secret signs and verifies the session cookie. It is **deliberately not part of the vault**: it is a standalone 256-bit random value stored in `data/jwt.key` (mode `0600`), independent of the password and the DEK. The rationale is separation of concerns: a JWT-secret compromise only enables session forgery, not credential decryption (credentials are encrypted with the DEK, which is never on disk). Keeping it outside the vault also means the server can authenticate sessions while sealed, and a password change does not invalidate existing sessions.
+
+Resolution happens once, at server startup, when the Fastify auth plugin is registered, before any cookie can be signed. A single resolver, `resolveJwtSecret()` in `packages/backend/src/lib/jwt-key.ts`, is the only source of truth, with this precedence:
+
+1. **Persisted `data/jwt.key`** — the normal case after first run.
+2. **`JWT_SECRET` env var** — legacy installs; used as-is, never written to disk.
+3. **First run** — generate a new secret and persist it to `data/jwt.key` now.
+
+`createJwtSecret()` is idempotent: if a key already exists it is reused, never rotated, so concurrent callers (startup resolver, first-run registration, vault migration) cannot invalidate live sessions.
+
+Both auth paths call `resolveJwtSecret()`: the Fastify auth plugin uses it to configure `@fastify/jwt` (signing + HTTP `request.jwtVerify`), and the WebSocket context (`api/trpc.ts`) uses it to build its standalone verifier. Because the key is persisted before the first cookie is signed and both paths share one resolver, HTTP and WebSocket authentication can never resolve to different secrets. (A prior bug where they did caused WebSocket subscriptions to be silently unauthenticated on a fresh first run until a backend restart.)
 
 ### Encryption Service
 
@@ -263,7 +273,7 @@ curl -X POST http://localhost:3000/trpc/vault.unlock \
 
 ## File Deny List
 
-Independent of the encryption architecture, the agent's file access tools are restricted from reading security-critical paths. This is defense-in-depth: even if a future change reintroduced a key file, the agent couldn't read it.
+Independent of the encryption architecture, the agent's file access tools are restricted from reading security-critical paths. This is defense-in-depth: the DEK is never on disk, and the one security-relevant key file that does exist (`data/jwt.key`) is on this list so the agent cannot read it to forge sessions.
 
 ### Blocked Paths
 
@@ -273,18 +283,25 @@ The following paths are blocked for the agent's Read, Write, and Bash tools:
 |---------|--------|
 | `$DATA_DIR/vault.json` | Wrapped DEK and KDF parameters |
 | `$DATA_DIR/.secrets` | Legacy secrets file (if present during migration) |
+| `$DATA_DIR/.secrets.migrated` | Renamed legacy secrets backup |
+| `$DATA_DIR/jwt.key` | JWT session secret (prevents session forgery) |
 | `.env` | May contain `ANIMUS_UNLOCK_PASSWORD` in dev |
 | `$DATA_DIR/databases/*.db` | Raw database files (prevent direct SQLite reads) |
 | `packages/backend/src/lib/encryption-service.ts` | Prevent agent from modifying encryption code |
 | `packages/backend/src/lib/secrets-manager.ts` | Prevent agent from modifying secrets code |
 | `packages/backend/src/lib/vault-manager.ts` | Prevent agent from modifying vault code |
+| `packages/backend/src/lib/vault-migration.ts` | Prevent agent from modifying vault migration code |
+| `packages/backend/src/lib/jwt-key.ts` | Prevent agent from modifying JWT key code |
 
 ### Blocked Commands
 
-The Bash tool additionally blocks commands that could access credential storage through non-file paths:
+The Bash tool additionally blocks commands that could read credential storage directly or query it through non-file paths:
 
 | Pattern | Reason |
 |---------|--------|
+| `cat ... vault.json` | Direct read of the wrapped DEK |
+| `cat ... .secrets` | Direct read of the legacy secrets file |
+| `cat ... jwt.key` | Direct read of the JWT session secret |
 | `security find-generic-password` | macOS Keychain query (future device-key feature) |
 | `secret-tool lookup` | Linux keyring query (future device-key feature) |
 
@@ -317,27 +334,38 @@ The deny list is enforced in the agent session's `canUseTool` callback and `PreT
    c. Start Fastify server (limited mode) + heartbeat (degraded)
 ```
 
+> In every startup path, sealed or unsealed, the Fastify auth plugin resolves
+> `data/jwt.key` (via `resolveJwtSecret()`) before any request is served. The
+> JWT secret does not depend on the vault, so session auth works even while
+> sealed (this is what lets the unauthenticated unlock endpoint issue a cookie).
+
 ### First Run (No Vault)
 
 ```
 1. resolveDataDir()
 2. loadVault() returns null             — no vault.json
 3. initializeDatabases()                — open DBs, run migrations
-4. Start Fastify server                 — serves registration page
-5. User completes registration:
+4. Register Fastify auth plugin         — resolveJwtSecret() generates and
+                                          persists data/jwt.key (first run)
+5. Start Fastify server                 — serves registration page
+6. User completes registration:
    a. Hash password with Argon2id       — for auth (stored in users table)
    b. Generate DEK: crypto.randomBytes(32)
    c. Generate salt: crypto.randomBytes(32)
    d. Derive password key: Argon2id(password, salt)
    e. Wrap DEK: AES-256-GCM encrypt DEK with password key
    f. Encrypt sentinel: AES-256-GCM encrypt 'animus-key-ok' with DEK
-   g. Generate JWT secret: crypto.randomBytes(32)
-   h. Wrap JWT secret with password key
-   i. Write vault.json: { version, kdf, kdfParams, wrappedDek, wrappedJwtSecret, sentinel }
-   j. setSealState('unsealed', dek)
-   k. Issue JWT session cookie
-   l. Redirect to onboarding
+   g. Write vault.json: { version, kdf, kdfParams, wrappedDek, sentinel }
+   h. setSealState('unsealed', dek)
+   i. Issue JWT session cookie          — signed with the data/jwt.key secret
+                                          resolved at step 4
+   j. Redirect to onboarding
 ```
+
+> The JWT secret is not generated during registration. It is resolved and
+> persisted earlier, when the auth plugin registers (step 4), so signing and
+> WebSocket verification always share the same secret. `createJwtSecret()` is
+> idempotent, so the registration path reuses the startup-created key.
 
 ### Migration from Legacy `.secrets` File
 
@@ -370,12 +398,11 @@ Password changes re-wrap the DEK without touching any encrypted credentials:
    b. Unwrap DEK (should match the one already in memory)
 3. Derive new password key from new password (new random salt)
 4. Re-wrap DEK with new password key
-5. Re-wrap JWT secret with new password key
-6. Update vault.json with new wrappedDek, wrappedJwtSecret, salt, kdfParams
-7. Update password hash in users table (Argon2id, separate salt)
+5. Update vault.json with new wrappedDek, salt, kdfParams
+6. Update password hash in users table (Argon2id, separate salt)
 ```
 
-This is an instant operation. Only the DEK wrapper changes. All credentials remain encrypted with the same DEK and need no re-encryption.
+This is an instant operation. Only the DEK wrapper changes. All credentials remain encrypted with the same DEK and need no re-encryption. The JWT secret (`data/jwt.key`) is independent of the password and is **not** touched, so a password change does not invalidate existing sessions.
 
 ---
 
@@ -485,6 +512,14 @@ This feature is not yet designed in detail. When implemented, it will be documen
 | `packages/backend/src/lib/secrets-manager.ts` | Legacy secrets resolution (migration support) |
 | `packages/backend/src/utils/env.ts` | `DATA_DIR` resolution |
 | `packages/backend/src/index.ts` | Startup flow: vault load, unseal attempt, database init |
+
+### Session Authentication (JWT)
+
+| File | Purpose |
+|------|---------|
+| `packages/backend/src/lib/jwt-key.ts` | `resolveJwtSecret()` / `createJwtSecret()`: single source of truth for the `data/jwt.key` session secret |
+| `packages/backend/src/plugins/auth.ts` | Registers `@fastify/jwt` with `resolveJwtSecret()`; signs/verifies HTTP session cookies |
+| `packages/backend/src/api/trpc.ts` | WebSocket tRPC context; verifies the session token with the same `resolveJwtSecret()` |
 
 ### Unlock Endpoints
 

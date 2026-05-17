@@ -36,12 +36,13 @@ $ANIMUS_DATA_DIR/
   workspace/              # Agent working directory (reserved for future use)
   package-uploads/        # Temp staging for .anpk installs
   vault.json              # Password-wrapped DEK + KDF parameters (see encryption-architecture.md)
+  jwt.key                 # JWT session secret, 0600, independent of the vault (see encryption-architecture.md)
   .restore-backup/        # Temporary rollback backup during restore
 ```
 
 ## Secrets Lifecycle
 
-The encryption key (DEK) is derived from the user's password and exists only in process memory. No key material is stored on the filesystem. For the complete encryption architecture, see **`docs/architecture/encryption-architecture.md`**.
+The encryption key (DEK) is derived from the user's password and exists only in process memory; it is never written to the filesystem. The JWT *session* secret is separate: it is stored in `jwt.key` (0600), is independent of the password and the DEK, and only protects session authentication. For the complete encryption architecture, see **`docs/architecture/encryption-architecture.md`**.
 
 ### Vault File
 
@@ -58,7 +59,6 @@ The encryption key (DEK) is derived from the user's password and exists only in 
     "salt": "<32-byte-base64>"
   },
   "wrappedDek": "<AES-256-GCM encrypted DEK>",
-  "wrappedJwtSecret": "<AES-256-GCM encrypted JWT secret>",
   "sentinel": "<AES-256-GCM encrypted 'animus-key-ok'>"
 }
 ```

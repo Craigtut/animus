@@ -164,7 +164,9 @@ The auth plugin provides:
 // Conceptual structure (not final implementation)
 export default fp(async (fastify) => {
   fastify.register(fastifyJwt, {
-    secret: process.env.ANIMUS_JWT_SECRET!,
+    // resolveJwtSecret(): data/jwt.key, else legacy JWT_SECRET env,
+    // else generated and persisted on first run (see jwt-key.ts)
+    secret: resolveJwtSecret(),
     sign: { expiresIn: '7d' },
     cookie: { cookieName: 'animus_session', signed: false },
   });
@@ -186,7 +188,7 @@ export default fp(async (fastify) => {
 
 **Security properties:**
 - Passwords never stored in plaintext (argon2 with default cost)
-- JWT secret from environment variable (`ANIMUS_JWT_SECRET`)
+- JWT secret stored in `data/jwt.key` (0600, independent of the vault DEK); legacy `JWT_SECRET` env still honored. The same `resolveJwtSecret()` is used for HTTP signing/verify and WebSocket verify so they cannot diverge. See `docs/architecture/encryption-architecture.md`
 - httpOnly cookies prevent XSS-based token theft
 - API channels use Bearer token (same JWT, different transport)
 - No OAuth, social login, or 2FA needed (single-user, self-hosted, LAN)
