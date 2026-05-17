@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { Slider, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
 import { OnboardingNav } from '../OnboardingNav';
+import { useReviewReturn } from '../useReviewReturn';
 
 interface Dimension {
   id: string;
@@ -49,6 +50,7 @@ export function DimensionsStep() {
   const theme = useTheme();
   const navigate = useNavigate();
   const { markStepComplete, setCurrentStep, personaDraft, updatePersonaDraft } = useOnboardingStore();
+  const { isEditing, finishStep, cancelEdit } = useReviewReturn();
 
   const [values, setValues] = useState<Record<string, number>>(() => {
     const stored = personaDraft.personalityDimensions;
@@ -68,8 +70,10 @@ export function DimensionsStep() {
   const handleContinue = () => {
     updatePersonaDraft({ personalityDimensions: values });
     markStepComplete('persona_dimensions');
-    setCurrentStep('persona_traits');
-    navigate('/onboarding/persona/traits');
+    finishStep(() => {
+      setCurrentStep('persona_traits');
+      navigate('/onboarding/persona/traits');
+    });
   };
 
   const handleBack = () => navigate('/onboarding/persona/archetype');
@@ -123,8 +127,9 @@ export function DimensionsStep() {
       </div>
 
       <OnboardingNav
-        onBack={handleBack}
+        onBack={isEditing ? cancelEdit : handleBack}
         onContinue={handleContinue}
+        continueLabel={isEditing ? 'Save' : undefined}
       />
     </div>
   );

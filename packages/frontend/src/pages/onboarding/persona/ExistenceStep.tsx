@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Input, SelectionCard, Typography, CityAutocomplete, TimezoneSelect } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
 import { OnboardingNav } from '../OnboardingNav';
+import { useReviewReturn } from '../useReviewReturn';
 
 type Paradigm = 'simulated_life' | 'digital_consciousness';
 
@@ -13,6 +14,7 @@ export function ExistenceStep() {
   const theme = useTheme();
   const navigate = useNavigate();
   const { markStepComplete, setCurrentStep, personaDraft, updatePersonaDraft } = useOnboardingStore();
+  const { isEditing, finishStep, cancelEdit } = useReviewReturn();
 
   const [paradigm, setParadigm] = useState<Paradigm | null>(personaDraft.existenceParadigm);
   const [location, setLocation] = useState(personaDraft.location);
@@ -26,8 +28,10 @@ export function ExistenceStep() {
   const handleContinue = () => {
     updatePersonaDraft({ existenceParadigm: paradigm, location, worldDescription, timezone });
     markStepComplete('persona_existence');
-    setCurrentStep('persona_identity');
-    navigate('/onboarding/persona/identity');
+    finishStep(() => {
+      setCurrentStep('persona_identity');
+      navigate('/onboarding/persona/identity');
+    });
   };
 
   const handleBack = () => navigate('/onboarding/about-you');
@@ -149,8 +153,9 @@ export function ExistenceStep() {
       </AnimatePresence>
 
       <OnboardingNav
-        onBack={handleBack}
+        onBack={isEditing ? cancelEdit : handleBack}
         onContinue={handleContinue}
+        continueLabel={isEditing ? 'Save' : undefined}
         continueDisabled={
           !paradigm
           || (paradigm === 'digital_consciousness' && !worldDescription.trim())

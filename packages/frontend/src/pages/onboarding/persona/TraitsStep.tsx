@@ -6,6 +6,7 @@ import { motion } from 'motion/react';
 import { Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
 import { OnboardingNav } from '../OnboardingNav';
+import { useReviewReturn } from '../useReviewReturn';
 
 const traitCategories: { title: string; traits: string[] }[] = [
   { title: 'Communication', traits: ['Witty', 'Sarcastic', 'Dry humor', 'Gentle', 'Blunt', 'Poetic', 'Formal', 'Casual', 'Verbose', 'Terse'] },
@@ -20,6 +21,7 @@ export function TraitsStep() {
   const theme = useTheme();
   const navigate = useNavigate();
   const { markStepComplete, setCurrentStep, personaDraft, updatePersonaDraft } = useOnboardingStore();
+  const { isEditing, finishStep, cancelEdit } = useReviewReturn();
 
   const [selected, setSelected] = useState<string[]>(personaDraft.traits);
 
@@ -34,8 +36,10 @@ export function TraitsStep() {
   const handleContinue = () => {
     updatePersonaDraft({ traits: selected });
     markStepComplete('persona_traits');
-    setCurrentStep('persona_values');
-    navigate('/onboarding/persona/values');
+    finishStep(() => {
+      setCurrentStep('persona_values');
+      navigate('/onboarding/persona/values');
+    });
   };
 
   const handleBack = () => navigate('/onboarding/persona/dimensions');
@@ -143,8 +147,9 @@ export function TraitsStep() {
       </div>
 
       <OnboardingNav
-        onBack={handleBack}
+        onBack={isEditing ? cancelEdit : handleBack}
         onContinue={handleContinue}
+        continueLabel={isEditing ? 'Save' : undefined}
         continueDisabled={selected.length < 5}
       />
     </div>

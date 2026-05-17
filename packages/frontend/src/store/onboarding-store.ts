@@ -94,10 +94,17 @@ interface OnboardingState {
   personaDraft: PersonaDraft;
   cortexProvider: string | null;
   cortexModel: string | null;
+  /**
+   * True when the user jumped into a persona step via "Edit" on the review
+   * screen. Steps use this to return straight to review on continue/back
+   * instead of walking forward through the rest of the flow again.
+   */
+  editReturn: boolean;
   setCurrentStep: (step: OnboardingStep) => void;
   markStepComplete: (step: OnboardingStep) => void;
   updatePersonaDraft: (updates: Partial<PersonaDraft>) => void;
   setCortexProvider: (provider: string | null, model: string | null) => void;
+  setEditReturn: (value: boolean) => void;
   reset: () => void;
 }
 
@@ -109,6 +116,7 @@ export const useOnboardingStore = create<OnboardingState>()(
       personaDraft: { ...defaultPersonaDraft },
       cortexProvider: null,
       cortexModel: null,
+      editReturn: false,
       setCurrentStep: (step) => set({ currentStep: step }),
       markStepComplete: (step) =>
         set((state) => ({
@@ -122,6 +130,7 @@ export const useOnboardingStore = create<OnboardingState>()(
         })),
       setCortexProvider: (provider, model) =>
         set({ cortexProvider: provider, cortexModel: model }),
+      setEditReturn: (value) => set({ editReturn: value }),
       reset: () =>
         set({
           currentStep: 'welcome',
@@ -129,6 +138,7 @@ export const useOnboardingStore = create<OnboardingState>()(
           personaDraft: { ...defaultPersonaDraft },
           cortexProvider: null,
           cortexModel: null,
+          editReturn: false,
         }),
     }),
     {

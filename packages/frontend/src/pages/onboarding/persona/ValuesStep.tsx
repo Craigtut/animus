@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { SelectionCard, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
 import { OnboardingNav } from '../OnboardingNav';
+import { useReviewReturn } from '../useReviewReturn';
 
 const allValues = [
   { id: 'knowledge', name: 'Knowledge & Truth', description: 'Pursuing understanding above all else' },
@@ -31,6 +32,7 @@ export function ValuesStep() {
   const theme = useTheme();
   const navigate = useNavigate();
   const { markStepComplete, setCurrentStep, personaDraft, updatePersonaDraft } = useOnboardingStore();
+  const { isEditing, finishStep, cancelEdit } = useReviewReturn();
 
   const [selected, setSelected] = useState<string[]>(personaDraft.values);
 
@@ -45,8 +47,10 @@ export function ValuesStep() {
   const handleContinue = () => {
     updatePersonaDraft({ values: selected });
     markStepComplete('persona_values');
-    setCurrentStep('persona_background');
-    navigate('/onboarding/persona/background');
+    finishStep(() => {
+      setCurrentStep('persona_background');
+      navigate('/onboarding/persona/background');
+    });
   };
 
   const handleBack = () => navigate('/onboarding/persona/traits');
@@ -132,8 +136,9 @@ export function ValuesStep() {
       </div>
 
       <OnboardingNav
-        onBack={handleBack}
+        onBack={isEditing ? cancelEdit : handleBack}
         onContinue={handleContinue}
+        continueLabel={isEditing ? 'Save' : undefined}
         continueDisabled={selected.length < 3}
       />
     </div>

@@ -5,11 +5,13 @@ import { useNavigate } from 'react-router-dom';
 import { Input, Select, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
 import { OnboardingNav } from '../OnboardingNav';
+import { useReviewReturn } from '../useReviewReturn';
 
 export function PersonaIdentityStep() {
   const theme = useTheme();
   const navigate = useNavigate();
   const { markStepComplete, setCurrentStep, personaDraft, updatePersonaDraft } = useOnboardingStore();
+  const { isEditing, finishStep, cancelEdit } = useReviewReturn();
 
   const [name, setName] = useState(personaDraft.name);
   const [gender, setGender] = useState(personaDraft.gender);
@@ -20,8 +22,10 @@ export function PersonaIdentityStep() {
   const handleContinue = () => {
     updatePersonaDraft({ name, gender, customGender, age, physicalDescription });
     markStepComplete('persona_identity');
-    setCurrentStep('persona_archetype');
-    navigate('/onboarding/persona/archetype');
+    finishStep(() => {
+      setCurrentStep('persona_archetype');
+      navigate('/onboarding/persona/archetype');
+    });
   };
 
   const handleBack = () => navigate('/onboarding/persona/existence');
@@ -91,8 +95,9 @@ export function PersonaIdentityStep() {
       </div>
 
       <OnboardingNav
-        onBack={handleBack}
+        onBack={isEditing ? cancelEdit : handleBack}
         onContinue={handleContinue}
+        continueLabel={isEditing ? 'Save' : undefined}
         continueDisabled={!name.trim()}
       />
     </div>

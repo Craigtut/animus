@@ -8,7 +8,7 @@ import { Button, Tooltip } from '../../components/ui';
 interface OnboardingNavProps {
   onBack?: () => void;
   onContinue: () => void;
-  continueLabel?: string;
+  continueLabel?: string | undefined;
   continueDisabled?: boolean;
   continueLoading?: boolean;
   onSkip?: () => void;

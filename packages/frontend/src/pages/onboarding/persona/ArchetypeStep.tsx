@@ -8,6 +8,7 @@ import { CaretLeft, CaretRight } from '@phosphor-icons/react';
 import { Button, SelectionCard, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
 import { OnboardingNav } from '../OnboardingNav';
+import { useReviewReturn } from '../useReviewReturn';
 import { archetypePresets, defaultDimensions } from './archetype-presets';
 import type SwiperCore from 'swiper';
 
@@ -30,6 +31,7 @@ export function ArchetypeStep() {
   const theme = useTheme();
   const navigate = useNavigate();
   const { markStepComplete, setCurrentStep, personaDraft, updatePersonaDraft } = useOnboardingStore();
+  const { isEditing, finishStep, cancelEdit } = useReviewReturn();
 
   const [selected, setSelected] = useState<string | null>(personaDraft.archetype);
   const swiperRef = useRef<SwiperCore | null>(null);
@@ -48,8 +50,10 @@ export function ArchetypeStep() {
       traits: preset ? [...preset.traits] : [],
     });
     markStepComplete('persona_archetype');
-    setCurrentStep('persona_dimensions');
-    navigate('/onboarding/persona/dimensions');
+    finishStep(() => {
+      setCurrentStep('persona_dimensions');
+      navigate('/onboarding/persona/dimensions');
+    });
   };
 
   const handleBack = () => navigate('/onboarding/persona/identity');
@@ -269,8 +273,9 @@ export function ArchetypeStep() {
       </div>
 
       <OnboardingNav
-        onBack={handleBack}
+        onBack={isEditing ? cancelEdit : handleBack}
         onContinue={handleContinue}
+        continueLabel={isEditing ? 'Save' : undefined}
         continueDisabled={selected === null}
       />
     </div>

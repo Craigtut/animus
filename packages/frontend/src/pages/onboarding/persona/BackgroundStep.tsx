@@ -5,11 +5,13 @@ import { useNavigate } from 'react-router-dom';
 import { Input, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
 import { OnboardingNav } from '../OnboardingNav';
+import { useReviewReturn } from '../useReviewReturn';
 
 export function BackgroundStep() {
   const theme = useTheme();
   const navigate = useNavigate();
   const { markStepComplete, setCurrentStep, personaDraft, updatePersonaDraft } = useOnboardingStore();
+  const { isEditing, finishStep, cancelEdit } = useReviewReturn();
 
   const [personalityNotes, setPersonalityNotes] = useState(personaDraft.personalityNotes);
   const [background, setBackground] = useState(personaDraft.background);
@@ -17,8 +19,10 @@ export function BackgroundStep() {
   const handleContinue = () => {
     updatePersonaDraft({ personalityNotes, background });
     markStepComplete('persona_background');
-    setCurrentStep('persona_review');
-    navigate('/onboarding/persona/review');
+    finishStep(() => {
+      setCurrentStep('persona_review');
+      navigate('/onboarding/persona/review');
+    });
   };
 
   const handleBack = () => navigate('/onboarding/persona/values');
@@ -57,8 +61,9 @@ export function BackgroundStep() {
       />
 
       <OnboardingNav
-        onBack={handleBack}
+        onBack={isEditing ? cancelEdit : handleBack}
         onContinue={handleContinue}
+        continueLabel={isEditing ? 'Save' : undefined}
       />
     </div>
   );

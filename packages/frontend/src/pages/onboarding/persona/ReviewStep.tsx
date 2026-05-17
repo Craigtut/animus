@@ -10,8 +10,14 @@ import { trpc } from '../../../utils/trpc';
 export function ReviewStep() {
   const theme = useTheme();
   const navigate = useNavigate();
-  const { markStepComplete, setCurrentStep, personaDraft } = useOnboardingStore();
+  const { markStepComplete, setCurrentStep, personaDraft, setEditReturn } = useOnboardingStore();
   const [isSaving, setIsSaving] = useState(false);
+
+  /** Jump to a single step in edit mode; the step returns here on save. */
+  const editStep = (path: string) => {
+    setEditReturn(true);
+    navigate(path);
+  };
 
   const saveDraft = trpc.persona.saveDraft.useMutation();
 
@@ -84,7 +90,7 @@ export function ReviewStep() {
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
         <ReviewSection
           title="Existence"
-          onEdit={() => navigate('/onboarding/persona/existence')}
+          onEdit={() => editStep('/onboarding/persona/existence')}
         >
           <Typography.SmallBody color="secondary">
             {personaDraft.existenceParadigm === 'simulated_life'
@@ -97,7 +103,7 @@ export function ReviewStep() {
 
         <ReviewSection
           title="Identity"
-          onEdit={() => navigate('/onboarding/persona/identity')}
+          onEdit={() => editStep('/onboarding/persona/identity')}
         >
           <Typography.SmallBody color="secondary">
             {personaDraft.name || 'No name set'}
@@ -107,7 +113,7 @@ export function ReviewStep() {
 
         <ReviewSection
           title="Personality"
-          onEdit={() => navigate('/onboarding/persona/dimensions')}
+          onEdit={() => editStep('/onboarding/persona/dimensions')}
         >
           <Typography.SmallBody color="secondary">
             10 personality dimensions configured
@@ -116,7 +122,7 @@ export function ReviewStep() {
 
         <ReviewSection
           title="Traits"
-          onEdit={() => navigate('/onboarding/persona/traits')}
+          onEdit={() => editStep('/onboarding/persona/traits')}
         >
           <Typography.SmallBody color="secondary">
             {personaDraft.traits.length > 0
@@ -127,7 +133,7 @@ export function ReviewStep() {
 
         <ReviewSection
           title="Values"
-          onEdit={() => navigate('/onboarding/persona/values')}
+          onEdit={() => editStep('/onboarding/persona/values')}
         >
           <Typography.SmallBody color="secondary">
             {personaDraft.values.length > 0
@@ -138,7 +144,7 @@ export function ReviewStep() {
 
         <ReviewSection
           title="Background & Notes"
-          onEdit={() => navigate('/onboarding/persona/background')}
+          onEdit={() => editStep('/onboarding/persona/background')}
         >
           <Typography.SmallBody color="secondary">
             {personaDraft.personalityNotes || personaDraft.background
