@@ -2,18 +2,18 @@ import type { OAuthStatusEvent } from './cortex-credential-service.js';
 
 export type OAuthAuthInfoLike = {
   url: string;
-  instructions?: string;
-  deviceCode?: string;
-  flowType?: 'browser' | 'localhost_callback' | 'device_code';
-  manualCodeRecommended?: boolean;
-  callbackPort?: number;
-  callbackPath?: string;
+  instructions?: string | undefined;
+  deviceCode?: string | undefined;
+  flowType?: 'browser' | 'localhost_callback' | 'device_code' | undefined;
+  manualCodeRecommended?: boolean | undefined;
+  callbackPort?: number | undefined;
+  callbackPath?: string | undefined;
 };
 
 export type OAuthPromptInfoLike = {
   message: string;
-  placeholder?: string;
-  allowEmpty?: boolean;
+  placeholder?: string | undefined;
+  allowEmpty?: boolean | undefined;
 };
 
 const DEVICE_CODE_INSTRUCTIONS_RE = /\benter\s+code:\s*([A-Z0-9-]+)/i;
@@ -28,7 +28,7 @@ export function normalizeOAuthAuthInfo(
   legacyInstructions?: string,
 ): OAuthAuthInfoLike {
   const raw = typeof info === 'string'
-    ? { url: info, instructions: legacyInstructions }
+    ? { url: info, ...(legacyInstructions !== undefined ? { instructions: legacyInstructions } : {}) }
     : info;
   const deviceCode = raw.deviceCode
     ?? raw.instructions?.match(DEVICE_CODE_INSTRUCTIONS_RE)?.[1];

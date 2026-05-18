@@ -201,9 +201,9 @@ export const cortexProviderRouter = router({
         let lastAuthEvent: Extract<OAuthStatusEvent, { type: 'auth_url' }> | null = null;
 
         const result = await svc.initiateOAuth(input.provider, {
-          onAuth: (info: OAuthAuthInfoLike | string, legacyInstructions?: string) => {
-            // Pi-ai passes { url, instructions } object; handle both shapes for safety
-            const authInfo = normalizeOAuthAuthInfo(input.provider, info, legacyInstructions);
+          onAuth: (info: OAuthAuthInfoLike) => {
+            // Cortex normalizes pi-ai provider callbacks before they reach Animus.
+            const authInfo = normalizeOAuthAuthInfo(input.provider, info);
             const authUrl = authInfo.url;
             log.info(`OAuth auth URL received for "${input.provider}"`);
 
