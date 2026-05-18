@@ -67,6 +67,7 @@ export function CortexProviderStep() {
   const [connectedMethod, setConnectedMethod] = useState<string | null>(null);
   const [connectedDisplayName, setConnectedDisplayName] = useState<string | null>(null);
   const [connectedRefreshable, setConnectedRefreshable] = useState(false);
+  const [continueError, setContinueError] = useState<string | null>(null);
 
   // Model selection (shown after successful auth)
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
@@ -86,6 +87,7 @@ export function CortexProviderStep() {
   const oauthRespondMutation = trpc.cortexProvider.oauthRespond.useMutation();
   const removeCredentialMutation = trpc.cortexProvider.removeCredential.useMutation();
   const setContextLimitMutation = trpc.cortexProvider.setContextWindowLimit.useMutation();
+  const completeFromRestoreMutation = trpc.onboarding.completeFromRestore.useMutation();
 
   const utils = trpc.useUtils();
 
@@ -135,7 +137,13 @@ export function CortexProviderStep() {
     }
   }, [statusData]);
 
-  const canContinue = connectedProvider !== null || (statusData?.connected ?? false);
+  const providerForContinue = connectedProvider ?? statusData?.provider ?? null;
+  const modelForContinue = selectedModel ?? statusData?.model ?? null;
+  const canContinue = Boolean(
+    providerForContinue
+    && modelForContinue
+    && (connectedProvider !== null || (statusData?.connected ?? false)),
+  );
 
   // Providers that support API keys
   const apiKeyProviders = (allProviders ?? []).filter(
@@ -289,6 +297,8 @@ export function CortexProviderStep() {
   }, []);
 
   const handleContinue = useCallback(async () => {
+    setContinueError(null);
+
     // Ensure active provider is registered. The OAuth/API key save flow
     // already sets the curated default model. Only call setActiveProvider
     // for env var detection where no save mutation ran.
@@ -324,18 +334,24 @@ export function CortexProviderStep() {
       }
     }
 
-    markStepComplete('agent_provider');
-
     // If persona is already finalized (restored from save), skip to main app
     if (persona?.isFinalized) {
-      setCurrentStep('complete');
-      navigate('/');
+      try {
+        const onboardingState = await completeFromRestoreMutation.mutateAsync();
+        utils.onboarding.getState.setData(undefined, onboardingState);
+        markStepComplete('agent_provider');
+        setCurrentStep('complete');
+        navigate('/');
+      } catch (err) {
+        setContinueError(err instanceof Error ? err.message : 'Connect an AI provider before continuing.');
+      }
       return;
     }
 
+    markStepComplete('agent_provider');
     setCurrentStep('identity');
     navigate('/onboarding/identity');
-  }, [markStepComplete, setCurrentStep, navigate, persona?.isFinalized, connectedProvider, statusData?.provider, statusData?.model, setActiveProviderMutation, setCortexProvider, selectedModel, selectedContextLimit, setContextLimitMutation]);
+  }, [markStepComplete, setCurrentStep, navigate, persona?.isFinalized, connectedProvider, statusData?.provider, statusData?.model, setActiveProviderMutation, setCortexProvider, selectedModel, selectedContextLimit, setContextLimitMutation, completeFromRestoreMutation, utils.onboarding.getState]);
 
   const handleBack = () => navigate('/onboarding/welcome');
 
@@ -991,11 +1007,35 @@ export function CortexProviderStep() {
         );
       })()}
 
+      <AnimatePresence>
+        {continueError && (
+          <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            css={css`
+              display: flex;
+              align-items: flex-start;
+              gap: ${theme.spacing[2]};
+              padding: ${theme.spacing[2]} ${theme.spacing[3]};
+              border-radius: ${theme.borderRadius.default};
+              background: ${theme.colors.error.main}1a;
+            `}
+          >
+            <XCircle size={14} weight="fill" css={css`color: ${theme.colors.error.main}; flex-shrink: 0; margin-top: 2px;`} />
+            <Typography.Caption color={theme.colors.error.main}>
+              {continueError}
+            </Typography.Caption>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Navigation */}
       <OnboardingNav
         onBack={handleBack}
         onContinue={handleContinue}
         continueDisabled={!canContinue}
+        continueLoading={completeFromRestoreMutation.isPending}
         continueTooltip={!canContinue ? 'Connect an AI provider to continue' : undefined}
       />
     </div>

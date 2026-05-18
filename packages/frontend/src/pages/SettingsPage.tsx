@@ -131,6 +131,7 @@ function HeartbeatSection() {
     refetchInterval: 10000,
   });
   const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
+  const { data: providerStatus } = trpc.cortexProvider.getStatus.useQuery();
 
   const startMutation = trpc.heartbeat.start.useMutation({
     onSuccess: () => utils.heartbeat.getState.invalidate(),
@@ -146,6 +147,7 @@ function HeartbeatSection() {
   const intervalSave = useSaveFlash();
 
   const isRunning = hbState?.isRunning ?? false;
+  const providerReady = Boolean(providerStatus?.connected && providerStatus.provider && providerStatus.model);
 
   // Clear resuming state once the heartbeat is confirmed running
   useEffect(() => {
@@ -215,6 +217,7 @@ function HeartbeatSection() {
   };
 
   const handleResume = () => {
+    if (!providerReady) return;
     setIsResuming(true);
     startMutation.mutate(undefined, {
       onError: () => setIsResuming(false),
@@ -303,7 +306,9 @@ function HeartbeatSection() {
             <Typography.SmallBody color={isResuming ? theme.colors.info.dark : theme.colors.warning.dark}>
               {isResuming
                 ? 'Starting heartbeat. Waiting for first tick...'
-                : 'Heartbeat is paused. Your Animus is not thinking.'}
+                : providerReady
+                  ? 'Heartbeat is paused. Your Animus is not thinking.'
+                  : 'Connect an AI provider before resuming heartbeat.'}
             </Typography.SmallBody>
           </div>
         )}
@@ -314,9 +319,17 @@ function HeartbeatSection() {
               Pause heartbeat
             </Button>
           ) : (
-            <Button size="sm" onClick={handleResume} loading={isResuming || startMutation.isPending} disabled={isResuming}>
-              {isResuming ? 'Starting...' : 'Resume heartbeat'}
-            </Button>
+            providerReady ? (
+              <Button size="sm" onClick={handleResume} loading={isResuming || startMutation.isPending} disabled={isResuming}>
+                {isResuming ? 'Starting...' : 'Resume heartbeat'}
+              </Button>
+            ) : (
+              <Tooltip content="Set up an AI provider first" position="top">
+                <Button size="sm" onClick={handleResume} loading={isResuming || startMutation.isPending} disabled>
+                  Resume heartbeat
+                </Button>
+              </Tooltip>
+            )
           )}
         </div>
 

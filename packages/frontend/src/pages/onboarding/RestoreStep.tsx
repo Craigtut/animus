@@ -48,7 +48,7 @@ export function RestoreStep() {
 
   const utils = trpc.useUtils();
   const restoreMutation = trpc.saves.restore.useMutation();
-  const completeMutation = trpc.onboarding.completeFromRestore.useMutation();
+  const updateStepMutation = trpc.onboarding.updateStep.useMutation();
 
   const uploadFile = useCallback(async (file: File) => {
     if (!file.name.endsWith('.animus')) {
@@ -132,22 +132,23 @@ export function RestoreStep() {
       { id: saveId },
       {
         onSuccess: () => {
-          completeMutation.mutate(undefined, {
-            onSuccess: () => {
-              // Update the cached onboarding state so AuthGuard sees isComplete: true
-              // when the user navigates to "/" after the provider step.
-              // Without this, the stale cached value (isComplete: false) causes
-              // a redirect loop back to the welcome screen.
-              utils.onboarding.getState.setData(undefined, { isComplete: true, currentStep: 8 });
-              navigate('/onboarding/agent');
+          updateStepMutation.mutate(
+            { currentStep: 1 },
+            {
+              onSuccess: (onboardingState) => {
+                utils.onboarding.getState.setData(undefined, onboardingState);
+                utils.persona.get.invalidate();
+                utils.cortexProvider.getStatus.invalidate();
+                navigate('/onboarding/agent');
+              },
+              onError: (err) => {
+                setState({
+                  status: 'error',
+                  message: err.message || 'Failed to continue setup after restore',
+                });
+              },
             },
-            onError: (err) => {
-              setState({
-                status: 'error',
-                message: err.message || 'Failed to complete onboarding after restore',
-              });
-            },
-          });
+          );
         },
         onError: (err) => {
           setState({
@@ -157,7 +158,7 @@ export function RestoreStep() {
         },
       },
     );
-  }, [state, restoreMutation, completeMutation, navigate]);
+  }, [state, restoreMutation, updateStepMutation, utils, navigate]);
 
   const handleBack = () => navigate('/onboarding/welcome');
 

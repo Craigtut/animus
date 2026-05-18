@@ -4,6 +4,7 @@
 
 import { z } from 'zod/v3';
 import { observable } from '@trpc/server/observable';
+import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../trpc.js';
 import { getHeartbeatDb, getAgentLogsDb, getPersonaDb } from '../../db/index.js';
 import * as heartbeatStore from '../../db/stores/heartbeat-store.js';
@@ -133,7 +134,13 @@ export const heartbeatRouter = router({
    * Start the heartbeat system.
    */
   start: protectedProcedure.mutation(() => {
-    startHeartbeat();
+    const started = startHeartbeat();
+    if (!started) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'Connect an AI provider before resuming the heartbeat.',
+      });
+    }
     return getHeartbeatStatus();
   }),
 

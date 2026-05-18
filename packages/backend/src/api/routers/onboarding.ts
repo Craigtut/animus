@@ -10,6 +10,8 @@ import { router, protectedProcedure } from '../trpc.js';
 import { getSystemDb, getPersonaDb } from '../../db/index.js';
 import * as systemStore from '../../db/stores/system-store.js';
 import * as personaStore from '../../db/stores/persona-store.js';
+import { getCortexCredentialService } from '../../services/cortex-credential-service.js';
+import { startHeartbeat } from '../../heartbeat/index.js';
 
 export const onboardingRouter = router({
   /**
@@ -37,8 +39,9 @@ export const onboardingRouter = router({
   /**
    * Mark onboarding complete after a save restore.
    *
-   * Verifies that the restored persona is finalized before allowing
-   * the user to skip the persona creation steps.
+   * Verifies that the restored persona is finalized and the local instance has
+   * its own AI provider configured before allowing the restored setup to enter
+   * the main app.
    */
   completeFromRestore: protectedProcedure.mutation(() => {
     const persona = personaStore.getPersona(getPersonaDb());
@@ -48,6 +51,23 @@ export const onboardingRouter = router({
         message: 'Restored persona is not finalized. Cannot skip onboarding.',
       });
     }
+    const providerReadiness = getCortexCredentialService().getActiveProviderReadiness();
+    if (!providerReadiness.ready) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: providerReadiness.message ?? 'Connect an AI provider before completing setup.',
+      });
+    }
+
+    const started = startHeartbeat();
+    if (!started) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'Connect an AI provider before completing setup.',
+      });
+    }
+
     systemStore.updateOnboardingState(getSystemDb(), { isComplete: true, currentStep: 8 });
+    return systemStore.getOnboardingState(getSystemDb());
   }),
 });

@@ -25,6 +25,7 @@ import { createLogger } from '../lib/logger.js';
 import { isUnsealed } from '../lib/vault-manager.js';
 import { getTelemetryService } from '../services/telemetry-service.js';
 import { getBudgetService } from '../services/budget-service.js';
+import { getCortexCredentialService } from '../services/cortex-credential-service.js';
 import { now } from '@animus-labs/shared';
 import type { HeartbeatState, MindOutput } from '@animus-labs/shared';
 import { resolveCacheRetention } from '@animus-labs/cortex';
@@ -86,6 +87,33 @@ interface BudgetGateResult {
 function checkBudgetGate(triggerType: string): BudgetGateResult {
   const budgetService = getBudgetService({ getSystemDb, getAgentLogsDb });
   return budgetService.shouldAllowTick(triggerType);
+}
+
+function getActiveProviderReadiness() {
+  return getCortexCredentialService().getActiveProviderReadiness();
+}
+
+function emitProviderRequiredError(message?: string | null): void {
+  getEventBus().emit('system:error', {
+    category: 'configuration',
+    message: message ?? 'No AI provider configured. Go to Settings > AI Provider to connect one.',
+    recoverable: true,
+    suggestedAction: 'Configure a provider in Settings > AI Provider.',
+  });
+}
+
+function forceHeartbeatPaused(reason: string): void {
+  const hbDb = getHeartbeatDb();
+  tickQueue.stopInterval();
+  tickQueue.clear();
+  heartbeatStore.updateHeartbeatState(hbDb, {
+    currentStage: 'idle',
+    triggerType: null,
+    triggerContext: null,
+    isRunning: false,
+  });
+  getEventBus().emit('heartbeat:state_change', heartbeatStore.getHeartbeatState(hbDb));
+  log.info(`Heartbeat paused: ${reason}`);
 }
 
 // ============================================================================
@@ -517,6 +545,14 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
   const state = heartbeatStore.getHeartbeatState(hbDb);
   const tickNumber = state.tickNumber + 1;
 
+  const providerReadiness = getActiveProviderReadiness();
+  if (!providerReadiness.ready) {
+    log.warn(`Tick skipped: ${providerReadiness.message}`);
+    forceHeartbeatPaused(providerReadiness.message ?? 'AI provider is not configured');
+    emitProviderRequiredError(providerReadiness.message);
+    return;
+  }
+
   // Skip the full pipeline when the vault is sealed (no credentials available)
   if (!isUnsealed()) {
     log.info(`Tick #${tickNumber} skipped: vault is sealed`);
@@ -931,6 +967,7 @@ export async function initializeHeartbeat(subsystems: {
       subsystems.agents.agentOrchestrator.setCortexAgent(null);
       log.info('AgentOrchestrator disconnected from cortex (provider removed)');
     }
+    forceHeartbeatPaused('AI provider was removed');
   });
 
   // Plugin changes, tool permission changes, and provider/model settings
@@ -945,6 +982,13 @@ export async function initializeHeartbeat(subsystems: {
   if (state.isRunning) {
     const sysDb = getSystemDb();
     const settings = systemStore.getSystemSettings(sysDb);
+    const providerReadiness = getActiveProviderReadiness();
+
+    if (!providerReadiness.ready) {
+      forceHeartbeatPaused(providerReadiness.message ?? 'AI provider is not configured');
+      log.info('Heartbeat will not resume until an AI provider is configured.');
+      return { resumedAfterRestart, nextTickInMs };
+    }
 
     // Use sleep interval if the AI is currently in the sleeping energy band
     const intervalMs = resolveTickInterval(settings);
@@ -960,13 +1004,21 @@ export async function initializeHeartbeat(subsystems: {
  * Start the heartbeat system.
  * Called after onboarding is complete and persona exists.
  */
-export function startHeartbeat(): void {
+export function startHeartbeat(): boolean {
   const hbDb = getHeartbeatDb();
   const state = heartbeatStore.getHeartbeatState(hbDb);
+  const providerReadiness = getActiveProviderReadiness();
+
+  if (!providerReadiness.ready) {
+    forceHeartbeatPaused(providerReadiness.message ?? 'AI provider is not configured');
+    emitProviderRequiredError(providerReadiness.message);
+    log.warn(`Cannot start heartbeat: ${providerReadiness.message}`);
+    return false;
+  }
 
   if (state.isRunning) {
     log.info('Already running');
-    return;
+    return true;
   }
 
   const sysDb = getSystemDb();
@@ -982,6 +1034,7 @@ export function startHeartbeat(): void {
   tickQueue.enqueueInterval();
 
   log.info(`Started with interval of ${intervalMs}ms${intervalMs !== settings.heartbeatIntervalMs ? ' (sleep)' : ''}`);
+  return true;
 }
 
 /**

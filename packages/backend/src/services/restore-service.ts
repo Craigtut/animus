@@ -12,7 +12,7 @@
  *  5. Checkpoint and close all databases
  *  6. Create rollback backup, then swap database files from extracted save
  *  7. Reopen databases (runs migrations to bring old schemas forward)
- *  8. Reinitialize heartbeat, channels, and start if persona is finalized
+ *  8. Reinitialize heartbeat, channels, and start if persona and provider are ready
  *  9. Exit maintenance mode
  *  10. Clean up temp directory
  */
@@ -358,13 +358,22 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     await channelManager.loadAll();
     log.info('Channels reloaded');
 
-    // 16. Start heartbeat if persona is finalized
+    // 16. Start heartbeat only if persona is finalized and this instance has
+    // its own AI provider configured. Save archives exclude system.db, so a
+    // brand new restored instance still needs provider setup before thinking.
     const { getPersonaDb: getRestoredPersonaDb } = await import('../db/index.js');
     const { getPersona } = await import('../db/stores/persona-store.js');
+    const { getCortexCredentialService } = await import('./cortex-credential-service.js');
     const persona = getPersona(getRestoredPersonaDb());
-    if (persona.isFinalized) {
+    const providerReadiness = getCortexCredentialService().getActiveProviderReadiness();
+    if (persona.isFinalized && providerReadiness.ready) {
       startHeartbeat();
       log.info('Heartbeat started');
+    } else if (persona.isFinalized) {
+      log.info(
+        'Heartbeat remains paused after restore: ' +
+        (providerReadiness.message ?? 'AI provider is not configured'),
+      );
     }
 
     // 17. Exit maintenance mode

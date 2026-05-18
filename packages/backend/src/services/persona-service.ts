@@ -7,9 +7,11 @@
  */
 
 import { createLogger } from '../lib/logger.js';
+import { TRPCError } from '@trpc/server';
 import { getSystemDb, getPersonaDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
 import * as personaStore from '../db/stores/persona-store.js';
+import { getCortexCredentialService } from './cortex-credential-service.js';
 import {
   startHeartbeat,
   recompilePersona,
@@ -74,6 +76,14 @@ class PersonaService {
    */
   finalize(): Persona {
     const db = getPersonaDb();
+    const providerReadiness = getCortexCredentialService().getActiveProviderReadiness();
+
+    if (!providerReadiness.ready) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: providerReadiness.message ?? 'Connect an AI provider before bringing Animus to life.',
+      });
+    }
 
     // Mark persona as finalized
     personaStore.finalizePersona(db);

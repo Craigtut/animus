@@ -256,6 +256,8 @@ This stage combines the old ACT and CONSOLIDATE phases into one system operation
 
 On a fresh Animus instance, the heartbeat starts in a **paused/stopped state**. There is no persona yet, no compiled system prompt, no identity for the mind to inhabit — the mind has nothing to *be*. The heartbeat remains paused through the entire onboarding flow and is only started when the user completes persona creation ("Bring to Life"). This is the moment the engine ignites and the first tick fires.
 
+The same gate applies when restoring a save or trying to resume the heartbeat manually. A finalized persona is necessary but not sufficient. The local instance must also have an active Cortex provider, selected model, and usable credential. Save archives exclude `system.db`, so restored instances normally pause at the AI provider step before the heartbeat can start.
+
 See `docs/frontend/onboarding.md` for the full first-startup flow.
 
 ## Configuration

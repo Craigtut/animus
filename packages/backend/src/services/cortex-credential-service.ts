@@ -27,9 +27,14 @@ import {
   type ApiKeyValidationResult,
 } from '@animus-labs/cortex';
 import * as credentialStore from '../db/stores/credential-store.js';
+import * as settingsStore from '../db/stores/settings-store.js';
 import { isConfigured as isVaultUnsealed } from '../lib/encryption-service.js';
 import { getSystemDb } from '../db/index.js';
 import { createLogger } from '../lib/logger.js';
+import {
+  evaluateActiveProviderReadiness,
+  type ActiveProviderReadiness,
+} from './cortex-provider-readiness.js';
 
 const log = createLogger('CortexCredentialService', 'server');
 
@@ -227,6 +232,19 @@ export class CortexCredentialService {
             : 'api_key',
       meta,
     };
+  }
+
+  getActiveProviderReadiness(): ActiveProviderReadiness {
+    const settings = settingsStore.getCortexSettings(this.db);
+    const status = settings.cortexProvider
+      ? this.getProviderStatus(settings.cortexProvider)
+      : null;
+
+    return evaluateActiveProviderReadiness({
+      provider: settings.cortexProvider,
+      model: settings.cortexModel,
+      status,
+    });
   }
 
   // ── The getApiKey Callback ──
