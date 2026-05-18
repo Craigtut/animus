@@ -289,6 +289,7 @@ describe('PluginManager', () => {
       expect(removed.some((p: unknown) => typeof p === 'string' && p.includes('animus-skill-bridge'))).toBe(true);
       expect(removed.some((p: unknown) => typeof p === 'string' && p.includes('runtime/providers/codex/home/skills'))).toBe(true);
       expect(removed.some((p: unknown) => typeof p === 'string' && p.includes('runtime/providers/opencode/skills'))).toBe(true);
+      expect(removed.some((p: unknown) => typeof p === 'string' && p.endsWith('/sdks'))).toBe(true);
     });
   });
 

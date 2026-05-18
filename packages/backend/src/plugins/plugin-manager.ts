@@ -917,16 +917,17 @@ export class PluginManager {
   // -------------------------------------------------------------------------
 
   /**
-   * Remove skill deployment artifacts left behind by the retired subprocess SDK
+   * Remove runtime artifacts left behind by the retired subprocess SDK
    * integration. Cortex registers plugin skills directly from each plugin's
-   * source SKILL.md path in cortex-mind.ts, so no provider-specific copies or
-   * symlinks are created anymore.
+   * source SKILL.md path in cortex-mind.ts, so no provider-specific copies,
+   * symlinks, or runtime SDK installs are created anymore.
    */
   async cleanupSkills(): Promise<void> {
     const legacyPaths = [
       path.join(DATA_DIR, 'runtime', 'providers', 'claude', 'animus-skill-bridge'),
       path.join(DATA_DIR, 'runtime', 'providers', 'codex', 'home', 'skills'),
       path.join(DATA_DIR, 'runtime', 'providers', 'opencode', 'skills'),
+      path.join(DATA_DIR, 'sdks'),
     ];
 
     for (const skillPath of legacyPaths) {

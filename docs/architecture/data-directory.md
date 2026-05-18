@@ -31,14 +31,14 @@ $ANIMUS_DATA_DIR/
   logs/                   # Application logs (animus.log, rotated)
   packages/               # Installed channel + plugin packages
     .cache/               # .anpk cache for rollback
-  runtime/                # Plugin runtime isolation
-    providers/            # Per-provider skill deployments
   workspace/              # Agent working directory (reserved for future use)
   package-uploads/        # Temp staging for .anpk installs
   vault.json              # Password-wrapped DEK + KDF parameters (see encryption-architecture.md)
   jwt.key                 # JWT session secret, 0600, independent of the vault (see encryption-architecture.md)
   .restore-backup/        # Temporary rollback backup during restore
 ```
+
+Retired runtime directories from the old subprocess SDK integration, including `sdks/` and provider skill deployment paths under `runtime/providers/`, are not part of the active layout and are removed during backend startup cleanup.
 
 ## Secrets Lifecycle
 
