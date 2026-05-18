@@ -26,7 +26,7 @@ $ANIMUS_DATA_DIR/
     speech/               # TTS-generated audio files
   models/                 # STT/TTS ONNX models
   voices/                 # Voice references (builtin + custom)
-  saves/                  # Snapshot/restore archives (.animus files)
+  saves/                  # Snapshot/restore archives (.animus files: AI databases + lived file assets)
   cache/                  # Ephemeral caches (model pricing data)
   logs/                   # Application logs (animus.log, rotated)
   packages/               # Installed channel + plugin packages

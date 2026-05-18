@@ -25,6 +25,7 @@ export const saveManifestSchema = z.object({
     memoryCount: z.number(),
     personaName: z.string().optional(),
   }),
+  assets: z.record(z.string(), z.boolean()).optional(), // archive directory key -> present in source data dir
   isAutosave: z.boolean().optional(),
 });
 

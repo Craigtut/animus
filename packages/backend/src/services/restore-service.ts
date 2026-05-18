@@ -21,14 +21,16 @@ import path from 'path';
 import fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { tmpdir } from 'os';
-import { DATA_DIR, LANCEDB_PATH } from '../utils/env.js';
+import type Database from 'better-sqlite3';
+import { DATA_DIR } from '../utils/env.js';
 import { createLogger } from '../lib/logger.js';
 import { setMaintenanceMode } from '../lib/maintenance.js';
-import { operationInProgress, getSave, extractArchive, getArchivePath } from './save-service.js';
+import { acquireOperationGuard, releaseOperationGuard, getSave, extractArchive, getArchivePath } from './save-service.js';
 import {
   SAVE_ARCHIVE_DATABASES,
   planArchiveDatabaseRestore,
 } from './save-archive-registry.js';
+import { SAVE_ARCHIVE_DIRECTORIES, type SaveArchiveDirectory } from './save-archive-assets.js';
 
 const log = createLogger('RestoreService', 'saves');
 
@@ -43,17 +45,12 @@ const ROLLBACK_DIR = path.join(DATA_DIR, '.restore-backup');
 // Concurrency guard
 // ---------------------------------------------------------------------------
 
-let restoreInProgress = false;
-
 function acquireGuard(): void {
-  if (operationInProgress || restoreInProgress) {
-    throw new Error('A save or restore operation is already in progress');
-  }
-  restoreInProgress = true;
+  acquireOperationGuard();
 }
 
 function releaseGuard(): void {
-  restoreInProgress = false;
+  releaseOperationGuard();
 }
 
 // ---------------------------------------------------------------------------
@@ -73,7 +70,7 @@ async function deleteWalFiles(): Promise<void> {
   }
 }
 
-/** Create rollback backup of current AI databases + LanceDB. */
+/** Create rollback backup of current AI databases + file-backed archive assets. */
 async function createRollbackBackup(): Promise<void> {
   await fs.rm(ROLLBACK_DIR, { recursive: true, force: true });
   await fs.mkdir(ROLLBACK_DIR, { recursive: true });
@@ -86,10 +83,12 @@ async function createRollbackBackup(): Promise<void> {
     }
   }
 
-  try {
-    await fs.cp(LANCEDB_PATH, path.join(ROLLBACK_DIR, 'lancedb'), { recursive: true });
-  } catch {
-    // LanceDB may not exist yet
+  for (const asset of SAVE_ARCHIVE_DIRECTORIES) {
+    try {
+      await fs.cp(asset.livePath, path.join(ROLLBACK_DIR, asset.entryName), { recursive: true });
+    } catch {
+      // Directory may not exist if this is a fresh install
+    }
   }
 }
 
@@ -106,11 +105,17 @@ async function restoreFromRollback(): Promise<void> {
     }
   }
 
-  try {
-    await fs.rm(LANCEDB_PATH, { recursive: true, force: true });
-    await fs.cp(path.join(ROLLBACK_DIR, 'lancedb'), LANCEDB_PATH, { recursive: true });
-  } catch {
-    log.error('Could not restore LanceDB from rollback backup');
+  for (const asset of SAVE_ARCHIVE_DIRECTORIES) {
+    const backupPath = path.join(ROLLBACK_DIR, asset.entryName);
+    try {
+      await fs.rm(asset.livePath, { recursive: true, force: true });
+      await fs.cp(backupPath, asset.livePath, { recursive: true });
+    } catch {
+      if (asset.missingFromOlderArchives === 'create-empty') {
+        await fs.mkdir(asset.livePath, { recursive: true }).catch(() => {});
+      }
+      log.error(`Could not restore ${asset.entryName} from rollback backup`);
+    }
   }
 }
 
@@ -130,6 +135,229 @@ async function recoverFromRollback(): Promise<void> {
   await restoreFromRollback();
   await deleteWalFiles();
   await initializeDatabases();
+}
+
+async function restoreArchiveDirectories(
+  extractDir: string,
+  archiveEntries: Iterable<string>,
+): Promise<void> {
+  const topLevelEntries = new Set(archiveEntries);
+
+  for (const asset of SAVE_ARCHIVE_DIRECTORIES) {
+    const extractedPath = path.join(extractDir, asset.entryName);
+
+    if (topLevelEntries.has(asset.entryName)) {
+      await fs.rm(asset.livePath, { recursive: true, force: true });
+      await fs.cp(extractedPath, asset.livePath, { recursive: true });
+      continue;
+    }
+
+    if (asset.missingFromOlderArchives === 'create-empty') {
+      await fs.rm(asset.livePath, { recursive: true, force: true });
+      await fs.mkdir(asset.livePath, { recursive: true });
+      log.info(`Archive missing ${asset.entryName}; restore created an empty directory.`);
+      continue;
+    }
+
+    log.info(`Archive missing ${asset.entryName}; restore preserved the current directory.`);
+  }
+}
+
+export function remapDataSubdirPath(
+  value: string,
+  subdir: SaveArchiveDirectory['entryName'],
+  currentDataDir: string = DATA_DIR,
+  fallbackToBasename = false,
+): string {
+  const normalized = value.replace(/\\/g, '/');
+  const marker = `/${subdir}/`;
+  let suffix: string | null = null;
+
+  const markerIndex = normalized.lastIndexOf(marker);
+  if (markerIndex >= 0) {
+    suffix = normalized.slice(markerIndex + marker.length);
+  } else if (normalized === subdir) {
+    suffix = '';
+  } else if (normalized.startsWith(`${subdir}/`)) {
+    suffix = normalized.slice(subdir.length + 1);
+  } else if (fallbackToBasename) {
+    const base = path.basename(value);
+    suffix = base || null;
+  }
+
+  if (suffix === null) return value;
+  const parts = suffix.split('/').filter(Boolean);
+  return path.join(currentDataDir, subdir, ...parts);
+}
+
+const PERSISTED_PATH_MARKER = /\[Result persisted: (.+?) \(/g;
+
+function remapPersistedPathMarkers(value: string, currentDataDir: string = DATA_DIR): string {
+  return value.replace(PERSISTED_PATH_MARKER, (match, persistedPath: string) => {
+    const remapped = remapDataSubdirPath(persistedPath, 'tool-results', currentDataDir);
+    return match.replace(persistedPath, remapped);
+  });
+}
+
+export function remapSavedJsonPaths(value: unknown, currentDataDir: string = DATA_DIR): unknown {
+  if (typeof value === 'string') {
+    return remapPersistedPathMarkers(value, currentDataDir);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => remapSavedJsonPaths(item, currentDataDir));
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if ((key === 'localPath' || key === 'local_path') && typeof child === 'string') {
+      out[key] = remapDataSubdirPath(child, 'media', currentDataDir, true);
+    } else {
+      out[key] = remapSavedJsonPaths(child, currentDataDir);
+    }
+  }
+  return out;
+}
+
+function remapJsonText(text: string, currentDataDir: string = DATA_DIR): string {
+  try {
+    return JSON.stringify(remapSavedJsonPaths(JSON.parse(text), currentDataDir));
+  } catch {
+    return remapPersistedPathMarkers(text, currentDataDir);
+  }
+}
+
+function remapMediaAttachmentPaths(db: Database.Database): number {
+  const rows = db
+    .prepare('SELECT id, local_path FROM media_attachments')
+    .all() as Array<{ id: string; local_path: string }>;
+
+  let changed = 0;
+  const update = db.prepare('UPDATE media_attachments SET local_path = ? WHERE id = ?');
+  const tx = db.transaction(() => {
+    for (const row of rows) {
+      const remapped = remapDataSubdirPath(row.local_path, 'media', DATA_DIR, true);
+      if (remapped === row.local_path) continue;
+      update.run(remapped, row.id);
+      changed++;
+    }
+  });
+  tx();
+  return changed;
+}
+
+function remapMessageMetadataPaths(db: Database.Database): number {
+  const rows = db
+    .prepare('SELECT id, metadata FROM messages WHERE metadata IS NOT NULL')
+    .all() as Array<{ id: string; metadata: string }>;
+
+  let changed = 0;
+  const update = db.prepare('UPDATE messages SET metadata = ? WHERE id = ?');
+  const tx = db.transaction(() => {
+    for (const row of rows) {
+      const remapped = remapJsonText(row.metadata);
+      if (remapped === row.metadata) continue;
+      update.run(remapped, row.id);
+      changed++;
+    }
+  });
+  tx();
+  return changed;
+}
+
+function remapSessionPaths(db: Database.Database): number {
+  const rows = db
+    .prepare('SELECT contact_id, channel, conversation_history, cortex_observational_state FROM mind_sessions')
+    .all() as Array<{
+      contact_id: string;
+      channel: string;
+      conversation_history: string | null;
+      cortex_observational_state: string | null;
+    }>;
+
+  let changed = 0;
+  const update = db.prepare(
+    `UPDATE mind_sessions
+     SET conversation_history = ?, cortex_observational_state = ?
+     WHERE contact_id = ? AND channel = ?`,
+  );
+  const tx = db.transaction(() => {
+    for (const row of rows) {
+      const history = row.conversation_history ? remapJsonText(row.conversation_history) : null;
+      const obsState = row.cortex_observational_state ? remapJsonText(row.cortex_observational_state) : null;
+      if (history === row.conversation_history && obsState === row.cortex_observational_state) continue;
+      update.run(history, obsState, row.contact_id, row.channel);
+      changed++;
+    }
+  });
+  tx();
+  return changed;
+}
+
+function remapAgentLogPaths(db: Database.Database): number {
+  const rows = db
+    .prepare('SELECT id, data FROM agent_events WHERE data IS NOT NULL')
+    .all() as Array<{ id: string; data: string }>;
+
+  let changed = 0;
+  const update = db.prepare('UPDATE agent_events SET data = ? WHERE id = ?');
+  const tx = db.transaction(() => {
+    for (const row of rows) {
+      const remapped = remapJsonText(row.data);
+      if (remapped === row.data) continue;
+      update.run(remapped, row.id);
+      changed++;
+    }
+  });
+  tx();
+  return changed;
+}
+
+function remapMemoryTextPaths(db: Database.Database): number {
+  let changed = 0;
+  const tables = [
+    { table: 'observations', column: 'content' },
+    { table: 'long_term_memories', column: 'content' },
+  ];
+
+  for (const { table, column } of tables) {
+    const rows = db
+      .prepare(`SELECT id, ${column} AS value FROM ${table}`)
+      .all() as Array<{ id: string; value: string }>;
+    const update = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`);
+    const tx = db.transaction(() => {
+      for (const row of rows) {
+        const remapped = remapPersistedPathMarkers(row.value);
+        if (remapped === row.value) continue;
+        update.run(remapped, row.id);
+        changed++;
+      }
+    });
+    tx();
+  }
+
+  return changed;
+}
+
+async function remapRestoredFileReferences(): Promise<void> {
+  const { getMessagesDb, getSessionsDb, getAgentLogsDb, getMemoryDb } = await import('../db/index.js');
+  const mediaPathCount = remapMediaAttachmentPaths(getMessagesDb());
+  const messageMetadataCount = remapMessageMetadataPaths(getMessagesDb());
+  const sessionCount = remapSessionPaths(getSessionsDb());
+  const agentLogCount = remapAgentLogPaths(getAgentLogsDb());
+  const memoryTextCount = remapMemoryTextPaths(getMemoryDb());
+
+  const total = mediaPathCount + messageMetadataCount + sessionCount + agentLogCount + memoryTextCount;
+  if (total > 0) {
+    log.info(
+      `Remapped restored file references: media=${mediaPathCount}, metadata=${messageMetadataCount}, ` +
+      `sessions=${sessionCount}, agentLogs=${agentLogCount}, memoryText=${memoryTextCount}`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -267,13 +495,8 @@ export async function restoreFromSave(saveId: string): Promise<void> {
         );
       }
 
-      // Copy LanceDB
-      await fs.rm(LANCEDB_PATH, { recursive: true, force: true });
-      try {
-        await fs.cp(path.join(extractDir, 'lancedb'), LANCEDB_PATH, { recursive: true });
-      } catch {
-        await fs.mkdir(LANCEDB_PATH, { recursive: true });
-      }
+      // Restore file-backed assets referenced by the saved databases.
+      await restoreArchiveDirectories(extractDir, archiveEntries);
 
       // Delete stale WAL/SHM files (save DBs are clean, no WAL)
       await deleteWalFiles();
@@ -287,6 +510,18 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     // 13. Reopen databases (runs migrations to bring old schemas forward)
     await initializeDatabases();
     log.info('Databases reopened and migrations applied');
+
+    // 13a. Remap portable file references for media and persisted tool results
+    // when an archive is restored into a different DATA_DIR.
+    await remapRestoredFileReferences();
+
+    try {
+      const { getSpeechService } = await import('../speech/speech-service.js');
+      await getSpeechService().voices.initialize();
+      log.info('Speech voices reloaded');
+    } catch (err) {
+      log.debug('Speech voice reload skipped:', err);
+    }
 
     // 13b. Post-restore remap: link restored primary contact to current user
     try {

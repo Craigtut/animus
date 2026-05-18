@@ -2,12 +2,14 @@
  * Save Service
  *
  * Creates, lists, exports, imports, and deletes save snapshots of Animus's
- * AI-related databases (persona, heartbeat, memory, messages, agent_logs)
- * and LanceDB vector store. System.db is excluded — it contains user
- * credentials and engine infrastructure, not AI state.
+ * AI-related databases (persona, heartbeat, memory, messages, agent_logs,
+ * contacts, sessions), LanceDB vector store, and file-backed lived artifacts
+ * such as media, persisted tool results, and voice references. System.db is
+ * excluded — it contains user credentials and engine infrastructure, not AI
+ * state.
  *
  * Each save is stored in `data/saves/` as:
- *   {uuid}.animus  — zip archive (DBs + lancedb/ + manifest.json)
+ *   {uuid}.animus  — zip archive (DBs + assets + manifest.json)
  *   {uuid}.json    — sidecar manifest cache (for fast listing without unzipping)
  */
 
@@ -21,7 +23,7 @@ import archiver from 'archiver';
 import extractZip from 'extract-zip';
 import { saveManifestSchema } from '@animus-labs/shared';
 import type { SaveManifest, SaveInfo } from '@animus-labs/shared';
-import { DATA_DIR, LANCEDB_PATH } from '../utils/env.js';
+import { DATA_DIR } from '../utils/env.js';
 import { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb, getAgentLogsDb, getContactsDb, getSessionsDb } from '../db/index.js';
 import { createLogger } from '../lib/logger.js';
 import {
@@ -29,6 +31,7 @@ import {
   planArchiveDatabaseRestore,
   type SaveArchiveDatabaseKey,
 } from './save-archive-registry.js';
+import { SAVE_ARCHIVE_DIRECTORIES } from './save-archive-assets.js';
 
 const log = createLogger('SaveService', 'saves');
 
@@ -101,15 +104,23 @@ async function getAnimusVersion(): Promise<string> {
 
 export let operationInProgress = false;
 
-function acquireGuard(): void {
+export function acquireOperationGuard(): void {
   if (operationInProgress) {
     throw new Error('A save or restore operation is already in progress');
   }
   operationInProgress = true;
 }
 
-function releaseGuard(): void {
+export function releaseOperationGuard(): void {
   operationInProgress = false;
+}
+
+function acquireGuard(): void {
+  acquireOperationGuard();
+}
+
+function releaseGuard(): void {
+  releaseOperationGuard();
 }
 
 // ---------------------------------------------------------------------------
@@ -237,7 +248,7 @@ export async function extractArchive(archivePath: string, destDir: string): Prom
  * Create a save snapshot of all AI databases.
  *
  * 1. Backup DBs to a temp staging directory
- * 2. Copy LanceDB
+ * 2. Copy file-backed assets
  * 3. Gather stats + schema versions
  * 4. Write manifest.json into staging dir
  * 5. Zip staging dir → {uuid}.animus
@@ -266,12 +277,18 @@ export async function createSave(
       await getLiveDb(dbInfo.key).backup(path.join(stageDir, dbInfo.fileName));
     }
 
-    // Copy LanceDB directory
-    try {
-      await fs.cp(LANCEDB_PATH, path.join(stageDir, 'lancedb'), { recursive: true });
-    } catch {
-      await fs.mkdir(path.join(stageDir, 'lancedb'), { recursive: true });
-      log.warn('LanceDB directory not found, created empty directory');
+    // Copy file-backed assets referenced by the saved databases.
+    const assets: Record<string, boolean> = {};
+    for (const asset of SAVE_ARCHIVE_DIRECTORIES) {
+      const targetPath = path.join(stageDir, asset.entryName);
+      try {
+        await fs.cp(asset.livePath, targetPath, { recursive: true });
+        assets[asset.key] = true;
+      } catch {
+        await fs.mkdir(targetPath, { recursive: true });
+        assets[asset.key] = false;
+        log.warn(`${asset.entryName} directory not found, created empty archive directory`);
+      }
     }
 
     // Read schema versions from backed-up DBs
@@ -290,6 +307,7 @@ export async function createSave(
       animusVersion: await getAnimusVersion(),
       schemaVersions,
       stats,
+      assets,
       ...(isAutosave ? { isAutosave: true } : {}),
     };
 
