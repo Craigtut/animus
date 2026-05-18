@@ -55,6 +55,7 @@ temp/
 .claude/animus-skill-bridge/
 .agents/skills/
 .opencode/skills/
+.cortex/
 
 # Claude local settings (keep .claude/settings.json for shared settings)
 .claude/settings.local.json
