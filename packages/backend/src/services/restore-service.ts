@@ -21,10 +21,14 @@ import path from 'path';
 import fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { tmpdir } from 'os';
-import { DATA_DIR, DB_PERSONA_PATH, DB_HEARTBEAT_PATH, DB_MEMORY_PATH, DB_MESSAGES_PATH, DB_AGENT_LOGS_PATH, DB_CONTACTS_PATH, DB_SESSIONS_PATH, LANCEDB_PATH } from '../utils/env.js';
+import { DATA_DIR, LANCEDB_PATH } from '../utils/env.js';
 import { createLogger } from '../lib/logger.js';
 import { setMaintenanceMode } from '../lib/maintenance.js';
 import { operationInProgress, getSave, extractArchive, getArchivePath } from './save-service.js';
+import {
+  SAVE_ARCHIVE_DATABASES,
+  planArchiveDatabaseRestore,
+} from './save-archive-registry.js';
 
 const log = createLogger('RestoreService', 'saves');
 
@@ -34,16 +38,6 @@ const log = createLogger('RestoreService', 'saves');
 
 
 const ROLLBACK_DIR = path.join(DATA_DIR, '.restore-backup');
-
-const AI_DB_FILES = [
-  { name: 'persona.db', envPath: DB_PERSONA_PATH },
-  { name: 'heartbeat.db', envPath: DB_HEARTBEAT_PATH },
-  { name: 'memory.db', envPath: DB_MEMORY_PATH },
-  { name: 'messages.db', envPath: DB_MESSAGES_PATH },
-  { name: 'agent_logs.db', envPath: DB_AGENT_LOGS_PATH },
-  { name: 'contacts.db', envPath: DB_CONTACTS_PATH },
-  { name: 'sessions.db', envPath: DB_SESSIONS_PATH },
-];
 
 // ---------------------------------------------------------------------------
 // Concurrency guard
@@ -68,7 +62,7 @@ function releaseGuard(): void {
 
 /** Delete stale WAL and SHM files for the AI databases. */
 async function deleteWalFiles(): Promise<void> {
-  for (const { envPath } of AI_DB_FILES) {
+  for (const { envPath } of SAVE_ARCHIVE_DATABASES) {
     for (const suffix of ['-wal', '-shm']) {
       try {
         await fs.rm(envPath + suffix, { force: true });
@@ -84,9 +78,9 @@ async function createRollbackBackup(): Promise<void> {
   await fs.rm(ROLLBACK_DIR, { recursive: true, force: true });
   await fs.mkdir(ROLLBACK_DIR, { recursive: true });
 
-  for (const { name, envPath } of AI_DB_FILES) {
+  for (const { fileName, envPath } of SAVE_ARCHIVE_DATABASES) {
     try {
-      await fs.copyFile(envPath, path.join(ROLLBACK_DIR, name));
+      await fs.copyFile(envPath, path.join(ROLLBACK_DIR, fileName));
     } catch {
       // DB file may not exist if this is a fresh install
     }
@@ -103,12 +97,12 @@ async function createRollbackBackup(): Promise<void> {
 async function restoreFromRollback(): Promise<void> {
   log.warn('Restoring from rollback backup...');
 
-  for (const { name, envPath } of AI_DB_FILES) {
-    const backupPath = path.join(ROLLBACK_DIR, name);
+  for (const { fileName, envPath } of SAVE_ARCHIVE_DATABASES) {
+    const backupPath = path.join(ROLLBACK_DIR, fileName);
     try {
       await fs.copyFile(backupPath, envPath);
     } catch {
-      log.error(`Could not restore ${name} from rollback backup`);
+      log.error(`Could not restore ${fileName} from rollback backup`);
     }
   }
 
@@ -127,6 +121,15 @@ async function cleanupRollback(): Promise<void> {
   } catch {
     // Best-effort cleanup
   }
+}
+
+/** Restore the pre-restore backup and reopen databases. */
+async function recoverFromRollback(): Promise<void> {
+  const { closeDatabases, initializeDatabases } = await import('../db/index.js');
+  closeDatabases();
+  await restoreFromRollback();
+  await deleteWalFiles();
+  await initializeDatabases();
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +162,8 @@ export async function checkForOrphanedRollback(): Promise<void> {
 export async function restoreFromSave(saveId: string): Promise<void> {
   acquireGuard();
   const extractDir = path.join(tmpdir(), `animus-restore-${randomUUID()}`);
+  let rollbackAvailable = false;
+  let restoreComplete = false;
 
   try {
     // 1. Validate save exists
@@ -205,8 +210,16 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     log.info('Observational memory operations complete');
 
     // 8. Checkpoint all AI databases (flush WAL into main file)
-    const { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb, getAgentLogsDb, getContactsDb } = await import('../db/index.js');
-    const dbs = [getPersonaDb(), getHeartbeatDb(), getMemoryDb(), getMessagesDb(), getAgentLogsDb(), getContactsDb()];
+    const { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb, getAgentLogsDb, getContactsDb, getSessionsDb } = await import('../db/index.js');
+    const dbs = [
+      getPersonaDb(),
+      getHeartbeatDb(),
+      getMemoryDb(),
+      getMessagesDb(),
+      getAgentLogsDb(),
+      getContactsDb(),
+      getSessionsDb(),
+    ];
     for (const db of dbs) {
       try {
         db.pragma('wal_checkpoint(TRUNCATE)');
@@ -224,21 +237,34 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     // 10-12. Create rollback, swap files from extracted archive, cleanup
     try {
       await createRollbackBackup();
+      rollbackAvailable = true;
       log.info('Rollback backup created');
 
-      // Copy extracted DB files over live files (contacts.db may not exist in old archives)
-      for (const { name, envPath } of AI_DB_FILES) {
-        const extractedPath = path.join(extractDir, name);
-        try {
-          await fs.access(extractedPath);
-          await fs.copyFile(extractedPath, envPath);
-        } catch {
-          if (name === 'contacts.db') {
-            log.info('contacts.db not found in archive (old save format), skipping');
-            continue;
-          }
-          throw new Error(`Missing required database file in archive: ${name}`);
+      // Normalize the extracted archive into the current database topology.
+      const archiveEntries = await fs.readdir(extractDir);
+      const restorePlan = planArchiveDatabaseRestore(save.manifest, archiveEntries);
+      for (const item of restorePlan) {
+        const { database } = item;
+        const extractedPath = path.join(extractDir, database.fileName);
+
+        if (item.action === 'copy') {
+          await fs.copyFile(extractedPath, database.envPath);
+          continue;
         }
+
+        if (item.action === 'create-empty') {
+          await fs.rm(database.envPath, { force: true });
+          log.info(
+            `Archive missing ${database.fileName}; restore will create a fresh database. ` +
+            (item.reason ?? ''),
+          );
+          continue;
+        }
+
+        log.info(
+          `Archive missing ${database.fileName}; restore will preserve the current database. ` +
+          (item.reason ?? ''),
+        );
       }
 
       // Copy LanceDB
@@ -253,15 +279,8 @@ export async function restoreFromSave(saveId: string): Promise<void> {
       await deleteWalFiles();
 
       log.info('Database files swapped');
-
-      await cleanupRollback();
-      log.info('Rollback backup cleaned up');
     } catch (swapError) {
-      log.error('File swap failed, restoring from rollback:', swapError);
-      await restoreFromRollback();
-      await deleteWalFiles();
-      await initializeDatabases();
-      setMaintenanceMode(false, '');
+      log.error('File swap failed:', swapError);
       throw new Error(`Restore failed during file swap: ${swapError}`);
     }
 
@@ -303,6 +322,11 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     } catch (err) {
       log.error('Post-restore contact remap failed (non-fatal):', err);
     }
+
+    restoreComplete = true;
+    await cleanupRollback();
+    rollbackAvailable = false;
+    log.info('Rollback backup cleaned up');
 
     // 14. Reinitialize subsystems and heartbeat
     const { initializeHeartbeat, startHeartbeat, handleAgentComplete, handleScheduledTask } = await import('../heartbeat/index.js');
@@ -347,6 +371,17 @@ export async function restoreFromSave(saveId: string): Promise<void> {
     setMaintenanceMode(false, '');
     log.info(`Restore from save "${saveName}" complete`);
   } catch (err) {
+    if (rollbackAvailable && !restoreComplete) {
+      log.warn('Restore failed after file swap, restoring from rollback backup...');
+      try {
+        await recoverFromRollback();
+        await cleanupRollback();
+        rollbackAvailable = false;
+        log.info('Rollback restore complete');
+      } catch (rollbackErr) {
+        log.error('Rollback restore failed:', rollbackErr);
+      }
+    }
     setMaintenanceMode(false, '');
     log.error('Restore failed:', err);
     throw err;

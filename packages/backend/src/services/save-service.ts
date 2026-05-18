@@ -24,6 +24,11 @@ import type { SaveManifest, SaveInfo } from '@animus-labs/shared';
 import { DATA_DIR, LANCEDB_PATH } from '../utils/env.js';
 import { getPersonaDb, getHeartbeatDb, getMemoryDb, getMessagesDb, getAgentLogsDb, getContactsDb, getSessionsDb } from '../db/index.js';
 import { createLogger } from '../lib/logger.js';
+import {
+  SAVE_ARCHIVE_DATABASES,
+  planArchiveDatabaseRestore,
+  type SaveArchiveDatabaseKey,
+} from './save-archive-registry.js';
 
 const log = createLogger('SaveService', 'saves');
 
@@ -71,9 +76,6 @@ export async function getArchivePath(saveId: string): Promise<string | null> {
   }
   return null;
 }
-
-const DB_NAMES = ['persona', 'heartbeat', 'memory', 'messages', 'agent_logs', 'contacts', 'sessions'] as const;
-type DbName = (typeof DB_NAMES)[number];
 
 /** Read root package.json version. */
 async function getAnimusVersion(): Promise<string> {
@@ -131,7 +133,7 @@ function getSchemaVersion(dbPath: string): number {
   }
 }
 
-function getLiveDb(name: DbName): Database.Database {
+function getLiveDb(name: SaveArchiveDatabaseKey): Database.Database {
   switch (name) {
     case 'persona': return getPersonaDb();
     case 'heartbeat': return getHeartbeatDb();
@@ -260,8 +262,8 @@ export async function createSave(
     log.info(`Creating ${isAutosave ? 'autosave' : 'save'} "${name}" (${id})`);
 
     // Backup each database using better-sqlite3's safe backup API
-    for (const dbName of DB_NAMES) {
-      await getLiveDb(dbName).backup(path.join(stageDir, `${dbName}.db`));
+    for (const dbInfo of SAVE_ARCHIVE_DATABASES) {
+      await getLiveDb(dbInfo.key).backup(path.join(stageDir, dbInfo.fileName));
     }
 
     // Copy LanceDB directory
@@ -274,8 +276,8 @@ export async function createSave(
 
     // Read schema versions from backed-up DBs
     const schemaVersions: Record<string, number> = {};
-    for (const dbName of DB_NAMES) {
-      schemaVersions[dbName] = getSchemaVersion(path.join(stageDir, `${dbName}.db`));
+    for (const dbInfo of SAVE_ARCHIVE_DATABASES) {
+      schemaVersions[dbInfo.key] = getSchemaVersion(path.join(stageDir, dbInfo.fileName));
     }
 
     // Build manifest
@@ -463,17 +465,18 @@ export async function importSave(fileBuffer: Buffer): Promise<SaveInfo> {
       throw new Error(`Invalid or missing manifest.json in save archive: ${err}`);
     }
 
-    // Verify expected DB files exist (contacts.db is optional for old archives)
-    const OPTIONAL_DBS: ReadonlySet<string> = new Set(['contacts', 'sessions']);
-    for (const dbName of DB_NAMES) {
-      try {
-        await fs.access(path.join(extractDir, `${dbName}.db`));
-      } catch {
-        if (OPTIONAL_DBS.has(dbName)) {
-          log.info(`Optional database file ${dbName}.db not found in archive — will use fresh DB`);
-          continue;
-        }
-        throw new Error(`Missing required database file: ${dbName}.db`);
+    // Verify the archive can be normalized by the current restore pipeline.
+    const archiveEntries = await fs.readdir(extractDir);
+    const restorePlan = planArchiveDatabaseRestore(manifest, archiveEntries);
+    for (const item of restorePlan) {
+      if (item.action !== 'copy') {
+        const actionDescription = item.action === 'create-empty'
+          ? 'create a fresh database'
+          : 'preserve the current database';
+        log.info(
+          `Archive missing ${item.database.fileName}; restore will ${actionDescription}. ` +
+          (item.reason ?? ''),
+        );
       }
     }
 
