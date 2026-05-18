@@ -4,6 +4,13 @@ All notable changes to the Animus Engine will be documented in this file.
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
 
+## [0.4.3](https://github.com/Craigtut/animus/compare/v0.4.2...v0.4.3) (2026-05-18)
+
+### Bug Fixes
+
+* **ci:** gate tts-native accelerate feature on macos ([c4e49b3](https://github.com/Craigtut/animus/commit/c4e49b332cfd1e41d2e1fa337de1c99cbb23b3cb))
+* **ci:** include backend assets in docker image ([e060c86](https://github.com/Craigtut/animus/commit/e060c860cadfb593212219ac0499c247fd093927))
+
 ## [0.4.2](https://github.com/Craigtut/animus/compare/v0.4.1...v0.4.2) (2026-05-17)
 
 ### Bug Fixes
