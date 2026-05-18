@@ -4,6 +4,14 @@ All notable changes to the Animus Engine will be documented in this file.
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
 
+## [0.4.5](https://github.com/Craigtut/animus/compare/v0.4.4...v0.4.5) (2026-05-18)
+
+### Bug Fixes
+
+* **cortex:** support remote OAuth sign-in ([822c308](https://github.com/Craigtut/animus/commit/822c308813628c1066504b17d174d58aa23230f6))
+* **db:** preserve file-backed save assets ([5ffae0a](https://github.com/Craigtut/animus/commit/5ffae0ae1a8a77b3b4b416a99e0ff575033356b7))
+* **heartbeat:** require provider before heartbeat start ([1e674a4](https://github.com/Craigtut/animus/commit/1e674a4da55b637ab1d26f5b1189fce9585f765f))
+
 ## [0.4.4](https://github.com/Craigtut/animus/compare/v0.4.3...v0.4.4) (2026-05-18)
 
 ### Bug Fixes
