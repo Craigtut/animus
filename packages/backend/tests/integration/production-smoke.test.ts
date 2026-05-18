@@ -19,6 +19,7 @@ import http from 'http';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = join(__dirname, '..', '..');
 const BACKEND_DIST = join(BACKEND_ROOT, 'dist', 'index.js');
+const OAUTH_SYMBOL_ASSET = join(BACKEND_ROOT, 'dist', 'lib', 'assets', 'animus-symbol.svg');
 const STARTUP_TIMEOUT = 30_000; // 30s for migrations + embedding model init
 const REQUEST_TIMEOUT = 5_000;
 
@@ -90,6 +91,12 @@ describe('Production Smoke Test', () => {
       throw new Error(
         'Backend dist not found. Run `npm run build:prod` first.\n' +
           `Expected: ${BACKEND_DIST}`
+      );
+    }
+    if (!existsSync(OAUTH_SYMBOL_ASSET)) {
+      throw new Error(
+        'OAuth callback symbol asset not found. Run `npm run build:prod` first.\n' +
+          `Expected: ${OAUTH_SYMBOL_ASSET}`
       );
     }
 

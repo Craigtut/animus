@@ -47,6 +47,8 @@ RUN cd packages/shared && rm -rf dist && npx tsc && \
     cd ../frontend && npx vite build && \
     cd ../backend && rm -rf dist && (npx tsc -p tsconfig.build.json || true) && \
     rm -rf dist/db/migrations && cp -r src/db/migrations dist/db/migrations && \
+    rm -rf dist/lib/assets && mkdir -p dist/lib && cp -r src/lib/assets dist/lib/assets && \
+    node -e "fs.writeFileSync('dist/version.json',JSON.stringify({version:JSON.parse(fs.readFileSync('package.json','utf8')).version}))" && \
     rm -rf dist/public && cp -r ../frontend/dist dist/public
 
 # Prune dev dependencies after build (keeps native addons intact).
