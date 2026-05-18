@@ -39,6 +39,20 @@ describe('oauth flow event helpers', () => {
     });
   });
 
+  it('does not add callback metadata to provider-supplied device code flows', () => {
+    const result = normalizeOAuthAuthInfo('anthropic', {
+      url: 'https://example.com/device',
+      flowType: 'device_code',
+      deviceCode: 'ZXCV-9876',
+    });
+
+    expect(result).toEqual({
+      url: 'https://example.com/device',
+      flowType: 'device_code',
+      deviceCode: 'ZXCV-9876',
+    });
+  });
+
   it('preserves prompt placeholder and allow-empty metadata', () => {
     const event = createOAuthPromptEvent({
       message: 'GitHub Enterprise URL/domain (blank for github.com)',

@@ -34,17 +34,19 @@ export function normalizeOAuthAuthInfo(
     ?? raw.instructions?.match(DEVICE_CODE_INSTRUCTIONS_RE)?.[1];
   const isKnownDeviceCodeProvider = provider === 'github-copilot';
   const callbackRoute = OAUTH_CALLBACK_ROUTES[provider];
+  const flowType = raw.flowType
+    ?? (deviceCode || isKnownDeviceCodeProvider ? 'device_code'
+      : callbackRoute ? 'localhost_callback'
+      : 'browser');
 
   return {
     ...raw,
     ...(deviceCode ? { deviceCode } : {}),
-    flowType: raw.flowType
-      ?? (deviceCode || isKnownDeviceCodeProvider ? 'device_code'
-        : callbackRoute ? 'localhost_callback'
-        : 'browser'),
-    manualCodeRecommended: raw.manualCodeRecommended ?? (callbackRoute ? true : undefined),
-    callbackPort: raw.callbackPort ?? callbackRoute?.port,
-    callbackPath: raw.callbackPath ?? callbackRoute?.path,
+    flowType,
+    manualCodeRecommended: raw.manualCodeRecommended
+      ?? (flowType === 'localhost_callback' && callbackRoute ? true : undefined),
+    callbackPort: raw.callbackPort ?? (flowType === 'localhost_callback' ? callbackRoute?.port : undefined),
+    callbackPath: raw.callbackPath ?? (flowType === 'localhost_callback' ? callbackRoute?.path : undefined),
   };
 }
 
