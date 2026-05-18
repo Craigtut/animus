@@ -4,6 +4,13 @@ All notable changes to the Animus Engine will be documented in this file.
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
 
+## [0.4.4](https://github.com/Craigtut/animus/compare/v0.4.3...v0.4.4) (2026-05-18)
+
+### Bug Fixes
+
+* **agents:** clean legacy sdk data directory ([8c9cbd0](https://github.com/Craigtut/animus/commit/8c9cbd0f1e6b6241c783928b9b69f3dbdaa8536c))
+* **backend:** support older save archive restores ([871e2e0](https://github.com/Craigtut/animus/commit/871e2e099006cd043c8b185a48b37bdbbeae290c))
+
 ## [0.4.3](https://github.com/Craigtut/animus/compare/v0.4.2...v0.4.3) (2026-05-18)
 
 ### Bug Fixes
