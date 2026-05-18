@@ -40,8 +40,11 @@ export function CortexProviderStep() {
   const [oauthState, setOauthState] = useState<'idle' | 'authenticating' | 'success' | 'error'>('idle');
   const [oauthAuthUrl, setOauthAuthUrl] = useState<string | null>(null);
   const [oauthDeviceCode, setOauthDeviceCode] = useState<string | null>(null);
+  const [oauthFlowType, setOauthFlowType] = useState<string | null>(null);
+  const [oauthManualCodeRecommended, setOauthManualCodeRecommended] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
 
   // API key state
   const [apiKeyExpanded, setApiKeyExpanded] = useState(false);
@@ -60,6 +63,8 @@ export function CortexProviderStep() {
 
   // OAuth prompt state (for manual paste flows in Docker/headless)
   const [oauthPromptMessage, setOauthPromptMessage] = useState<string | null>(null);
+  const [oauthPromptPlaceholder, setOauthPromptPlaceholder] = useState('Paste here...');
+  const [oauthPromptAllowEmpty, setOauthPromptAllowEmpty] = useState(false);
   const [oauthPromptValue, setOauthPromptValue] = useState('');
 
   // Connected provider info
@@ -99,10 +104,14 @@ export function CortexProviderStep() {
     onData: (event) => {
       if (event.type === 'auth_url') {
         setOauthAuthUrl(event.url);
+        setOauthFlowType(event.flowType ?? null);
+        setOauthManualCodeRecommended(event.manualCodeRecommended ?? false);
         if (event.deviceCode) setOauthDeviceCode(event.deviceCode);
       } else if (event.type === 'prompt') {
         // OAuth flow needs user input (e.g., paste redirect URL in Docker)
         setOauthPromptMessage(event.message);
+        setOauthPromptPlaceholder(event.placeholder ?? 'Paste here...');
+        setOauthPromptAllowEmpty(event.allowEmpty ?? false);
         setOauthPromptValue('');
       } else if (event.type === 'success') {
         setOauthState('success');
@@ -112,6 +121,8 @@ export function CortexProviderStep() {
         setConnectedRefreshable(event.meta?.refreshable ?? false);
         setOauthAuthUrl(null);
         setOauthDeviceCode(null);
+        setOauthFlowType(null);
+        setOauthManualCodeRecommended(false);
         setOauthPromptMessage(null);
         utils.cortexProvider.getStatus.invalidate();
       } else if (event.type === 'error') {
@@ -165,6 +176,13 @@ export function CortexProviderStep() {
     setOauthError(null);
     setOauthAuthUrl(null);
     setOauthDeviceCode(null);
+    setOauthFlowType(null);
+    setOauthManualCodeRecommended(false);
+    setOauthPromptMessage(null);
+    setOauthPromptPlaceholder('Paste here...');
+    setOauthPromptAllowEmpty(false);
+    setUrlCopied(false);
+    setCodeCopied(false);
 
     initiateOAuthMutation.mutate(
       { provider: providerId },
@@ -186,6 +204,13 @@ export function CortexProviderStep() {
     setOauthProvider(null);
     setOauthAuthUrl(null);
     setOauthDeviceCode(null);
+    setOauthFlowType(null);
+    setOauthManualCodeRecommended(false);
+    setOauthPromptMessage(null);
+    setOauthPromptPlaceholder('Paste here...');
+    setOauthPromptAllowEmpty(false);
+    setUrlCopied(false);
+    setCodeCopied(false);
   }, [cancelOAuthMutation]);
 
   const handleSignOut = useCallback((providerId: string) => {
@@ -280,17 +305,27 @@ export function CortexProviderStep() {
   }, [customBaseUrl, customModelId, customApiKey, testCustomMutation, saveCustomMutation, utils.cortexProvider.getStatus]);
 
   const handleOAuthPromptSubmit = useCallback(() => {
-    if (!oauthPromptValue.trim()) return;
+    if (!oauthPromptAllowEmpty && !oauthPromptValue.trim()) return;
     oauthRespondMutation.mutate({ response: oauthPromptValue.trim() });
     setOauthPromptMessage(null);
     setOauthPromptValue('');
-  }, [oauthPromptValue, oauthRespondMutation]);
+  }, [oauthPromptAllowEmpty, oauthPromptValue, oauthRespondMutation]);
 
   const handleCopyCode = useCallback(async (code: string) => {
     try {
       await navigator.clipboard.writeText(code);
       setCodeCopied(true);
       setTimeout(() => setCodeCopied(false), 2000);
+    } catch {
+      // Fallback
+    }
+  }, []);
+
+  const handleCopyUrl = useCallback(async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setUrlCopied(true);
+      setTimeout(() => setUrlCopied(false), 2000);
     } catch {
       // Fallback
     }
@@ -387,7 +422,9 @@ export function CortexProviderStep() {
           Connect your AI
         </Typography.Title3>
         <Typography.Caption color="hint">
-          Sign in with your existing subscription. No API keys needed.
+          {statusData?.headless
+            ? 'Running remotely. OAuth opens here and may ask for a final redirect URL.'
+            : 'Sign in with your existing subscription. No API keys needed.'}
         </Typography.Caption>
       </div>
 
@@ -460,52 +497,65 @@ export function CortexProviderStep() {
 
                   {oauthAuthUrl ? (
                     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
-                      {oauthDeviceCode ? (
-                        <>
-                          <Typography.Caption color="secondary">
-                            Open this URL on any device:
-                          </Typography.Caption>
-                          <Typography.SmallBody
-                            as="a"
-                            href={oauthAuthUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                      <Typography.Caption color="secondary">
+                        Open this sign-in page:
+                      </Typography.Caption>
+                      <Typography.SmallBody
+                        as="a"
+                        href={oauthAuthUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        css={css`
+                          display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
+                          color: ${theme.colors.text.primary}; word-break: break-all;
+                          text-decoration: none; &:hover { text-decoration: underline; }
+                        `}
+                      >
+                        {oauthAuthUrl} <ArrowSquareOut size={12} />
+                      </Typography.SmallBody>
+                      <button
+                        onClick={() => handleCopyUrl(oauthAuthUrl)}
+                        css={css`
+                          display: inline-flex; align-items: center; gap: 4px; padding: ${theme.spacing[0.5]} ${theme.spacing[1]};
+                          border-radius: ${theme.borderRadius.sm}; cursor: pointer; align-self: flex-start;
+                          background: none; border: none;
+                          color: ${urlCopied ? theme.colors.success.main : theme.colors.text.hint};
+                          &:hover { color: ${urlCopied ? theme.colors.success.main : theme.colors.text.primary}; }
+                        `}
+                      >
+                        {urlCopied ? <><CheckCircle size={12} /> <Typography.Tiny>Copied URL</Typography.Tiny></> : <><Copy size={12} /> <Typography.Tiny>Copy URL</Typography.Tiny></>}
+                      </button>
+
+                      {oauthDeviceCode && (
+                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
+                          <Typography.Caption color="secondary">Enter code:</Typography.Caption>
+                          <Typography.SmallBodyAlt as="code" css={css`
+                            letter-spacing: 0.15em;
+                            background: ${theme.colors.background.elevated};
+                            padding: ${theme.spacing[1]} ${theme.spacing[2]};
+                            border-radius: ${theme.borderRadius.sm};
+                            border: 1px solid ${theme.colors.border.default};
+                          `}>
+                            {oauthDeviceCode}
+                          </Typography.SmallBodyAlt>
+                          <button
+                            onClick={() => handleCopyCode(oauthDeviceCode)}
                             css={css`
-                              display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
-                              color: ${theme.colors.text.primary}; word-break: break-all;
-                              text-decoration: none; &:hover { text-decoration: underline; }
+                              display: flex; align-items: center; gap: 4px; padding: ${theme.spacing[0.5]} ${theme.spacing[1]};
+                              border-radius: ${theme.borderRadius.sm}; cursor: pointer;
+                              background: none; border: none;
+                              color: ${codeCopied ? theme.colors.success.main : theme.colors.text.hint};
+                              &:hover { color: ${codeCopied ? theme.colors.success.main : theme.colors.text.primary}; }
                             `}
                           >
-                            {oauthAuthUrl} <ArrowSquareOut size={12} />
-                          </Typography.SmallBody>
-                          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
-                            <Typography.Caption color="secondary">Enter code:</Typography.Caption>
-                            <Typography.SmallBodyAlt as="code" css={css`
-                              letter-spacing: 0.15em;
-                              background: ${theme.colors.background.elevated};
-                              padding: ${theme.spacing[1]} ${theme.spacing[2]};
-                              border-radius: ${theme.borderRadius.sm};
-                              border: 1px solid ${theme.colors.border.default};
-                            `}>
-                              {oauthDeviceCode}
-                            </Typography.SmallBodyAlt>
-                            <button
-                              onClick={() => handleCopyCode(oauthDeviceCode!)}
-                              css={css`
-                                display: flex; align-items: center; gap: 4px; padding: ${theme.spacing[0.5]} ${theme.spacing[1]};
-                                border-radius: ${theme.borderRadius.sm}; cursor: pointer;
-                                background: none; border: none;
-                                color: ${codeCopied ? theme.colors.success.main : theme.colors.text.hint};
-                                &:hover { color: ${codeCopied ? theme.colors.success.main : theme.colors.text.primary}; }
-                              `}
-                            >
-                              {codeCopied ? <><CheckCircle size={12} /> <Typography.Tiny>Copied</Typography.Tiny></> : <><Copy size={12} /> <Typography.Tiny>Copy</Typography.Tiny></>}
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <Typography.Caption color="secondary">
-                          A browser window has opened. Complete the sign-in there.
+                            {codeCopied ? <><CheckCircle size={12} /> <Typography.Tiny>Copied</Typography.Tiny></> : <><Copy size={12} /> <Typography.Tiny>Copy</Typography.Tiny></>}
+                          </button>
+                        </div>
+                      )}
+
+                      {(oauthManualCodeRecommended || oauthFlowType === 'localhost_callback') && !oauthPromptMessage && (
+                        <Typography.Caption color="hint">
+                          If the browser lands on a localhost page that cannot connect, copy the full address from that page and paste it here when prompted.
                         </Typography.Caption>
                       )}
                     </div>
@@ -525,7 +575,7 @@ export function CortexProviderStep() {
                           value={oauthPromptValue}
                           onChange={(e) => setOauthPromptValue(e.target.value)}
                           onKeyDown={(e) => { if (e.key === 'Enter') handleOAuthPromptSubmit(); }}
-                          placeholder="Paste here..."
+                          placeholder={oauthPromptPlaceholder}
                           css={css`
                             flex: 1;
                             padding: ${theme.spacing[2]} ${theme.spacing[3]};
@@ -539,7 +589,7 @@ export function CortexProviderStep() {
                             &::placeholder { color: ${theme.colors.text.hint}; }
                           `}
                         />
-                        <Button variant="primary" size="sm" onClick={handleOAuthPromptSubmit} disabled={!oauthPromptValue.trim()}>
+                        <Button variant="primary" size="sm" onClick={handleOAuthPromptSubmit} disabled={!oauthPromptAllowEmpty && !oauthPromptValue.trim()}>
                           Submit
                         </Button>
                       </div>

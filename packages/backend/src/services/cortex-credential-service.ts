@@ -49,9 +49,18 @@ export interface ProviderStatus {
 }
 
 export type OAuthStatusEvent =
-  | { type: 'auth_url'; url: string; instructions?: string; deviceCode?: string }
+  | {
+      type: 'auth_url';
+      url: string;
+      instructions?: string;
+      deviceCode?: string;
+      flowType?: 'browser' | 'localhost_callback' | 'device_code';
+      manualCodeRecommended?: boolean;
+      callbackPort?: number;
+      callbackPath?: string;
+    }
   | { type: 'progress'; message: string }
-  | { type: 'prompt'; message: string }
+  | { type: 'prompt'; message: string; placeholder?: string; allowEmpty?: boolean }
   | { type: 'success'; meta: OAuthMeta }
   | { type: 'error'; message: string };
 

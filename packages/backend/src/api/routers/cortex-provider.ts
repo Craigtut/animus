@@ -26,6 +26,13 @@ import {
   isHeadless,
   type OAuthStatusEvent,
 } from '../../services/cortex-credential-service.js';
+import {
+  createOAuthAuthUrlEvent,
+  createOAuthPromptEvent,
+  normalizeOAuthAuthInfo,
+  type OAuthAuthInfoLike,
+  type OAuthPromptInfoLike,
+} from '../../services/oauth-flow-events.js';
 import { getEventBus } from '../../lib/event-bus.js';
 import { createLogger } from '../../lib/logger.js';
 import { renderOAuthCallbackPage } from '../../lib/oauth-callback-page.js';
@@ -80,6 +87,27 @@ let pendingPromptResolve: ((response: string) => void) | null = null;
 /** Whether an OAuth flow is currently active. */
 let activeOAuthProvider: string | null = null;
 
+/** Last event for the active OAuth flow, replayed to late subscribers. */
+let latestOAuthAuthUrlEvent: Extract<OAuthStatusEvent, { type: 'auth_url' }> | null = null;
+let latestOAuthStatusEvent: OAuthStatusEvent | null = null;
+
+function emitOAuthStatus(event: OAuthStatusEvent): void {
+  if (event.type === 'auth_url') {
+    latestOAuthAuthUrlEvent = event;
+  }
+
+  latestOAuthStatusEvent = event;
+  oauthEmitter.emit('status', event);
+}
+
+function requestOAuthInput(prompt: OAuthPromptInfoLike): Promise<string> {
+  emitOAuthStatus(createOAuthPromptEvent(prompt));
+
+  return new Promise<string>((resolve) => {
+    pendingPromptResolve = resolve;
+  });
+}
+
 // ============================================================================
 // Router
 // ============================================================================
@@ -131,6 +159,7 @@ export const cortexProviderRouter = router({
       model: settings.cortexModel,
       thinkingLevel: settings.cortexThinkingLevel,
       contextWindowLimit: settings.cortexContextWindowLimit,
+      headless: isHeadless(),
       ...status,
     };
   }),
@@ -161,14 +190,21 @@ export const cortexProviderRouter = router({
       }
 
       activeOAuthProvider = input.provider;
+      latestOAuthAuthUrlEvent = null;
+      latestOAuthStatusEvent = {
+        type: 'progress',
+        message: 'Starting sign-in...',
+      };
       log.info(`Starting OAuth flow for provider "${input.provider}" (headless=${headless})`);
 
       try {
+        let lastAuthEvent: Extract<OAuthStatusEvent, { type: 'auth_url' }> | null = null;
+
         const result = await svc.initiateOAuth(input.provider, {
-          onAuth: (info: { url: string; instructions?: string } | string, legacyInstructions?: string) => {
+          onAuth: (info: OAuthAuthInfoLike | string, legacyInstructions?: string) => {
             // Pi-ai passes { url, instructions } object; handle both shapes for safety
-            const authUrl = typeof info === 'string' ? info : info.url;
-            const authInstructions = typeof info === 'string' ? legacyInstructions : info.instructions;
+            const authInfo = normalizeOAuthAuthInfo(input.provider, info, legacyInstructions);
+            const authUrl = authInfo.url;
             log.info(`OAuth auth URL received for "${input.provider}"`);
 
             // In non-headless environments, try to open browser
@@ -176,26 +212,14 @@ export const cortexProviderRouter = router({
               openUrl(authUrl);
             }
 
-            const event: OAuthStatusEvent = {
-              type: 'auth_url',
-              url: authUrl,
-              ...(authInstructions !== undefined ? { instructions: authInstructions } : {}),
-            };
-            oauthEmitter.emit('status', event);
+            const event = createOAuthAuthUrlEvent(authInfo);
+            lastAuthEvent = event;
+            emitOAuthStatus(event);
           },
 
-          onPrompt: (prompt: { message: string }) => {
+          onPrompt: (prompt: OAuthPromptInfoLike) => {
             log.info(`OAuth prompt received for "${input.provider}": ${prompt.message}`);
-            const event: OAuthStatusEvent = {
-              type: 'prompt',
-              message: prompt.message,
-            };
-            oauthEmitter.emit('status', event);
-
-            // Wait for oauthRespond to resolve this
-            return new Promise<string>((resolve) => {
-              pendingPromptResolve = resolve;
-            });
+            return requestOAuthInput(prompt);
           },
 
           onProgress: (message: string) => {
@@ -203,8 +227,21 @@ export const cortexProviderRouter = router({
               type: 'progress',
               message,
             };
-            oauthEmitter.emit('status', event);
+            emitOAuthStatus(event);
           },
+
+          ...(headless ? {
+            onManualCodeInput: () => {
+              const placeholder = lastAuthEvent?.callbackPort && lastAuthEvent?.callbackPath
+                ? `http://localhost:${lastAuthEvent.callbackPort}${lastAuthEvent.callbackPath}?code=...`
+                : undefined;
+              return requestOAuthInput({
+                message: 'Paste the final redirect URL or authorization code:',
+                ...(placeholder ? { placeholder } : {}),
+                allowEmpty: false,
+              });
+            },
+          } : {}),
 
           renderCallbackPage: renderProviderCallbackPage,
         });
@@ -214,7 +251,7 @@ export const cortexProviderRouter = router({
           type: 'success',
           meta: result.meta,
         };
-        oauthEmitter.emit('status', successEvent);
+        emitOAuthStatus(successEvent);
 
         // Auto-select as active provider with a curated default model
         const db = getSystemDb();
@@ -282,17 +319,30 @@ export const cortexProviderRouter = router({
           type: 'error',
           message,
         };
-        oauthEmitter.emit('status', errorEvent);
+        emitOAuthStatus(errorEvent);
 
         throw new TRPCError({ code, message });
       } finally {
         activeOAuthProvider = null;
         pendingPromptResolve = null;
+        latestOAuthAuthUrlEvent = null;
+        latestOAuthStatusEvent = null;
       }
     }),
 
   oauthStatus: protectedProcedure.subscription(() => {
     return observable<OAuthStatusEvent>((emit) => {
+      if (activeOAuthProvider && latestOAuthStatusEvent) {
+        const replayAuthUrlEvent = latestOAuthAuthUrlEvent;
+        const replayEvent = latestOAuthStatusEvent;
+        queueMicrotask(() => {
+          if (replayAuthUrlEvent && replayAuthUrlEvent !== replayEvent) {
+            emit.next(replayAuthUrlEvent);
+          }
+          emit.next(replayEvent);
+        });
+      }
+
       const handler = (event: OAuthStatusEvent) => {
         emit.next(event);
 
@@ -330,12 +380,14 @@ export const cortexProviderRouter = router({
     getCortexCredentialService().cancelOAuth();
     activeOAuthProvider = null;
     pendingPromptResolve = null;
+    latestOAuthAuthUrlEvent = null;
+    latestOAuthStatusEvent = null;
 
     const event: OAuthStatusEvent = {
       type: 'error',
       message: 'OAuth flow cancelled by user.',
     };
-    oauthEmitter.emit('status', event);
+    emitOAuthStatus(event);
 
     return { success: true };
   }),

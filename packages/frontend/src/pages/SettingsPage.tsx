@@ -12,6 +12,7 @@ import {
   ChatText,
   DiscordLogo,
   Code,
+  Copy,
   Eye,
   EyeSlash,
   Warning,
@@ -621,14 +622,38 @@ function CortexProviderSection() {
   // Reconnect OAuth state
   const [reconnectState, setReconnectState] = useState<'idle' | 'authenticating'>('idle');
   const [reconnectError, setReconnectError] = useState<string | null>(null);
+  const [reconnectAuthUrl, setReconnectAuthUrl] = useState<string | null>(null);
+  const [reconnectDeviceCode, setReconnectDeviceCode] = useState<string | null>(null);
+  const [reconnectPromptMessage, setReconnectPromptMessage] = useState<string | null>(null);
+  const [reconnectPromptPlaceholder, setReconnectPromptPlaceholder] = useState('Paste here...');
+  const [reconnectPromptAllowEmpty, setReconnectPromptAllowEmpty] = useState(false);
+  const [reconnectPromptValue, setReconnectPromptValue] = useState('');
+  const [reconnectUrlCopied, setReconnectUrlCopied] = useState(false);
+  const [reconnectCodeCopied, setReconnectCodeCopied] = useState(false);
+  const [reconnectManualCodeRecommended, setReconnectManualCodeRecommended] = useState(false);
+  const [reconnectFlowType, setReconnectFlowType] = useState<string | null>(null);
+  const oauthRespondMutation = trpc.cortexProvider.oauthRespond.useMutation();
 
   // Subscribe to OAuth status when reconnecting
   trpc.cortexProvider.oauthStatus.useSubscription(undefined, {
     enabled: reconnectState === 'authenticating',
     onData: (event) => {
-      if (event.type === 'success') {
+      if (event.type === 'auth_url') {
+        setReconnectAuthUrl(event.url);
+        setReconnectDeviceCode(event.deviceCode ?? null);
+        setReconnectManualCodeRecommended(event.manualCodeRecommended ?? false);
+        setReconnectFlowType(event.flowType ?? null);
+      } else if (event.type === 'prompt') {
+        setReconnectPromptMessage(event.message);
+        setReconnectPromptPlaceholder(event.placeholder ?? 'Paste here...');
+        setReconnectPromptAllowEmpty(event.allowEmpty ?? false);
+        setReconnectPromptValue('');
+      } else if (event.type === 'success') {
         setReconnectState('idle');
         setReconnectError(null);
+        setReconnectAuthUrl(null);
+        setReconnectDeviceCode(null);
+        setReconnectPromptMessage(null);
         utils.cortexProvider.getStatus.invalidate();
         utils.cortexProvider.listConfiguredProviders.invalidate();
         // Dismiss any auth errors from the store
@@ -734,6 +759,13 @@ function CortexProviderSection() {
     if (!activeProvider) return;
     setReconnectError(null);
     setReconnectState('authenticating');
+    setReconnectAuthUrl(null);
+    setReconnectDeviceCode(null);
+    setReconnectPromptMessage(null);
+    setReconnectManualCodeRecommended(false);
+    setReconnectFlowType(null);
+    setReconnectUrlCopied(false);
+    setReconnectCodeCopied(false);
     initiateOAuthMutation.mutate(
       { provider: activeProvider },
       {
@@ -748,7 +780,39 @@ function CortexProviderSection() {
   const handleCancelReconnect = useCallback(() => {
     cancelOAuthMutation.mutate();
     setReconnectState('idle');
+    setReconnectAuthUrl(null);
+    setReconnectDeviceCode(null);
+    setReconnectPromptMessage(null);
   }, [cancelOAuthMutation]);
+
+  const handleReconnectPromptSubmit = useCallback(() => {
+    if (!reconnectPromptAllowEmpty && !reconnectPromptValue.trim()) return;
+    oauthRespondMutation.mutate({ response: reconnectPromptValue.trim() });
+    setReconnectPromptMessage(null);
+    setReconnectPromptValue('');
+  }, [oauthRespondMutation, reconnectPromptAllowEmpty, reconnectPromptValue]);
+
+  const handleCopyReconnectUrl = useCallback(async () => {
+    if (!reconnectAuthUrl) return;
+    try {
+      await navigator.clipboard.writeText(reconnectAuthUrl);
+      setReconnectUrlCopied(true);
+      setTimeout(() => setReconnectUrlCopied(false), 2000);
+    } catch {
+      // Fallback unavailable
+    }
+  }, [reconnectAuthUrl]);
+
+  const handleCopyReconnectCode = useCallback(async () => {
+    if (!reconnectDeviceCode) return;
+    try {
+      await navigator.clipboard.writeText(reconnectDeviceCode);
+      setReconnectCodeCopied(true);
+      setTimeout(() => setReconnectCodeCopied(false), 2000);
+    } catch {
+      // Fallback unavailable
+    }
+  }, [reconnectDeviceCode]);
 
   const handleSwitchModalClose = useCallback(() => {
     setSwitchModalOpen(false);
@@ -806,10 +870,102 @@ function CortexProviderSection() {
             </div>
 
             {reconnectState === 'authenticating' ? (
-              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
-                <BreathingDots color={theme.colors.warning.main} />
-                <Typography.Caption color="secondary">Waiting for authorization...</Typography.Caption>
-                <Button variant="ghost" size="sm" onClick={handleCancelReconnect}>Cancel</Button>
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+                {reconnectAuthUrl && (
+                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                    <Typography.Caption color="secondary">Open this sign-in page:</Typography.Caption>
+                    <Typography.SmallBody
+                      as="a"
+                      href={reconnectAuthUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      css={css`
+                        display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
+                        color: ${theme.colors.text.primary}; word-break: break-all;
+                        text-decoration: none; &:hover { text-decoration: underline; }
+                      `}
+                    >
+                      {reconnectAuthUrl} <ArrowSquareOut size={12} />
+                    </Typography.SmallBody>
+                    <button
+                      onClick={handleCopyReconnectUrl}
+                      css={css`
+                        display: inline-flex; align-items: center; gap: 4px; padding: ${theme.spacing[0.5]} ${theme.spacing[1]};
+                        border-radius: ${theme.borderRadius.sm}; cursor: pointer; align-self: flex-start;
+                        background: none; border: none;
+                        color: ${reconnectUrlCopied ? theme.colors.success.main : theme.colors.text.hint};
+                        &:hover { color: ${reconnectUrlCopied ? theme.colors.success.main : theme.colors.text.primary}; }
+                      `}
+                    >
+                      {reconnectUrlCopied ? <><CheckCircle size={12} /> <Typography.Tiny>Copied URL</Typography.Tiny></> : <><Copy size={12} /> <Typography.Tiny>Copy URL</Typography.Tiny></>}
+                    </button>
+                    {reconnectDeviceCode && (
+                      <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
+                        <Typography.Caption color="secondary">Enter code:</Typography.Caption>
+                        <Typography.SmallBodyAlt as="code" css={css`
+                          letter-spacing: 0.15em;
+                          background: ${theme.colors.background.elevated};
+                          padding: ${theme.spacing[1]} ${theme.spacing[2]};
+                          border-radius: ${theme.borderRadius.sm};
+                          border: 1px solid ${theme.colors.border.default};
+                        `}>
+                          {reconnectDeviceCode}
+                        </Typography.SmallBodyAlt>
+                        <button
+                          onClick={handleCopyReconnectCode}
+                          css={css`
+                            display: flex; align-items: center; gap: 4px; padding: ${theme.spacing[0.5]} ${theme.spacing[1]};
+                            border-radius: ${theme.borderRadius.sm}; cursor: pointer;
+                            background: none; border: none;
+                            color: ${reconnectCodeCopied ? theme.colors.success.main : theme.colors.text.hint};
+                            &:hover { color: ${reconnectCodeCopied ? theme.colors.success.main : theme.colors.text.primary}; }
+                          `}
+                        >
+                          {reconnectCodeCopied ? <><CheckCircle size={12} /> <Typography.Tiny>Copied</Typography.Tiny></> : <><Copy size={12} /> <Typography.Tiny>Copy</Typography.Tiny></>}
+                        </button>
+                      </div>
+                    )}
+                    {(reconnectManualCodeRecommended || reconnectFlowType === 'localhost_callback') && !reconnectPromptMessage && (
+                      <Typography.Caption color="hint">
+                        If the browser lands on a localhost page that cannot connect, copy the full address from that page and paste it here when prompted.
+                      </Typography.Caption>
+                    )}
+                  </div>
+                )}
+                {reconnectPromptMessage && (
+                  <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                    <Typography.Caption color="secondary">{reconnectPromptMessage}</Typography.Caption>
+                    <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
+                      <input
+                        type="text"
+                        value={reconnectPromptValue}
+                        onChange={(e) => setReconnectPromptValue(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleReconnectPromptSubmit(); }}
+                        placeholder={reconnectPromptPlaceholder}
+                        css={css`
+                          flex: 1;
+                          padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                          background: ${theme.colors.background.paper};
+                          border: 1px solid ${theme.colors.border.default};
+                          border-radius: ${theme.borderRadius.default};
+                          color: ${theme.colors.text.primary};
+                          font-size: ${theme.typography.fontSize.sm};
+                          outline: none;
+                          &:focus { border-color: ${theme.colors.border.focus}; }
+                          &::placeholder { color: ${theme.colors.text.hint}; }
+                        `}
+                      />
+                      <Button variant="primary" size="sm" onClick={handleReconnectPromptSubmit} disabled={!reconnectPromptAllowEmpty && !reconnectPromptValue.trim()}>
+                        Submit
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
+                  <BreathingDots color={theme.colors.warning.main} />
+                  <Typography.Caption color="secondary">Waiting for authorization...</Typography.Caption>
+                  <Button variant="ghost" size="sm" onClick={handleCancelReconnect}>Cancel</Button>
+                </div>
               </div>
             ) : (
               <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
@@ -1052,7 +1208,15 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
   const [oauthState, setOauthState] = useState<'idle' | 'authenticating' | 'success' | 'error'>('idle');
   const [oauthAuthUrl, setOauthAuthUrl] = useState<string | null>(null);
   const [oauthDeviceCode, setOauthDeviceCode] = useState<string | null>(null);
+  const [oauthFlowType, setOauthFlowType] = useState<string | null>(null);
+  const [oauthManualCodeRecommended, setOauthManualCodeRecommended] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  const [urlCopied, setUrlCopied] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [oauthPromptMessage, setOauthPromptMessage] = useState<string | null>(null);
+  const [oauthPromptPlaceholder, setOauthPromptPlaceholder] = useState('Paste here...');
+  const [oauthPromptAllowEmpty, setOauthPromptAllowEmpty] = useState(false);
+  const [oauthPromptValue, setOauthPromptValue] = useState('');
 
   // API key state
   const [apiKeyExpanded, setApiKeyExpanded] = useState(false);
@@ -1076,6 +1240,7 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
   const saveApiKeyMutation = trpc.cortexProvider.saveApiKey.useMutation();
   const saveCustomMutation = trpc.cortexProvider.saveCustomEndpoint.useMutation();
   const testCustomMutation = trpc.cortexProvider.testCustomEndpoint.useMutation();
+  const oauthRespondMutation = trpc.cortexProvider.oauthRespond.useMutation();
 
   // OAuth subscription
   trpc.cortexProvider.oauthStatus.useSubscription(undefined, {
@@ -1083,7 +1248,14 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
     onData: (event) => {
       if (event.type === 'auth_url') {
         setOauthAuthUrl(event.url);
-        if (event.deviceCode) setOauthDeviceCode(event.deviceCode);
+        setOauthDeviceCode(event.deviceCode ?? null);
+        setOauthFlowType(event.flowType ?? null);
+        setOauthManualCodeRecommended(event.manualCodeRecommended ?? false);
+      } else if (event.type === 'prompt') {
+        setOauthPromptMessage(event.message);
+        setOauthPromptPlaceholder(event.placeholder ?? 'Paste here...');
+        setOauthPromptAllowEmpty(event.allowEmpty ?? false);
+        setOauthPromptValue('');
       } else if (event.type === 'success') {
         setOauthState('success');
         utils.cortexProvider.getStatus.invalidate();
@@ -1092,6 +1264,7 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
       } else if (event.type === 'error') {
         setOauthState('error');
         setOauthError(event.message);
+        setOauthPromptMessage(null);
       }
     },
   });
@@ -1113,6 +1286,13 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
     setOauthError(null);
     setOauthAuthUrl(null);
     setOauthDeviceCode(null);
+    setOauthFlowType(null);
+    setOauthManualCodeRecommended(false);
+    setOauthPromptMessage(null);
+    setOauthPromptPlaceholder('Paste here...');
+    setOauthPromptAllowEmpty(false);
+    setUrlCopied(false);
+    setCodeCopied(false);
     initiateOAuthMutation.mutate(
       { provider: providerId },
       {
@@ -1128,7 +1308,41 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
     cancelOAuthMutation.mutate();
     setOauthState('idle');
     setOauthProvider(null);
+    setOauthAuthUrl(null);
+    setOauthDeviceCode(null);
+    setOauthFlowType(null);
+    setOauthManualCodeRecommended(false);
+    setOauthPromptMessage(null);
   }, [cancelOAuthMutation]);
+
+  const handleOAuthPromptSubmit = useCallback(() => {
+    if (!oauthPromptAllowEmpty && !oauthPromptValue.trim()) return;
+    oauthRespondMutation.mutate({ response: oauthPromptValue.trim() });
+    setOauthPromptMessage(null);
+    setOauthPromptValue('');
+  }, [oauthPromptAllowEmpty, oauthPromptValue, oauthRespondMutation]);
+
+  const handleCopyUrl = useCallback(async () => {
+    if (!oauthAuthUrl) return;
+    try {
+      await navigator.clipboard.writeText(oauthAuthUrl);
+      setUrlCopied(true);
+      setTimeout(() => setUrlCopied(false), 2000);
+    } catch {
+      // Fallback unavailable
+    }
+  }, [oauthAuthUrl]);
+
+  const handleCopyCode = useCallback(async () => {
+    if (!oauthDeviceCode) return;
+    try {
+      await navigator.clipboard.writeText(oauthDeviceCode);
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 2000);
+    } catch {
+      // Fallback unavailable
+    }
+  }, [oauthDeviceCode]);
 
   const handleValidateApiKey = useCallback(() => {
     if (!apiKeyValue.trim()) return;
@@ -1199,7 +1413,9 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
   return (
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
       <Typography.Caption color="secondary">
-        Connect to a different AI provider. Your existing configuration will be replaced.
+        {statusData?.headless
+          ? 'Animus is running remotely. OAuth opens in this browser and may ask for a final redirect URL.'
+          : 'Connect to a different AI provider. Your existing configuration will be replaced.'}
       </Typography.Caption>
 
       {/* OAuth Provider Cards */}
@@ -1223,17 +1439,97 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
               {isAuthenticating ? (
                 <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
                   <Typography.SmallBodyAlt>{card.name}</Typography.SmallBodyAlt>
-                  {oauthAuthUrl && oauthDeviceCode ? (
-                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
-                      <Typography.Caption color="secondary">Open the browser and enter code:</Typography.Caption>
-                      <Typography.SmallBodyAlt as="code" css={css`letter-spacing: 0.15em;`}>
-                        {oauthDeviceCode}
-                      </Typography.SmallBodyAlt>
+                  {oauthAuthUrl ? (
+                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+                      <Typography.Caption color="secondary">Open this sign-in page:</Typography.Caption>
+                      <Typography.SmallBody
+                        as="a"
+                        href={oauthAuthUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        css={css`
+                          display: inline-flex; align-items: center; gap: ${theme.spacing[1]};
+                          color: ${theme.colors.text.primary}; word-break: break-all;
+                          text-decoration: none; &:hover { text-decoration: underline; }
+                        `}
+                      >
+                        {oauthAuthUrl} <ArrowSquareOut size={12} />
+                      </Typography.SmallBody>
+                      <button
+                        onClick={handleCopyUrl}
+                        css={css`
+                          display: inline-flex; align-items: center; gap: 4px; padding: ${theme.spacing[0.5]} ${theme.spacing[1]};
+                          border-radius: ${theme.borderRadius.sm}; cursor: pointer; align-self: flex-start;
+                          background: none; border: none;
+                          color: ${urlCopied ? theme.colors.success.main : theme.colors.text.hint};
+                          &:hover { color: ${urlCopied ? theme.colors.success.main : theme.colors.text.primary}; }
+                        `}
+                      >
+                        {urlCopied ? <><CheckCircle size={12} /> <Typography.Tiny>Copied URL</Typography.Tiny></> : <><Copy size={12} /> <Typography.Tiny>Copy URL</Typography.Tiny></>}
+                      </button>
+                      {oauthDeviceCode && (
+                        <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
+                          <Typography.Caption color="secondary">Enter code:</Typography.Caption>
+                          <Typography.SmallBodyAlt as="code" css={css`
+                            letter-spacing: 0.15em;
+                            background: ${theme.colors.background.elevated};
+                            padding: ${theme.spacing[1]} ${theme.spacing[2]};
+                            border-radius: ${theme.borderRadius.sm};
+                            border: 1px solid ${theme.colors.border.default};
+                          `}>
+                            {oauthDeviceCode}
+                          </Typography.SmallBodyAlt>
+                          <button
+                            onClick={handleCopyCode}
+                            css={css`
+                              display: flex; align-items: center; gap: 4px; padding: ${theme.spacing[0.5]} ${theme.spacing[1]};
+                              border-radius: ${theme.borderRadius.sm}; cursor: pointer;
+                              background: none; border: none;
+                              color: ${codeCopied ? theme.colors.success.main : theme.colors.text.hint};
+                              &:hover { color: ${codeCopied ? theme.colors.success.main : theme.colors.text.primary}; }
+                            `}
+                          >
+                            {codeCopied ? <><CheckCircle size={12} /> <Typography.Tiny>Copied</Typography.Tiny></> : <><Copy size={12} /> <Typography.Tiny>Copy</Typography.Tiny></>}
+                          </button>
+                        </div>
+                      )}
+                      {(oauthManualCodeRecommended || oauthFlowType === 'localhost_callback') && !oauthPromptMessage && (
+                        <Typography.Caption color="hint">
+                          If the browser lands on a localhost page that cannot connect, copy the full address from that page and paste it here when prompted.
+                        </Typography.Caption>
+                      )}
                     </div>
                   ) : (
-                    <Typography.Caption color="secondary">
-                      {oauthAuthUrl ? 'Complete sign-in in your browser.' : 'Starting authentication...'}
-                    </Typography.Caption>
+                    <Typography.Caption color="secondary">Starting authentication...</Typography.Caption>
+                  )}
+                  {oauthPromptMessage && (
+                    <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+                      <Typography.Caption color="secondary">{oauthPromptMessage}</Typography.Caption>
+                      <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
+                        <input
+                          type="text"
+                          value={oauthPromptValue}
+                          onChange={(e) => setOauthPromptValue(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleOAuthPromptSubmit(); }}
+                          placeholder={oauthPromptPlaceholder}
+                          css={css`
+                            flex: 1;
+                            padding: ${theme.spacing[2]} ${theme.spacing[3]};
+                            background: ${theme.colors.background.paper};
+                            border: 1px solid ${theme.colors.border.default};
+                            border-radius: ${theme.borderRadius.default};
+                            color: ${theme.colors.text.primary};
+                            font-size: ${theme.typography.fontSize.sm};
+                            outline: none;
+                            &:focus { border-color: ${theme.colors.border.focus}; }
+                            &::placeholder { color: ${theme.colors.text.hint}; }
+                          `}
+                        />
+                        <Button variant="primary" size="sm" onClick={handleOAuthPromptSubmit} disabled={!oauthPromptAllowEmpty && !oauthPromptValue.trim()}>
+                          Submit
+                        </Button>
+                      </div>
+                    </div>
                   )}
                   <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
                     <BreathingDots color={theme.colors.text.hint} />

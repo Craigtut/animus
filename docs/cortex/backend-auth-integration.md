@@ -88,9 +88,18 @@ Discriminated union for the `oauthStatus` tRPC subscription:
 
 ```typescript
 type OAuthStatusEvent =
-  | { type: 'auth_url'; url: string; instructions?: string; deviceCode?: string }
+  | {
+      type: 'auth_url';
+      url: string;
+      instructions?: string;
+      deviceCode?: string;
+      flowType?: 'browser' | 'localhost_callback' | 'device_code';
+      manualCodeRecommended?: boolean;
+      callbackPort?: number;
+      callbackPath?: string;
+    }
   | { type: 'progress'; message: string }
-  | { type: 'prompt'; message: string }
+  | { type: 'prompt'; message: string; placeholder?: string; allowEmpty?: boolean }
   | { type: 'success'; meta: OAuthMeta }
   | { type: 'error'; message: string };
 ```
@@ -730,6 +739,8 @@ Each pi-ai provider uses a different OAuth flow type. This determines whether OA
 All four providers support a manual paste fallback. When the callback server is unreachable (Docker, SSH, headless), pi-ai calls the `onManualCodeInput` or `onPrompt` callback, prompting the user to paste the redirect URL or authorization code from their browser. The Animus frontend relays this prompt via the `oauthStatus` tRPC subscription and the `oauthRespond` mutation.
 
 This means OAuth login technically works in Docker, but requires the user to manually copy-paste the redirect URL. The `isHeadless()` detection in the backend can surface this in the UI: show the authorization URL prominently and add a paste input field for the redirect URL.
+
+The backend passes `onManualCodeInput` in headless mode so the paste field appears immediately instead of waiting for the localhost callback to time out. Cortex normalizes provider auth callbacks into `flowType`, `deviceCode`, and callback metadata, and the backend replays the latest OAuth event to new subscribers so the frontend does not miss the auth URL if the subscription attaches slightly late.
 
 **For Docker users who want zero manual steps:** Use API key authentication (Layer 2 in the progressive disclosure) or environment variables. Only GitHub Copilot's device code flow works seamlessly in Docker without any paste step.
 
