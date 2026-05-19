@@ -15,6 +15,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { platform, arch } from 'node:process';
 import { get as httpsGet } from 'node:https';
+import { getExpectedTtsNativeBinary } from './tts-native-platform.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -30,23 +31,7 @@ const PREFIX_OK = '\x1b[32m[tts-native]\x1b[0m';
 // 1. Determine expected binary name
 // ---------------------------------------------------------------------------
 
-function getExpectedBinary() {
-  const cpu = arch === 'arm64' ? 'arm64' : arch === 'x64' ? 'x64' : null;
-  if (!cpu) return null;
-
-  switch (platform) {
-    case 'darwin':
-      return `tts-native.darwin-${cpu}.node`;
-    case 'linux':
-      return `tts-native.linux-${cpu}-gnu.node`;
-    case 'win32':
-      return `tts-native.win32-${cpu}-msvc.node`;
-    default:
-      return null;
-  }
-}
-
-const binaryName = getExpectedBinary();
+const binaryName = getExpectedTtsNativeBinary({ platform, arch });
 if (!binaryName) {
   console.log(`${PREFIX} Unsupported platform (${platform}/${arch}), skipping native TTS`);
   process.exit(0);

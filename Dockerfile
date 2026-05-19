@@ -10,6 +10,7 @@ COPY packages/backend/package.json packages/backend/
 COPY packages/frontend/package.json packages/frontend/
 COPY packages/channel-sdk/package.json packages/channel-sdk/
 COPY packages/tts-native/package.json packages/tts-native/
+COPY scripts/tts-native-platform.mjs scripts/
 
 # Install dependencies for the production runtime workspaces.
 # NOTE: @animus-labs/cortex must be published to npm before Docker builds work.
@@ -22,10 +23,11 @@ RUN node -e "const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('packa
 RUN npm install
 
 # Download pre-built tts-native binary from GitHub release.
-# TARGETARCH is set automatically by Docker buildx (amd64 or arm64).
+# TARGETARCH is set by buildx. Local classic/Compose builds may leave it empty,
+# so the helper falls back to the architecture reported inside the build
+# container instead of incorrectly defaulting to x64.
 ARG TARGETARCH
-RUN TTS_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "x64") && \
-    TTS_BINARY="tts-native.linux-${TTS_ARCH}-gnu.node" && \
+RUN TTS_BINARY="$(node scripts/tts-native-platform.mjs docker-linux-binary)" && \
     curl -fSL "https://github.com/Craigtut/animus/releases/download/tts-native-latest/${TTS_BINARY}" \
       -o "packages/tts-native/${TTS_BINARY}"
 
@@ -105,6 +107,7 @@ COPY --from=builder /app/packages/backend/dist packages/backend/dist
 # Copy tts-native package (index.js loader, type definitions, native binary)
 COPY packages/tts-native/index.js packages/tts-native/index.d.ts packages/tts-native/
 COPY --from=builder /app/packages/tts-native/tts-native.*.node packages/tts-native/
+RUN node -e "const fs=require('fs'); const arch={x64:'x64',arm64:'arm64'}[process.arch]; if(!arch) throw new Error('Unsupported runtime architecture: '+process.arch); const p='packages/tts-native/tts-native.linux-'+arch+'-gnu.node'; if(!fs.existsSync(p)) throw new Error('Missing native TTS addon for runtime architecture: '+p); require('./packages/tts-native'); console.log('Verified native TTS addon: '+p)"
 
 # Create data directory
 RUN mkdir -p /app/data

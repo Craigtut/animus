@@ -391,7 +391,7 @@ Settings > Persona includes voice selection:
 | Scenario | Behavior |
 |----------|----------|
 | sherpa-onnx not installed | STT engine reports unavailable. Backend runs normally. |
-| @animus-labs/tts-native not built | TTS engine reports unavailable with message: "Native TTS addon not built. Run: npm run build -w @animus-labs/tts-native (requires Rust toolchain)". Backend runs normally. |
+| @animus-labs/tts-native not built or failed to load | TTS engine reports unavailable with a message that includes the original native import error and the manual build command. Backend runs normally. |
 | Rust not installed | `scripts/check-native.mjs` prints warning on `npm run dev` and continues. TTS unavailable. |
 | STT model files missing | `stt.isAvailable()` returns false. Transcription calls fail with clear error. |
 | TTS model files missing | `tts.isAvailable()` returns false (checks for `tts_b6369a24.safetensors` + `tokenizer.model`). Synthesis calls fail with clear error. |

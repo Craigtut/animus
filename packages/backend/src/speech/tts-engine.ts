@@ -124,8 +124,10 @@ export class TTSEngine {
       // @ts-expect-error -- @animus-labs/tts-native has no type declarations until native build
       ({ PocketTTS } = await import('@animus-labs/tts-native') as any);
     } catch (err) {
+      const detail = err instanceof Error && err.message ? ` Original error: ${err.message}` : '';
       throw new Error(
-        'Native TTS addon not built. Run: npm run build -w @animus-labs/tts-native (requires Rust toolchain)',
+        `Native TTS addon not built or failed to load.${detail} Run: npm run build -w @animus-labs/tts-native (requires Rust toolchain)`,
+        { cause: err },
       );
     }
 
