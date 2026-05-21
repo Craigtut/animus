@@ -3451,7 +3451,6 @@ function SystemSection() {
   const utils = trpc.useUtils();
 
   const { data: settings } = trpc.settings.getSystemSettings.useQuery();
-  const { data: me } = trpc.auth.me.useQuery();
   const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation({
     onSuccess: () => utils.settings.getSystemSettings.invalidate(),
   });
@@ -3723,14 +3722,17 @@ function SystemSection() {
         </div>
       </div>
 
-      {/* Account */}
+      {/* Instance access */}
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
         <Typography.Subtitle as="h3" css={css`font-weight: ${theme.typography.fontWeight.semibold};`}>
-          Account
+          Instance access
         </Typography.Subtitle>
         <Typography.SmallBody as="div" color="secondary">
-          {me?.email ?? 'Loading...'}
+          Local password
         </Typography.SmallBody>
+        <Typography.Caption as="p" color="hint" css={css`margin-top: -${theme.spacing[1]};`}>
+          This protects the vault and opens this instance. It is separate from Animus Store sign-in.
+        </Typography.Caption>
         {!showPasswordForm ? (
           <button
             onClick={() => setShowPasswordForm(true)}
@@ -3745,7 +3747,7 @@ function SystemSection() {
               &:hover { opacity: 0.8; }
             `}
           >
-            Change password
+            Change local password
           </button>
         ) : (
           <PasswordChangeForm onClose={() => setShowPasswordForm(false)} />
@@ -3887,12 +3889,12 @@ function PasswordChangeForm({ onClose }: { onClose: () => void }) {
             border-radius: ${theme.borderRadius.default};
           `}
         >
-          Password changed successfully
+          Local password changed
         </Typography.SmallBody>
       )}
       <div css={css`display: flex; gap: ${theme.spacing[2]};`}>
         <Button size="sm" onClick={handleSubmit} loading={changePasswordMutation.isPending}>
-          {changePasswordMutation.isPending ? 'Saving...' : 'Save password'}
+          {changePasswordMutation.isPending ? 'Saving...' : 'Save local password'}
         </Button>
         <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
       </div>

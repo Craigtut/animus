@@ -80,10 +80,10 @@ export function UnlockPage() {
           <LockKey size={48} weight="duotone" color={theme.colors.text.hint} />
         </div>
         <Typography.Title serif css={css`text-align: center; margin-bottom: ${theme.spacing[1]};`}>
-          Unlock Animus
+          Unlock this Animus
         </Typography.Title>
         <Typography.Body color="secondary" css={css`text-align: center;`}>
-          Enter your password to unlock the encryption vault.
+          Enter the local password to open the vault and wake the server.
         </Typography.Body>
 
         <form onSubmit={handleSubmit} css={css`margin-top: ${theme.spacing[8]};`}>
@@ -105,6 +105,7 @@ export function UnlockPage() {
 
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
             <Input
+              label="Local password"
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword((e.target as HTMLInputElement).value)}
@@ -143,7 +144,7 @@ export function UnlockPage() {
           color="hint"
           style={{ textAlign: 'center', marginTop: theme.spacing[3] }}
         >
-          Your encryption key is derived from this password. It exists only in memory while the server is running.
+          The key is derived from this password and kept only in server memory while Animus is running.
         </Typography.Caption>
       </motion.div>
     </div>

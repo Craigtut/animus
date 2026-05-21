@@ -94,11 +94,11 @@ export function MigrationPage() {
           <ShieldCheck size={48} weight="duotone" color={theme.colors.text.hint} />
         </div>
         <Typography.Title serif css={css`text-align: center; margin-bottom: ${theme.spacing[1]};`}>
-          Encryption Upgrade
+          Protect this Animus
         </Typography.Title>
         <Typography.Body color="secondary" css={css`text-align: center;`}>
-          Animus has upgraded its encryption system. Choose a password to protect your stored
-          credentials. This password will be required to unlock the server on each start.
+          This instance needs a local password before it can continue. The password protects
+          stored credentials and opens the vault when the server starts.
         </Typography.Body>
 
         <form onSubmit={handleSubmit} css={css`margin-top: ${theme.spacing[8]};`}>
@@ -120,6 +120,7 @@ export function MigrationPage() {
 
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
             <Input
+              label="Local password"
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword((e.target as HTMLInputElement).value)}
@@ -144,6 +145,7 @@ export function MigrationPage() {
             />
 
             <Input
+              label="Confirm local password"
               type={showPassword ? 'text' : 'password'}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword((e.target as HTMLInputElement).value)}
@@ -156,7 +158,7 @@ export function MigrationPage() {
               loading={migrateMutation.isPending}
               css={css`width: 100%; margin-top: ${theme.spacing[2]};`}
             >
-              {migrateMutation.isPending ? 'Migrating...' : 'Upgrade Encryption'}
+              {migrateMutation.isPending ? 'Protecting...' : 'Protect this instance'}
             </Button>
           </div>
         </form>
@@ -166,8 +168,7 @@ export function MigrationPage() {
           color="hint"
           style={{ textAlign: 'center', marginTop: theme.spacing[3] }}
         >
-          Your existing credentials will be re-encrypted with a key derived from this password.
-          For automated environments, set ANIMUS_UNLOCK_PASSWORD in your .env file.
+          Automated environments can provide this password with ANIMUS_UNLOCK_PASSWORD.
         </Typography.Caption>
       </motion.div>
     </div>

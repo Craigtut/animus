@@ -55,7 +55,7 @@
 |--------|-----|------------|
 | **Prompt injection: "use credentials on my behalf"** | The agent-blind pattern allows the agent to call `run_with_credentials` with valid references. The agent can misuse a credential without seeing its value. | Tool permission system, user approval for sensitive operations. See `docs/architecture/tool-permissions.md`. |
 | **Memory dump of running process** | The derived DEK lives in the Node.js heap for the process lifetime. A debugger or core dump could extract it. | OS-level protections (SIP on macOS, ptrace restrictions on Linux). Disable core dumps in production. |
-| **Weak password brute-force** | If the user chooses a weak password, offline brute-force against `vault.json` is feasible. | Argon2id with high memory cost (64 MB) makes each attempt expensive. Enforce minimum password strength at registration. |
+| **Weak password brute-force** | If the user chooses a weak password, offline brute-force against `vault.json` is feasible. | Argon2id with high memory cost (64 MB) makes each attempt expensive. Enforce minimum password strength during first-time setup. |
 | **Agent modifies server source code** | A prompt-injected agent could theoretically edit encryption source files to log the key on next restart. | File deny list blocks writes to security-critical source files. Code review on restart. |
 
 ### Trust Assumptions
@@ -131,7 +131,7 @@ Resolution happens once, at server startup, when the Fastify auth plugin is regi
 2. **`JWT_SECRET` env var** — legacy installs; used as-is, never written to disk.
 3. **First run** — generate a new secret and persist it to `data/jwt.key` now.
 
-`createJwtSecret()` is idempotent: if a key already exists it is reused, never rotated, so concurrent callers (startup resolver, first-run registration, vault migration) cannot invalidate live sessions.
+`createJwtSecret()` is idempotent: if a key already exists it is reused, never rotated, so concurrent callers (startup resolver, first-time setup, vault migration) cannot invalidate live sessions.
 
 Both auth paths call `resolveJwtSecret()`: the Fastify auth plugin uses it to configure `@fastify/jwt` (signing + HTTP `request.jwtVerify`), and the WebSocket context (`api/trpc.ts`) uses it to build its standalone verifier. Because the key is persisted before the first cookie is signed and both paths share one resolver, HTTP and WebSocket authentication can never resolve to different secrets. (A prior bug where they did caused WebSocket subscriptions to be silently unauthenticated on a fresh first run until a backend restart.)
 
@@ -182,7 +182,7 @@ Server Start --> [vault.json exists?]
   Yes --> [ANIMUS_UNLOCK_PASSWORD available?]
     Yes --> Derive key, unwrap DEK, verify sentinel --> Unsealed
     No  --> Sealed (wait for manual unlock)
-  No  --> [First run, no vault yet] --> Registration flow creates vault --> Unsealed
+  No  --> [First run, no vault yet] --> First-time setup creates vault --> Unsealed
 ```
 
 The sealed/unsealed state is managed by a `VaultManager` module that holds the DEK in a module-scoped variable. Components that need encryption check `vault.isUnsealed()` before proceeding.
@@ -347,9 +347,9 @@ The deny list is enforced in the agent session's `canUseTool` callback and `PreT
 3. initializeDatabases()                — open DBs, run migrations
 4. Register Fastify auth plugin         — resolveJwtSecret() generates and
                                           persists data/jwt.key (first run)
-5. Start Fastify server                 — serves registration page
-6. User completes registration:
-   a. Hash password with Argon2id       — for auth (stored in users table)
+5. Start Fastify server                 — serves first-time setup page
+6. User creates a local instance password:
+   a. Hash password with Argon2id       — for local session auth (stored in users table)
    b. Generate DEK: crypto.randomBytes(32)
    c. Generate salt: crypto.randomBytes(32)
    d. Derive password key: Argon2id(password, salt)
@@ -362,10 +362,10 @@ The deny list is enforced in the agent session's `canUseTool` callback and `PreT
    j. Redirect to onboarding
 ```
 
-> The JWT secret is not generated during registration. It is resolved and
+> The JWT secret is not generated during first-time setup. It is resolved and
 > persisted earlier, when the auth plugin registers (step 4), so signing and
 > WebSocket verification always share the same secret. `createJwtSecret()` is
-> idempotent, so the registration path reuses the startup-created key.
+> idempotent, so the setup path reuses the startup-created key.
 
 ### Migration from Legacy `.secrets` File
 
@@ -408,20 +408,22 @@ This is an instant operation. Only the DEK wrapper changes. All credentials rema
 
 ## First-Time Setup
 
-The password for encryption is the same password used for web UI authentication. There is no separate "encryption password" to remember. The registration flow creates both the auth record and the vault in a single step.
+The password for encryption is the same password used for local web UI authentication. There is no separate "encryption password" to remember. First-time setup creates both the local auth record and the vault in a single step. It does not create an Animus Store account and does not collect an email address.
 
-### Registration Flow
+### First-Time Setup Flow
 
 1. User visits Animus for the first time
-2. Registration page collects email and password
+2. Setup page collects a local password
 3. Password is used for two independent purposes:
    - **Authentication**: Argon2id hash stored in `users.password_hash` (with its own random salt, managed by the argon2 library)
    - **Encryption**: Argon2id derivation to wrap the DEK (with a separate random salt stored in `vault.json`)
 4. These two derivations use different salts and produce different outputs. The auth hash and the encryption key derivation are independent.
 
+The `users.email` column remains for schema compatibility with older installs, but new local installs receive an internal placeholder identifier. The interface does not ask for or display an email address for local instance access. Animus Store authentication, when present, is a separate optional connection.
+
 ### Password Requirements
 
-The registration form enforces minimum password requirements. The strength of the encryption is directly proportional to password entropy, so the system should guide users toward strong passwords.
+The first-time setup form enforces minimum password requirements. The strength of the encryption is directly proportional to password entropy, so the system should guide users toward strong passwords.
 
 ---
 
@@ -431,7 +433,7 @@ The registration form enforces minimum password requirements. The strength of th
 
 | Event | Password needed? |
 |-------|-----------------|
-| First launch after install | Yes (registration) |
+| First launch after install | Yes (first-time setup) |
 | App opened (process was stopped) | Yes (lock screen) |
 | Machine reboots | Yes (lock screen on next app open) |
 | Machine sleeps / screen locks | No (process stays alive) |

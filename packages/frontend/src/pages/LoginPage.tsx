@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { css, useTheme } from '@emotion/react';
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Eye, EyeSlash } from '@phosphor-icons/react';
 import { Button, Input, Typography } from '../components/ui';
@@ -14,7 +14,6 @@ export function LoginPage() {
   const navigate = useNavigate();
   const { setUser } = useAuthStore();
 
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,17 +30,17 @@ export function LoginPage() {
       navigate('/');
     },
     onError: () => {
-      setError('Invalid email or password');
+      setError('Wrong password');
     },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    loginMutation.mutate({ email, password });
+    loginMutation.mutate({ password });
   };
 
-  // If no user exists yet, redirect to register
+  // If local access has not been configured yet, redirect to first-time setup.
   if (status && !status.hasUser) {
     navigate('/register', { replace: true });
     return null;
@@ -79,10 +78,10 @@ export function LoginPage() {
           `}
         />
         <Typography.Title serif css={css`text-align: center; margin-bottom: ${theme.spacing[1]};`}>
-          Welcome back
+          Enter local password
         </Typography.Title>
         <Typography.Body color="secondary" css={css`text-align: center; margin-bottom: ${theme.spacing[8]};`}>
-          Sign in to your Animus instance.
+          This opens the running Animus instance. It is not an Animus Store sign-in.
         </Typography.Body>
 
         <form onSubmit={handleSubmit}>
@@ -104,22 +103,13 @@ export function LoginPage() {
 
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
             <Input
-              label="Email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail((e.target as HTMLInputElement).value)}
-              placeholder="you@example.com"
-              required
-              autoFocus
-            />
-
-            <Input
-              label="Password"
+              label="Local password"
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword((e.target as HTMLInputElement).value)}
               placeholder="Enter your password"
               required
+              autoFocus
               rightElement={
                 <button
                   type="button"
@@ -142,7 +132,7 @@ export function LoginPage() {
               loading={loginMutation.isPending}
               css={css`width: 100%; margin-top: ${theme.spacing[2]};`}
             >
-              Sign in
+              Continue
             </Button>
           </div>
         </form>
@@ -168,18 +158,8 @@ export function LoginPage() {
               animate={{ opacity: 1, height: 'auto' }}
               css={css`margin-top: ${theme.spacing[2]};`}
             >
-              Since Animus is self-hosted, you can reset your password from the
-              server terminal. Run{' '}
-              <code css={css`
-                font-family: ${theme.typography.fontFamily.mono};
-                background: ${theme.colors.background.elevated};
-                padding: 0.15em 0.4em;
-                border-radius: ${theme.borderRadius.sm};
-                font-size: 0.9em;
-              `}>
-                npm run reset-password
-              </code>{' '}
-              in the project directory.
+              There is no recovery email. If this password is lost, the vault cannot be opened.
+              Restore from a save or reset the application data to start again.
             </Typography.Caption>
           )}
         </div>

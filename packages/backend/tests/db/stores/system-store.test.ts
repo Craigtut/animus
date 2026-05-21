@@ -44,6 +44,15 @@ describe('system-store', () => {
       expect(found!.email).toBe('test@example.com');
     });
 
+    it('retrieves the first user', () => {
+      const first = systemStore.createUser(db, { email: 'first@example.com', passwordHash: 'h1' });
+      systemStore.createUser(db, { email: 'second@example.com', passwordHash: 'h2' });
+
+      const found = systemStore.getFirstUser(db);
+      expect(found).not.toBeNull();
+      expect(found!.id).toBe(first.id);
+    });
+
     it('returns null for nonexistent user', () => {
       expect(systemStore.getUserByEmail(db, 'nope@example.com')).toBeNull();
       expect(systemStore.getUserById(db, 'nonexistent-id')).toBeNull();
@@ -56,9 +65,11 @@ describe('system-store', () => {
     });
 
     it('retrieves password hash', () => {
-      systemStore.createUser(db, { email: 'a@b.com', passwordHash: 'my-hash' });
+      const user = systemStore.createUser(db, { email: 'a@b.com', passwordHash: 'my-hash' });
       expect(systemStore.getPasswordHash(db, 'a@b.com')).toBe('my-hash');
       expect(systemStore.getPasswordHash(db, 'nope@b.com')).toBeNull();
+      expect(systemStore.getPasswordHashByUserId(db, user.id)).toBe('my-hash');
+      expect(systemStore.getPasswordHashByUserId(db, 'missing-user')).toBeNull();
     });
   });
 

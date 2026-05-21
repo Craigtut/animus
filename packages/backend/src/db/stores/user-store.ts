@@ -34,6 +34,13 @@ export function getUserById(db: Database.Database, id: string): User | null {
   return row ? snakeToCamel<User>(row) : null;
 }
 
+export function getFirstUser(db: Database.Database): User | null {
+  const row = db
+    .prepare('SELECT id, email, contact_id, created_at, updated_at FROM users ORDER BY rowid ASC LIMIT 1')
+    .get() as Record<string, unknown> | undefined;
+  return row ? snakeToCamel<User>(row) : null;
+}
+
 export function getUserCount(db: Database.Database): number {
   const row = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
   return row.count;
@@ -46,6 +53,13 @@ export function getPasswordHash(db: Database.Database, email: string): string | 
   return row?.password_hash ?? null;
 }
 
+export function getPasswordHashByUserId(db: Database.Database, userId: string): string | null {
+  const row = db
+    .prepare('SELECT password_hash FROM users WHERE id = ?')
+    .get(userId) as { password_hash: string } | undefined;
+  return row?.password_hash ?? null;
+}
+
 export function updatePasswordHash(
   db: Database.Database,
   email: string,
@@ -55,6 +69,18 @@ export function updatePasswordHash(
     newPasswordHash,
     now(),
     email
+  );
+}
+
+export function updatePasswordHashByUserId(
+  db: Database.Database,
+  userId: string,
+  newPasswordHash: string
+): void {
+  db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?').run(
+    newPasswordHash,
+    now(),
+    userId
   );
 }
 

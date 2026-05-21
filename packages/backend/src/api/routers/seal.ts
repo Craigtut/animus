@@ -115,8 +115,8 @@ export const sealRouter = router({
         try {
           const count = systemStore.getUserCount(db);
           if (count > 0) {
-            const firstUser = db.prepare('SELECT id, email FROM users LIMIT 1').get() as
-              | { id: string; email: string }
+            const firstUser = db.prepare('SELECT id FROM users LIMIT 1').get() as
+              | { id: string }
               | undefined;
             return firstUser ?? null;
           }
@@ -127,7 +127,7 @@ export const sealRouter = router({
       })();
 
       if (user && typeof ctx.req.server.jwt?.sign === 'function') {
-        const payload: JwtPayload = { userId: user.id, email: user.email };
+        const payload: JwtPayload = { userId: user.id };
         const token = ctx.req.server.jwt.sign(payload, {
           expiresIn: `${COOKIE_OPTIONS.maxAge}s`,
         });
@@ -140,7 +140,7 @@ export const sealRouter = router({
         });
 
         log.info('Vault unlocked, session issued');
-        return { success: true, user: { userId: user.id, email: user.email } };
+        return { success: true, user: { userId: user.id } };
       }
 
       log.info('Vault unlocked (no user session)');
@@ -181,7 +181,7 @@ export const sealRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
       }
 
-      const hash = systemStore.getPasswordHash(db, user.email);
+      const hash = systemStore.getPasswordHashByUserId(db, user.id);
       if (!hash) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'No password hash found' });
       }
@@ -203,7 +203,7 @@ export const sealRouter = router({
 
       // Update password hash in users table
       const newHash = await argon2.hash(input.newPassword);
-      systemStore.updatePasswordHash(db, user.email, newHash);
+      systemStore.updatePasswordHashByUserId(db, user.id, newHash);
 
       log.info('Password changed and vault re-wrapped');
       return { success: true };
@@ -267,8 +267,8 @@ export const sealRouter = router({
           try {
             const count = systemStore.getUserCount(db);
             if (count > 0) {
-              const firstUser = db.prepare('SELECT id, email FROM users LIMIT 1').get() as
-                | { id: string; email: string }
+              const firstUser = db.prepare('SELECT id FROM users LIMIT 1').get() as
+                | { id: string }
                 | undefined;
               return firstUser ?? null;
             }
@@ -279,7 +279,7 @@ export const sealRouter = router({
         })();
 
         if (user && typeof ctx.req.server.jwt?.sign === 'function') {
-          const payload: JwtPayload = { userId: user.id, email: user.email };
+          const payload: JwtPayload = { userId: user.id };
           const token = ctx.req.server.jwt.sign(payload, {
             expiresIn: `${COOKIE_OPTIONS.maxAge}s`,
           });
@@ -296,7 +296,7 @@ export const sealRouter = router({
           success: true,
           migratedCredentials: result.migratedCredentials,
           migratedPluginConfigs: result.migratedPluginConfigs,
-          user: user ? { userId: user.id, email: user.email } : null,
+          user: user ? { userId: user.id } : null,
         };
       } catch (err) {
         throw new TRPCError({

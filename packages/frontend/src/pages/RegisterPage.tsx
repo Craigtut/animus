@@ -14,12 +14,11 @@ export function RegisterPage() {
   const navigate = useNavigate();
   const { setUser } = useAuthStore();
 
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string; confirmPassword?: string }>({});
+  const [fieldErrors, setFieldErrors] = useState<{ password?: string; confirmPassword?: string }>({});
 
   const { data: status } = trpc.auth.status.useQuery(undefined, {
     retry: 3,
@@ -32,21 +31,18 @@ export function RegisterPage() {
       navigate('/onboarding/welcome');
     },
     onError: (err) => {
-      setError(err.message || 'Registration failed');
+      setError(err.message || 'Could not create local password');
     },
   });
 
-  // If a user already exists, registration is closed
+  // If local access already exists, setup is closed.
   if (status?.hasUser) {
     navigate('/login', { replace: true });
     return null;
   }
 
   const validate = (): boolean => {
-    const errors: { email?: string; password?: string; confirmPassword?: string } = {};
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      errors.email = 'Enter a valid email address';
-    }
+    const errors: { password?: string; confirmPassword?: string } = {};
     if (password.length < 8) {
       errors.password = 'Password must be at least 8 characters';
     }
@@ -61,7 +57,7 @@ export function RegisterPage() {
     e.preventDefault();
     setError(null);
     if (!validate()) return;
-    registerMutation.mutate({ email, password, confirmPassword });
+    registerMutation.mutate({ password, confirmPassword });
   };
 
   return (
@@ -93,10 +89,10 @@ export function RegisterPage() {
           `}
         />
         <Typography.Title serif css={css`text-align: center; margin-bottom: ${theme.spacing[1]};`}>
-          Create your account
+          Secure this Animus
         </Typography.Title>
         <Typography.Body color="secondary" css={css`text-align: center; margin-bottom: ${theme.spacing[8]};`}>
-          You'll be the only one who can access this Animus instance.
+          Create a local password for this instance. It protects the credentials and memories Animus may hold.
         </Typography.Body>
 
         <form onSubmit={handleSubmit}>
@@ -118,24 +114,14 @@ export function RegisterPage() {
 
           <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
             <Input
-              label="Email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail((e.target as HTMLInputElement).value)}
-              placeholder="you@example.com"
-              error={fieldErrors.email}
-              required
-              autoFocus
-            />
-
-            <Input
-              label="Password"
+              label="Local password"
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword((e.target as HTMLInputElement).value)}
               placeholder="Minimum 8 characters"
               error={fieldErrors.password}
               required
+              autoFocus
               rightElement={
                 <button
                   type="button"
@@ -154,7 +140,7 @@ export function RegisterPage() {
             />
 
             <Input
-              label="Confirm password"
+              label="Confirm local password"
               type={showPassword ? 'text' : 'password'}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword((e.target as HTMLInputElement).value)}
@@ -168,8 +154,12 @@ export function RegisterPage() {
               loading={registerMutation.isPending}
               css={css`width: 100%; margin-top: ${theme.spacing[2]};`}
             >
-              Create Account
+              Create local password
             </Button>
+
+            <Typography.Caption as="p" color="hint" css={css`text-align: center;`}>
+              No Animus account is created here. Store sign-in is separate.
+            </Typography.Caption>
           </div>
         </form>
       </motion.div>

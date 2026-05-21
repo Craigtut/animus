@@ -18,7 +18,6 @@ import { resolveJwtSecret } from '../lib/jwt-key.js';
 
 export interface JwtPayload {
   userId: string;
-  email: string;
 }
 
 const COOKIE_NAME = 'animus_session';

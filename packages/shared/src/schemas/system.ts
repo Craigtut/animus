@@ -19,13 +19,11 @@ import {
 const emailSchema = z.string().email().transform((e) => e.toLowerCase());
 
 export const loginInputSchema = z.object({
-  email: emailSchema,
   password: z.string().min(8),
 });
 
 export const registerInputSchema = z
   .object({
-    email: emailSchema,
     password: z.string().min(8),
     confirmPassword: z.string().min(8),
   })

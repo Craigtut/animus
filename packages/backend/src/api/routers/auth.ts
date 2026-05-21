@@ -1,7 +1,7 @@
 /**
- * Auth Router — tRPC procedures for registration, login, logout, status.
+ * Auth Router - tRPC procedures for local access setup, login, logout, status.
  *
- * First-user bootstrap: registration is locked after the first user is created.
+ * First-user bootstrap: local access setup is locked after the first user is created.
  */
 
 import { TRPCError } from '@trpc/server';
@@ -17,9 +17,11 @@ import { createVault, setSealState } from '../../lib/vault-manager.js';
 import { setDek, verifyEncryptionKey } from '../../lib/encryption-service.js';
 import { createJwtSecret } from '../../lib/jwt-key.js';
 
+const LOCAL_INSTANCE_EMAIL = 'local@animus.invalid';
+
 export const authRouter = router({
   /**
-   * Public status check — returns whether a user exists and if the caller is authenticated.
+   * Public status check: returns whether a user exists and if the caller is authenticated.
    */
   status: publicProcedure.query(async ({ ctx }) => {
     const db = getSystemDb();
@@ -37,113 +39,113 @@ export const authRouter = router({
   }),
 
   /**
-   * Register the first user. Fails if a user already exists.
+   * Create the local access password. Fails if a user already exists.
    */
   register: rateLimitedPublicProcedure({ key: 'auth.register', max: 5, windowMs: 60 * 60 * 1000 })
     .input(registerInputSchema)
     .mutation(async ({ input, ctx }) => {
-    const db = getSystemDb();
+      const db = getSystemDb();
 
-    if (systemStore.getUserCount(db) > 0) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'Registration is locked — a user already exists',
+      if (systemStore.getUserCount(db) > 0) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Local access is already configured',
+        });
+      }
+
+      const passwordHash = await argon2.hash(input.password);
+      const user = systemStore.createUser(db, {
+        email: LOCAL_INSTANCE_EMAIL,
+        passwordHash,
       });
-    }
 
-    const passwordHash = await argon2.hash(input.password);
-    const user = systemStore.createUser(db, {
-      email: input.email,
-      passwordHash,
-    });
+      // Create the primary contact linked to this user (in contacts.db)
+      const contactsDb = getContactsDb();
+      const contact = contactStore.createContact(contactsDb, {
+        fullName: 'You',
+        userId: user.id,
+        email: null,
+        isPrimary: true,
+        permissionTier: 'primary',
+      });
 
-    // Create the primary contact linked to this user (in contacts.db)
-    const contactsDb = getContactsDb();
-    const contact = contactStore.createContact(contactsDb, {
-      fullName: input.email.split('@')[0] ?? 'User',
-      userId: user.id,
-      email: input.email,
-      isPrimary: true,
-      permissionTier: 'primary',
-    });
+      // Link user to contact (in system.db)
+      systemStore.updateUserContactId(db, user.id, contact.id);
 
-    // Link user to contact (in system.db)
-    systemStore.updateUserContactId(db, user.id, contact.id);
+      // Create web channel for the contact (in contacts.db)
+      contactStore.createContactChannel(contactsDb, {
+        contactId: contact.id,
+        channel: 'web',
+        identifier: `web:${user.id}`,
+      });
 
-    // Create web channel for the contact (in contacts.db)
-    contactStore.createContactChannel(contactsDb, {
-      contactId: contact.id,
-      channel: 'web',
-      identifier: user.email,
-    });
+      // Create encryption vault with the user's password
+      const newDek = await createVault(input.password);
+      setDek(newDek);
+      setSealState('unsealed');
 
-    // Create encryption vault with the user's password
-    const newDek = await createVault(input.password);
-    setDek(newDek);
-    setSealState('unsealed');
+      // Store encryption sentinel for key verification on future startups
+      verifyEncryptionKey(db);
 
-    // Store encryption sentinel for key verification on future startups
-    verifyEncryptionKey(db);
+      // Generate and persist JWT secret (separate from vault DEK)
+      createJwtSecret();
 
-    // Generate and persist JWT secret (separate from vault DEK)
-    createJwtSecret();
+      // Sign JWT and set cookie
+      const payload: JwtPayload = { userId: user.id };
+      const token = ctx.req.server.jwt.sign(payload, {
+        expiresIn: `${COOKIE_OPTIONS.maxAge}s`,
+      });
+      (ctx.res as any).setCookie(COOKIE_OPTIONS.cookieName, token, {
+        httpOnly: COOKIE_OPTIONS.httpOnly,
+        secure: COOKIE_OPTIONS.secure,
+        sameSite: COOKIE_OPTIONS.sameSite,
+        path: COOKIE_OPTIONS.path,
+        maxAge: COOKIE_OPTIONS.maxAge,
+      });
 
-    // Sign JWT and set cookie
-    const payload: JwtPayload = { userId: user.id, email: user.email };
-    const token = ctx.req.server.jwt.sign(payload, {
-      expiresIn: `${COOKIE_OPTIONS.maxAge}s`,
-    });
-    (ctx.res as any).setCookie(COOKIE_OPTIONS.cookieName, token, {
-      httpOnly: COOKIE_OPTIONS.httpOnly,
-      secure: COOKIE_OPTIONS.secure,
-      sameSite: COOKIE_OPTIONS.sameSite,
-      path: COOKIE_OPTIONS.path,
-      maxAge: COOKIE_OPTIONS.maxAge,
-    });
-
-    return { userId: user.id, email: user.email };
+      return { userId: user.id };
     }),
 
   /**
-   * Login with email and password.
+   * Login with the local instance password.
    */
   login: rateLimitedPublicProcedure({ key: 'auth.login', max: 10, windowMs: 5 * 60 * 1000 })
     .input(loginInputSchema)
     .mutation(async ({ input, ctx }) => {
-    const db = getSystemDb();
+      const db = getSystemDb();
 
-    const user = systemStore.getUserByEmail(db, input.email);
-    if (!user) {
-      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
-    }
+      const user = systemStore.getFirstUser(db);
+      if (!user) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
+      }
 
-    const hash = systemStore.getPasswordHash(db, input.email);
-    if (!hash) {
-      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
-    }
+      const hash = systemStore.getPasswordHashByUserId(db, user.id);
+      if (!hash) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
+      }
 
-    const valid = await argon2.verify(hash, input.password);
-    if (!valid) {
-      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
-    }
+      const valid = await argon2.verify(hash, input.password);
+      if (!valid) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
+      }
 
-    const payload: JwtPayload = { userId: user.id, email: user.email };
-    const token = ctx.req.server.jwt.sign(payload, {
-      expiresIn: `${COOKIE_OPTIONS.maxAge}s`,
-    });
-    (ctx.res as any).setCookie(COOKIE_OPTIONS.cookieName, token, {
-      httpOnly: COOKIE_OPTIONS.httpOnly,
-      secure: COOKIE_OPTIONS.secure,
-      sameSite: COOKIE_OPTIONS.sameSite,
-      path: COOKIE_OPTIONS.path,
-      maxAge: COOKIE_OPTIONS.maxAge,
-    });
+      const payload: JwtPayload = { userId: user.id };
+      const token = ctx.req.server.jwt.sign(payload, {
+        expiresIn: `${COOKIE_OPTIONS.maxAge}s`,
+      });
+      (ctx.res as any).setCookie(COOKIE_OPTIONS.cookieName, token, {
+        httpOnly: COOKIE_OPTIONS.httpOnly,
+        secure: COOKIE_OPTIONS.secure,
+        sameSite: COOKIE_OPTIONS.sameSite,
+        path: COOKIE_OPTIONS.path,
+        maxAge: COOKIE_OPTIONS.maxAge,
+      });
 
-    return { userId: user.id, email: user.email };
+      return { userId: user.id };
     }),
 
   /**
-   * Logout — clear the session cookie.
+   * Logout: clear the session cookie.
    */
   logout: publicProcedure.mutation(({ ctx }) => {
     (ctx.res as any).clearCookie(COOKIE_OPTIONS.cookieName, {
@@ -179,6 +181,6 @@ export const authRouter = router({
     if (!user) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
     }
-    return { userId: user.id, email: user.email };
+    return { userId: user.id };
   }),
 });

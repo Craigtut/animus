@@ -11,8 +11,8 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 
 interface AuthState {
   isAuthenticated: boolean;
-  user: { userId: string; email: string } | null;
-  setUser: (user: { userId: string; email: string } | null) => void;
+  user: { userId: string } | null;
+  setUser: (user: { userId: string } | null) => void;
   logout: () => void;
 }
 

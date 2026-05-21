@@ -76,14 +76,14 @@ describe('AuthStore', () => {
   });
 
   it('sets user and marks authenticated', () => {
-    useAuthStore.getState().setUser({ userId: 'u1', email: 'test@example.com' });
+    useAuthStore.getState().setUser({ userId: 'u1' });
     const state = useAuthStore.getState();
     expect(state.isAuthenticated).toBe(true);
-    expect(state.user).toEqual({ userId: 'u1', email: 'test@example.com' });
+    expect(state.user).toEqual({ userId: 'u1' });
   });
 
   it('logout clears user and auth state', () => {
-    useAuthStore.getState().setUser({ userId: 'u1', email: 'test@example.com' });
+    useAuthStore.getState().setUser({ userId: 'u1' });
     useAuthStore.getState().logout();
     const state = useAuthStore.getState();
     expect(state.isAuthenticated).toBe(false);
@@ -91,7 +91,7 @@ describe('AuthStore', () => {
   });
 
   it('setUser(null) marks unauthenticated', () => {
-    useAuthStore.getState().setUser({ userId: 'u1', email: 'test@example.com' });
+    useAuthStore.getState().setUser({ userId: 'u1' });
     useAuthStore.getState().setUser(null);
     const state = useAuthStore.getState();
     expect(state.isAuthenticated).toBe(false);
