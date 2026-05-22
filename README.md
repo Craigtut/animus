@@ -104,7 +104,7 @@ Architecture and design documentation lives in [`docs/`](docs/). Start here:
 | Sleep and energy | [sleep-energy.md](docs/architecture/sleep-energy.md) |
 | Voice and speech | [voice-channel.md](docs/architecture/voice-channel.md), [speech-engine.md](docs/architecture/speech-engine.md) |
 | Data directory layout | [data-directory.md](docs/architecture/data-directory.md) |
-| Frontend design | [design-principles.md](docs/frontend/design-principles.md) |
+| Design vision | [design-vision.md](docs/design-vision.md) |
 
 ## Development
 

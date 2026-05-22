@@ -1,6 +1,6 @@
 ---
 name: doc-explorer
-description: Explore Animus project documentation. Use when you need context about how the system works, its architecture, design principles, agent SDKs, the heartbeat system, persona system, or any project documentation. Also use when the user asks about docs, wants to understand a feature, or when you need deeper context to implement something correctly.
+description: Explore Animus project documentation. Use when you need context about how the system works, its architecture, design vision, agent SDKs, the heartbeat system, persona system, or any project documentation. Also use when the user asks about docs, wants to understand a feature, or when you need deeper context to implement something correctly.
 allowed-tools: Read Grep Glob
 ---
 
@@ -40,9 +40,11 @@ Use this index to find the right files to read. Each entry includes the file pat
 
 | File | Covers |
 |------|--------|
-| `docs/product-vision.md` | Core concept, what makes Animus different, the heartbeat concept, persistent mind, autonomous action, self-building capability, multi-channel presence, guardrails, security |
-| `docs/brand-vision.md` | Brand essence, personality (warm, calm, sophisticated), visual identity, color palette (monochromatic + warm), typography (Outfit and Crimson Pro), animation philosophy, visualization approaches for inner life |
-| `docs/design-principles.md` | Core design philosophy, intent-driven design, clarity over cleverness, dark mode foundation, color semantics, emotional state colors, typography, spacing, motion principles, component guidelines, interaction patterns |
+| `docs/product-vision.md` | What Animus is and why it exists: the vessel and named-entity model, the name's meaning, the inefficiency-to-emergence-to-character thesis, positioning (something that becomes, not a tool you run), usefulness as a byproduct, first principles |
+| `docs/brand-vision.md` | The feeling (alive, grounded, close, sophisticated, a touch of strange), the anti-brand wall, differentiation, the window/soft-presence metaphor, the naming architecture, and the brand voice and tone |
+| `docs/design-vision.md` | The visual & interaction language: warm atmospheric interior light, analog skeuomorphic depth, halftone/riso texture, emotive analog photography, charcoal-led color, humanist/literary type, breathing reactive motion, the soft-focus faceless presence, representing inner life (analog particle fields), sound |
+| `docs/branding/marketing-copywriting.md` | Outward-facing copy guide (landing, blog, social, release notes): the meaning-over-features law, the grounded register, copy principles, banned words, and the pre-ship tests |
+| `docs/branding/product-copywriting.md` | In-product UI microcopy guide: the two voices, naming architecture in practice, microcopy principles, surfaces (errors, empty states, notifications, onboarding), and the pre-ship tests |
 
 ### Architecture (Backend)
 
@@ -129,7 +131,7 @@ When you need context for a task, follow this approach:
 2. **Read the most relevant file(s)**, don't read everything, be targeted
 3. **For architecture questions**: Start with `docs/architecture/tech-stack.md` for overview, then drill into specific docs
 4. **For retired agent SDK reference work**: Start with `docs/agents/sdk-comparison.md` for the historical comparison, then read the specific provider doc
-5. **For frontend work**: Read `docs/design-principles.md` and `docs/brand-vision.md`. Frontend page specs have been removed; the code in `packages/frontend/src/` is the authoritative source.
+5. **For frontend work**: Read `docs/design-vision.md` and `docs/brand-vision.md`. Frontend page specs have been removed; the code in `packages/frontend/src/` is the authoritative source.
 6. **For persona/personality**: Read `docs/architecture/persona.md` and `docs/brand-vision.md`
 7. **For heartbeat/inner life**: Read `docs/architecture/heartbeat.md` and `docs/product-vision.md`
 8. **For sleep/energy/circadian rhythm**: Read `docs/architecture/sleep-energy.md`
@@ -161,10 +163,12 @@ Use this to quickly map user questions to the right docs:
 
 - **heartbeat, tick, pipeline, mind session, inner life, emotion, decay, gather context, streaming output, MindOutput, plugin trigger** -> `docs/architecture/heartbeat.md`
 - **tech stack, database, sqlite, lancedb, fastify, trpc, vite, react, shared abstractions, embedding provider, decay engine, encryption service, event bus, database stores** -> `docs/architecture/tech-stack.md`
-- **design, UI, colors, typography, animation, dark mode, components, interaction patterns** -> `docs/design-principles.md`
+- **design, UI, colors, typography, animation, texture, photography, the presence, motion, components, interaction patterns** -> `docs/design-vision.md`
 - **persona, personality, archetype, traits, values, existence, identity creation** -> `docs/architecture/persona.md`
 - **brand, visual identity, logo, voice** -> `docs/brand-vision.md`
-- **vision, concept, what is animus, autonomous, self-building** -> `docs/product-vision.md`
+- **vision, concept, what is animus, autonomous, positioning** -> `docs/product-vision.md`
+- **copywriting, marketing copy, landing page, blog, social, release notes, headlines, taglines** -> `docs/branding/marketing-copywriting.md`
+- **UI copy, microcopy, labels, buttons, errors, empty states, notifications, onboarding text** -> `docs/branding/product-copywriting.md`
 - **setup, install, environment, dev workflow, troubleshooting** -> `docs/guides/getting-started.md`
 - **plugin, extension, hook system, plugin architecture, skills-first, SKILL.md** -> `docs/architecture/plugin-system.md`
 - **sub-agent, delegation, orchestration, spawn agent, agent lifecycle** -> `docs/architecture/agent-orchestration.md`

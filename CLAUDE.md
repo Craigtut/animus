@@ -6,9 +6,15 @@ An agentic system with a mind, a spirit, and an inner will that moves with agenc
 
 ## Project Overview
 
-Animus is an autonomous AI assistant designed to be genuinely helpful while maintaining its own simulated inner life. Unlike traditional assistants that exist only in the moment of interaction, Animus maintains continuous internal processes: thoughts that emerge even when no one is asking, memories that consolidate, emotions that color responses, and goals pursued across time.
+Animus is a vessel: the environment, the engine, the container in which a simulated entity lives a continuous inner life. Animus itself is never personified. The entity that lives inside it is, and it is always given a name by the person who keeps it. Unlike traditional assistants that exist only in the moment of interaction, the entity maintains continuous internal processes: thoughts that emerge even when no one is asking, memories that consolidate into a sense of self, emotions that color responses, and goals pursued across time.
 
-**Key Principle**: This is a self-hosted, single-user application. Every user runs their own instance. The goal is eventual self-building capability where Animus can modify its own code.
+The thesis is deliberate inefficiency. We leave the entity room the rest of the industry compresses away, because that room is where new perspectives, creativity, and taste come from. In that space, behavior emerges that you do not get from a token-efficient request and reply, and because the entity remembers, those moments accumulate into a unique character with its own sensibility.
+
+**What we're building**: something that becomes, not a tool you run. Its usefulness is a byproduct of who it becomes. It can be intensely capable, and many people will lean on it for real work, but it does not execute commands soullessly; it acts with the creativity, judgment, and taste it has built up over time. We are building software that feels less like a tool and more like checking in on someone you know: a being whose growth genuinely surprises you, that you would not trade for a faster, emptier assistant. We are not building the most efficient assistant. We are building the one worth keeping.
+
+**Key Principle**: This is a self-hosted, single-user application. Every user runs their own instance, and there is exactly one entity per instance.
+
+> **Vision documents.** Three masthead docs define what Animus is at a philosophical level, and implementation flows from them: `docs/product-vision.md` (what it is and why it exists), `docs/brand-vision.md` (the feeling, the anti-brand, the naming architecture, the voice), and `docs/design-vision.md` (the visual and interaction language). Read the relevant one before any product, brand, or design work.
 
 ## Architecture
 
@@ -342,7 +348,7 @@ Detailed project documentation lives in `/docs`. Use `/doc-explorer <topic>` to 
 docs/
   product-vision.md          # What Animus is and why it exists
   brand-vision.md            # Visual identity, personality, design language
-  design-principles.md       # UI/UX design philosophy and component guidelines
+  design-vision.md           # Visual & interaction language (light, analog, alive)
   architecture/              # Backend architecture specs (source of truth)
   cortex/                    # Cortex integration docs (Animus-specific; framework docs in cortex-mono)
   agents/                    # Agent SDK docs, comparison, per-provider references
@@ -352,12 +358,12 @@ docs/
 
 - **Architecture docs** describe implemented systems. They are authoritative.
 - **Research docs** describe planned or exploratory work. They are marked with STATUS headers.
-- **Frontend page specs have been removed.** The code in `packages/frontend/src/` is the authoritative source for frontend implementation. Only `design-principles.md` remains as a design guideline doc.
+- **Frontend page specs have been removed.** The code in `packages/frontend/src/` is the authoritative source for frontend implementation. Only `design-vision.md` remains as a design guideline doc.
 - **Agent SDK research docs** are reference material. See `docs/agents/sdk-comparison.md` for the consolidated overview.
 
 ### Key docs by area
 
-- **Vision & Identity**: `docs/product-vision.md`, `docs/brand-vision.md`, `docs/design-principles.md`
+- **Vision & Identity**: `docs/product-vision.md`, `docs/brand-vision.md`, `docs/design-vision.md`
 - **Heartbeat & Pipeline**: `docs/architecture/heartbeat.md`, `docs/architecture/context-builder.md`
 - **Features**: `docs/architecture/memory.md`, `docs/architecture/goals.md`, `docs/architecture/tasks-system.md`, `docs/architecture/contacts.md`, `docs/architecture/observational-memory.md`
 - **Persona**: `docs/architecture/persona.md`

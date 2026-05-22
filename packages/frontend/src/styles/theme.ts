@@ -7,7 +7,7 @@
  * Typography: Outfit (sans-serif) for UI chrome. Crimson Pro (serif)
  * for inner-life content, brand moments, and attention-drawing text.
  *
- * See docs/frontend/design-principles.md, docs/brand-vision.md,
+ * See docs/design-vision.md, docs/brand-vision.md,
  * and docs/branding/02-typography.md.
  */
 

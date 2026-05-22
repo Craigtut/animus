@@ -475,6 +475,6 @@ These settings affect voice mode behavior immediately (no restart required). Cha
 - `docs/frontend/presence.md` -- The Presence space where voice mode lives, emotional field, conversation, message input
 - `docs/frontend/app-shell.md` -- Navigation pill, connection status indicator, space transitions
 - `docs/brand-vision.md` -- The alive quality, organic waveforms, warmth, breathing over blinking
-- `docs/design-principles.md` -- Animation timing, micro-interactions, visual system
+- `docs/design-vision.md` -- Animation timing, micro-interactions, visual system
 - `docs/architecture/heartbeat.md` -- Tick pipeline, emotion engine, streaming reply output
 - `docs/architecture/channel-packages.md` -- Channel system architecture, IncomingMessage interface, channel adapters
