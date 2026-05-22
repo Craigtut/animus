@@ -723,14 +723,7 @@ async function executeTick(queuedTick: QueuedTick): Promise<void> {
       tickQueue,
       deferredQueue: getDeferredQueue(),
       onIntervalChanged: (newIntervalMs: number) => {
-        const cortexAgent = ctx.agents?.cortexMind?.agent;
-        if (cortexAgent) {
-          const providerName = (systemStore.getSystemSettings(getSystemDb()) as Record<string, unknown>)['cortexProvider'] as string | undefined;
-          if (!providerName) return;
-          const newRetention = resolveCacheRetention(providerName, newIntervalMs);
-          cortexAgent.setCacheRetention(newRetention);
-          log.info(`Cache retention updated: ${newRetention} (interval=${newIntervalMs}ms)`);
-        }
+        updateCortexCacheRetention(newIntervalMs);
       },
     }, eventBus, {
       replySentEarly,
@@ -1175,6 +1168,24 @@ export function getMessageEmbedder(): import('../memory/message-embedder.js').Me
  */
 export function updateHeartbeatInterval(intervalMs: number): void {
   tickQueue.updateInterval(intervalMs);
+  updateCortexCacheRetention(intervalMs);
+}
+
+function updateCortexCacheRetention(intervalMs: number): void {
+  const cortexAgent = ctx.agents?.cortexMind?.agent;
+  if (!cortexAgent) return;
+
+  const providerName = (systemStore.getSystemSettings(getSystemDb()) as Record<string, unknown>)['cortexProvider'] as string | undefined;
+  if (!providerName) return;
+
+  const newRetention = resolveCacheRetention(providerName, intervalMs);
+  const previousRetention = cortexAgent.getCacheRetention();
+  cortexAgent.setCacheRetention(newRetention);
+  if (previousRetention !== newRetention) {
+    log.info(`Cache retention updated: ${previousRetention ?? 'unset'} -> ${newRetention} (provider=${providerName}, interval=${intervalMs}ms)`);
+  } else {
+    log.debug(`Cache retention unchanged: ${newRetention} (provider=${providerName}, interval=${intervalMs}ms)`);
+  }
 }
 
 /**

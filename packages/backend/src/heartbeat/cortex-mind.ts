@@ -822,11 +822,14 @@ function wireProviderChangeListeners(
       const newModel = await state.providerManager.resolveModel(provider, modelId);
       state.model = newModel;
       cortexAgent.setModel(newModel);
+      const settings = systemStore.getSystemSettings(getSystemDb());
+      const cacheRetention = resolveCacheRetention(provider, settings.heartbeatIntervalMs);
+      cortexAgent.setCacheRetention(cacheRetention);
       // The utility model is provider-scoped; re-resolve it for the new
       // provider so an explicit selection from the old provider does not
       // leak across (it degrades to the recommended model).
       await applyUtilityModel(cortexAgent, state);
-      log.info(`CortexAgent model updated to ${provider}/${modelId}`);
+      log.info(`CortexAgent model updated to ${provider}/${modelId} (cache=${cacheRetention})`);
     } catch (err) {
       log.error('Failed to switch model:', err);
     }

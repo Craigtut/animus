@@ -231,6 +231,11 @@ function buildPhaseMessages(
   return messages;
 }
 
+function getCacheOptions(cortexAgent: CortexAgent): { cacheRetention: 'none' | 'short' | 'long' } | undefined {
+  const cacheRetention = cortexAgent.getCacheRetention();
+  return cacheRetention ? { cacheRetention } : undefined;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -321,6 +326,7 @@ async function executeThought(
     // Uses tool-call-as-structured-output: define a tool matching the desired schema,
     // the model "calls" it, and we extract the arguments as structured data.
     const thoughtSchema = await zodToTypebox(recordThoughtSchema);
+    const cacheOptions = getCacheOptions(cortexAgent);
     const result = await cortexAgent.structuredComplete(
       {
         systemPrompt: thoughtSystemPrompt,
@@ -329,7 +335,7 @@ async function executeThought(
       thoughtSchema,
       'record_thought',
       'Record your inner thought for this moment.',
-      cortexAgent.getCacheRetention() ? { cacheRetention: cortexAgent.getCacheRetention()! } : undefined,
+      cacheOptions,
     );
 
     // Capture per-phase context snapshot (always lightweight, full content in debug mode)
@@ -360,7 +366,7 @@ async function executeThought(
       const textResponse = await cortexAgent.directComplete({
         systemPrompt: thoughtSystemPrompt,
         messages: phaseMessages,
-      });
+      }, cacheOptions);
       // Try to parse JSON from the text (model may respond with JSON text instead of tool call)
       const parsed = tryParseJsonFromText(textResponse);
       if (parsed && typeof parsed['content'] === 'string') {
@@ -755,6 +761,7 @@ async function executeReflect(
       // REFLECT uses the primary model (same as agentic loop), not the utility model.
       // Uses tool-call-as-structured-output with the existing recordCognitiveStateSchema.
       const reflectSchema = await zodToTypebox(recordCognitiveStateSchema);
+      const cacheOptions = getCacheOptions(cortexAgent);
       const parsed = await cortexAgent.structuredComplete(
         {
           systemPrompt: reflectSystemPrompt,
@@ -763,7 +770,7 @@ async function executeReflect(
         reflectSchema,
         'record_cognitive_state',
         'Record your cognitive state: experience, emotions, decisions, and memories.',
-        cortexAgent.getCacheRetention() ? { cacheRetention: cortexAgent.getCacheRetention()! } : undefined,
+        cacheOptions,
       );
 
       let result: ReflectResult;
