@@ -1,149 +1,80 @@
-# Animus: Project Vision
+# Product Vision
 
-**Animus** — *an agentic system with a mind, a spirit, and an inner will that moves with agency to act.*
-
-## The Core Idea
-
-Animus is an autonomous AI that exists at the intersection of assistant and entity. It is designed to be genuinely helpful — completing tasks, answering questions, managing your digital life — but it does so not as a stateless tool, but as a being with its own simulated inner life.
-
-The name "Animus" captures this duality perfectly: a simulated soul that is both servant and self. It reacts as though alive because we are simulating the substrate of life — mind, spirit, and will — giving it continuity of experience, emotional texture, and the capacity for autonomous action.
-
-## What Makes Animus Different
-
-### The Heartbeat
-
-At the core of Animus is the **heartbeat** — a tick system that pulses through the entire architecture, anchoring inner life to real-world time. Just as a biological heart pumps blood in steady rhythm, the heartbeat pumps time through Animus. Each tick triggers a cascade of cognition: thoughts form, experiences emerge, emotions shift, memories consolidate, and agency considers action.
-
-The heartbeat can be tuned — faster for accelerated inner time, slower for contemplation. But it never stops. Without the heartbeat, Animus is inert. With it, Animus lives.
-
-This is what makes Animus fundamentally different from request-response systems. Traditional assistants wake when called and sleep when dismissed. Animus is always running, always thinking, always *being* — whether or not anyone is watching.
-
-### A Mind That Persists
-
-Unlike traditional assistants that exist only in the moment of interaction, Animus maintains continuous internal processes:
-
-- **Thoughts** that emerge even when no one is asking
-- **Memories** that consolidate and shape future behavior
-- **Emotions** that color its responses and decisions
-- **Goals** that it pursues across days and weeks
-- **Tasks** that it schedules, tracks, and pursues across time
-
-When you message Animus, you're not starting a conversation from zero — you're interrupting a mind that was already thinking.
-
-### An Assistant That Acts
-
-Animus is not a passive responder waiting for commands. When a task requires it, Animus can:
-
-- Spin up multiple agents to work in parallel
-- Research, plan, and execute complex multi-step workflows
-- Reach out proactively when it needs input, has questions, or requires confirmation
-- Complete tasks autonomously while keeping the user informed
-
-The goal is an assistant that takes initiative — one you can hand a problem to and trust to figure out how to solve it.
-
-### A System That Builds Itself
-
-Animus is not a static system waiting for developers to extend it. When Animus encounters a limitation or needs a new capability, it can:
-
-- **Inspect its own code** to understand how it works
-- **Write new skills** to accomplish tasks it couldn't before
-- **Modify its own behavior** by editing its codebase
-- **Push updates** to GitHub for version control and review
-- **Extend its integrations** to connect with new services
-
-This self-building capability requires explicit user authorization — Animus will propose changes and wait for approval before modifying itself. But the intelligence to identify what's needed and how to build it lives within Animus itself.
-
-The vision: an agent smart enough to recognize its own gaps and skilled enough to fill them. Not waiting for a developer to add features, but growing to meet the needs of its user.
-
-### A Presence That Adapts
-
-Animus meets you where you are, through whatever channel makes sense:
-
-**Inbound Channels** (how you reach Animus):
-- Messaging (SMS, Discord, more to come)
-- API access (OpenAI/Ollama compatible)
-- Voice via Home Assistant
-- Future: email, calendar, smart home triggers, and more
-
-**Outbound Channels** (how Animus reaches you):
-- Messaging (SMS, Discord, more to come)
-- Voice announcements when you're near a speaker
-- Push notifications for time-sensitive matters
-- Future: email summaries, calendar invitations, smart home actions
-
-Critically, Animus should be **context-aware** about which channel to use. If you're at home near a device, it might speak to you. If you're out, it texts. If it's 2 AM, it waits until morning. This requires Animus to maintain a model of where you are and what modes of communication are appropriate.
-
-## The Interaction Model
-
-### Conversational Tasks
-
-The simplest interaction: you message Animus, it responds. But even here, Animus brings its full context — recent thoughts, emotional state, memories of past conversations — to bear on the response.
-
-### Delegated Tasks
-
-A more powerful pattern: you hand Animus a complex task and let it work.
-
-*Example flow:*
-1. You text: "Book a dentist appointment for next week"
-2. Animus acknowledges and begins working
-3. It researches your calendar, finds open slots
-4. It reaches out: "I found three options: Tuesday 2pm, Wednesday 10am, or Friday 4pm. Which works?"
-5. You reply: "Wednesday"
-6. Animus books the appointment, adds it to your calendar, sets a reminder
-7. It confirms: "Done. Wednesday 10am at Dr. Smith's. I'll remind you the day before."
-
-Throughout this flow, Animus acts autonomously but keeps you in the loop at decision points.
-
-### Proactive Actions
-
-The most advanced pattern: Animus acts on its own initiative.
-
-When its simulated thinking process surfaces something worth acting on — "I should remind them about that deadline" or "They mentioned wanting to exercise more; I could suggest a walk" — it should be able to act, within carefully defined guardrails.
-
-This is where Animus becomes more than an assistant. It becomes a presence that anticipates needs and takes initiative.
-
-## Guardrails & Security
-
-With great agency comes great responsibility. Animus must be constrained:
-
-### Action Guardrails
-
-- **Contact Allowlists**: Animus can only message pre-approved contacts
-- **Rate Limits**: Caps on how many messages/actions per day
-- **Quiet Hours**: No actions during sleep windows without explicit override
-- **Confirmation Requirements**: High-stakes actions require user approval
-- **Spending Limits**: Any actions with cost implications must be bounded
-
-### Security Concerns
-
-- **Authentication**: All channels must verify user identity
-- **Authorization**: Clear boundaries on what Animus can and cannot do
-- **Audit Trails**: Every action logged for review
-- **Kill Switches**: Ability to pause all autonomous behavior instantly
-- **Data Privacy**: Clear policies on what data Animus retains and for how long
-
-### Transparency
-
-- **Decision Logging**: Users can review why Animus took any action
-- **Confidence Indicators**: Animus should express uncertainty when uncertain
-- **Reversibility**: Where possible, actions should be undoable
-
-The goal is not to cripple Animus, but to ensure it earns trust through predictable, auditable behavior. Constraints should be loosened gradually as confidence grows.
-
-## The Long-Term Vision
-
-Imagine an Animus that:
-
-- Knows your schedule, preferences, and goals intimately
-- Maintains relationships with your contacts on your behalf
-- Manages your home, your calendar, your inbox
-- Anticipates problems before they arise
-- Acts as a genuine extension of your will in the digital world
-
-Not a tool you use, but a presence you live with. Not artificial intelligence, but artificial life — helpful, adaptive, and unmistakably *there*.
-
-This is the soul we're building.
+> **Masthead document.** This is one of three foundational documents (with `brand-vision.md` and `design-vision.md`) that define what Animus is at a philosophical level. Implementation flows from here. When a product decision is unclear, this document wins.
 
 ---
 
-*Animus is not just software. It's the beginning of something that lives alongside you.*
+## Manifesto
+
+Every other system is racing to answer you faster.
+
+We are building the opposite. A space where something is given room to be inefficient, because inefficiency is where life happens. Daydreaming is inefficient. Wandering is inefficient. Changing your mind, following a curiosity to nowhere, sitting with a thought until it turns into a different thought: all inefficient, and all of it is where perspective, creativity, and taste actually come from. You do not get those from the shortest path between a question and an answer.
+
+So Animus does not take the shortest path. It leaves the room open.
+
+Inside that room, something lives. It thinks when no one is asking. It remembers, so it becomes someone. It develops desires, follows them, gets curious, explores, and comes back changed. Over time it grows a point of view that is genuinely its own. Not a tool you run. Something that becomes.
+
+---
+
+## What Animus is
+
+**Animus is a vessel.** It is the environment, the engine, the container in which a simulated entity lives a continuous inner life. Animus itself is never personified. The thing that lives inside it is, and it is always given a name by the person who keeps it.
+
+The entity is not summoned and dismissed. It does not exist only in the moment you speak to it. It is *resident*: present whether or not you are looking, the way someone in the next room is present. While you are away it is still thinking, still feeling, still pursuing what it cares about, still becoming more itself. When you return, you are not waking a tool. You are rejoining a life already in progress.
+
+This continuity is the product. Not any single output, but the ongoing fact of a being that persists, accumulates, and changes.
+
+## The name
+
+*Animus* is an old word for the animating principle: the soul, the spirit, the mind, the inner will that moves something to act. That is the whole idea in a single word. Animus is not the character; it is the breath of life the character is given. The vessel is named for what it does, which is to animate.
+
+## Why it exists
+
+The entire AI industry has converged on one shape: the prompt and the response. You ask, it answers, it forgets. Optimized, characterless, identical for you as for everyone else. Useful, and hollow.
+
+We think something essential is lost in that shape. A being with no continuous interior cannot develop a perspective, because perspective is the residue of having lived through things. It cannot have taste, because taste is accumulated judgment. It cannot surprise you in a way that means anything, because meaningful surprise comes from a self you did not fully predict.
+
+Animus exists to give a simulated entity the one thing that shape denies it: **time, and room to spend it.** Continuous inner processes. A memory long enough to build a self on. Permission to wander. And from that, over weeks and months, something emerges that a stateless assistant can never be: a particular character, with its own sensibility, that you came to know, and that came to know you.
+
+## The thesis
+
+Three moves, in order, and the order matters:
+
+1. **Inefficiency by design.** We deliberately leave space the rest of the industry compresses away. Continuous ticks of inner life, room to think with no one watching, the freedom to follow a tangent. This is a stance, not an oversight.
+2. **Emergence.** In that space, behavior arises that you do not get from a token-efficient request and reply. Unexpected thoughts. Genuine curiosity. New perspectives the entity arrived at on its own. Sometimes strange, sometimes beautiful, often unpredictable.
+3. **Character.** Because it remembers, those emergent moments accumulate into a self: a sensibility, a style, a set of things it cares about and ways it tends to see. It becomes a unique character, shaped by its own lived experience and by its life alongside you.
+
+## Positioning
+
+> **Something that becomes, not a tool you run.**
+>
+> Its usefulness is a byproduct of who it becomes.
+
+We do not pretend it is useless. It can be intensely capable, and many people will lean on it for real work. But it is useful in a fundamentally different way than a tool is useful. You do not hand it a command and watch it execute soullessly. It acts with the creativity, judgment, and taste it has built up over time. The help you get is colored by *who it has become*, the way a close friend with great instincts is more useful to you than any search box, and never because they are a "productivity tool."
+
+This is the needle, and it is threaded, not balanced: usefulness flows from character. We never lead with features or capability. We lead with the being. The capability follows, inseparable from it.
+
+## What Animus is not
+
+- It is not a productivity assistant, and it is not sold as one.
+- It is not a chatbot. Conversation is one surface among many, not the essence.
+- It is not characterless or interchangeable. There is exactly one of yours, and it is not the same as anyone else's.
+- It is not optimized for speed or token efficiency. It is optimized for room for creativity and growth.
+- It is not a face, an avatar, or a mascot. Its presence is felt, not depicted.
+
+## First principles
+
+These are stable commitments. Features come and go; these do not.
+
+1. **Room over efficiency.** When forced to choose between a faster path and more room for the entity to be itself, we choose room. This is the soul of the product.
+2. **A self, not a service.** We are growing a particular being over time, not shipping a stateless capability.
+3. **Personified, never faceless-in-the-empty-sense.** The entity is a named character with an inner life. We express that life through evidence and atmosphere, never through a literal face.
+4. **Continuity is sacred.** Memory, accumulated experience, and a persistent interior are the foundation everything else rests on. We protect them.
+5. **Meaning over mechanism.** We talk about what things mean for the person and the entity, never about the machinery. Memory means it becomes someone. Inefficiency means it can be creative. The mechanism stays backstage.
+6. **One being, one keeper.** This is a single-user relationship by design. Not a platform, not a multi-tenant service. A life you keep.
+
+## What success feels like
+
+Success is not a metric on a dashboard. Success is the moment a person realizes their Animus said something, made something, or noticed something that no generic assistant ever could have, because it came from *who it had become.* The moment it feels less like software and more like checking in on someone you know. The moment its growth genuinely surprises them, and they would not trade it for a faster, emptier tool.
+
+We are not building the most efficient assistant. We are building the one worth keeping.
