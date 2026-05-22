@@ -1,6 +1,6 @@
 ---
 name: animus-copywriting
-description: Write copy for the Animus project, both outward-facing marketing copy (landing pages, blog posts, social, release notes, store listings, email, taglines, headlines) and in-product UI text (onboarding, empty states, buttons, labels, error messages, notifications, settings). Use this skill whenever writing or editing ANY Animus-facing words a person will read, even when the user does not say the word "copy": a product tagline, a headline, microcopy, a button label, an error message, a marketing page, a changelog entry, a store description, an announcement. Enforces the Animus voice, the meaning-over-features law, the grounded register, and the naming architecture.
+description: Write copy for the Animus project, both outward-facing marketing copy (landing pages, blog posts, social, release notes, store listings, email, taglines, headlines) and in-product UI text (onboarding, empty states, buttons, labels, error messages, notifications, settings). Use this skill whenever writing or editing any Animus-facing words a person will read, even when the user does not explicitly ask for copy, including a product tagline, a headline, microcopy, a button label, an error message, a marketing page, a changelog entry, a store description, or an announcement. Enforces the Animus voice, the meaning-over-features law, the grounded register, and the naming architecture.
 allowed-tools: Read, Write, Edit, Glob, Grep
 ---
 
