@@ -231,7 +231,7 @@ The structured output includes:
 
 This replaces the old sequential THINK → FEEL → DECIDE → REFLECT pipeline. The model handles all of these concerns holistically in a single pass, which is both faster and more natural — a human mind doesn't think, then feel, then decide sequentially. It all happens together.
 
-The mind output is assembled by the Cortex 5-phase pipeline. THOUGHT and REFLECT are direct structured model calls, while the AGENTIC LOOP runs through `CortexAgent`. EXECUTE combines those results into persisted thoughts, experiences, emotions, memories, decisions, and replies. See `docs/cortex/mind-migration.md` for the detailed phase contracts.
+The mind output is assembled by the Cortex 5-phase pipeline. THOUGHT and REFLECT are direct structured model calls, while the AGENTIC LOOP runs through `CortexAgent`. EXECUTE combines those results into persisted thoughts, experiences, emotions, memories, decisions, and replies.
 
 ### Stage 3: EXECUTE (System)
 

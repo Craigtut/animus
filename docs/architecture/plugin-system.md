@@ -1460,7 +1460,6 @@ System prompt injection was the previous approach but has critical flaws:
 - `docs/architecture/mcp-tools.md` — 5-layer tool architecture, registry pattern
 - `docs/architecture/channel-packages.md` — Channel system architecture, config pattern (encrypted config, typed schemas, dynamic UI forms)
 - `docs/architecture/package-installation.md` — Package install flow, rollback, updates, AI self-management
-- `docs/cortex/mind-migration.md` — Cortex mind integration
 
 ### External References
 - [Agent Skills — agentskills.io](https://agentskills.io/home) (cross-vendor standard)

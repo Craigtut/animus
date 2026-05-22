@@ -113,7 +113,7 @@ The heartbeat is the core tick system that drives Animus's inner life. The mind 
 4. **Reflect** (direct LLM call) — Produces experience narration, emotion deltas, energy delta, memory candidates, working memory/core self updates. Not part of the agentic loop.
 5. **Execute** (system) — Persist data from all phases, send replies, spawn sub-agents, cleanup expired entries
 
-The mind is a top-level orchestrator. It does not perform long-running work; it delegates to sub-agents for complex tasks (research, multi-step workflows, code generation). Sub-agents are independent agent sessions managed by a custom orchestration layer. They carry the full Animus personality and can message the user directly. The mind can forward new information to running sub-agents via `update_agent` decisions. See `docs/architecture/agent-orchestration.md` for the full design and `docs/cortex/mind-migration.md` for the 5-phase pipeline details. Pipeline state is persisted to SQLite for crash recovery.
+The mind is a top-level orchestrator. It does not perform long-running work; it delegates to sub-agents for complex tasks (research, multi-step workflows, code generation). Sub-agents are independent agent sessions managed by a custom orchestration layer. They carry the full Animus personality and can message the user directly. The mind can forward new information to running sub-agents via `update_agent` decisions. See `docs/architecture/agent-orchestration.md` for the full design. Pipeline state is persisted to SQLite for crash recovery.
 
 ### The Cortex Package (`@animus-labs/cortex`) -- External
 
@@ -123,10 +123,7 @@ The mind is a top-level orchestrator. It does not perform long-running work; it 
 
 **Boundary rules still apply:** The backend imports from Cortex, never the reverse. When working on heartbeat/agent code, never add Animus-specific logic to the cortex-mono repo. Use Cortex's hooks and callbacks instead.
 
-**Cortex framework documentation** lives in the cortex-mono repository. Animus-specific integration docs remain here:
-- `docs/cortex/mind-migration.md` -- 5-phase pipeline, how Animus consumes Cortex
-- `docs/cortex/backend-auth-integration.md` -- CortexCredentialService, tRPC router
-- `docs/cortex/frontend-auth-ux.md` -- Frontend OAuth UX design
+**Cortex framework documentation** lives in the cortex-mono repository (`/Users/craigtut/Code/cortex-mono/docs/`).
 
 ### The Agents Package (`@animus-labs/agents`)
 
@@ -319,7 +316,7 @@ const { data } = trpc.onHeartbeat.useSubscription();
 
 ### Agent Integration
 
-The mind uses `@animus-labs/cortex` (CortexAgent) for the primary agentic loop. The backend is a consumer of Cortex; see "The Cortex Package" section above for the boundary rules. The `@animus-labs/agents` package remains available for sub-agent orchestration. See `docs/cortex/mind-migration.md` for how the backend integrates with Cortex. For full Cortex framework docs, see the cortex-mono repository.
+The mind uses `@animus-labs/cortex` (CortexAgent) for the primary agentic loop. The backend is a consumer of Cortex; see "The Cortex Package" section above for the boundary rules. The `@animus-labs/agents` package remains available for sub-agent orchestration. For full Cortex framework docs, see the cortex-mono repository.
 
 **Boundary reminder**: When working on the heartbeat pipeline or agent-related backend code, never add Animus-specific logic to the cortex-mono repository. If the backend needs Cortex to do something application-specific, use one of Cortex's hooks or callbacks. If no suitable hook exists, add a general-purpose hook to Cortex that any consumer could use, then implement the Animus-specific behavior in the backend's hook handler.
 
@@ -373,7 +370,7 @@ docs/
 - **Security**: `docs/architecture/encryption-architecture.md`, `docs/architecture/credential-passing.md`
 - **Telemetry**: `docs/architecture/telemetry.md`
 - **Infrastructure**: `docs/architecture/data-directory.md`, `docs/architecture/backend-architecture.md`, `docs/architecture/tech-stack.md`, `docs/architecture/sleep-energy.md`, `docs/architecture/release-engineering.md`
-- **Cortex Integration** (Animus-specific): `docs/cortex/mind-migration.md`, `docs/cortex/backend-auth-integration.md`, `docs/cortex/frontend-auth-ux.md` (framework docs are in the cortex-mono repo)
+- **Cortex Integration**: framework docs are in the cortex-mono repository (`/Users/craigtut/Code/cortex-mono/docs/`)
 - **Agent SDKs (legacy)**: `docs/agents/sdk-comparison.md`, `docs/agents/architecture-overview.md`, plus per-provider docs in `docs/agents/claude/`, `docs/agents/codex/`, `docs/agents/opencode/`
 - **Planned (not built)**: `docs/research/reflex-system.md`, `docs/research/voice-mode.md`
 
