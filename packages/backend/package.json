@@ -13,7 +13,7 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
-    "@animus-labs/cortex": "^0.2.5",
+    "@animus-labs/cortex": "^0.2.6",
     "@animus-labs/shared": "*",
     "@animus-labs/tts-native": "*",
     "@fastify/cookie": "^10.0.0",
