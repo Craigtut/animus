@@ -18,6 +18,7 @@ import { AgentOrchestrator, type AgentTaskStore, type AgentTaskRecord } from './
 import {
   createCortexMindState,
   destroyCortexMind,
+  refreshChannelDependentTools,
   type CortexMindState,
 } from './cortex-mind.js';
 
@@ -28,6 +29,13 @@ export class AgentSubsystem implements SubsystemLifecycle {
   agentOrchestrator: AgentOrchestrator | null = null;
   /** CortexAgent state for the mind session */
   cortexMind: CortexMindState = createCortexMindState();
+
+  /** Rebuilds the mind's channel-dependent tools when channels change. */
+  private readonly onChannelChange = (): void => {
+    refreshChannelDependentTools(this.cortexMind).catch((err) => {
+      log.warn('Failed to refresh channel-dependent mind tools:', err);
+    });
+  };
 
   constructor(private onAgentComplete: (params: {
     agentId: string;
@@ -68,9 +76,20 @@ export class AgentSubsystem implements SubsystemLifecycle {
       eventBus: getEventBus(),
       onAgentComplete: this.onAgentComplete,
     });
+
+    // Keep the mind's channel-dependent tools (send_proactive_message,
+    // lookup_contacts) in sync with the live channel set as channels are
+    // installed/removed at runtime.
+    const bus = getEventBus();
+    bus.on('channel:installed', this.onChannelChange);
+    bus.on('channel:uninstalled', this.onChannelChange);
   }
 
   async stop(): Promise<void> {
+    const bus = getEventBus();
+    bus.off('channel:installed', this.onChannelChange);
+    bus.off('channel:uninstalled', this.onChannelChange);
+
     // Destroy the cortex mind session
     await destroyCortexMind(this.cortexMind);
     this.cortexMind = createCortexMindState();

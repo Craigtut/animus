@@ -46,7 +46,9 @@ import type { ToolHandlerContext, ToolResult } from '../tools/types.js';
 import type { MemoryManager } from '../memory/index.js';
 import type { GatherResult } from './gather-context.js';
 import { getChannelRouter } from '../channels/channel-router.js';
+import { getChannelManager } from '../channels/channel-manager.js';
 import { getPluginManager } from '../plugins/index.js';
+import { z } from 'zod/v3';
 import { join } from 'node:path';
 import { createToolResultPersistor, cleanupDereferencedPaths } from './tool-result-persistor.js';
 import { buildTaskContextSection, formatTimestamp } from './context-builder.js';
@@ -327,6 +329,45 @@ function buildPermissionResolver(
 // ============================================================================
 
 /**
+ * Narrow a tool's dynamic `channel` field to an enum of the given channels.
+ *
+ * The shared tool definitions declare `channel` as a dynamic string because the
+ * channel set is not known at authoring time (packages add new types). The
+ * backend owns the channel registry, so here we narrow that field to an enum of
+ * the channels actually installed on this instance. This is what tells the
+ * model which channels are real (e.g. `web`, `slack`) instead of a stale
+ * hardcoded list.
+ *
+ * Pure: callers pass the live channel set (see `getChannelManager().getChannelTypes()`).
+ * Generic by design: any tool whose top-level schema has a `channel` field gets
+ * the enum, preserving the field's optionality and description. If `channels` is
+ * empty (should not happen — `web` is always built in) the schema is returned
+ * unchanged so we never produce an invalid empty enum.
+ */
+export function injectChannelEnum(
+  schema: z.ZodTypeAny,
+  channels: readonly string[],
+): z.ZodTypeAny {
+  if (!(schema instanceof z.ZodObject)) return schema;
+
+  const shape = schema.shape as Record<string, z.ZodTypeAny>;
+  const field = shape['channel'];
+  if (!field) return schema;
+  if (channels.length === 0) return schema;
+
+  const description = field.description;
+  const isOptional = field.isOptional();
+
+  // Build outermost-last so the description sits on the wrapper, matching how
+  // the original definitions were authored (and what zodToTypebox reads).
+  let channelField: z.ZodTypeAny = z.enum(channels as [string, ...string[]]);
+  if (isOptional) channelField = channelField.optional();
+  if (description) channelField = channelField.describe(description);
+
+  return schema.extend({ channel: channelField });
+}
+
+/**
  * Convert Animus tool definitions + handlers into CortexTool objects
  * for registration with CortexAgent.
  *
@@ -342,7 +383,8 @@ async function buildSingleAnimusTool(
 
   let parameters;
   try {
-    parameters = await zodToTypebox(def.inputSchema as never);
+    const channels = getChannelManager().getChannelTypes();
+    parameters = await zodToTypebox(injectChannelEnum(def.inputSchema, channels) as never);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.warn(`Failed to convert schema for tool '${toolName}': ${msg}`);
@@ -379,6 +421,26 @@ async function buildSingleAnimusTool(
   };
 }
 
+/** Whether a tool is turned off via the tool-permission settings. */
+function isToolDisabled(toolName: AnimusToolName): boolean {
+  try {
+    const sysDb = getSystemDb();
+    const perm = getToolPermission(sysDb, toolName);
+    return perm?.mode === 'off';
+  } catch {
+    // DB not ready yet; treat as enabled.
+    return false;
+  }
+}
+
+/** Tool names whose schema declares a dynamic `channel` field. */
+function channelDependentToolNames(): AnimusToolName[] {
+  return (Object.keys(ANIMUS_TOOL_DEFS) as AnimusToolName[]).filter((name) => {
+    const schema = ANIMUS_TOOL_DEFS[name].inputSchema;
+    return schema instanceof z.ZodObject && 'channel' in schema.shape;
+  });
+}
+
 async function buildAnimusTools(
   toolContextRef: MutableMindToolContext,
 ): Promise<CortexTool[]> {
@@ -387,15 +449,9 @@ async function buildAnimusTools(
   for (const [name] of Object.entries(ANIMUS_TOOL_DEFS)) {
     const toolName = name as AnimusToolName;
 
-    try {
-      const sysDb = getSystemDb();
-      const perm = getToolPermission(sysDb, toolName);
-      if (perm && perm.mode === 'off') {
-        log.debug(`Skipping disabled tool: ${toolName}`);
-        continue;
-      }
-    } catch {
-      // DB not ready yet; include the tool
+    if (isToolDisabled(toolName)) {
+      log.debug(`Skipping disabled tool: ${toolName}`);
+      continue;
     }
 
     const tool = await buildSingleAnimusTool(toolName, toolContextRef);
@@ -404,6 +460,35 @@ async function buildAnimusTools(
 
   log.info(`Built ${tools.length} Animus tools as CortexTool objects`);
   return tools;
+}
+
+/**
+ * Hot-swap the channel-dependent tools on a live mind agent so their `channel`
+ * enum reflects the currently-installed channels. Channels install/uninstall at
+ * runtime (no engine restart), but the agent caches its tool set for its whole
+ * lifetime, so without this the model keeps seeing the channel set from when the
+ * agent was first built. Wired to `channel:installed` / `channel:uninstalled`
+ * in AgentSubsystem.
+ *
+ * No-op when the agent has not been created yet — the next createCortexMind()
+ * build reads the live channel set anyway.
+ */
+export async function refreshChannelDependentTools(
+  state: CortexMindState,
+): Promise<void> {
+  const agent = state.agent;
+  if (!agent) return;
+
+  for (const toolName of channelDependentToolNames()) {
+    if (isToolDisabled(toolName)) {
+      agent.removeConsumerTool(toolName);
+      continue;
+    }
+    const tool = await buildSingleAnimusTool(toolName, state.toolContext);
+    if (tool) agent.addConsumerTool(tool);
+  }
+
+  log.info('Refreshed channel-dependent mind tools after channel change');
 }
 
 // ============================================================================

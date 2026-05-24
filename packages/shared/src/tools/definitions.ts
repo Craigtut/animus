@@ -9,6 +9,7 @@
  */
 
 import { z } from 'zod/v3';
+import { channelTypeSchema } from '../schemas/common.js';
 
 /**
  * A tool definition without a handler.
@@ -122,8 +123,10 @@ export const lookupContactsDef: AnimusToolDef = {
       .string()
       .optional()
       .describe('Filter contacts by name (case-insensitive partial match)'),
-    channel: z
-      .enum(['web', 'sms', 'discord', 'api'])
+    // Channel set is dynamic (packages add new types). The data layer accepts
+    // any channel string; the backend injects the live enum of installed
+    // channels at tool-build time (see buildSingleAnimusTool in cortex-mind.ts).
+    channel: channelTypeSchema
       .optional()
       .describe('Only return contacts reachable on this channel'),
   }),
@@ -140,9 +143,10 @@ export const sendProactiveMessageDef: AnimusToolDef = {
     'Send a message to any contact on any of their available channels. This is the ONLY way to message a user on non-message ticks (interval, scheduled task, agent completion), and the way to reach out on a different channel than the one that triggered this tick. Use lookup_contacts first to verify the contact ID and available channels. Goes through the full delivery pipeline (channel adapter, message storage, event emission).',
   inputSchema: z.object({
     contactId: z.string().uuid().describe('The contact ID to message'),
-    channel: z
-      .enum(['web', 'sms', 'discord', 'api'])
-      .describe('Channel to send through'),
+    // Channel set is dynamic (packages add new types). The data layer accepts
+    // any channel string; the backend injects the live enum of installed
+    // channels at tool-build time (see buildSingleAnimusTool in cortex-mind.ts).
+    channel: channelTypeSchema.describe('Channel to send through'),
     content: z.string().describe('Message content'),
     media: z.array(z.object({
       type: z.enum(['image', 'audio', 'video', 'file']).describe('Media type'),
