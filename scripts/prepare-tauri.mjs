@@ -533,10 +533,36 @@ function generatePackageJson() {
 function installDependencies() {
   console.log('[7/12] Installing production dependencies in resources/...');
 
-  execSync('npm install --omit=dev', {
+  // Resolve the target platform/arch (may differ from host when cross-compiling
+  // in CI -- e.g. the Intel macOS bundle is built on an arm64 runner). npm's
+  // --cpu/--os select the matching arch of platform-specific optional deps
+  // (sharp, lancedb, sherpa-onnx) so the bundle ships the target's native
+  // binaries instead of the host's. (Earlier the host-arch ones were installed
+  // here and then pruned away, silently shipping a bundle missing those modules.)
+  const targetArch = process.env.TAURI_TARGET_ARCH || process.arch;
+  const targetPlatform = process.env.TAURI_TARGET_PLATFORM || process.platform;
+
+  execSync(`npm install --omit=dev --cpu=${targetArch} --os=${targetPlatform}`, {
     cwd: RESOURCES_DIR,
     stdio: 'inherit',
   });
+
+  // better-sqlite3 builds from source via node-gyp, which targets the host arch
+  // and ignores --cpu/--os (current npm also strips npm_config_arch). When cross-
+  // compiling, drive node-gyp with --arch so its Mach-O matches the target; on
+  // Apple Silicon this emits an x86_64 slice for the Intel build.
+  if (targetArch !== process.arch) {
+    const bsq = path.join(RESOURCES_DIR, 'node_modules', 'better-sqlite3');
+    if (fs.existsSync(bsq)) {
+      console.log(`      Cross-building better-sqlite3 for ${targetArch}...`);
+      execSync(`npx node-gyp rebuild --arch=${targetArch} --release`, {
+        cwd: bsq,
+        stdio: 'inherit',
+      });
+      // test_extension.node is a test-only fixture and is never shipped.
+      fs.rmSync(path.join(bsq, 'build', 'Release', 'test_extension.node'), { force: true });
+    }
+  }
 
   console.log('      Done');
 }

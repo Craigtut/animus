@@ -86,32 +86,6 @@ jobs:
       - name: Build production assets
         run: npm run build:prod
 
-      # Runs AFTER build:prod: the Intel (x64) bundle cross-compiles on the arm64
-      # runner, so npm only resolved arm64 native binaries. Swap in the x64 variants
-      # for bundling. This must come after build:prod because re-running npm install
-      # with --cpu/--os prunes the host's arm64 toolchain binaries (e.g.
-      # @rollup/rollup-darwin-arm64) that vite needs to run on the runner (npm bug
-      # #4828). By here the frontend/backend are already built, so that's harmless.
-      - name: Install x64 native deps for Intel cross-build
-        if: matrix.platform == 'macos-latest' && matrix.target-arch == 'x64'
-        shell: bash
-        run: |
-          # --force is required: npm rejects an explicitly-named off-platform
-          # package with EBADPLATFORM even with --cpu/--os set. The version is
-          # still resolved from the parent's optionalDependencies range.
-          npm install --no-save --force --cpu=x64 --os=darwin \
-            @img/sharp-darwin-x64 \
-            @lancedb/lancedb-darwin-x64 \
-            sherpa-onnx-darwin-x64
-          # better-sqlite3 builds from source for the host (arm64). Current npm
-          # strips npm_config_arch ("Unknown env config arch"), so `npm rebuild`
-          # ignores it and still produces arm64. Drive node-gyp directly with
-          # --arch=x64 instead: on Apple Silicon this emits x86_64 Mach-O. Then
-          # drop the test-only fixture (never shipped).
-          rm -rf node_modules/better-sqlite3/build
-          ( cd node_modules/better-sqlite3 && npx node-gyp rebuild --arch=x64 --release )
-          rm -f node_modules/better-sqlite3/build/Release/test_extension.node
-
       - name: Import Apple certificate
         if: matrix.platform == 'macos-latest'
         env:
