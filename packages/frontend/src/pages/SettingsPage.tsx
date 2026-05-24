@@ -3617,16 +3617,26 @@ function SystemSection() {
               <Typography.Caption as="p" color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
                 Check for updates in the background and notify you when a new version is ready.
               </Typography.Caption>
-              <div css={css`margin-top: ${theme.spacing[1]};`}>
+              <div css={css`margin-top: ${theme.spacing[1]}; display: flex; gap: ${theme.spacing[2]};`}>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={autoUpdate.checkNow}
-                  disabled={autoUpdate.checking || autoUpdate.downloading}
+                  disabled={autoUpdate.checking || autoUpdate.downloading || autoUpdate.installing}
                   loading={autoUpdate.checking || autoUpdate.downloading}
                 >
                   {autoUpdate.checking ? 'Checking...' : autoUpdate.downloading ? 'Downloading...' : 'Check for updates'}
                 </Button>
+                {autoUpdate.updateReady && (
+                  <Button
+                    size="sm"
+                    onClick={() => { void autoUpdate.installAndRelaunch(); }}
+                    disabled={autoUpdate.installing}
+                    loading={autoUpdate.installing}
+                  >
+                    {autoUpdate.installing ? 'Installing...' : `Restart & install v${autoUpdate.updateVersion}`}
+                  </Button>
+                )}
               </div>
             </>
           )}

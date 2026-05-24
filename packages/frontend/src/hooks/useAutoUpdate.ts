@@ -11,10 +11,12 @@ export interface AutoUpdateState {
   enabled: boolean;
   checking: boolean;
   downloading: boolean;
+  installing: boolean;
   updateReady: boolean;
   updateVersion: string | null;
   toggle: () => void;
   checkNow: () => Promise<void>;
+  installAndRelaunch: () => Promise<void>;
   dismiss: () => void;
 }
 
@@ -26,6 +28,7 @@ export function useAutoUpdate(): AutoUpdateState {
   });
   const [checking, setChecking] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [installing, setInstalling] = useState(false);
   const [updateReady, setUpdateReady] = useState(false);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
 
@@ -77,6 +80,27 @@ export function useAutoUpdate(): AutoUpdateState {
       setDownloading(false);
     }
   }, []); // stable reference, no state dependencies
+
+  const installAndRelaunch = useCallback(async () => {
+    const update = updateRef.current;
+    if (!update || isRunningRef.current) return;
+    isRunningRef.current = true;
+    setInstalling(true);
+    try {
+      // download() only buffers the update in the Update resource; install()
+      // is what actually swaps the app bundle. Without it, restarting does
+      // nothing and the next launch just re-downloads the same version.
+      await update.install();
+      const { relaunch } = await import('@tauri-apps/plugin-process');
+      await relaunch();
+    } catch (err) {
+      setInstalling(false);
+      isRunningRef.current = false;
+      toast.error('Failed to install update.', {
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, []);
 
   const dismiss = useCallback(() => {
     const version = updateRef.current?.version;
@@ -157,10 +181,12 @@ export function useAutoUpdate(): AutoUpdateState {
     enabled,
     checking,
     downloading,
+    installing,
     updateReady,
     updateVersion,
     toggle,
     checkNow,
+    installAndRelaunch,
     dismiss,
   };
 }
