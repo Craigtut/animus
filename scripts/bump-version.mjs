@@ -30,7 +30,6 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -121,25 +120,31 @@ function updateCargoToml(relPath, newVersion, dryRun) {
   return oldVersion;
 }
 
-function updateCargoLocks(dryRun) {
+function updateCargoLocks(newVersion, dryRun) {
   if (dryRun) return;
 
-  // Update Cargo.lock files to reflect new versions
-  const cargoDirs = [
-    path.join(ROOT, 'packages', 'tauri'),
-    path.join(ROOT, 'packages', 'tts-native'),
+  // Sync ONLY each workspace crate's own version entry in its Cargo.lock.
+  // We deliberately do NOT run `cargo generate-lockfile`: that re-resolves every
+  // dependency to the newest version its constraints allow, which silently
+  // floats branch-pinned git deps (e.g. ptts) and semver-compatible registry
+  // crates to new releases -- the exact failure that broke v0.4.6. A targeted
+  // string replace touches nothing but the version line and needs no toolchain.
+  const locks = [
+    { file: path.join(ROOT, 'packages', 'tauri', 'Cargo.lock'), crate: 'animus-desktop' },
+    { file: path.join(ROOT, 'packages', 'tts-native', 'Cargo.lock'), crate: 'animus-tts-native' },
   ];
 
-  for (const dir of cargoDirs) {
-    const lockFile = path.join(dir, 'Cargo.lock');
-    if (fs.existsSync(lockFile)) {
-      try {
-        execSync('cargo generate-lockfile', { cwd: dir, stdio: 'pipe' });
-      } catch {
-        // Non-fatal: lock file update may fail if Rust toolchain isn't installed
-        console.log(`  WARN: Could not update ${path.relative(ROOT, lockFile)}`);
-      }
+  for (const { file, crate } of locks) {
+    if (!fs.existsSync(file)) continue;
+    const content = fs.readFileSync(file, 'utf-8');
+    // Match the crate's own [[package]] entry: name line immediately followed
+    // by its version line. Only this crate's version is rewritten.
+    const regex = new RegExp(`(name = "${crate}"\\r?\\nversion = )"[^"]*"`);
+    if (!regex.test(content)) {
+      console.log(`  WARN: Could not find ${crate} entry in ${path.relative(ROOT, file)}`);
+      continue;
     }
+    fs.writeFileSync(file, content.replace(regex, `$1"${newVersion}"`));
   }
 }
 
@@ -194,10 +199,8 @@ function main() {
     changes.push({ file: relPath, from: oldVersion, to: newVersion });
   }
 
-  // Update Cargo.lock files
-  if (!dryRun) {
-    updateCargoLocks(dryRun);
-  }
+  // Update Cargo.lock files (version-only; never re-resolves dependencies)
+  updateCargoLocks(newVersion, dryRun);
 
   // Print summary
   console.log('File                                  Old       New');
