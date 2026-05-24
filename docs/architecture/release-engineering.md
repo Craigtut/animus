@@ -163,6 +163,16 @@ The macOS Intel build runs on an ARM runner. The `TAURI_TARGET_ARCH` environment
 
 `TAURI_TARGET_PLATFORM` is also supported for future use but not currently needed since macOS targets build on macOS runners and Windows targets build on Windows runners.
 
+### Bundled Binaries & Architecture Safety
+
+The desktop sidecar bundles two external executables (Node.js and FFmpeg) plus a set of native addons. Each must match the build target's architecture, or macOS flags the app as Intel-based ("Support Ending for Intel-based Apps") and runs it under Rosetta. `prepare-tauri.mjs` enforces this in three ways:
+
+- **Node.js** is downloaded per-target from nodejs.org using the `darwin-arm64` / `darwin-x64` / `win-x64` mapping.
+- **FFmpeg** sources differ by OS. Linux and Windows use BtbN's LGPL (GPL-free) builds. macOS uses `ffmpeg.martin-riedl.de`, which publishes both `arm64` and `amd64` static builds behind a stable `/redirect/latest/macos/{arch}/release/ffmpeg.zip` URL. (The previous source, evermeet.cx, was x86_64-only and silently shipped an Intel ffmpeg inside the arm64 bundle.) The macOS builds are GPL; ffmpeg is spawned as a separate process, not linked, so it does not impose GPL terms on the engine.
+- **Native prebuilds.** Packages that bundle every platform's prebuilt binary in a `prebuilds/{platform}-{arch}` layout (e.g. `argon2`, the `bare-*` modules) are pruned down to the target tuple. This removes foreign-arch Mach-O files that would otherwise trip Gatekeeper.
+
+As a backstop, the final `prepare-tauri.mjs` step runs an **architecture gate** on macOS targets: it walks every Mach-O in the staged bundle (`.node`, `.bare`, `.dylib`, `.so`, and the sidecar executables) with `lipo -archs` and **fails the build** if any binary lacks the target's architecture slice. A foreign binary becomes a red CI build, not a warning a user discovers weeks later.
+
 ## How to Cut a Release
 
 1. Ensure `main` is clean and CI is passing

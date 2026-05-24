@@ -182,11 +182,11 @@ async function downloadFfmpegBinary() {
     return;
   }
 
-  // BtbN/FFmpeg-Builds release naming:
+  // BtbN/FFmpeg-Builds release naming (LGPL, GPL-free):
   //   ffmpeg-n7.1-linux-amd64-lgpl-7.1.tar.xz
   //   ffmpeg-n7.1-win64-lgpl-7.1.zip
-  //   ffmpeg-n7.1-macOS-amd64-lgpl-7.1.tar.xz (hypothetical)
-  // Note: BtbN only builds linux and windows. For macOS we use evermeet.cx.
+  // Note: BtbN only builds linux and windows. For macOS we use
+  // ffmpeg.martin-riedl.de, which publishes both arm64 and amd64 builds.
   let url;
   let archiveName;
   let archiveExt;
@@ -203,9 +203,15 @@ async function downloadFfmpegBinary() {
     url = `https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${archiveName}${archiveExt}`;
     ffmpegPathInArchive = `${archiveName}/bin/ffmpeg`;
   } else if (platform === 'darwin') {
-    // macOS: use evermeet.cx static builds (universal or arch-specific)
+    // macOS: martin-riedl.de publishes per-arch static builds (arm64 + amd64)
+    // behind a stable "latest release" redirect. We previously used evermeet.cx,
+    // which only ships x86_64 -- that silently placed an Intel-only ffmpeg inside
+    // the arm64 app bundle, tripping macOS's "Intel-based app" Gatekeeper warning
+    // and forcing Rosetta. ffmpegArch is 'arm64' or 'amd64', matching the path.
+    // These are GPL builds (as evermeet's were); ffmpeg is spawned as a separate
+    // process, not linked, so it does not impose GPL terms on the engine itself.
     archiveExt = '.zip';
-    url = `https://evermeet.cx/ffmpeg/ffmpeg-${FFMPEG_VERSION.slice(1)}.zip`;
+    url = `https://ffmpeg.martin-riedl.de/redirect/latest/macos/${ffmpegArch}/release/ffmpeg.zip`;
     ffmpegPathInArchive = 'ffmpeg'; // flat zip, no subdirectory
   } else {
     console.log(`      WARN: No ffmpeg download source for platform ${platform}, skipping`);
@@ -609,6 +615,47 @@ function prunePlatformBinaries() {
     console.log(`      Removed onnxruntime-web entirely (${formatMB(size)})`);
   }
 
+  // --- Generic prebuildify / node-gyp-build layout: prebuilds/{platform}-{arch} ---
+  // Packages like argon2 ship every platform's prebuilt .node under prebuilds/.
+  // On macOS the foreign-arch Mach-O (e.g. darwin-x64 inside an arm64 bundle)
+  // trips Gatekeeper's "Intel-based app" check; on every platform the others are
+  // dead weight. Keep only the tuple matching the build target. Directory names
+  // whose OS token is not a recognized platform are left untouched (conservative).
+  const KNOWN_PLATFORMS = ['darwin', 'linux', 'win32', 'freebsd', 'openbsd', 'sunos', 'android', 'ios'];
+
+  function prunePrebuildsDirs(dir) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.name === 'prebuilds') {
+        for (const tuple of fs.readdirSync(full, { withFileTypes: true })) {
+          if (!tuple.isDirectory()) continue;
+          const osToken = tuple.name.split('-')[0];
+          const archToken = tuple.name.split('-').pop();
+          // Only act on recognized platform tuples; skip anything unexpected.
+          if (!KNOWN_PLATFORMS.some((p) => osToken.startsWith(p))) continue;
+          // Keep the exact target tuple (e.g. darwin-arm64, win32-x64).
+          if (osToken === platform && archToken === arch) continue;
+          const tuplePath = path.join(full, tuple.name);
+          const size = dirSize(tuplePath);
+          fs.rmSync(tuplePath, { recursive: true, force: true });
+          totalSaved += size;
+          console.log(`      Removed ${path.relative(nodeModules, tuplePath)} (${formatMB(size)})`);
+        }
+      } else {
+        // Recurse to catch scoped packages and nested node_modules.
+        prunePrebuildsDirs(full);
+      }
+    }
+  }
+  prunePrebuildsDirs(nodeModules);
+
   console.log(`      Platform pruning saved ${formatMB(totalSaved)}`);
 }
 
@@ -891,6 +938,75 @@ function verify() {
   if (!allOk) {
     console.error('\nVerification failed. Some required files are missing.');
     process.exit(1);
+  }
+
+  // Architecture gate (macOS only): every Mach-O in the bundle must contain a
+  // slice for the build target. A foreign-arch binary (e.g. an Intel-only
+  // ffmpeg or argon2 prebuild inside an arm64 app) is exactly what triggers
+  // macOS's "Support Ending for Intel-based Apps" warning and forces Rosetta.
+  // `lipo` is macOS-only; the cross-compiled x64 target also builds on a mac
+  // runner, so the host check is sufficient.
+  if (platform === 'darwin' && process.platform === 'darwin') {
+    const arch = process.env.TAURI_TARGET_ARCH || process.arch;
+    const expected = arch === 'arm64' ? 'arm64' : 'x86_64';
+    console.log(`      Checking Mach-O architectures (expecting ${expected})...`);
+
+    const offenders = [];
+    let checked = 0;
+
+    const collect = (dir, acc) => {
+      let entries;
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          collect(full, acc);
+        } else if (entry.isFile()) {
+          const ext = path.extname(entry.name).toLowerCase();
+          const isSidecar = entry.name.startsWith('node-') || entry.name.startsWith('ffmpeg-');
+          // Mirrors the extension set in signNativeBinaries() so the gate covers
+          // every Mach-O we ship (.bare is the Bare runtime's native module ext).
+          if (ext === '.node' || ext === '.bare' || ext === '.dylib' || ext === '.so' || isSidecar) {
+            acc.push(full);
+          }
+        }
+      }
+    };
+
+    const candidates = [];
+    collect(BINARIES_DIR, candidates);
+    collect(RESOURCES_DIR, candidates);
+
+    for (const file of candidates) {
+      let archs;
+      try {
+        archs = execSync(`lipo -archs "${file}"`, { stdio: ['ignore', 'pipe', 'ignore'] })
+          .toString()
+          .trim()
+          .split(/\s+/);
+      } catch {
+        // Not a Mach-O (e.g. a Linux/Windows prebuild). Gatekeeper ignores
+        // these; only Mach-O binaries gate the macOS bundle. Skip.
+        continue;
+      }
+      checked++;
+      if (!archs.includes(expected)) {
+        offenders.push(`${path.relative(TAURI_DIR, file)} -> [${archs.join(', ')}]`);
+      }
+    }
+
+    if (offenders.length > 0) {
+      console.error(`\nArchitecture check FAILED: ${offenders.length} Mach-O binary(ies) missing the ${expected} slice:`);
+      for (const o of offenders) console.error(`      ${o}`);
+      console.error('\nThis bundle would trigger macOS\'s "Intel-based app" warning. Fix the binary source before shipping.');
+      process.exit(1);
+    }
+
+    console.log(`      OK: all ${checked} Mach-O binaries include ${expected}`);
   }
 
   console.log('\nTauri build preparation complete.');
