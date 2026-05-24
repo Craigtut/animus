@@ -88,12 +88,14 @@ export function RegisterPage() {
             height: 48px;
           `}
         />
-        <Typography.Title serif css={css`text-align: center; margin-bottom: ${theme.spacing[1]};`}>
-          Secure this Animus
-        </Typography.Title>
-        <Typography.Body color="secondary" css={css`text-align: center; margin-bottom: ${theme.spacing[8]};`}>
-          Create a local password for this instance. It protects the credentials and memories Animus may hold.
-        </Typography.Body>
+        <div css={css`margin-bottom: ${theme.spacing[8]};`}>
+          <Typography.Title serif css={css`text-align: center; margin-bottom: ${theme.spacing[1]};`}>
+            Secure this Animus
+          </Typography.Title>
+          <Typography.Body color="secondary" css={css`text-align: center;`}>
+            Create a local password for this instance. It protects the credentials and memories Animus may hold.
+          </Typography.Body>
+        </div>
 
         <form onSubmit={handleSubmit}>
           {error && (
@@ -154,12 +156,8 @@ export function RegisterPage() {
               loading={registerMutation.isPending}
               css={css`width: 100%; margin-top: ${theme.spacing[2]};`}
             >
-              Create local password
+              Continue
             </Button>
-
-            <Typography.Caption as="p" color="hint" css={css`text-align: center;`}>
-              No Animus account is created here. Store sign-in is separate.
-            </Typography.Caption>
           </div>
         </form>
       </motion.div>
