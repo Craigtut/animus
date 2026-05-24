@@ -9,7 +9,7 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "2", features = ["async", "tokio_rt"] }
 napi-derive = "2"
-ptts = { git = "https://github.com/LaurentMazare/xn-ptts", features = ["sp"] }
+ptts = { git = "https://github.com/LaurentMazare/xn-ptts", rev = "d0aa099f533b67ee18cfae8551a4dfd821f8b345", features = ["sp"] }
 xn = "0.1.11"
 sentencepiece = "0.13.1"
 symphonia = { version = "0.5.3", features = ["all"] }

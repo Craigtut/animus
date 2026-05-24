@@ -673,8 +673,8 @@ dependencies = [
 
 [[package]]
 name = "ptts"
-version = "0.2.0"
-source = "git+https://github.com/LaurentMazare/xn-ptts#20a0d510b426e4e9b61416ca97c4af1a4a4a0991"
+version = "0.1.11"
+source = "git+https://github.com/LaurentMazare/xn-ptts?rev=d0aa099f533b67ee18cfae8551a4dfd821f8b345#d0aa099f533b67ee18cfae8551a4dfd821f8b345"
 dependencies = [
  "rand",
  "rand_distr",
