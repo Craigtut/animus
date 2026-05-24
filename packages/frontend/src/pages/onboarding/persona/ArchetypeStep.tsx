@@ -9,7 +9,7 @@ import { Button, SelectionCard, Typography } from '../../../components/ui';
 import { useOnboardingStore } from '../../../store';
 import { OnboardingNav } from '../OnboardingNav';
 import { useReviewReturn } from '../useReviewReturn';
-import { archetypePresets, defaultDimensions } from './archetype-presets';
+import { getArchetypeDraftPreset } from './archetype-presets';
 import type SwiperCore from 'swiper';
 
 import 'swiper/css';
@@ -33,7 +33,9 @@ export function ArchetypeStep() {
   const { markStepComplete, setCurrentStep, personaDraft, updatePersonaDraft } = useOnboardingStore();
   const { isEditing, finishStep, cancelEdit } = useReviewReturn();
 
-  const [selected, setSelected] = useState<string | null>(personaDraft.archetype);
+  const [selected, setSelected] = useState<string | null>(
+    personaDraft.archetype === 'scratch' ? null : personaDraft.archetype,
+  );
   const swiperRef = useRef<SwiperCore | null>(null);
   const [isBeginning, setIsBeginning] = useState(true);
   const [isEnd, setIsEnd] = useState(false);
@@ -42,18 +44,21 @@ export function ArchetypeStep() {
     setSelected(selected === id ? null : id);
   };
 
-  const handleContinue = () => {
-    const preset = selected && selected !== 'scratch' ? archetypePresets[selected] : null;
-    updatePersonaDraft({
-      archetype: selected,
-      personalityDimensions: preset ? { ...preset.dimensions } : { ...defaultDimensions },
-      traits: preset ? [...preset.traits] : [],
-    });
+  const saveArchetypeAndAdvance = (archetype: string | null) => {
+    updatePersonaDraft(getArchetypeDraftPreset(archetype));
     markStepComplete('persona_archetype');
     finishStep(() => {
       setCurrentStep('persona_dimensions');
       navigate('/onboarding/persona/dimensions');
     });
+  };
+
+  const handleContinue = () => {
+    saveArchetypeAndAdvance(selected);
+  };
+
+  const handleStartFromScratch = () => {
+    saveArchetypeAndAdvance(null);
   };
 
   const handleBack = () => navigate('/onboarding/persona/identity');
@@ -260,13 +265,7 @@ export function ArchetypeStep() {
         <Button
           variant="secondary"
           size="sm"
-          onClick={() => setSelected(selected === 'scratch' ? null : 'scratch')}
-          css={css`
-            ${selected === 'scratch' ? css`
-              border-color: ${theme.colors.border.focus};
-              box-shadow: ${theme.shadows.sm};
-            ` : ''}
-          `}
+          onClick={handleStartFromScratch}
         >
           Or start from scratch
         </Button>

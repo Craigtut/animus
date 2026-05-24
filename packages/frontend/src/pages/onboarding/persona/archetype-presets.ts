@@ -13,6 +13,12 @@ export interface ArchetypePreset {
   traits: string[];
 }
 
+export interface ArchetypeDraftPreset {
+  archetype: string | null;
+  personalityDimensions: Record<string, number>;
+  traits: string[];
+}
+
 export const archetypePresets: Record<string, ArchetypePreset> = {
   scholar: {
     dimensions: {
@@ -156,3 +162,21 @@ export const defaultDimensions: Record<string, number> = {
   order: 0.5,
   altruism: 0.5,
 };
+
+export function getArchetypeDraftPreset(archetype: string | null): ArchetypeDraftPreset {
+  const preset = archetype ? archetypePresets[archetype] : null;
+
+  if (!preset) {
+    return {
+      archetype: null,
+      personalityDimensions: { ...defaultDimensions },
+      traits: [],
+    };
+  }
+
+  return {
+    archetype,
+    personalityDimensions: { ...preset.dimensions },
+    traits: [...preset.traits],
+  };
+}
