@@ -57,29 +57,6 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      # The Intel (x64) macOS target cross-compiles on the arm64 runner, so the
-      # initial `npm install` only resolved arm64 native binaries. Fetch the x64
-      # variants of the platform-specific packages and rebuild better-sqlite3 for
-      # x64, otherwise the bundle ships arm64 Mach-O slices and the architecture
-      # gate in prepare:tauri rejects it ("missing x86_64 slice").
-      - name: Install x64 native deps for Intel cross-build
-        if: matrix.platform == 'macos-latest' && matrix.target-arch == 'x64'
-        shell: bash
-        run: |
-          # --force is required: npm rejects an explicitly-named off-platform
-          # package with EBADPLATFORM even with --cpu/--os set. The version is
-          # still resolved from the parent's optionalDependencies range.
-          npm install --no-save --force --cpu=x64 --os=darwin \
-            @img/sharp-darwin-x64 \
-            @lancedb/lancedb-darwin-x64 \
-            sherpa-onnx-darwin-x64
-          # better-sqlite3 built from source for the host (arm64); wipe it and
-          # refetch the x64 prebuilt, then drop the test-only fixture (never
-          # shipped, and a source build leaves it host-arch -> trips the gate).
-          rm -rf node_modules/better-sqlite3/build
-          npm_config_arch=x64 npm rebuild better-sqlite3
-          rm -f node_modules/better-sqlite3/build/Release/test_extension.node
-
       - name: Download prebuilt tts-native binary
         shell: bash
         env:
@@ -108,6 +85,30 @@ jobs:
 
       - name: Build production assets
         run: npm run build:prod
+
+      # Runs AFTER build:prod: the Intel (x64) bundle cross-compiles on the arm64
+      # runner, so npm only resolved arm64 native binaries. Swap in the x64 variants
+      # for bundling. This must come after build:prod because re-running npm install
+      # with --cpu/--os prunes the host's arm64 toolchain binaries (e.g.
+      # @rollup/rollup-darwin-arm64) that vite needs to run on the runner (npm bug
+      # #4828). By here the frontend/backend are already built, so that's harmless.
+      - name: Install x64 native deps for Intel cross-build
+        if: matrix.platform == 'macos-latest' && matrix.target-arch == 'x64'
+        shell: bash
+        run: |
+          # --force is required: npm rejects an explicitly-named off-platform
+          # package with EBADPLATFORM even with --cpu/--os set. The version is
+          # still resolved from the parent's optionalDependencies range.
+          npm install --no-save --force --cpu=x64 --os=darwin \
+            @img/sharp-darwin-x64 \
+            @lancedb/lancedb-darwin-x64 \
+            sherpa-onnx-darwin-x64
+          # better-sqlite3 built from source for the host (arm64); wipe it and
+          # refetch the x64 prebuilt, then drop the test-only fixture (never
+          # shipped, and a source build leaves it host-arch -> trips the gate).
+          rm -rf node_modules/better-sqlite3/build
+          npm_config_arch=x64 npm rebuild better-sqlite3
+          rm -f node_modules/better-sqlite3/build/Release/test_extension.node
 
       - name: Import Apple certificate
         if: matrix.platform == 'macos-latest'
