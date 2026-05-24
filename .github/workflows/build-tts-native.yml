@@ -22,10 +22,14 @@ jobs:
           - os: macos-latest
             target: x86_64-apple-darwin
             binary: tts-native.darwin-x64.node
-          - os: ubuntu-latest
+          # Build Linux binaries on 22.04 (glibc 2.35) so they load on the
+          # Debian bookworm (glibc 2.36) Docker runtime. ubuntu-latest (24.04)
+          # links against glibc 2.39, which the node:25 runtime image lacks,
+          # causing ERR_DLOPEN_FAILED at the Docker build verification step.
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             binary: tts-native.linux-x64-gnu.node
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: aarch64-unknown-linux-gnu
             binary: tts-native.linux-arm64-gnu.node
           - os: windows-latest

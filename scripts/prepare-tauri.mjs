@@ -656,6 +656,42 @@ function prunePlatformBinaries() {
   }
   prunePrebuildsDirs(nodeModules);
 
+  // --- Platform-specific npm packages: {name}-{os}-{arch}[-{abi}] ---
+  // Packages like sharp, lancedb, and sherpa-onnx ship each platform's native
+  // binary as a separate optional dependency package (e.g. @img/sharp-darwin-x64,
+  // @lancedb/lancedb-darwin-arm64, sherpa-onnx-darwin-x64). When cross-compiling
+  // (x64 bundle built on an arm64 runner) the foreign-arch package is installed
+  // explicitly in CI alongside the host one, so both archs are present. Remove
+  // the packages whose os/arch don't match the build target; otherwise the
+  // arm64 Mach-O inside an x64 bundle trips the architecture gate in verify().
+  const PLATFORM_PKG_RE = /-(darwin|linux|win32)-(x64|arm64|ia32)(?:-(gnu|musl|msvc|glibc))?$/;
+
+  function prunePlatformPackages(dir) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const full = path.join(dir, entry.name);
+      const m = entry.name.match(PLATFORM_PKG_RE);
+      if (m) {
+        const [, pkgOs, pkgArch] = m;
+        if (pkgOs === platform && pkgArch === arch) continue; // keep the target
+        const size = dirSize(full);
+        fs.rmSync(full, { recursive: true, force: true });
+        totalSaved += size;
+        console.log(`      Removed ${path.relative(nodeModules, full)} (${formatMB(size)})`);
+      } else if (entry.name.startsWith('@')) {
+        // Recurse one level into scope dirs (e.g. @img/, @lancedb/).
+        prunePlatformPackages(full);
+      }
+    }
+  }
+  prunePlatformPackages(nodeModules);
+
   console.log(`      Platform pruning saved ${formatMB(totalSaved)}`);
 }
 

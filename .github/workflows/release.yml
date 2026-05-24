@@ -57,6 +57,21 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # The Intel (x64) macOS target cross-compiles on the arm64 runner, so the
+      # initial `npm install` only resolved arm64 native binaries. Fetch the x64
+      # variants of the platform-specific packages and rebuild better-sqlite3 for
+      # x64, otherwise the bundle ships arm64 Mach-O slices and the architecture
+      # gate in prepare:tauri rejects it ("missing x86_64 slice").
+      - name: Install x64 native deps for Intel cross-build
+        if: matrix.platform == 'macos-latest' && matrix.target-arch == 'x64'
+        shell: bash
+        run: |
+          npm install --no-save --cpu=x64 --os=darwin \
+            @img/sharp-darwin-x64 \
+            @lancedb/lancedb-darwin-x64 \
+            sherpa-onnx-darwin-x64
+          npm_config_arch=x64 npm rebuild better-sqlite3
+
       - name: Download prebuilt tts-native binary
         shell: bash
         env:
