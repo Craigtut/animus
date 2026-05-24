@@ -51,6 +51,29 @@ The thesis is deliberate inefficiency. We leave the entity room the rest of the 
 - Cortex agent framework (`@animus-labs/cortex`, external package from cortex-mono repo) wrapping pi-agent-core
 - Agent SDKs (legacy, used for sub-agents): Claude, Codex, OpenCode
 
+### Platforms & Distribution
+
+Animus is a **multi-platform application**. Every change must work across all supported targets, not just the machine you happen to be developing on. Keep these in mind when writing code, choosing dependencies, spawning processes, or touching the filesystem:
+
+**Desktop app (Tauri + Node sidecar)** — the primary distribution form:
+- **macOS Apple Silicon** (`aarch64-apple-darwin`)
+- **macOS Intel** (`x86_64-apple-darwin`, cross-compiled on an ARM runner)
+- **Windows 64-bit** (`x86_64-pc-windows-msvc`)
+
+**Docker image (headless server)** — published to GHCR as a multi-arch image:
+- **`linux/amd64`** (x86_64 servers, most cloud VMs)
+- **`linux/arm64`** (ARM servers, Raspberry Pi, Apple Silicon VMs)
+
+**Standalone service (dev / self-host)** — the backend + frontend run directly via `npm run dev`, the same path used during development. The engine is a self-contained Node.js service and can be run on its own without the Tauri shell.
+
+**Practical implications for agents:**
+- **Cross-platform code only.** No hardcoded POSIX paths or path separators (use `node:path`), no assuming a shell, no Unix-only commands. Code must run on macOS, Windows, and Linux.
+- **Architecture-aware native deps.** Native addons (LanceDB, sharp, sherpa-onnx, tts-native, onnxruntime-node) ship per-arch binaries (x64 / arm64, and Windows / macOS / Linux). Don't assume the host's architecture; see `Dockerfile` and `scripts/prepare-tauri.mjs` for how target arch is resolved.
+- **Process spawning differs by platform.** Windows orphans long-running child processes differently than macOS/Linux (this is why agents must never run dev servers — see below).
+- **Headless vs. desktop.** Code must not assume the Tauri shell exists; the Docker/standalone runtime has no native window, tray, or auto-updater.
+
+The full build, signing, and release matrix lives in `docs/architecture/release-engineering.md`. Read it before touching build scripts, CI workflows, the Dockerfile, or `prepare-tauri.mjs`.
+
 ### Database Architecture
 
 Eight separate SQLite databases with distinct purposes and lifecycles, all stored under `data/databases/`:

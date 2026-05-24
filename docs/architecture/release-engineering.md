@@ -116,21 +116,27 @@ Each job:
 
 The release is created as a draft so the maintainer can review artifacts, edit release notes, and publish manually.
 
-#### Docker Image (`build-docker`)
+#### Docker Image (`build-docker` + `merge-docker-manifest`)
 
 Builds a multi-architecture Docker image and pushes to GitHub Container Registry (GHCR).
 
-| Platform | Architecture |
-|----------|-------------|
-| `linux/amd64` | x86_64 servers, most cloud VMs |
-| `linux/arm64` | ARM servers, Raspberry Pi, Apple Silicon VMs |
+| Platform | Architecture | Runner |
+|----------|-------------|--------|
+| `linux/amd64` | x86_64 servers, most cloud VMs | `ubuntu-24.04` |
+| `linux/arm64` | ARM servers, Raspberry Pi, Apple Silicon VMs | `ubuntu-24.04-arm` |
 
-The job uses the standard Docker GitHub Actions toolkit:
-1. `docker/setup-qemu-action` enables cross-platform builds via emulation
-2. `docker/setup-buildx-action` creates a BuildKit builder with multi-arch support
-3. `docker/login-action` authenticates to GHCR using the built-in `GITHUB_TOKEN`
-4. `docker/metadata-action` generates tags from the Git tag (see tagging below)
-5. `docker/build-push-action` builds and pushes with GitHub Actions layer caching
+Each architecture is built **natively on its own runner** rather than via QEMU emulation, which avoids the 5-8x slowdown emulated ARM builds incur. The flow is split across two jobs:
+
+**`build-docker`** (matrix, one job per architecture):
+1. `docker/setup-buildx-action` creates a BuildKit builder
+2. `docker/login-action` authenticates to GHCR using the built-in `GITHUB_TOKEN`
+3. `docker/build-push-action` builds the single-arch image and pushes it **by digest** (`push-by-digest=true`), with GitHub Actions layer caching scoped per-arch
+4. The resulting digest is uploaded as an artifact
+
+**`merge-docker-manifest`** (runs after both arch builds):
+1. Downloads the per-arch digests
+2. `docker/metadata-action` generates tags from the Git tag (see tagging below)
+3. `docker buildx imagetools create` merges the digests into a single multi-arch manifest and pushes the tags
 
 **Tagging strategy:**
 
@@ -139,8 +145,9 @@ The job uses the standard Docker GitHub Actions toolkit:
 | `{{version}}` | `0.2.4` | Exact version pin |
 | `{{major}}.{{minor}}` | `0.2` | Latest patch within a minor version |
 | `sha-{{sha}}` | `sha-a04b872` | Immutable commit reference |
+| `latest` | `latest` | Most recent release |
 
-The `v` prefix from Git tags is stripped automatically (Docker convention). No `latest` tag is published; users should pin to a specific version.
+The `v` prefix from Git tags is stripped automatically (Docker convention). A `latest` tag is published alongside the version tags, but production deployments should still pin to a specific version.
 
 **Pull the image:**
 
