@@ -4,6 +4,20 @@ All notable changes to the Animus Engine will be documented in this file.
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
 
+## [0.4.6](https://github.com/Craigtut/animus/compare/v0.4.5...v0.4.6) (2026-05-24)
+
+### Features
+
+* **auth:** use local password for instance access ([3b72335](https://github.com/Craigtut/animus/commit/3b7233552978cdb23a926f7efeafa9a456a0ea09))
+
+### Bug Fixes
+
+* **ci:** select Docker TTS addon by runtime arch ([63782b2](https://github.com/Craigtut/animus/commit/63782b26bb9eb9f088b8628ff4091fb3c1cb0f11))
+* **frontend:** install and relaunch on auto-update instead of download-only ([a879028](https://github.com/Craigtut/animus/commit/a8790284835ba2748dfa208f5fc96dd33e40bd6e))
+* **heartbeat:** keep Cortex cache retention current ([b546d75](https://github.com/Craigtut/animus/commit/b546d753f78485cf445cda15dea17319769da3d0))
+* remove invalid YAML colon from animus-copywriting skill description ([100cdbd](https://github.com/Craigtut/animus/commit/100cdbd3adea612eee8476123078d044644a9e3b))
+* **tauri:** ship arch-correct macOS ffmpeg and gate foreign-arch binaries ([e8f18b5](https://github.com/Craigtut/animus/commit/e8f18b528711c25cfdcc927072c400cfdc294c24))
+
 ## [0.4.5](https://github.com/Craigtut/animus/compare/v0.4.4...v0.4.5) (2026-05-18)
 
 ### Bug Fixes

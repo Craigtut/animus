@@ -19,7 +19,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "animus-tts-native"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "napi",
  "napi-build",
@@ -48,9 +48,9 @@ checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
 name = "autocfg"
-version = "1.5.0"
+version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "bitflags"
@@ -189,9 +189,9 @@ checksum = "e1d926b4d407d372f141f93bb444696142c29d32962ccbd3531117cf3aa0bfa9"
 
 [[package]]
 name = "either"
-version = "1.15.0"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "encoding_rs"
@@ -673,8 +673,8 @@ dependencies = [
 
 [[package]]
 name = "ptts"
-version = "0.1.11"
-source = "git+https://github.com/LaurentMazare/xn-ptts#d0aa099f533b67ee18cfae8551a4dfd821f8b345"
+version = "0.2.0"
+source = "git+https://github.com/LaurentMazare/xn-ptts#20a0d510b426e4e9b61416ca97c4af1a4a4a0991"
 dependencies = [
  "rand",
  "rand_distr",
@@ -951,9 +951,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.149"
+version = "1.0.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
 dependencies = [
  "itoa",
  "memchr",
@@ -1430,9 +1430,9 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "xn"
-version = "0.1.11"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ede98b6d288862c6d33f76ea5aaefff177aa4024973d1e17f60b4bc4cd35f12"
+checksum = "eea71cec0a9d2b2e963c646e6489d6bdf7896d6d1ae46652d3c78af196b800b5"
 dependencies = [
  "byteorder",
  "gemm",
