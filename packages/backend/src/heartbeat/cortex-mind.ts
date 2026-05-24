@@ -49,7 +49,7 @@ import { getChannelRouter } from '../channels/channel-router.js';
 import { getPluginManager } from '../plugins/index.js';
 import { join } from 'node:path';
 import { createToolResultPersistor, cleanupDereferencedPaths } from './tool-result-persistor.js';
-import { formatTimestamp } from './context-builder.js';
+import { buildTaskContextSection, formatTimestamp } from './context-builder.js';
 import { buildCortexEnvOverrides } from './cortex-env.js';
 import { getSessionsDb } from '../db/index.js';
 import * as sessionStore from '../db/stores/session-store.js';
@@ -1309,14 +1309,8 @@ export function populateContextSlots(
     : '(No active goals)');
 
   // Slot 8: tasks
-  const taskLines = gathered.deferredTasks.map(t =>
-    `- [${t.id.slice(0, 8)}] ${t.title} (priority: ${t.priority}, status: ${t.status})`
-  );
-  cm.setSlot('tasks', taskLines.length > 0
-    ? '── PENDING TASKS ──\n' +
-      'These tasks are waiting for your attention during quiet moments.\n' +
-      'Use start_task with the task ID to begin working on one.\n\n' +
-      taskLines.join('\n')
+  cm.setSlot('tasks', gathered.deferredTasks.length > 0
+    ? buildTaskContextSection(gathered.deferredTasks, gathered.taskJournals)
     : '(No pending tasks)');
 
   log.debug('Context slots populated');

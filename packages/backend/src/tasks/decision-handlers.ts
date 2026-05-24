@@ -7,13 +7,23 @@
  * Extracted from decision-executor.ts executeGoalTaskDecisions().
  */
 
-import { registerDecisionHandler } from '../heartbeat/decision-registry.js';
+import { registerDecisionHandler, type DecisionHandlerContext } from '../heartbeat/decision-registry.js';
 import * as taskStore from '../db/stores/task-store.js';
 import { now } from '@animus-labs/shared';
 import type { ScheduleType } from '@animus-labs/shared';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('TaskDecisions', 'heartbeat');
+
+function resolveTaskIdOrThrow(taskId: string, decisionType: string, ctx: DecisionHandlerContext): string {
+  const resolved = taskStore.resolveTaskId(ctx.hbDb, taskId);
+  if (!resolved) {
+    const message = `${decisionType} failed: task "${taskId}" was not found or was ambiguous`;
+    log.warn(message);
+    throw new Error(message);
+  }
+  return resolved;
+}
 
 // schedule_task
 registerDecisionHandler('schedule_task', async (params, decision, ctx) => {
@@ -65,27 +75,31 @@ registerDecisionHandler('schedule_task', async (params, decision, ctx) => {
 
 // start_task
 registerDecisionHandler('start_task', async (params, _decision, ctx) => {
-  const taskId = String(params['taskId'] ?? '');
+  const taskId = resolveTaskIdOrThrow(String(params['taskId'] ?? ''), 'start_task', ctx);
   taskStore.updateTask(ctx.hbDb, taskId, {
     status: 'in_progress',
     startedAt: now(),
   });
+  const journal = taskStore.updateTaskJournalStatus(ctx.hbDb, taskId, 'in_progress', ctx.tickNumber);
+  if (journal) ctx.eventBus.emit('task:journal_updated', journal);
   const updated = taskStore.getTask(ctx.hbDb, taskId);
   if (updated) ctx.eventBus.emit('task:updated', updated);
 });
 
 // complete_task
 registerDecisionHandler('complete_task', async (params, _decision, ctx) => {
-  const taskId = String(params['taskId'] ?? '');
+  const taskId = resolveTaskIdOrThrow(String(params['taskId'] ?? ''), 'complete_task', ctx);
   const result = params['result'] ? String(params['result']) : undefined;
   ctx.taskRunner.completeTask(taskId, result);
+  const journal = taskStore.updateTaskJournalStatus(ctx.hbDb, taskId, 'complete', ctx.tickNumber);
+  if (journal) ctx.eventBus.emit('task:journal_updated', journal);
   const updated = taskStore.getTask(ctx.hbDb, taskId);
   if (updated) ctx.eventBus.emit('task:updated', updated);
 });
 
 // cancel_task
 registerDecisionHandler('cancel_task', async (params, _decision, ctx) => {
-  const taskId = String(params['taskId'] ?? '');
+  const taskId = resolveTaskIdOrThrow(String(params['taskId'] ?? ''), 'cancel_task', ctx);
   ctx.taskRunner.cancelTask(taskId);
   try {
     ctx.taskScheduler.unregisterTask(taskId);
@@ -98,7 +112,7 @@ registerDecisionHandler('cancel_task', async (params, _decision, ctx) => {
 
 // skip_task
 registerDecisionHandler('skip_task', async (params, _decision, ctx) => {
-  const taskId = String(params['taskId'] ?? '');
+  const taskId = resolveTaskIdOrThrow(String(params['taskId'] ?? ''), 'skip_task', ctx);
   const task = taskStore.getTask(ctx.hbDb, taskId);
   if (!task) return;
 

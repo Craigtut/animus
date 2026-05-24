@@ -8,9 +8,20 @@
  */
 
 import { registerDecisionHandler } from './decision-registry.js';
+import * as taskStore from '../db/stores/task-store.js';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('AgentDecisions', 'heartbeat');
 
 registerDecisionHandler('spawn_agent', async (params, decision, ctx) => {
   if (!ctx.agentOrchestrator) return;
+  const rawTaskId = params['taskId'] ? String(params['taskId']) : null;
+  const parentTaskId = rawTaskId ? taskStore.resolveTaskId(ctx.hbDb, rawTaskId) : null;
+  if (rawTaskId && !parentTaskId) {
+    const message = `spawn_agent failed: task "${rawTaskId}" was not found or was ambiguous`;
+    log.warn(message);
+    throw new Error(message);
+  }
   await ctx.agentOrchestrator.spawnAgent({
     taskType: String(params['taskType'] ?? 'general'),
     description: decision.description,
@@ -18,6 +29,7 @@ registerDecisionHandler('spawn_agent', async (params, decision, ctx) => {
     contactId: params['contactId'] ? String(params['contactId']) : (ctx.contact?.id ?? ''),
     channel: String(params['channel'] ?? ctx.triggerChannel ?? 'web'),
     tickNumber: ctx.tickNumber,
+    ...(parentTaskId ? { parentTaskId } : {}),
     systemPrompt: ctx.compiledPersona
       ? ctx.buildSystemPrompt(ctx.compiledPersona)
       : '',

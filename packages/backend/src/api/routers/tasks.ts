@@ -7,7 +7,7 @@ import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';
 import { getTaskService } from '../../services/task-service.js';
 import { getEventBus } from '../../lib/event-bus.js';
-import type { Task } from '@animus-labs/shared';
+import type { Task, TaskJournal } from '@animus-labs/shared';
 
 export const tasksRouter = router({
   /**
@@ -46,6 +46,15 @@ export const tasksRouter = router({
     .input(z.object({ taskId: z.string() }))
     .query(({ input }) => {
       return getTaskService().getTask(input.taskId);
+    }),
+
+  /**
+   * Get the continuity journal for a task.
+   */
+  getTaskJournal: protectedProcedure
+    .input(z.object({ taskId: z.string() }))
+    .query(({ input }) => {
+      return getTaskService().getTaskJournal(input.taskId);
     }),
 
   /**
@@ -144,6 +153,20 @@ export const tasksRouter = router({
       return () => {
         eventBus.off('task:created', handler);
         eventBus.off('task:updated', handler);
+      };
+    });
+  }),
+
+  /**
+   * Subscribe to task journal changes.
+   */
+  onTaskJournalChange: protectedProcedure.subscription(() => {
+    return observable<TaskJournal>((emit) => {
+      const eventBus = getEventBus();
+      const handler = (journal: TaskJournal) => emit.next(journal);
+      eventBus.on('task:journal_updated', handler);
+      return () => {
+        eventBus.off('task:journal_updated', handler);
       };
     });
   }),

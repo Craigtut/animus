@@ -3,7 +3,7 @@
  *
  * Tables: heartbeat_state, emotion_state, emotion_history,
  *         tick_decisions, goal_seeds, goals, plans, goal_salience_log,
- *         tasks, task_runs, agent_tasks
+ *         tasks, task_journals, task_runs, agent_tasks
  */
 
 import { z } from 'zod/v3';
@@ -382,6 +382,63 @@ export const taskSchema = z.object({
 });
 
 // ============================================================================
+// Task Journals (continuity notes for task-scoped work)
+// ============================================================================
+
+export const taskJournalStatusSchema = z.enum([
+  'not_started',
+  'in_progress',
+  'blocked',
+  'ready_to_complete',
+  'complete',
+]);
+
+export const taskJournalArtifactTypeSchema = z.enum([
+  'file',
+  'url',
+  'tool_result',
+  'database',
+  'log',
+  'note',
+  'other',
+]);
+
+export const taskJournalArtifactSchema = z.object({
+  label: z.string(),
+  type: taskJournalArtifactTypeSchema.default('other'),
+  ref: z.string(),
+  context: z.string(),
+});
+
+export const taskJournalSchema = z.object({
+  taskId: uuidSchema,
+  status: taskJournalStatusSchema,
+  handoff: z.string(),
+  summary: z.string(),
+  learned: z.array(z.string()),
+  decisions: z.array(z.string()),
+  artifacts: z.array(taskJournalArtifactSchema),
+  openQuestions: z.array(z.string()),
+  nextSteps: z.array(z.string()),
+  tokenCount: z.number().int().nonnegative().default(0),
+  updatedTickNumber: z.number().int().nonnegative().nullable(),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+});
+
+export const taskJournalUpdateSchema = z.object({
+  taskId: z.string(),
+  status: taskJournalStatusSchema,
+  handoff: z.string(),
+  summary: z.string(),
+  learned: z.array(z.string()),
+  decisions: z.array(z.string()),
+  artifacts: z.array(taskJournalArtifactSchema),
+  openQuestions: z.array(z.string()),
+  nextSteps: z.array(z.string()),
+});
+
+// ============================================================================
 // Task Runs (recurring task execution log)
 // ============================================================================
 
@@ -423,6 +480,7 @@ export const agentTaskSchema = z.object({
   // Task definition
   taskType: z.string(),
   taskDescription: z.string(),
+  parentTaskId: uuidSchema.nullable(),
   contactId: uuidSchema.nullable(),
   sourceChannel: channelTypeSchema.nullable(),
 

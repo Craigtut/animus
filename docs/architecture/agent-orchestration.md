@@ -70,6 +70,12 @@ agent_complete trigger
 
 The mind can send new information to a running sub-agent through an `update_agent` decision. The orchestrator forwards that update to Cortex so it becomes part of the sub-agent's conversation.
 
+When a sub-agent is spawned for an existing task, the mind should include
+`taskId` in the `spawn_agent` decision. The orchestrator stores this parent
+task link on `agent_tasks`. When the sub-agent completes, the `agent_complete`
+tick includes the completion result plus the parent task and task journal
+context, allowing reflection to fold returned findings into the task journal.
+
 Cancellation is handled through Cortex when possible. If a sub-agent cannot be stopped cleanly, Animus stops tracking it, marks the task state accordingly, and lets the next heartbeat tick reason over the outcome.
 
 ## Crash Recovery

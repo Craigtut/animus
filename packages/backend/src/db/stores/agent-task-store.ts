@@ -16,17 +16,19 @@ export function insertAgentTask(
     status: string;
     taskType: string;
     taskDescription: string;
+    parentTaskId?: string | null;
     contactId: string | null;
     sourceChannel: string | null;
     createdAt: string;
   }
 ): void {
   db.prepare(
-    `INSERT INTO agent_tasks (id, tick_number, session_id, provider, status, task_type, task_description, contact_id, source_channel, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO agent_tasks (id, tick_number, session_id, provider, status, task_type, task_description, parent_task_id, contact_id, source_channel, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     data.id, data.tickNumber, data.sessionId, data.provider,
     data.status, data.taskType, data.taskDescription,
+    data.parentTaskId ?? null,
     data.contactId, data.sourceChannel, data.createdAt
   );
 }

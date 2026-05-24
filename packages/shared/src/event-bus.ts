@@ -16,6 +16,7 @@ import type {
   Goal,
   GoalSeed,
   Task,
+  TaskJournal,
   LongTermMemory,
   StreamType,
   AgentEventType,
@@ -64,6 +65,7 @@ export interface AnimusEventMap {
   // Tasks
   'task:created': Task;
   'task:updated': Task;
+  'task:journal_updated': TaskJournal;
   'task:deleted': { taskId: string };
 
   // Memory

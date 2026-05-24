@@ -87,6 +87,37 @@ The mind may pick up a deferred task, advance a goal, or do neither. Deferred ta
 5. Mind handles the task inline or spawns a sub-agent
 6. When complete, task is marked `completed`
 
+If a deferred task is marked `in_progress` but is not completed in the same
+tick, it continues to surface during later interval ticks until it is completed,
+cancelled, skipped, or failed. This keeps multi-tick task work visible without
+requiring inner-life ticks to retain full conversation history.
+
+### Task Journals
+
+Every task has a task-scoped journal row in `heartbeat.db`. The journal is a
+compact continuity surface for work that spans ticks. It is not written by the
+agentic loop as a mandatory note-taking chore. Instead, the REFLECT phase may
+replace the journal after a tick if task context changed.
+
+The journal tracks:
+
+- `handoff`: what the next tick should do first
+- `summary`: the current state of the task
+- `learned`: findings that matter for continuing the task
+- `decisions`: decisions already made, with enough rationale to avoid rework
+- `artifacts`: files, URLs, tool-result paths, database rows, or notes, each
+  with a short context hint explaining why it matters
+- `open_questions`: unresolved questions
+- `next_steps`: concrete follow-up steps
+
+The journal is a full replacement, not an append-only log. Reflection should
+keep it current, remove stale details, and omit an update when nothing changed.
+
+Sub-agents can be linked to a parent task by passing `taskId` in the
+`spawn_agent` decision. When the sub-agent finishes, the resulting
+`agent_complete` tick includes that parent task and journal context so the mind
+can fold returned findings into the same task journal.
+
 ### Deferred Task Staleness
 
 Deferred tasks that sit pending for too long need attention:
@@ -565,6 +596,31 @@ CREATE INDEX idx_task_runs_task ON task_runs(task_id, started_at);
 ```
 
 **TTL cleanup:** Task runs older than 30 days are deleted during periodic EXECUTE cleanup. This prevents unbounded growth from long-running recurring tasks.
+
+### Task Journals Table
+
+```sql
+CREATE TABLE task_journals (
+  task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'not_started',
+  handoff TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT '',
+  learned TEXT NOT NULL DEFAULT '[]',
+  decisions TEXT NOT NULL DEFAULT '[]',
+  artifacts TEXT NOT NULL DEFAULT '[]',
+  open_questions TEXT NOT NULL DEFAULT '[]',
+  next_steps TEXT NOT NULL DEFAULT '[]',
+  token_count INTEGER NOT NULL DEFAULT 0,
+  updated_tick_number INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+```
+
+`learned`, `decisions`, `artifacts`, `open_questions`, and `next_steps` are
+stored as JSON arrays. `artifacts` entries include `{ label, type, ref,
+context }`, where `context` explains what the artifact is and why future ticks
+may want to inspect it.
 
 ---
 

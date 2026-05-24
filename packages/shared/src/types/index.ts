@@ -56,6 +56,11 @@ import type {
   taskStatusSchema,
   taskCreatedBySchema,
   taskSchema,
+  taskJournalStatusSchema,
+  taskJournalArtifactTypeSchema,
+  taskJournalArtifactSchema,
+  taskJournalSchema,
+  taskJournalUpdateSchema,
   taskRunStatusSchema,
   taskRunSchema,
   agentTaskStatusSchema,
@@ -201,6 +206,11 @@ export type ScheduleType = z.infer<typeof scheduleTypeSchema>;
 export type TaskStatus = z.infer<typeof taskStatusSchema>;
 export type TaskCreatedBy = z.infer<typeof taskCreatedBySchema>;
 export type Task = z.infer<typeof taskSchema>;
+export type TaskJournalStatus = z.infer<typeof taskJournalStatusSchema>;
+export type TaskJournalArtifactType = z.infer<typeof taskJournalArtifactTypeSchema>;
+export type TaskJournalArtifact = z.infer<typeof taskJournalArtifactSchema>;
+export type TaskJournal = z.infer<typeof taskJournalSchema>;
+export type TaskJournalUpdate = z.infer<typeof taskJournalUpdateSchema>;
 
 export type TaskRunStatus = z.infer<typeof taskRunStatusSchema>;
 export type TaskRun = z.infer<typeof taskRunSchema>;

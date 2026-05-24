@@ -16,12 +16,13 @@ import {
   Warning,
   Timer,
   Tray,
+  Notebook,
   PencilSimple,
   Trash,
   type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
+import type { TaskJournal } from '@animus-labs/shared';
 import { trpc } from '../../utils/trpc';
-import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button, Input, Modal, Typography } from '../ui';
 
@@ -343,6 +344,168 @@ function EditTaskModal({ open, onClose, task }: EditTaskModalProps) {
 // Task Card
 // ============================================================================
 
+function JournalList({ label, items }: { label: string; items: string[] }) {
+  const theme = useTheme();
+  if (items.length === 0) return null;
+
+  return (
+    <div>
+      <Typography.Caption color="hint" css={css`
+        display: block;
+        margin-bottom: ${theme.spacing[1]};
+      `}>
+        {label}
+      </Typography.Caption>
+      <ul css={css`
+        display: flex;
+        flex-direction: column;
+        gap: ${theme.spacing[1]};
+        margin: 0;
+        padding-left: ${theme.spacing[4]};
+        color: ${theme.colors.text.secondary};
+      `}>
+        {items.map((item, index) => (
+          <li key={`${label}-${index}`}>
+            <Typography.Caption color="secondary" css={css`line-height: 1.55;`}>
+              {item}
+            </Typography.Caption>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function TaskJournalBlock({ journal }: { journal: TaskJournal | null | undefined }) {
+  const theme = useTheme();
+  if (!journal) return null;
+
+  const hasContent = Boolean(
+    journal.handoff ||
+    journal.summary ||
+    journal.learned.length > 0 ||
+    journal.decisions.length > 0 ||
+    journal.artifacts.length > 0 ||
+    journal.openQuestions.length > 0 ||
+    journal.nextSteps.length > 0
+  );
+
+  const statusLabel = journal.status === 'ready_to_complete'
+    ? 'ready'
+    : journal.status.replaceAll('_', ' ');
+
+  return (
+    <div css={css`
+      display: flex;
+      flex-direction: column;
+      gap: ${theme.spacing[3]};
+      padding-left: ${theme.spacing[3]};
+      border-left: 1px solid ${theme.colors.border.light};
+    `}>
+      <div css={css`
+        display: flex;
+        align-items: center;
+        gap: ${theme.spacing[2]};
+      `}>
+        <Notebook size={14} css={css`color: ${theme.colors.text.hint}; flex-shrink: 0;`} />
+        <Typography.Caption color="secondary" css={css`
+          font-weight: ${theme.typography.fontWeight.medium};
+          text-transform: uppercase;
+          letter-spacing: 0;
+        `}>
+          Journal
+        </Typography.Caption>
+        <Typography.Caption color="disabled">
+          {statusLabel}
+        </Typography.Caption>
+      </div>
+
+      {!hasContent && (
+        <Typography.Caption color="hint">
+          No notes yet.
+        </Typography.Caption>
+      )}
+
+      {journal.handoff && (
+        <div>
+          <Typography.Caption color="hint" css={css`
+            display: block;
+            margin-bottom: ${theme.spacing[1]};
+          `}>
+            Next
+          </Typography.Caption>
+          <Typography.SmallBody color="secondary" css={css`line-height: 1.55;`}>
+            {journal.handoff}
+          </Typography.SmallBody>
+        </div>
+      )}
+
+      {journal.summary && (
+        <div>
+          <Typography.Caption color="hint" css={css`
+            display: block;
+            margin-bottom: ${theme.spacing[1]};
+          `}>
+            Current state
+          </Typography.Caption>
+          <Typography.Caption color="secondary" css={css`line-height: 1.55;`}>
+            {journal.summary}
+          </Typography.Caption>
+        </div>
+      )}
+
+      <JournalList label="Learned" items={journal.learned} />
+      <JournalList label="Decisions" items={journal.decisions} />
+
+      {journal.artifacts.length > 0 && (
+        <div>
+          <Typography.Caption color="hint" css={css`
+            display: block;
+            margin-bottom: ${theme.spacing[1]};
+          `}>
+            Artifacts
+          </Typography.Caption>
+          <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+            {journal.artifacts.map((artifact, index) => (
+              <div key={`${artifact.ref}-${index}`} css={css`
+                display: flex;
+                flex-direction: column;
+                gap: ${theme.spacing[0.5]};
+              `}>
+                <Typography.Caption color="secondary" css={css`
+                  font-weight: ${theme.typography.fontWeight.medium};
+                  line-height: 1.45;
+                `}>
+                  {artifact.label}
+                </Typography.Caption>
+                <Typography.Caption color="disabled" css={css`
+                  font-family: ${theme.typography.fontFamily.mono};
+                  word-break: break-word;
+                  line-height: 1.45;
+                `}>
+                  {artifact.ref}
+                </Typography.Caption>
+                <Typography.Caption color="hint" css={css`line-height: 1.45;`}>
+                  {artifact.context}
+                </Typography.Caption>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <JournalList label="Open questions" items={journal.openQuestions} />
+      <JournalList label="Next steps" items={journal.nextSteps} />
+
+      {journal.updatedAt && (
+        <Typography.Caption color="disabled" css={css`font-size: 0.65rem;`}>
+          Updated {formatRelativeTime(journal.updatedAt)}
+        </Typography.Caption>
+      )}
+    </div>
+  );
+}
+
 function TaskCard({ task }: { task: TaskItem }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
@@ -352,6 +515,10 @@ function TaskCard({ task }: { task: TaskItem }) {
   const utils = trpc.useUtils();
 
   const { data: taskRuns } = trpc.tasks.getTaskRuns.useQuery(
+    { taskId: task.id },
+    { retry: false, enabled: expanded },
+  );
+  const { data: taskJournal } = trpc.tasks.getTaskJournal.useQuery(
     { taskId: task.id },
     { retry: false, enabled: expanded },
   );
@@ -537,6 +704,8 @@ function TaskCard({ task }: { task: TaskItem }) {
                     </Typography.Caption>
                   </div>
                 )}
+
+                <TaskJournalBlock journal={taskJournal} />
 
                 {/* Task Runs */}
                 {taskRuns && taskRuns.length > 0 && (
@@ -752,12 +921,19 @@ export function TasksSection() {
     onData: () => {
       utils.tasks.getTasks.invalidate();
       utils.tasks.getDeferredTasks.invalidate();
+      utils.tasks.getTaskJournal.invalidate();
+    },
+  });
+  trpc.tasks.onTaskJournalChange.useSubscription(undefined, {
+    onData: () => {
+      utils.tasks.getTaskJournal.invalidate();
     },
   });
   trpc.tasks.onTaskDeleted.useSubscription(undefined, {
     onData: () => {
       utils.tasks.getTasks.invalidate();
       utils.tasks.getDeferredTasks.invalidate();
+      utils.tasks.getTaskJournal.invalidate();
     },
   });
 

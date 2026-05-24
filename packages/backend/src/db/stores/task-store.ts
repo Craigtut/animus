@@ -8,6 +8,10 @@ import type Database from 'better-sqlite3';
 import { generateUUID, now } from '@animus-labs/shared';
 import type {
   Task,
+  TaskJournal,
+  TaskJournalArtifact,
+  TaskJournalStatus,
+  TaskJournalUpdate,
   TaskRun,
   TaskStatus,
   TaskRunStatus,
@@ -23,6 +27,54 @@ import { snakeToCamel } from '../utils.js';
 function rowToTask(row: Record<string, unknown>): Task {
   const t = snakeToCamel<Task>(row);
   return t;
+}
+
+function parseJsonArray<T>(value: unknown): T[] {
+  if (typeof value !== 'string' || value.length === 0) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed as T[] : [];
+  } catch {
+    return [];
+  }
+}
+
+function estimateJournalTokens(update: {
+  handoff: string;
+  summary: string;
+  learned: string[];
+  decisions: string[];
+  artifacts: TaskJournalArtifact[];
+  openQuestions: string[];
+  nextSteps: string[];
+}): number {
+  const chars =
+    update.handoff.length +
+    update.summary.length +
+    update.learned.join('\n').length +
+    update.decisions.join('\n').length +
+    JSON.stringify(update.artifacts).length +
+    update.openQuestions.join('\n').length +
+    update.nextSteps.join('\n').length;
+  return Math.ceil(chars / 4);
+}
+
+function rowToTaskJournal(row: Record<string, unknown>): TaskJournal {
+  return {
+    taskId: String(row['task_id']),
+    status: String(row['status']) as TaskJournalStatus,
+    handoff: String(row['handoff'] ?? ''),
+    summary: String(row['summary'] ?? ''),
+    learned: parseJsonArray<string>(row['learned']),
+    decisions: parseJsonArray<string>(row['decisions']),
+    artifacts: parseJsonArray<TaskJournalArtifact>(row['artifacts']),
+    openQuestions: parseJsonArray<string>(row['open_questions']),
+    nextSteps: parseJsonArray<string>(row['next_steps']),
+    tokenCount: Number(row['token_count'] ?? 0),
+    updatedTickNumber: row['updated_tick_number'] == null ? null : Number(row['updated_tick_number']),
+    createdAt: String(row['created_at']),
+    updatedAt: String(row['updated_at']),
+  };
 }
 
 export interface CreateTaskData {
@@ -76,6 +128,8 @@ export function createTask(db: Database.Database, data: CreateTaskData): Task {
     timestamp
   );
 
+  ensureTaskJournal(db, id);
+
   return {
     id,
     title: data.title,
@@ -100,6 +154,24 @@ export function createTask(db: Database.Database, data: CreateTaskData): Task {
     startedAt: null,
     completedAt: null,
   };
+}
+
+/**
+ * Resolve a task ID from either a full UUID or a unique UUID prefix.
+ */
+export function resolveTaskId(db: Database.Database, taskIdOrPrefix: string): string | null {
+  const value = taskIdOrPrefix.trim();
+  if (!value) return null;
+
+  const exact = db.prepare('SELECT id FROM tasks WHERE id = ?').get(value) as
+    | { id: string }
+    | undefined;
+  if (exact) return exact.id;
+
+  const rows = db
+    .prepare('SELECT id FROM tasks WHERE substr(id, 1, ?) = ? ORDER BY created_at DESC LIMIT 2')
+    .all(value.length, value) as Array<{ id: string }>;
+  return rows.length === 1 ? rows[0]!.id : null;
 }
 
 export function getTask(db: Database.Database, id: string): Task | null {
@@ -263,6 +335,131 @@ export function getTopDeferredTasks(
     )
     .all(limit) as Array<Record<string, unknown>>;
   return rows.map(rowToTask);
+}
+
+/**
+ * Get deferred tasks to surface to the mind during interval ticks.
+ * In-progress deferred tasks stay visible until completed.
+ */
+export function getDeferredTasksForContext(
+  db: Database.Database,
+  limit: number = 5
+): Task[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM tasks
+       WHERE schedule_type = 'deferred'
+         AND status IN ('in_progress', 'scheduled')
+       ORDER BY
+         CASE status WHEN 'in_progress' THEN 0 ELSE 1 END,
+         priority DESC
+       LIMIT ?`
+    )
+    .all(limit) as Array<Record<string, unknown>>;
+  return rows.map(rowToTask);
+}
+
+// ============================================================================
+// Task Journals
+// ============================================================================
+
+export function ensureTaskJournal(db: Database.Database, taskId: string): TaskJournal {
+  const timestamp = now();
+  db.prepare(
+    `INSERT OR IGNORE INTO task_journals (task_id, created_at, updated_at)
+     VALUES (?, ?, ?)`
+  ).run(taskId, timestamp, timestamp);
+
+  const journal = getTaskJournal(db, taskId);
+  if (!journal) {
+    throw new Error(`Failed to create task journal for task ${taskId}`);
+  }
+  return journal;
+}
+
+export function getTaskJournal(db: Database.Database, taskId: string): TaskJournal | null {
+  const row = db.prepare('SELECT * FROM task_journals WHERE task_id = ?').get(taskId) as
+    | Record<string, unknown>
+    | undefined;
+  return row ? rowToTaskJournal(row) : null;
+}
+
+export function getTaskJournals(db: Database.Database, taskIds: string[]): TaskJournal[] {
+  const uniqueIds = [...new Set(taskIds)].filter(Boolean);
+  if (uniqueIds.length === 0) return [];
+
+  const placeholders = uniqueIds.map(() => '?').join(', ');
+  const rows = db
+    .prepare(`SELECT * FROM task_journals WHERE task_id IN (${placeholders})`)
+    .all(...uniqueIds) as Array<Record<string, unknown>>;
+  return rows.map(rowToTaskJournal);
+}
+
+export function updateTaskJournal(
+  db: Database.Database,
+  update: TaskJournalUpdate & { updatedTickNumber?: number | null }
+): TaskJournal {
+  const taskId = resolveTaskId(db, update.taskId);
+  if (!taskId) {
+    throw new Error(`Task not found or ambiguous for journal update: ${update.taskId}`);
+  }
+  ensureTaskJournal(db, taskId);
+
+  const timestamp = now();
+  const tokenCount = estimateJournalTokens(update);
+  db.prepare(
+    `UPDATE task_journals SET
+       status = ?,
+       handoff = ?,
+       summary = ?,
+       learned = ?,
+       decisions = ?,
+       artifacts = ?,
+       open_questions = ?,
+       next_steps = ?,
+       token_count = ?,
+       updated_tick_number = ?,
+       updated_at = ?
+     WHERE task_id = ?`
+  ).run(
+    update.status,
+    update.handoff,
+    update.summary,
+    JSON.stringify(update.learned),
+    JSON.stringify(update.decisions),
+    JSON.stringify(update.artifacts),
+    JSON.stringify(update.openQuestions),
+    JSON.stringify(update.nextSteps),
+    tokenCount,
+    update.updatedTickNumber ?? null,
+    timestamp,
+    taskId
+  );
+
+  const journal = getTaskJournal(db, taskId);
+  if (!journal) {
+    throw new Error(`Failed to update task journal for task ${taskId}`);
+  }
+  return journal;
+}
+
+export function updateTaskJournalStatus(
+  db: Database.Database,
+  taskId: string,
+  status: TaskJournalStatus,
+  updatedTickNumber?: number
+): TaskJournal | null {
+  const resolvedTaskId = resolveTaskId(db, taskId);
+  if (!resolvedTaskId) return null;
+  ensureTaskJournal(db, resolvedTaskId);
+
+  db.prepare(
+    `UPDATE task_journals
+     SET status = ?, updated_tick_number = ?, updated_at = ?
+     WHERE task_id = ?`
+  ).run(status, updatedTickNumber ?? null, now(), resolvedTaskId);
+
+  return getTaskJournal(db, resolvedTaskId);
 }
 
 /**

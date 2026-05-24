@@ -15,6 +15,7 @@ import { getTaskScheduler, getTaskRunner } from '../tasks/index.js';
 import { computeNextRunAt } from '../tasks/task-scheduler.js';
 import type {
   Task,
+  TaskJournal,
   TaskRun,
   TaskStatus,
   ScheduleType,
@@ -80,6 +81,16 @@ class TaskService {
    */
   getTask(id: string): Task | null {
     return taskStore.getTask(getHeartbeatDb(), id);
+  }
+
+  /**
+   * Get the continuity journal for a task.
+   */
+  getTaskJournal(taskId: string): TaskJournal | null {
+    const db = getHeartbeatDb();
+    const resolvedTaskId = taskStore.resolveTaskId(db, taskId);
+    if (!resolvedTaskId) return null;
+    return taskStore.getTaskJournal(db, resolvedTaskId);
   }
 
   /**

@@ -119,6 +119,28 @@ export async function executeOutput(
     }
   };
 
+  const persistTaskJournalUpdate = (): void => {
+    const update = output.taskJournalUpdate;
+    if (!update) return;
+
+    const taskId = taskStore.resolveTaskId(hbDb, update.taskId);
+    if (!taskId) {
+      log.warn(`Task journal update ignored: task "${update.taskId}" was not found or was ambiguous`);
+      return;
+    }
+
+    const journal = taskStore.updateTaskJournal(hbDb, {
+      ...update,
+      taskId,
+      updatedTickNumber: tickNumber,
+    });
+    eventBusRef.emit('task:journal_updated', journal);
+
+    const task = taskStore.getTask(hbDb, taskId);
+    if (task) eventBusRef.emit('task:updated', task);
+    log.info(`Updated task journal for "${task?.title ?? taskId}" (${taskId})`);
+  };
+
   // Step 0: Mark execute start
   log.info(`Execute: ${output.decisions.length} decision(s), ${output.emotionDeltas.length} emotion(s), ${output.memoryCandidate?.length ?? 0} memory candidate(s)${output.reply?.content ? `, reply=${output.reply.content.length} chars` : ''}`);
   logExecuteEvent('execute_start', {
@@ -366,6 +388,10 @@ export async function executeOutput(
     decisionCount: output.decisions.length,
   });
 
+  // Reflection writes the full journal first; lifecycle decisions below may
+  // then set the final status (for example complete_task -> complete).
+  persistTaskJournalUpdate();
+
   // 4b-4d. Execute decisions (agent, plugin, goal/task, channel) -- outside transaction
   await executeDecisions(
     hbDb,
@@ -392,7 +418,7 @@ export async function executeOutput(
     const taskId = gathered.trigger.taskId;
     const mindExplicitlyHandled = output.decisions.some(
       d => ['complete_task', 'cancel_task', 'skip_task'].includes(d.type) &&
-           (d.parameters as Record<string, unknown>)?.['taskId'] === taskId
+           taskStore.resolveTaskId(hbDb, String((d.parameters as Record<string, unknown>)?.['taskId'] ?? '')) === taskId
     );
     if (!mindExplicitlyHandled) {
       const task = taskStore.getTask(hbDb, taskId);
@@ -402,6 +428,8 @@ export async function executeOutput(
           completedAt: now(),
           result: 'Auto-completed after scheduled tick execution',
         });
+        const journal = taskStore.updateTaskJournalStatus(hbDb, taskId, 'complete', tickNumber);
+        if (journal) eventBus.emit('task:journal_updated', journal);
         const updated = taskStore.getTask(hbDb, taskId);
         if (updated) eventBus.emit('task:updated', updated);
         log.info(`Auto-completed one-shot task "${task.title}" (${taskId})`);

@@ -696,6 +696,7 @@ interface ReflectResult {
     contactId?: string;
     keywords?: string[];
   }>;
+  taskJournalUpdate: MindOutput['taskJournalUpdate'] | null;
 }
 
 /**
@@ -789,6 +790,7 @@ async function executeReflect(
           workingMemoryUpdate: (parsed['workingMemoryUpdate'] as string) ?? null,
           coreSelfUpdate: (parsed['coreSelfUpdate'] as string) ?? null,
           memoryCandidate: Array.isArray(parsed['memoryCandidate']) ? parsed['memoryCandidate'] as ReflectResult['memoryCandidate'] : [],
+          taskJournalUpdate: (parsed['taskJournalUpdate'] as ReflectResult['taskJournalUpdate']) ?? null,
         };
       } else {
         // Model didn't call the tool — produce minimal reflection
@@ -874,6 +876,7 @@ function generatePlaceholderReflection(
     workingMemoryUpdate: null,
     coreSelfUpdate: null,
     memoryCandidate: [],
+    taskJournalUpdate: null,
   };
 }
 
@@ -1210,6 +1213,7 @@ export async function executeCortexPipeline(
     workingMemoryUpdate: reflectResult?.workingMemoryUpdate ?? null,
     coreSelfUpdate: reflectResult?.coreSelfUpdate ?? null,
     memoryCandidate: reflectResult?.memoryCandidate ?? [],
+    taskJournalUpdate: reflectResult?.taskJournalUpdate ?? null,
   };
 
   const output = snapshotToMindOutput(snapshot, loopResult.replyText, gathered);
@@ -1313,7 +1317,10 @@ Guidelines for the tool parameters:
 - energyDelta: null if no change
 - decisions: Only include if you need to take action
 - workingMemoryUpdate/coreSelfUpdate: null unless genuinely new knowledge
-- memoryCandidate: Only genuinely noteworthy knowledge worth preserving`);
+- memoryCandidate: Only genuinely noteworthy knowledge worth preserving
+- taskJournalUpdate: If this tick advanced a task, replace that task's journal
+  with the current continuity notes. This is optional. Use it only when task
+  context changed or stale journal details should be removed.`);
 
   // 2. Persona
   if (compiledPersona.compiledText) {

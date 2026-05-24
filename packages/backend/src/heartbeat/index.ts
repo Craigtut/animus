@@ -381,6 +381,7 @@ async function cortexMindQuery(
     ...(gathered.pluginContextSources ? { pluginContextSources: gathered.pluginContextSources } : {}),
     ...(gathered.credentialManifest ? { credentialManifest: gathered.credentialManifest } : {}),
     deferredTasks: gathered.deferredTasks,
+    taskJournals: gathered.taskJournals,
     thoughtContext: gathered.thoughtContext,
     experienceContext: gathered.experienceContext,
     ...(gathered.messageContext ? { messageContext: gathered.messageContext } : {}),

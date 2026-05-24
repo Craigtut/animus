@@ -29,6 +29,7 @@ export interface SpawnAgentParams {
   channel: string;
   tickNumber: number;
   systemPrompt: string;
+  parentTaskId?: string | null;
 }
 
 export interface UpdateAgentParams {
@@ -49,6 +50,7 @@ export interface AgentTaskRecord {
   status: 'spawning' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out';
   taskType: string;
   taskDescription: string;
+  parentTaskId: string | null;
   contactId: string | null;
   sourceChannel: string | null;
   currentActivity: string | null;
@@ -88,6 +90,7 @@ export interface AgentTaskStore {
     status: string;
     taskType: string;
     taskDescription: string;
+    parentTaskId?: string | null;
     contactId: string | null;
     sourceChannel: string | null;
     createdAt: string;
@@ -292,6 +295,7 @@ export class AgentOrchestrator {
         status: 'failed',
         taskType: params.taskType,
         taskDescription: params.description,
+        parentTaskId: params.parentTaskId ?? null,
         contactId: params.contactId,
         sourceChannel: params.channel,
         createdAt: timestamp,
@@ -327,6 +331,7 @@ export class AgentOrchestrator {
         status: 'running',
         taskType: params.taskType,
         taskDescription: params.description,
+        parentTaskId: params.parentTaskId ?? null,
         contactId: params.contactId,
         sourceChannel: params.channel,
         createdAt: timestamp,
@@ -356,6 +361,7 @@ export class AgentOrchestrator {
         status: 'failed',
         taskType: params.taskType,
         taskDescription: params.description,
+        parentTaskId: params.parentTaskId ?? null,
         contactId: params.contactId,
         sourceChannel: params.channel,
         createdAt: timestamp,

@@ -619,8 +619,23 @@ interface MindOutput {
     contactId?: string;
     keywords?: string[];
   }>;
+  taskJournalUpdate?: {
+    taskId: string;
+    status: 'not_started' | 'in_progress' | 'blocked' | 'ready_to_complete' | 'complete';
+    handoff: string;
+    summary: string;
+    learned: string[];
+    decisions: string[];
+    artifacts: Array<{ label: string; type: string; ref: string; context: string }>;
+    openQuestions: string[];
+    nextSteps: string[];
+  } | null;
 }
 ```
+
+`taskJournalUpdate` is optional and produced by REFLECT only when task continuity
+changed during the tick. It replaces the existing task journal so stale findings
+can be removed rather than accumulated forever.
 
 The old cognitive MCP tools were retired. Thought and reflection are now programmatic phases, which makes structured inner-life capture deterministic and keeps the Cortex agentic loop focused on reasoning, tool use, decisions, and replies.
 

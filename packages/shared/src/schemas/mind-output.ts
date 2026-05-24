@@ -11,7 +11,7 @@
 
 import { z } from 'zod/v3';
 import { channelTypeSchema } from './common.js';
-import { emotionNameSchema, decisionTypeSchema } from './heartbeat.js';
+import { emotionNameSchema, decisionTypeSchema, taskJournalUpdateSchema } from './heartbeat.js';
 import { memoryTypeSchema } from './memory.js';
 
 // ============================================================================
@@ -86,6 +86,9 @@ export const mindOutputSchema = z.object({
       }),
     )
     .optional(),
+
+  // Task continuity
+  taskJournalUpdate: taskJournalUpdateSchema.nullable().optional(),
 });
 
 // ============================================================================
@@ -150,6 +153,9 @@ export const taskTickOutputSchema = z.object({
       }),
     )
     .optional(),
+
+  // Task continuity
+  taskJournalUpdate: taskJournalUpdateSchema.nullable().optional(),
 
   // Task-specific (replaces reply from MindOutput)
   taskResult: z.object({

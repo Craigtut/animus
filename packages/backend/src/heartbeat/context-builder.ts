@@ -19,6 +19,7 @@ import type {
   ContactChannel,
   EnergyBand,
   Task,
+  TaskJournal,
   ContextSection,
   ContextSectionCategory,
 } from '@animus-labs/shared';
@@ -117,6 +118,8 @@ export interface MindContextParams {
   credentialManifest?: string;
   /** Deferred tasks for idle ticks */
   deferredTasks?: Task[];
+  /** Task journals for visible scheduled/deferred/agent-complete tasks */
+  taskJournals?: TaskJournal[];
   /** Observational memory stream contexts */
   thoughtContext?: StreamContext | null;
   experienceContext?: StreamContext | null;
@@ -333,7 +336,7 @@ type-specific parameters. You can make zero or many decisions per tick.
 
 AGENT DECISIONS:
   spawn_agent    — Delegate a task to a sub-agent
-                   params: { taskType, instructions, contactId?, channel? }
+                   params: { taskType, instructions, taskId?, contactId?, channel? }
   update_agent   — Send new context to a running agent
                    params: { agentId, context }
   cancel_agent   — Cancel a running agent
@@ -363,6 +366,16 @@ TASK DECISIONS:
                    params: { taskId }
   skip_task      — Skip a task's current execution (recurring: advance to next run)
                    params: { taskId }
+
+When to create tasks:
+  - Use schedule_task for work that needs continuity beyond the current tick,
+    should resume during quiet intervals, has a future time, or should be
+    tracked under a goal.
+  - Use scheduleType "deferred" for background work to continue when available.
+  - If you delegate work for an existing task, pass taskId to spawn_agent so
+    the completion result returns to the right task journal.
+  - Use the full task ID shown in context. Short prefixes may work only when
+    unambiguous.
 
 CHANNEL:
   send_reaction  — React to the triggering message with a Unicode emoji
@@ -618,11 +631,13 @@ export function buildTriggerSection(trigger: TriggerContext): string {
         'A sub-agent has completed its work.',
         '',
         `Agent: ${trigger.agentId || 'Unknown'}`,
+        trigger.taskId ? `Parent task ID: ${trigger.taskId}` : null,
+        trigger.taskTitle ? `Parent task: ${trigger.taskTitle}` : null,
         `Task: ${trigger.taskDescription || 'Unknown'}`,
         `Outcome: ${trigger.outcome || 'Unknown'}`,
         '',
         trigger.resultContent || '',
-      ].join('\n');
+      ].filter(Boolean).join('\n');
 
     case 'plugin_trigger':
       return buildPluginTriggerSection(trigger);
@@ -821,6 +836,66 @@ function buildPreviousDecisionsSection(decisions: TickDecision[]): string {
   });
 
   return '── PREVIOUS TICK OUTCOMES ──\n' + lines.join('\n');
+}
+
+function buildTaskJournalText(journal: TaskJournal): string {
+  const parts: string[] = [];
+
+  parts.push(`Journal status: ${journal.status}`);
+  if (journal.handoff) parts.push(`Next handoff: ${journal.handoff}`);
+  if (journal.summary) parts.push(`Current summary: ${journal.summary}`);
+  if (journal.learned.length > 0) {
+    parts.push('Learned:\n' + journal.learned.map(item => `  - ${item}`).join('\n'));
+  }
+  if (journal.decisions.length > 0) {
+    parts.push('Decisions:\n' + journal.decisions.map(item => `  - ${item}`).join('\n'));
+  }
+  if (journal.artifacts.length > 0) {
+    parts.push('Artifacts:\n' + journal.artifacts.map(artifact =>
+      `  - ${artifact.label} [${artifact.type}] ${artifact.ref}: ${artifact.context}`
+    ).join('\n'));
+  }
+  if (journal.openQuestions.length > 0) {
+    parts.push('Open questions:\n' + journal.openQuestions.map(item => `  - ${item}`).join('\n'));
+  }
+  if (journal.nextSteps.length > 0) {
+    parts.push('Next steps:\n' + journal.nextSteps.map(item => `  - ${item}`).join('\n'));
+  }
+
+  return parts.join('\n');
+}
+
+export function buildTaskContextSection(tasks: Task[], journals: TaskJournal[] = []): string {
+  if (tasks.length === 0) return '';
+
+  const journalsByTaskId = new Map(journals.map(journal => [journal.taskId, journal]));
+  const taskBlocks = tasks.map((task) => {
+    const lines = [
+      `Task ID: ${task.id}`,
+      `Title: ${task.title}`,
+      `Status: ${task.status}`,
+      `Priority: ${task.priority.toFixed(2)}`,
+    ];
+    if (task.description) lines.push(`Description: ${task.description}`);
+    if (task.instructions) lines.push(`Instructions: ${task.instructions}`);
+    if (task.goalId) lines.push('Linked to goal');
+
+    const journal = journalsByTaskId.get(task.id);
+    if (journal) {
+      const journalText = buildTaskJournalText(journal);
+      lines.push(journalText ? `Journal:\n${journalText}` : 'Journal: empty');
+    }
+
+    return lines.join('\n');
+  });
+
+  return '── PENDING TASKS ──\n' +
+    'These tasks are waiting for attention during quiet moments. In-progress ' +
+    'tasks stay here until completed so work can continue across ticks.\n' +
+    'Use start_task with the full task ID to begin a scheduled deferred task. ' +
+    'If a task is already in_progress, continue from its journal. Use the task ' +
+    'journal as continuity context, not as an instruction to update it.\n\n' +
+    taskBlocks.join('\n\n');
 }
 
 function buildContactsSection(
@@ -1252,15 +1327,8 @@ function buildUserMessageManifest(params: MindContextParams): ContextSection[] {
 
   // 8b. Deferred tasks
   if (params.deferredTasks && params.deferredTasks.length > 0) {
-    const taskLines = params.deferredTasks.map(t =>
-      `- [${t.id.slice(0, 8)}] ${t.title} (priority: ${t.priority.toFixed(2)})` +
-      (t.goalId ? ' — linked to goal' : '')
-    ).join('\n');
     manifest.push(included('deferred_tasks', 'Pending Tasks',
-      '── PENDING TASKS ──\n' +
-      'These tasks are waiting for your attention during quiet moments.\n' +
-      'Use start_task with the task ID to begin working on one.\n\n' +
-      taskLines,
+      buildTaskContextSection(params.deferredTasks, params.taskJournals ?? []),
       'goals'));
   } else {
     manifest.push(excluded('deferred_tasks', 'Pending Tasks', 'no deferred tasks', 'goals'));

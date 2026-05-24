@@ -75,7 +75,7 @@ export class DeferredQueue {
    */
   getTopTasks(limit: number = MAX_DEFERRED_TASKS_IN_CONTEXT): Task[] {
     const db = getHeartbeatDb();
-    return taskStore.getTopDeferredTasks(db, limit);
+    return taskStore.getDeferredTasksForContext(db, limit);
   }
 
   /**

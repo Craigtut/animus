@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod/v3';
-import { emotionNameSchema, decisionTypeSchema, memoryTypeSchema } from '@animus-labs/shared';
+import { emotionNameSchema, decisionTypeSchema, memoryTypeSchema, taskJournalUpdateSchema } from '@animus-labs/shared';
 import type { MindOutput, ChannelType } from '@animus-labs/shared';
 import { createLogger } from '../lib/logger.js';
 import type { GatherResult } from './gather-context.js';
@@ -32,6 +32,7 @@ export interface CognitiveSnapshot {
     contactId?: string;
     keywords?: string[];
   }>;
+  taskJournalUpdate: MindOutput['taskJournalUpdate'] | null;
 }
 
 function createEmptySnapshot(): CognitiveSnapshot {
@@ -44,6 +45,7 @@ function createEmptySnapshot(): CognitiveSnapshot {
     workingMemoryUpdate: null,
     coreSelfUpdate: null,
     memoryCandidate: [],
+    taskJournalUpdate: null,
   };
 }
 
@@ -170,6 +172,17 @@ export const recordCognitiveStateSchema = z.object({
       }),
     )
     .describe('Knowledge worth preserving in long-term memory. Be selective — not everything needs saving.'),
+
+  // 8. Task journal update: task-scoped continuity notes
+  taskJournalUpdate: taskJournalUpdateSchema
+    .nullable()
+    .optional()
+    .describe(
+      'If task continuity context changed, provide the complete updated task journal. ' +
+      'Use the existing journal as the starting point, remove stale details, and preserve only continuity context: ' +
+      'what was learned, decisions made, artifacts with context, open questions, and the next handoff. ' +
+      'Also use this to remove outdated journal details. null or omit if no task journal changed.',
+    ),
 });
 
 // ============================================================================
@@ -267,6 +280,7 @@ export function snapshotToMindOutput(
     workingMemoryUpdate: snapshot.workingMemoryUpdate,
     coreSelfUpdate: snapshot.coreSelfUpdate,
     memoryCandidate,
+    taskJournalUpdate: snapshot.taskJournalUpdate ?? null,
   };
 }
 
@@ -302,5 +316,6 @@ export function safeMindOutput(trigger: {
     workingMemoryUpdate: null,
     coreSelfUpdate: null,
     memoryCandidate: [],
+    taskJournalUpdate: null,
   };
 }

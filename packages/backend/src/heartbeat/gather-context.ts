@@ -16,6 +16,7 @@ import * as personaStore from '../db/stores/persona-store.js';
 import * as contactStore from '../db/stores/contact-store.js';
 import * as messageStore from '../db/stores/message-store.js';
 import * as memoryDbStore from '../db/stores/memory-store.js';
+import * as taskStore from '../db/stores/task-store.js';
 import * as vaultStore from '../db/stores/vault-store.js';
 import { DecayEngine } from '@animus-labs/shared';
 import type {
@@ -24,6 +25,7 @@ import type {
   EmotionState,
   EnergyBand,
   Task,
+  TaskJournal,
   ContactChannel,
   ChannelType,
   Message,
@@ -85,6 +87,8 @@ export interface GatherResult {
   credentialManifest: string;
   /** Deferred tasks for idle ticks (surfaced for the mind to pick up) */
   deferredTasks: Task[];
+  /** Journals for tasks currently visible in context */
+  taskJournals: TaskJournal[];
   /** Observational memory stream contexts (observation + raw items per stream) */
   thoughtContext: StreamContext;
   experienceContext: StreamContext;
@@ -147,6 +151,8 @@ export async function gatherContext(
   const state = heartbeatStore.getHeartbeatState(hbDb);
 
   const gatherStart = Date.now();
+  let effectiveTrigger = trigger;
+
   log.info(`Gather: trigger=${trigger.type}${trigger.contactName ? `, contact=${trigger.contactName}` : ''}`);
 
   // Compute energy state (before emotion decay — sleep affects decay rate)
@@ -278,8 +284,20 @@ export async function gatherContext(
     if (agentTask) {
       const taskContactId = agentTask['contactId'];
       const taskSourceChannel = agentTask['sourceChannel'];
+      const parentTaskId = agentTask['parentTaskId'];
       resolvedContactId = (typeof taskContactId === 'string' ? taskContactId : undefined) || undefined;
       resolvedChannel = (typeof taskSourceChannel === 'string' ? taskSourceChannel : undefined) || undefined;
+      if (typeof parentTaskId === 'string' && parentTaskId) {
+        const parentTask = taskStore.getTask(hbDb, parentTaskId);
+        const taskDetails: Partial<TriggerContext> = {
+          taskId: parentTaskId,
+        };
+        if (parentTask) {
+          taskDetails.taskTitle = parentTask.title;
+          if (parentTask.instructions) taskDetails.taskInstructions = parentTask.instructions;
+        }
+        effectiveTrigger = { ...effectiveTrigger, ...taskDetails };
+      }
     }
   }
 
@@ -386,6 +404,22 @@ export async function gatherContext(
       log.warn('Deferred task context failed:', err);
     }
   }
+
+  if (effectiveTrigger.taskId && !deferredTasks.some(task => task.id === effectiveTrigger.taskId)) {
+    const triggeredTask = taskStore.getTask(hbDb, effectiveTrigger.taskId);
+    if (triggeredTask) {
+      deferredTasks = [triggeredTask, ...deferredTasks];
+    }
+  }
+
+  const taskJournalIds = new Set<string>();
+  for (const task of deferredTasks) {
+    taskJournalIds.add(task.id);
+  }
+  if (effectiveTrigger.taskId) {
+    taskJournalIds.add(effectiveTrigger.taskId);
+  }
+  const taskJournals = taskStore.getTaskJournals(hbDb, [...taskJournalIds]);
 
   // Load all contacts with their channels
   const cDb = getContactsDb();
@@ -521,7 +555,7 @@ export async function gatherContext(
   log.info(`Gather complete (${gatherMs}ms): ${recentMessages.length} messages, ${recentThoughts.length} recent thoughts, ${emotions.filter(e => e.intensity > 0.1).length} active emotions${energyBand ? `, energy=${energyBand}` : ''}${memCtx ? ', memory=yes' : ''}${goalCtx ? ', goals=yes' : ''}${deliveryFailures.length > 0 ? `, deliveryFailures=${deliveryFailures.length}` : ''}`);
 
   return {
-    trigger,
+    trigger: effectiveTrigger,
     contact,
     emotions,
     recentThoughts,
@@ -539,6 +573,7 @@ export async function gatherContext(
     wakeUpContext,
     energySystemEnabled: settings.energySystemEnabled,
     deferredTasks,
+    taskJournals,
     pluginDecisionDescriptions,
     pluginContextSources,
     credentialManifest,
