@@ -845,21 +845,21 @@ function buildTaskJournalText(journal: TaskJournal): string {
   if (journal.handoff) parts.push(`Next handoff: ${journal.handoff}`);
   if (journal.summary) parts.push(`Current summary: ${journal.summary}`);
   if (journal.learned.length > 0) {
-    parts.push('Learned:\n' + journal.learned.map(item => `  - ${item}`).join('\n'));
+    parts.push('Learned:\n' + journal.learned.map((item: string) => `  - ${item}`).join('\n'));
   }
   if (journal.decisions.length > 0) {
-    parts.push('Decisions:\n' + journal.decisions.map(item => `  - ${item}`).join('\n'));
+    parts.push('Decisions:\n' + journal.decisions.map((item: string) => `  - ${item}`).join('\n'));
   }
   if (journal.artifacts.length > 0) {
-    parts.push('Artifacts:\n' + journal.artifacts.map(artifact =>
+    parts.push('Artifacts:\n' + journal.artifacts.map((artifact: TaskJournal['artifacts'][number]) =>
       `  - ${artifact.label} [${artifact.type}] ${artifact.ref}: ${artifact.context}`
     ).join('\n'));
   }
   if (journal.openQuestions.length > 0) {
-    parts.push('Open questions:\n' + journal.openQuestions.map(item => `  - ${item}`).join('\n'));
+    parts.push('Open questions:\n' + journal.openQuestions.map((item: string) => `  - ${item}`).join('\n'));
   }
   if (journal.nextSteps.length > 0) {
-    parts.push('Next steps:\n' + journal.nextSteps.map(item => `  - ${item}`).join('\n'));
+    parts.push('Next steps:\n' + journal.nextSteps.map((item: string) => `  - ${item}`).join('\n'));
   }
 
   return parts.join('\n');
