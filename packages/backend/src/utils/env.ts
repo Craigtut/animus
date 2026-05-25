@@ -45,6 +45,14 @@ export const LANCEDB_PATH = path.join(DB_DIR, 'lancedb');
 
 export const TOOL_RESULTS_DIR = path.join(DATA_DIR, 'tool-results');
 
+/**
+ * Self-managed environment ("agent-env") — the entity's persistent, self-owned
+ * toolchain. Holds the environment manifest, downloaded binaries, installed
+ * toolchains, and the built-in bootstrap skill.
+ * See docs/research/self-managed-environment.md
+ */
+export const AGENT_ENV_DIR = path.join(DATA_DIR, 'agent-env');
+
 // ---------------------------------------------------------------------------
 // Environment schema (non-path configuration)
 // ---------------------------------------------------------------------------

@@ -57,6 +57,7 @@ import { createLogger } from '../lib/logger.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { getAgentLogsDb } from '../db/index.js';
 import { getBudgetService } from '../services/budget-service.js';
+import { getEnvironmentService } from '../services/environment-service.js';
 
 const log = createLogger('GatherContext', 'heartbeat');
 
@@ -94,6 +95,7 @@ export interface GatherResult {
   messageContext: StreamContext | null;
   /** Trust ramp context for tools with repeated approvals (interval ticks only) */
   trustRampContext: string | null;
+  environmentContext: string | null;
   /** AI's timezone (from persona.db) */
   aiTimezone: string;
   /** External conversation history from channel adapters (e.g., Slack, Discord) */
@@ -499,6 +501,21 @@ export async function gatherContext(
     }
   }
 
+  // Self-managed environment awareness — included on every tick the entity
+  // might act, but only when it has registered tools (no noise otherwise).
+  let environmentContext: string | null = null;
+  try {
+    const toolSummary = getEnvironmentService().getToolSummary();
+    if (toolSummary) {
+      environmentContext =
+        '── ENVIRONMENT ──\n' +
+        `You maintain your own toolchain: ${toolSummary}. Extend it with ` +
+        'manage_environment; load the bootstrap skill to install missing tools.';
+    }
+  } catch (err) {
+    log.warn('Environment context failed:', err);
+  }
+
   // Load unnotified delivery failures
   let deliveryFailures: Message[] = [];
   try {
@@ -569,6 +586,7 @@ export async function gatherContext(
     messageContext,
     aiTimezone,
     trustRampContext,
+    environmentContext,
     externalHistory,
     deliveryFailures,
     budgetStatus,

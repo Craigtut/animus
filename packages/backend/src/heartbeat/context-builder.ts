@@ -124,6 +124,7 @@ export interface MindContextParams {
   messageContext?: StreamContext | null;
   /** Trust ramp suggestions for tools with repeated approvals (interval ticks only) */
   trustRampContext?: string | null;
+  environmentContext?: string | null;
   /** External conversation history from channel adapters */
   externalHistory?: Map<string, Array<{
     author: { identifier: string; displayName: string; isBot: boolean };
@@ -1368,6 +1369,13 @@ function buildUserMessageManifest(params: MindContextParams): ContextSection[] {
     manifest.push(included('trust_ramp', 'Trust Observation', params.trustRampContext, 'state'));
   } else {
     manifest.push(excluded('trust_ramp', 'Trust Observation', 'no tools eligible for trust ramp', 'state'));
+  }
+
+  // 9c. Self-managed environment
+  if (params.environmentContext) {
+    manifest.push(included('environment', 'Environment', params.environmentContext, 'state'));
+  } else {
+    manifest.push(excluded('environment', 'Environment', 'no registered tools', 'state'));
   }
 
   // 10. Plugin context

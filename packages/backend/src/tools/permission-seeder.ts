@@ -31,6 +31,7 @@ const CORE_TOOL_RISK_TIERS: Record<string, RiskTier> = {
   list_vault_entries: 'safe',
   manage_vault_entry: 'acts',
   send_voice_reply: 'communicates',
+  manage_environment: 'sensitive',
 };
 
 // ---------------------------------------------------------------------------

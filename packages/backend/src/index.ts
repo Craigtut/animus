@@ -82,6 +82,13 @@ async function main() {
   fsMod.mkdirSync(path.join(DATA_DIR, 'logs'), { recursive: true });
   fsMod.mkdirSync(path.join(DATA_DIR, 'workspace'), { recursive: true });
 
+  // Apply the self-managed environment overlay to process.env before any
+  // child processes (MCP servers, channel adapters, agent shell commands) are
+  // spawned, so they inherit the entity's registered toolchain and the
+  // platform PATH floor. See docs/research/self-managed-environment.md
+  const { getEnvironmentService } = await import('./services/environment-service.js');
+  getEnvironmentService().applyToProcessEnv();
+
   // Log process identity for production diagnostics
   logProcessIdentity('sidecar');
 

@@ -27,6 +27,7 @@ import { manageVaultEntryHandler } from './handlers/manage-vault-entry.js';
 import { transcribeAudioHandler } from './handlers/transcribe-audio.js';
 import { generateSpeechHandler } from './handlers/generate-speech.js';
 import { sendVoiceReplyHandler } from './handlers/send-voice-reply.js';
+import { manageEnvironmentHandler } from './handlers/manage-environment.js';
 import { getSystemDb, getHeartbeatDb } from '../db/index.js';
 import {
   getToolPermission,
@@ -134,6 +135,13 @@ const TOOL_REGISTRY: Record<AnimusToolName, AnimusTool> = {
     inputSchema: ANIMUS_TOOL_DEFS.send_voice_reply.inputSchema,
     category: ANIMUS_TOOL_DEFS.send_voice_reply.category,
     handler: sendVoiceReplyHandler,
+  },
+  manage_environment: {
+    name: 'manage_environment',
+    description: ANIMUS_TOOL_DEFS.manage_environment.description,
+    inputSchema: ANIMUS_TOOL_DEFS.manage_environment.inputSchema,
+    category: ANIMUS_TOOL_DEFS.manage_environment.category,
+    handler: manageEnvironmentHandler,
   },
 };
 

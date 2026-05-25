@@ -49,6 +49,11 @@ import type { GatherResult } from './gather-context.js';
 import { getChannelRouter } from '../channels/channel-router.js';
 import { getChannelManager } from '../channels/channel-manager.js';
 import { getPluginManager } from '../plugins/index.js';
+import { getEnvironmentService } from '../services/environment-service.js';
+import {
+  SETUP_ENVIRONMENT_SKILL_NAME,
+  SETUP_ENVIRONMENT_SKILL_MD,
+} from './builtin-skills/setup-environment-skill.js';
 import { z } from 'zod/v3';
 import { join } from 'node:path';
 import { createToolResultPersistor, cleanupDereferencedPaths } from './tool-result-persistor.js';
@@ -680,6 +685,9 @@ export async function createCortexMind(
     log.warn('Error connecting initial plugin MCP servers:', err);
   });
 
+  // Load built-in skills (always available, not tied to any plugin)
+  loadBuiltInSkillsAtStartup(cortexAgent);
+
   // Load existing plugin skills into the SkillRegistry at startup
   loadPluginSkillsAtStartup(cortexAgent);
 
@@ -1294,6 +1302,33 @@ function wirePluginLifecycleListeners(cortexAgent: CortexAgent): void {
  * already-installed plugins are available when the CortexAgent is first
  * created, without waiting for a plugin:changed event.
  */
+/**
+ * Materialize and register the built-in skills with the SkillRegistry.
+ *
+ * Built-in skills ship as backend source strings (no plugin, no DB rows).
+ * Their SKILL.md is written into the agent-env skills directory and registered
+ * with `${AGENT_ENV}` resolved to the agent-env root, so the entity can act on
+ * the install paths the skill references.
+ */
+function loadBuiltInSkillsAtStartup(cortexAgent: CortexAgent): void {
+  try {
+    const envService = getEnvironmentService();
+    const skillRegistry = cortexAgent.getSkillRegistry();
+    const skillPath = envService.materializeSkill(
+      SETUP_ENVIRONMENT_SKILL_NAME,
+      SETUP_ENVIRONMENT_SKILL_MD,
+    );
+    skillRegistry.addSkill({
+      path: skillPath,
+      source: 'builtin',
+      variables: { AGENT_ENV: envService.rootDir },
+    });
+    log.info('Loaded built-in setup-environment skill into SkillRegistry');
+  } catch (err) {
+    log.warn('Failed to load built-in skills:', err);
+  }
+}
+
 function loadPluginSkillsAtStartup(cortexAgent: CortexAgent): void {
   const pluginManager = getPluginManager();
   if (!pluginManager) {

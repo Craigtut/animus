@@ -385,6 +385,7 @@ async function cortexMindQuery(
     experienceContext: gathered.experienceContext,
     ...(gathered.messageContext ? { messageContext: gathered.messageContext } : {}),
     ...(gathered.trustRampContext ? { trustRampContext: gathered.trustRampContext } : {}),
+    ...(gathered.environmentContext ? { environmentContext: gathered.environmentContext } : {}),
     ...(gathered.externalHistory ? { externalHistory: gathered.externalHistory } : {}),
     ...(gathered.deliveryFailures.length > 0 ? { deliveryFailures: gathered.deliveryFailures } : {}),
     ...(gathered.budgetStatus ? { budgetStatus: gathered.budgetStatus } : {}),
