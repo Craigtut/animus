@@ -37,23 +37,80 @@ export async function webmToPcm(webmBuffer: Buffer): Promise<{ samples: Float32A
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
     const chunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
     ffmpeg.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
-    ffmpeg.stderr.on('data', () => {}); // suppress stderr
+    ffmpeg.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
 
     ffmpeg.on('close', (code) => {
       if (code !== 0) {
-        reject(new Error(`ffmpeg exited with code ${code}`));
+        const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
+        reject(new Error(`ffmpeg exited with code ${code}${stderr ? `: ${stderr}` : ''}`));
         return;
       }
       const pcmBuffer = Buffer.concat(chunks);
-      const samples = new Float32Array(pcmBuffer.buffer, pcmBuffer.byteOffset, pcmBuffer.byteLength / 4);
-      resolve({ samples, sampleRate: 16000 });
+      try {
+        const samples = pcmBufferToFloat32(pcmBuffer);
+        resolve({ samples, sampleRate: 16000 });
+      } catch (err) {
+        reject(err);
+      }
     });
 
     ffmpeg.on('error', (err) => reject(new Error(`ffmpeg not available: ${err.message}`)));
     ffmpeg.stdin.write(webmBuffer);
     ffmpeg.stdin.end();
   });
+}
+
+/** Convert an audio file to raw PCM (16kHz mono Float32). */
+export async function audioFileToPcm(filePath: string): Promise<{ samples: Float32Array; sampleRate: number }> {
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn(ffmpegBin(), [
+      '-i', filePath,
+      '-f', 'f32le',
+      '-ar', '16000',
+      '-ac', '1',
+      'pipe:1',
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+    const chunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    ffmpeg.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
+    ffmpeg.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+
+    ffmpeg.on('close', (code) => {
+      if (code !== 0) {
+        const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
+        reject(new Error(`ffmpeg exited with code ${code}${stderr ? `: ${stderr}` : ''}`));
+        return;
+      }
+      const pcmBuffer = Buffer.concat(chunks);
+      try {
+        const samples = pcmBufferToFloat32(pcmBuffer);
+        resolve({ samples, sampleRate: 16000 });
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+    ffmpeg.on('error', (err) => reject(new Error(`ffmpeg not available: ${err.message}`)));
+  });
+}
+
+function pcmBufferToFloat32(pcmBuffer: Buffer): Float32Array {
+  if (pcmBuffer.byteLength === 0) {
+    throw new Error('ffmpeg produced no PCM samples');
+  }
+
+  if (pcmBuffer.byteLength % 4 !== 0) {
+    throw new Error(`ffmpeg produced invalid PCM byte length: ${pcmBuffer.byteLength}`);
+  }
+
+  const samples = new Float32Array(pcmBuffer.byteLength / 4);
+  for (let i = 0; i < samples.length; i++) {
+    samples[i] = pcmBuffer.readFloatLE(i * 4);
+  }
+  return samples;
 }
 
 /** Convert raw PCM Float32 samples to a WAV buffer (16-bit PCM). */

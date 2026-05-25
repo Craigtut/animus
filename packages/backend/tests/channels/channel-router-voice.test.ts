@@ -67,6 +67,10 @@ vi.mock('../../src/speech/audio-utils.js', () => ({
     samples: new Float32Array(16000),
     sampleRate: 16000,
   })),
+  audioFileToPcm: vi.fn(async () => ({
+    samples: new Float32Array(16000),
+    sampleRate: 16000,
+  })),
 }));
 
 const { ChannelRouter } = await import('../../src/channels/channel-router.js');

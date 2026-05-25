@@ -13,4 +13,4 @@ export {
   type SpeechServiceConfig,
   type SpeechStatus,
 } from './speech-service.js';
-export { pcmToWav, webmToPcm, checkFfmpeg, readWavSamples } from './audio-utils.js';
+export { audioFileToPcm, pcmToWav, webmToPcm, checkFfmpeg, readWavSamples } from './audio-utils.js';

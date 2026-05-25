@@ -64,7 +64,7 @@ Pocket TTS is a zero-shot voice cloning model that uses reference audio to repro
 
 ```
 packages/backend/src/speech/
-  audio-utils.ts     -- webmToPcm, pcmToWav, readWavSamples, checkFfmpeg
+  audio-utils.ts     -- webmToPcm, audioFileToPcm, pcmToWav, readWavSamples, checkFfmpeg
   stt-engine.ts      -- STTEngine class (lazy-loaded sherpa-onnx OfflineRecognizer)
   tts-engine.ts      -- TTSEngine class (lazy-loaded @animus-labs/tts-native PocketTTS, voice state caching)
   voice-manager.ts   -- VoiceManager (manifest CRUD, built-in discovery, custom uploads, WAV buffer loading)
@@ -163,8 +163,11 @@ interface Voice {
 ### Audio Utilities
 
 ```typescript
-// Convert WebM/Opus to PCM (requires ffmpeg)
-function webmToPcm(webmBuffer: Buffer): Promise<Float32Array>;
+// Convert WebM/Opus buffers to PCM (requires ffmpeg)
+function webmToPcm(webmBuffer: Buffer): Promise<{ samples: Float32Array; sampleRate: number }>;
+
+// Convert an audio file to PCM (requires ffmpeg)
+function audioFileToPcm(filePath: string): Promise<{ samples: Float32Array; sampleRate: number }>;
 
 // Convert PCM samples to WAV buffer
 function pcmToWav(samples: Float32Array, sampleRate: number): Buffer;

@@ -16,6 +16,7 @@ vi.mock('../../src/speech/index.js', () => ({
 vi.mock('../../src/speech/audio-utils.js', () => ({
   readWavSamples: vi.fn(),
   webmToPcm: vi.fn(),
+  audioFileToPcm: vi.fn(),
 }));
 
 const mockContext: ToolHandlerContext = {
@@ -150,7 +151,7 @@ describe('transcribe_audio handler', () => {
     );
   });
 
-  it('converts non-WAV files via webmToPcm', async () => {
+  it('converts non-WAV files via audioFileToPcm', async () => {
     const { getSpeechService } = await import('../../src/speech/index.js');
     const mockTranscribe = vi.fn().mockResolvedValue('Converted audio');
     vi.mocked(getSpeechService).mockReturnValue({
@@ -164,8 +165,8 @@ describe('transcribe_audio handler', () => {
       shutdown: vi.fn(),
     } as any);
 
-    const { webmToPcm } = await import('../../src/speech/audio-utils.js');
-    vi.mocked(webmToPcm).mockResolvedValue({
+    const { audioFileToPcm } = await import('../../src/speech/audio-utils.js');
+    vi.mocked(audioFileToPcm).mockResolvedValue({
       samples: new Float32Array([0.3, 0.4]),
       sampleRate: 16000,
     });
@@ -184,7 +185,7 @@ describe('transcribe_audio handler', () => {
 
     expect(result.isError).toBeUndefined();
     expect(result.content[0]!.text).toBe('Converted audio');
-    expect(webmToPcm).toHaveBeenCalled();
+    expect(audioFileToPcm).toHaveBeenCalledWith(audioPath);
   });
 
   it('handles empty transcription gracefully', async () => {

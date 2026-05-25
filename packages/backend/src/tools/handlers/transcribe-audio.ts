@@ -59,9 +59,8 @@ export const transcribeAudioHandler: ToolHandler<TranscribeAudioInput> = async (
       sampleRate = wav.sampleRate;
     } else {
       // Convert via ffmpeg
-      const { webmToPcm } = await import('../../speech/audio-utils.js');
-      const audioBuffer = fs.readFileSync(input.filePath);
-      const pcm = await webmToPcm(audioBuffer);
+      const { audioFileToPcm } = await import('../../speech/audio-utils.js');
+      const pcm = await audioFileToPcm(input.filePath);
       samples = pcm.samples;
       sampleRate = pcm.sampleRate;
     }

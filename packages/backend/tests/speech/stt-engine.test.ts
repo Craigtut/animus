@@ -3,18 +3,32 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Mock sherpa-onnx-node before importing STTEngine
-vi.mock('sherpa-onnx-node', () => {
+const {
+  mockStream,
+  mockCreateStream,
+  mockDecodeAsync,
+  MockOfflineRecognizer,
+} = vi.hoisted(() => {
   const mockStream = {
     acceptWaveform: vi.fn(),
   };
-
+  const mockCreateStream = vi.fn().mockReturnValue(mockStream);
+  const mockDecodeAsync = vi.fn().mockResolvedValue({ text: '  Hello world  ' });
   const MockOfflineRecognizer = vi.fn().mockImplementation(() => ({
-    createStream: vi.fn().mockReturnValue(mockStream),
-    decode: vi.fn(),
-    getResult: vi.fn().mockReturnValue({ text: '  Hello world  ' }),
+    createStream: mockCreateStream,
+    decodeAsync: mockDecodeAsync,
   }));
 
+  return {
+    mockStream,
+    mockCreateStream,
+    mockDecodeAsync,
+    MockOfflineRecognizer,
+  };
+});
+
+// Mock sherpa-onnx-node before importing STTEngine
+vi.mock('sherpa-onnx-node', () => {
   return {
     default: {
       OfflineRecognizer: MockOfflineRecognizer,
@@ -39,6 +53,9 @@ describe('STTEngine', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'animus-test-'));
+    vi.clearAllMocks();
+    mockCreateStream.mockReturnValue(mockStream);
+    mockDecodeAsync.mockResolvedValue({ text: '  Hello world  ' });
   });
 
   afterEach(() => {
@@ -128,9 +145,40 @@ describe('STTEngine', () => {
       fs.writeFileSync(path.join(sttDir, 'tokens.txt'), '');
 
       const engine = new STTEngine(tmpDir);
-      const samples = new Float32Array([0.1, 0.2, 0.3]);
+      const samples = new Float32Array(1600).fill(0.1);
       const text = await engine.transcribe(samples, 16000);
       expect(text).toBe('Hello world');
+    });
+
+    it('rejects empty audio before calling the native recognizer', async () => {
+      const sttDir = path.join(tmpDir, 'stt');
+      fs.mkdirSync(sttDir, { recursive: true });
+      fs.writeFileSync(path.join(sttDir, 'encoder.int8.onnx'), '');
+      fs.writeFileSync(path.join(sttDir, 'decoder.int8.onnx'), '');
+      fs.writeFileSync(path.join(sttDir, 'joiner.int8.onnx'), '');
+      fs.writeFileSync(path.join(sttDir, 'tokens.txt'), '');
+
+      const engine = new STTEngine(tmpDir);
+      await expect(engine.transcribe(new Float32Array(0), 16000)).rejects.toThrow(
+        'Audio contains no PCM samples',
+      );
+      expect(mockCreateStream).not.toHaveBeenCalled();
+      expect(mockDecodeAsync).not.toHaveBeenCalled();
+    });
+
+    it('surfaces native decode failures as rejected transcription errors', async () => {
+      const sttDir = path.join(tmpDir, 'stt');
+      fs.mkdirSync(sttDir, { recursive: true });
+      fs.writeFileSync(path.join(sttDir, 'encoder.int8.onnx'), '');
+      fs.writeFileSync(path.join(sttDir, 'decoder.int8.onnx'), '');
+      fs.writeFileSync(path.join(sttDir, 'joiner.int8.onnx'), '');
+      fs.writeFileSync(path.join(sttDir, 'tokens.txt'), '');
+      mockDecodeAsync.mockRejectedValue(new Error('Invalid input shape: {0,128}'));
+
+      const engine = new STTEngine(tmpDir);
+      await expect(engine.transcribe(new Float32Array(1600).fill(0.1), 16000)).rejects.toThrow(
+        'Invalid input shape',
+      );
     });
   });
 

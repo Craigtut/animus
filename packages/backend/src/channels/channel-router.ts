@@ -287,9 +287,8 @@ export class ChannelRouter {
       sampleRate = wav.sampleRate;
     } else {
       // OGG, WebM, MP3, etc. — convert via ffmpeg
-      const { webmToPcm } = await import('../speech/audio-utils.js');
-      const audioBuffer = fs.readFileSync(filePath);
-      const pcm = await webmToPcm(audioBuffer);
+      const { audioFileToPcm } = await import('../speech/audio-utils.js');
+      const pcm = await audioFileToPcm(filePath);
       samples = pcm.samples;
       sampleRate = pcm.sampleRate;
     }
