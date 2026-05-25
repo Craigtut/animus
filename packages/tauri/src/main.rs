@@ -582,13 +582,13 @@ fn main() {
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_process::init())
             .plugin(tauri_plugin_dialog::init())
+            .manage(sidecar)
+            .manage(power::DesktopPowerManager::default())
             .invoke_handler(tauri::generate_handler![
                 export_animus_save,
                 power::desktop_power_status,
                 power::set_desktop_power_settings,
             ])
-            .manage(sidecar)
-            .manage(power::DesktopPowerManager::default())
             .setup(move |app| {
                 setup_tray(app).expect("Failed to setup tray");
 

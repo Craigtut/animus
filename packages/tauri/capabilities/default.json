@@ -16,6 +16,7 @@
     "autostart:allow-is-enabled",
     "updater:default",
     "process:default",
-    "dialog:allow-save"
+    "dialog:allow-save",
+    "app-commands"
   ]
 }

@@ -1,0 +1,8 @@
+[[permission]]
+identifier = "app-commands"
+description = "Allows the main window to call Animus desktop application commands."
+commands.allow = [
+  "export_animus_save",
+  "desktop_power_status",
+  "set_desktop_power_settings",
+]

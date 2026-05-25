@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { toast } from '../store/toast-store';
 import { trpc } from '../utils/trpc';
 import {
   getDesktopPowerStatus,
@@ -53,6 +54,9 @@ export function useDesktopPowerSettings(): DesktopPowerSettingsState {
   }, [platformAvailable]);
 
   const apply = useCallback(async (keepComputerAwake: boolean, keepDisplayAwake: boolean) => {
+    const previousComputerAwake = settings?.desktopKeepComputerAwake ?? false;
+    const previousDisplayAwake = settings?.desktopKeepDisplayAwake ?? false;
+
     const persisted = await updateSettingsMutation.mutateAsync({
       desktopKeepComputerAwake: keepComputerAwake,
       desktopKeepDisplayAwake: keepDisplayAwake,
@@ -67,10 +71,21 @@ export function useDesktopPowerSettings(): DesktopPowerSettingsState {
         normalizedDisplayAwake,
       );
       setStatus(nextStatus);
-    } catch {
+    } catch (error) {
       setStatus(null);
+      await updateSettingsMutation.mutateAsync({
+        desktopKeepComputerAwake: previousComputerAwake,
+        desktopKeepDisplayAwake: previousDisplayAwake,
+      }).catch(() => undefined);
+      toast.error('Could not apply that desktop setting.', {
+        detail: error instanceof Error ? error.message : String(error),
+      });
     }
-  }, [updateSettingsMutation]);
+  }, [
+    settings?.desktopKeepComputerAwake,
+    settings?.desktopKeepDisplayAwake,
+    updateSettingsMutation,
+  ]);
 
   const keepComputerAwake = settings?.desktopKeepComputerAwake ?? false;
   const keepDisplayAwake = settings?.desktopKeepDisplayAwake ?? false;
