@@ -103,7 +103,8 @@ Use this index to find the right files to read. Each entry includes the file pat
 | `docs/research/voice-mode.md` | Frontend voice mode UX design: mic button, voice visualization, VAD, listening/speaking states. **STATUS: PLANNED, not implemented.** |
 | `docs/research/tauri-v2-os-features.md` | Tauri v2 desktop features research: system tray, autostart, global shortcuts, background audio. **STATUS: RESEARCH, not implemented.** |
 | `docs/research/twilio-mms-media-hosting.md` | Twilio MMS media hosting options: ImgBB, Cloudflare R2, pluggable hosting. **STATUS: RESEARCH, not implemented.** |
-| `docs/research/docker-agent-environment.md` | Docker agent environment persistence proposal: persistent `/app/data/agent-env`, install wrappers, manifest replay, fat base image, security and reliability tradeoffs. **STATUS: Proposal, not implemented.** |
+| `docs/research/docker-agent-environment.md` | Docker agent environment persistence proposal: persistent `/app/data/agent-env`, install wrappers, manifest replay, fat base image, security and reliability tradeoffs. **STATUS: Proposal, not implemented.** Generalized by `self-managed-environment.md`. |
+| `docs/research/self-managed-environment.md` | Cross-platform self-managed environment proposal: the entity owns and extends its own toolchain over time. macOS GUI-launch PATH problem, three layers (per-platform PATH floor in Tauri `main.rs`, persistent `agent-env/` overlay merged into `process.env`, agent-facing environment tool + bootstrap skill + minimal per-tick context), Cortex `safe-env` denylist interaction, prompt-injection threat model and mitigations. Generalizes the Docker-only proposal. **STATUS: Proposal, not implemented.** |
 | `docs/research/multi-agent-engine-runtime.md` | Multi-agent engine runtime research: app host plus per-agent runtime instances, per-agent databases, scoped channels/plugins/credentials/contacts/saves, staged extraction from global singletons. **STATUS: RESEARCH, not implemented.** |
 | `docs/research/Claude-Agent-SDK-Research.md` | Deep Claude Agent SDK API reference. **STATUS: REFERENCE** |
 | `docs/research/opencode-sdk-research.md` | Deep OpenCode SDK API reference. **STATUS: REFERENCE** |
@@ -197,4 +198,5 @@ Use this to quickly map user questions to the right docs:
 - **reflex, fast response, voice latency, dual path, Vercel AI SDK** -> `docs/research/reflex-system.md`
 - **voice mode UI, voice UX, voice visualization, barge-in** -> `docs/research/voice-mode.md`
 - **docker, container, agent environment, agent-env, persistent tools, install wrappers, fat base image** -> `docs/research/docker-agent-environment.md`
+- **PATH, npm not found, node not found, tool not found, shell environment, self-managed environment, agent toolchain, install tools, environment overlay, macOS GUI launch PATH, bootstrap skill, environment.json** -> `docs/research/self-managed-environment.md`
 - **multi-agent, multiple agents, agent runtime, runtime manager, per-agent databases, agent registry, agent switcher, agent saves, scoped plugins, scoped channels, terminal UI agents** -> `docs/research/multi-agent-engine-runtime.md`
