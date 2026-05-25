@@ -15,6 +15,8 @@ use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
+mod power;
+
 struct Sidecar(Mutex<Option<Child>>);
 
 /// Simple file logger for the Rust side (sidecar output goes to same file)
@@ -253,7 +255,12 @@ fn main() {
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_process::init())
             .plugin(tauri_plugin_dialog::init())
-            .invoke_handler(tauri::generate_handler![export_animus_save])
+            .manage(power::DesktopPowerManager::default())
+            .invoke_handler(tauri::generate_handler![
+                export_animus_save,
+                power::desktop_power_status,
+                power::set_desktop_power_settings,
+            ])
             .setup(move |app| {
                 setup_tray(app).expect("Failed to setup tray");
 
@@ -575,8 +582,13 @@ fn main() {
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_process::init())
             .plugin(tauri_plugin_dialog::init())
-            .invoke_handler(tauri::generate_handler![export_animus_save])
+            .invoke_handler(tauri::generate_handler![
+                export_animus_save,
+                power::desktop_power_status,
+                power::set_desktop_power_settings,
+            ])
             .manage(sidecar)
+            .manage(power::DesktopPowerManager::default())
             .setup(move |app| {
                 setup_tray(app).expect("Failed to setup tray");
 

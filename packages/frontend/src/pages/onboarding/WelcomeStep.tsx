@@ -12,8 +12,8 @@ export function WelcomeStep() {
 
   const handleContinue = () => {
     markStepComplete('welcome');
-    setCurrentStep('agent_provider');
-    navigate('/onboarding/agent');
+    setCurrentStep('desktop');
+    navigate('/onboarding/desktop');
   };
 
   return (

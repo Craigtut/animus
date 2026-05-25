@@ -11,6 +11,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 
 export type OnboardingStep =
   | 'welcome'
+  | 'desktop'
   | 'agent_provider'
   | 'identity'
   | 'about_you'

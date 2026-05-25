@@ -192,6 +192,20 @@ describe('system-store', () => {
       const restored = systemStore.getSystemSettings(db);
       expect(restored.telemetryEnabled).toBe(true);
     });
+
+    it('reads and updates desktop runtime settings', () => {
+      const defaults = systemStore.getSystemSettings(db);
+      expect(defaults.desktopKeepComputerAwake).toBe(false);
+      expect(defaults.desktopKeepDisplayAwake).toBe(false);
+
+      systemStore.updateSystemSettings(db, {
+        desktopKeepComputerAwake: true,
+        desktopKeepDisplayAwake: true,
+      });
+      const updated = systemStore.getSystemSettings(db);
+      expect(updated.desktopKeepComputerAwake).toBe(true);
+      expect(updated.desktopKeepDisplayAwake).toBe(true);
+    });
   });
 
 });

@@ -113,6 +113,28 @@ describe('SettingsService', () => {
 
       expect(result.heartbeatIntervalMs).toBe(90000);
     });
+
+    it('keeps display awake as a stronger desktop awake setting', () => {
+      const svc = getSettingsService();
+      const result = svc.updateSystemSettings({ desktopKeepDisplayAwake: true });
+
+      expect(result.desktopKeepComputerAwake).toBe(true);
+      expect(result.desktopKeepDisplayAwake).toBe(true);
+      expect(mockEmit).toHaveBeenCalledWith('system:settings_updated', {
+        desktopKeepDisplayAwake: true,
+        desktopKeepComputerAwake: true,
+      });
+    });
+
+    it('turns display awake off when desktop awake is disabled', () => {
+      const svc = getSettingsService();
+      svc.updateSystemSettings({ desktopKeepDisplayAwake: true });
+
+      const result = svc.updateSystemSettings({ desktopKeepComputerAwake: false });
+
+      expect(result.desktopKeepComputerAwake).toBe(false);
+      expect(result.desktopKeepDisplayAwake).toBe(false);
+    });
   });
 
   // ==========================================================================

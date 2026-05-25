@@ -27,7 +27,7 @@ export const onboardingRouter = router({
   updateStep: protectedProcedure
     .input(
       z.object({
-        currentStep: z.number().int().min(0).max(8),
+        currentStep: z.number().int().min(0).max(9),
       })
     )
     .mutation(({ input }) => {
@@ -67,7 +67,7 @@ export const onboardingRouter = router({
       });
     }
 
-    systemStore.updateOnboardingState(getSystemDb(), { isComplete: true, currentStep: 8 });
+    systemStore.updateOnboardingState(getSystemDb(), { isComplete: true, currentStep: 9 });
     return systemStore.getOnboardingState(getSystemDb());
   }),
 });

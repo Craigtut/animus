@@ -139,7 +139,7 @@ export function RestoreStep() {
                 utils.onboarding.getState.setData(undefined, onboardingState);
                 utils.persona.get.invalidate();
                 utils.cortexProvider.getStatus.invalidate();
-                navigate('/onboarding/agent');
+                navigate('/onboarding/desktop');
               },
               onError: (err) => {
                 setState({

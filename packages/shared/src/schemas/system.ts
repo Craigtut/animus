@@ -110,6 +110,9 @@ export const systemSettingsSchema = z.object({
   contextDebugMode: z.boolean().default(false),
   // Debug: enable Cortex prompt watchdog diagnostics (logs prompt lifecycle events)
   cortexDiagnostics: z.boolean().default(false),
+  // Desktop runtime
+  desktopKeepComputerAwake: z.boolean().default(false),
+  desktopKeepDisplayAwake: z.boolean().default(false),
 });
 
 export const updateSystemSettingsInputSchema = systemSettingsSchema.partial();
@@ -119,7 +122,7 @@ export const updateSystemSettingsInputSchema = systemSettingsSchema.partial();
 // ============================================================================
 
 export const onboardingStateSchema = z.object({
-  currentStep: z.number().int().min(0).max(8),
+  currentStep: z.number().int().min(0).max(9),
   isComplete: z.boolean(),
 });
 

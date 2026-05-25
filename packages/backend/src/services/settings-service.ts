@@ -36,6 +36,14 @@ class SettingsService {
     for (const [k, v] of Object.entries(input)) {
       if (v !== undefined) clean[k] = v;
     }
+
+    if (clean['desktopKeepDisplayAwake'] === true) {
+      clean['desktopKeepComputerAwake'] = true;
+    }
+    if (clean['desktopKeepComputerAwake'] === false) {
+      clean['desktopKeepDisplayAwake'] = false;
+    }
+
     systemStore.updateSystemSettings(getSystemDb(), clean as Partial<SystemSettings>);
     if (Object.keys(clean).length > 0) {
       getEventBus().emit('system:settings_updated', clean);

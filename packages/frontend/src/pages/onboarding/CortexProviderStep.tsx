@@ -388,7 +388,7 @@ export function CortexProviderStep() {
     navigate('/onboarding/identity');
   }, [markStepComplete, setCurrentStep, navigate, persona?.isFinalized, connectedProvider, statusData?.provider, statusData?.model, setActiveProviderMutation, setCortexProvider, selectedModel, selectedContextLimit, setContextLimitMutation, completeFromRestoreMutation, utils.onboarding.getState]);
 
-  const handleBack = () => navigate('/onboarding/welcome');
+  const handleBack = () => navigate('/onboarding/desktop');
 
   // ── Render ──
 

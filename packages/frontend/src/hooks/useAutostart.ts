@@ -6,6 +6,7 @@ interface AutostartState {
   enabled: boolean;
   loading: boolean;
   toggle: () => Promise<void>;
+  setEnabled: (enabled: boolean) => Promise<void>;
 }
 
 export function useAutostart(): AutostartState {
@@ -37,21 +38,25 @@ export function useAutostart(): AutostartState {
     return () => { cancelled = true; };
   }, []);
 
-  const toggle = useCallback(async () => {
+  const setEnabledExplicit = useCallback(async (nextEnabled: boolean) => {
     if (!available) return;
     setLoading(true);
     try {
       const { enable, disable, isEnabled } = await import('@tauri-apps/plugin-autostart');
-      if (enabled) {
-        await disable();
-      } else {
+      if (nextEnabled) {
         await enable();
+      } else {
+        await disable();
       }
       setEnabled(await isEnabled());
     } finally {
       setLoading(false);
     }
-  }, [available, enabled]);
+  }, [available]);
 
-  return { available, enabled, loading, toggle };
+  const toggle = useCallback(async () => {
+    await setEnabledExplicit(!enabled);
+  }, [enabled, setEnabledExplicit]);
+
+  return { available, enabled, loading, toggle, setEnabled: setEnabledExplicit };
 }

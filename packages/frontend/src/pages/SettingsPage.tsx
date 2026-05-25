@@ -42,6 +42,7 @@ import { Card, SelectionCard, Button, Input, Select, Modal, Badge, Toggle, Slide
 import { trpc } from '../utils/trpc';
 import { isTauri } from '../utils/tauri';
 import { useAutostart } from '../hooks/useAutostart';
+import { useDesktopPowerSettings } from '../hooks/useDesktopPowerSettings';
 import { useAutoUpdate } from '../hooks/useAutoUpdate';
 import type { Theme } from '../styles/theme';
 import { SavesSection } from '../components/settings/SavesSection';
@@ -3464,6 +3465,7 @@ function SystemSection() {
   const [factoryResetting, setFactoryResetting] = useState(false);
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const autostart = useAutostart();
+  const desktopPower = useDesktopPowerSettings();
   const autoUpdate = useAutoUpdate();
 
   const handleConfirmAction = async () => {
@@ -3596,14 +3598,50 @@ function SystemSection() {
           <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]};`}>
             <Toggle
               checked={autostart.enabled}
-              onChange={autostart.toggle}
+              onChange={(checked) => {
+                void autostart.setEnabled(checked);
+              }}
               disabled={autostart.loading || !autostart.available}
-              label="Launch at startup"
+              label="Start at login"
             />
           </div>
           <Typography.Caption as="p" color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
-            Automatically start Animus when you log in. The app will launch hidden in the system tray.
+            Open Animus when you sign in. The app will start hidden in the menu bar or system tray.
           </Typography.Caption>
+
+          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]}; margin-top: ${theme.spacing[2]};`}>
+            <Toggle
+              checked={desktopPower.keepComputerAwake}
+              onChange={(checked) => {
+                void desktopPower.setKeepComputerAwake(checked);
+              }}
+              disabled={desktopPower.loading || desktopPower.saving || !desktopPower.supported}
+              label="Keep computer awake"
+            />
+          </div>
+          <Typography.Caption as="p" color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+            Prevent idle sleep while Animus is running, so the heartbeat can keep time.
+          </Typography.Caption>
+
+          <div css={css`display: flex; align-items: center; gap: ${theme.spacing[3]}; margin-top: ${theme.spacing[2]};`}>
+            <Toggle
+              checked={desktopPower.keepDisplayAwake}
+              onChange={(checked) => {
+                void desktopPower.setKeepDisplayAwake(checked);
+              }}
+              disabled={desktopPower.loading || desktopPower.saving || !desktopPower.supported}
+              label="Keep display awake"
+            />
+          </div>
+          <Typography.Caption as="p" color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+            Keep the screen lit too. Turning this on also keeps the computer awake.
+          </Typography.Caption>
+
+          {!desktopPower.loading && !desktopPower.supported && (
+            <Typography.Caption as="p" color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
+              Awake controls are available on macOS and Windows.
+            </Typography.Caption>
+          )}
 
           {autoUpdate.available && (
             <>

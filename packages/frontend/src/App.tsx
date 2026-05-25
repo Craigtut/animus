@@ -27,6 +27,7 @@ import { MigrationPage } from './pages/MigrationPage';
 // Onboarding
 import { OnboardingLayout } from './pages/onboarding/OnboardingLayout';
 import { WelcomeStep } from './pages/onboarding/WelcomeStep';
+import { DesktopStep } from './pages/onboarding/DesktopStep';
 import { CortexProviderStep } from './pages/onboarding/CortexProviderStep';
 import { IdentityStep } from './pages/onboarding/IdentityStep';
 import { AboutYouStep } from './pages/onboarding/AboutYouStep';
@@ -53,6 +54,7 @@ import { MaintenanceOverlay } from './components/MaintenanceOverlay';
 import { DownloadToast } from './components/DownloadToast';
 import { ToastContainer } from './components/ToastContainer';
 import { AutoUpdateManager } from './components/AutoUpdateManager';
+import { DesktopRuntimeManager } from './components/DesktopRuntimeManager';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -176,6 +178,7 @@ export function App() {
                 <Route index element={<Navigate to="welcome" replace />} />
                 <Route path="welcome" element={<WelcomeStep />} />
                 <Route path="restore" element={<RestoreStep />} />
+                <Route path="desktop" element={<DesktopStep />} />
                 <Route path="agent" element={<CortexProviderStep />} />
                 <Route path="identity" element={<IdentityStep />} />
                 <Route path="about-you" element={<AboutYouStep />} />
@@ -214,6 +217,7 @@ export function App() {
           <MaintenanceOverlay />
           <DownloadToast />
           <AutoUpdateManager />
+          <DesktopRuntimeManager />
           <ToastContainer />
         </ThemeSelector>
       </QueryClientProvider>

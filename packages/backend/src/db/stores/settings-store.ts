@@ -22,6 +22,8 @@ export function getSystemSettings(db: Database.Database): SystemSettings {
     autosaveEnabled: intToBool(rest['autosaveEnabled'] as number),
     budgetThrottleEnabled: intToBool(rest['budgetThrottleEnabled'] as number),
     contextDebugMode: intToBool(rest['contextDebugMode'] as number),
+    desktopKeepComputerAwake: intToBool(rest['desktopKeepComputerAwake'] as number),
+    desktopKeepDisplayAwake: intToBool(rest['desktopKeepDisplayAwake'] as number),
   } as SystemSettings;
 }
 
@@ -62,6 +64,8 @@ export function updateSystemSettings(
     cortexContextWindowLimit: 'cortex_context_window_limit',
     utilityModel: 'utility_model',
     contextDebugMode: 'context_debug_mode',
+    desktopKeepComputerAwake: 'desktop_keep_computer_awake',
+    desktopKeepDisplayAwake: 'desktop_keep_display_awake',
   };
 
   // Boolean fields need int conversion
@@ -71,6 +75,8 @@ export function updateSystemSettings(
     'autosaveEnabled',
     'budgetThrottleEnabled',
     'contextDebugMode',
+    'desktopKeepComputerAwake',
+    'desktopKeepDisplayAwake',
   ]);
 
   for (const [camelKey, snakeKey] of Object.entries(mapping)) {

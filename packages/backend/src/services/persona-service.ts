@@ -89,7 +89,7 @@ class PersonaService {
     personaStore.finalizePersona(db);
 
     // Mark onboarding as complete
-    systemStore.updateOnboardingState(getSystemDb(), { isComplete: true, currentStep: 8 });
+    systemStore.updateOnboardingState(getSystemDb(), { isComplete: true, currentStep: 9 });
 
     // Recompile persona prompt
     recompilePersona();

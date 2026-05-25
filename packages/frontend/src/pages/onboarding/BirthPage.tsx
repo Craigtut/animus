@@ -43,7 +43,7 @@ export function BirthPage() {
   // true. Setting it earlier kills the birth animation mid-play.
   useEffect(() => {
     if (animationReady && finalized) {
-      utils.onboarding.getState.setData(undefined, { isComplete: true, currentStep: 8 });
+      utils.onboarding.getState.setData(undefined, { isComplete: true, currentStep: 9 });
       markStepComplete('birth');
       setCurrentStep('complete');
       navigate('/');
