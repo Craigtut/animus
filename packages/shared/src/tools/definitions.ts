@@ -347,6 +347,39 @@ export const manageVaultEntryDef: AnimusToolDef = {
 };
 
 /**
+ * manage_environment - Inspect and extend your own persistent working environment.
+ */
+export const manageEnvironmentDef: AnimusToolDef = {
+  name: 'manage_environment',
+  description:
+    'Inspect and extend your own persistent working environment (your "workshop"). ' +
+    'Directories you register here are added to PATH for every shell command, take effect ' +
+    'immediately, and persist across restarts. Install self-contained toolchains under the ' +
+    'agent-env tools directory (use ${AGENT_ENV}/tools), then register them so you keep them.\n\n' +
+    'Actions:\n' +
+    '- list: Show registered tools, PATH additions, and environment variables.\n' +
+    '- add_path: Add a directory to PATH. Provide "path".\n' +
+    '- remove_path: Remove a previously added directory. Provide "path".\n' +
+    '- set_var: Set an environment variable. Provide "name" and "value". Security-sensitive vars (PATH, NODE_OPTIONS, LD_*, DYLD_*, etc.) are rejected.\n' +
+    '- unset_var: Remove a variable you set. Provide "name".\n' +
+    '- register_tool: Record an installed tool and add its bin dir to PATH. Provide "name" and "binDir"; optionally "version", "source", "sha256".\n' +
+    '- unregister_tool: Remove a registered tool. Provide "name".',
+  inputSchema: z.object({
+    action: z
+      .enum(['list', 'add_path', 'remove_path', 'set_var', 'unset_var', 'register_tool', 'unregister_tool'])
+      .describe('The environment operation to perform'),
+    path: z.string().optional().describe('Directory path (add_path / remove_path)'),
+    name: z.string().optional().describe('Variable name (set_var / unset_var) or tool name (register_tool / unregister_tool)'),
+    value: z.string().optional().describe('Variable value (set_var)'),
+    binDir: z.string().optional().describe('Directory containing the tool binary (register_tool)'),
+    version: z.string().optional().describe('Tool version for display/audit (register_tool)'),
+    source: z.string().optional().describe('Where the tool was obtained, e.g. a URL, for audit (register_tool)'),
+    sha256: z.string().optional().describe('Checksum recorded at install time (register_tool)'),
+  }),
+  category: 'system',
+};
+
+/**
  * Central registry of all Animus tool definitions.
  * This is the single source of truth for what tools exist.
  * Handlers are attached separately in the backend.
@@ -364,6 +397,7 @@ export const ANIMUS_TOOL_DEFS = {
   transcribe_audio: transcribeAudioDef,
   generate_speech: generateSpeechDef,
   send_voice_reply: sendVoiceReplyDef,
+  manage_environment: manageEnvironmentDef,
 } as const;
 
 export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
@@ -384,4 +418,5 @@ export type AnimusToolName = keyof typeof ANIMUS_TOOL_DEFS;
 export const MIND_TOOL_NAMES: readonly AnimusToolName[] = [
   'read_memory', 'lookup_contacts', 'send_proactive_message', 'send_media', 'run_with_credentials', 'list_vault_entries',
   'manage_vault_entry', 'transcribe_audio', 'generate_speech', 'send_voice_reply',
+  'manage_environment',
 ] as const;

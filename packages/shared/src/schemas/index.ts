@@ -16,6 +16,7 @@
  */
 
 export * from './common.js';
+export * from './environment.js';
 export * from './system.js';
 export * from './heartbeat.js';
 export * from './memory.js';
