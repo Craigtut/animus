@@ -15,7 +15,7 @@ import type { CortexAgent, AgentTextOutput, CortexEvent, CortexUsage, AgentMessa
 import { zodToTypebox } from '@animus-labs/cortex';
 import type { MindOutput } from '@animus-labs/shared';
 import { getEmotionDescription, EMOTION_CATEGORIES } from '@animus-labs/shared';
-import { recordThoughtSchema, recordCognitiveStateSchema } from './cognitive-tools.js';
+import { recordThoughtSchema, buildRecordCognitiveStateSchema } from './cognitive-tools.js';
 import { formatEmotionalState } from './emotion-engine.js';
 import { formatEnergyContext } from './energy-engine.js';
 
@@ -761,8 +761,11 @@ async function executeReflect(
       }
 
       // REFLECT uses the primary model (same as agentic loop), not the utility model.
-      // Uses tool-call-as-structured-output with the existing recordCognitiveStateSchema.
-      const reflectSchema = await zodToTypebox(recordCognitiveStateSchema);
+      // Uses tool-call-as-structured-output. The energyDelta field is dropped
+      // from the schema when the energy system is disabled.
+      const reflectSchema = await zodToTypebox(
+        buildRecordCognitiveStateSchema({ energySystemEnabled: gathered.energySystemEnabled }),
+      );
       const cacheOptions = getCacheOptions(cortexAgent);
       const parsed = await cortexAgent.structuredComplete(
         {
@@ -1314,8 +1317,7 @@ Do not respond with text. Call the tool with all required fields.
 
 Guidelines for the tool parameters:
 - experience: Third-person past tense narration using your name, under 72 words
-- emotionDeltas: Only include emotions that actually shifted this tick
-- energyDelta: null if no change
+- emotionDeltas: Only include emotions that actually shifted this tick${gathered.energySystemEnabled ? '\n- energyDelta: null if no change' : ''}
 - decisions: Only include if you need to take action
 - workingMemoryUpdate/coreSelfUpdate: null unless genuinely new knowledge
 - memoryCandidate: Only genuinely noteworthy knowledge worth preserving

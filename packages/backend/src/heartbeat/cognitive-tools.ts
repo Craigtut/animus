@@ -185,6 +185,17 @@ export const recordCognitiveStateSchema = z.object({
     ),
 });
 
+/**
+ * Build the reflect structured-output schema for the current configuration.
+ * When the energy system is disabled, the `energyDelta` field is omitted
+ * entirely so the mind is never offered (or asked for) an energy assessment.
+ */
+export function buildRecordCognitiveStateSchema(opts: { energySystemEnabled: boolean }) {
+  return opts.energySystemEnabled
+    ? recordCognitiveStateSchema
+    : recordCognitiveStateSchema.omit({ energyDelta: true });
+}
+
 // ============================================================================
 // Non-response filter
 // ============================================================================
