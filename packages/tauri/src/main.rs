@@ -438,6 +438,25 @@ fn main() {
             }
         }
 
+        // macOS PATH floor: a Finder/Dock launch hands the app a minimal PATH
+        // (~/usr/bin:/bin:/usr/sbin:/sbin) and does NOT source the user's login
+        // shell profile (.zshrc/.zprofile), so Homebrew and other common tool
+        // directories are absent. Append them (when present) so the entity can
+        // find user-installed tooling such as `npm`/`node`. Appended, not
+        // prepended, so the bundled helper-node ordering above is preserved.
+        // The persistent self-managed environment (data/agent-env) layers on
+        // top of this floor at the backend level.
+        #[cfg(target_os = "macos")]
+        {
+            for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"] {
+                if std::path::Path::new(dir).exists()
+                    && !path_env.split(sep).any(|p| p == dir)
+                {
+                    path_env = format!("{}{}{}", path_env, sep, dir);
+                }
+            }
+        }
+
         // On macOS, suppress dock icons for ALL child processes using a
         // four-layer strategy:
         //
