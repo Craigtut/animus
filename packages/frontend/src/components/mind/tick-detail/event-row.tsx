@@ -310,6 +310,21 @@ function CompactionRow({ event }: { event: MergedEvent }) {
     label = 'Tool Results Trimmed';
   } else if (event.compactionType === 'emergency_truncation') {
     label = 'Emergency Truncation';
+  } else if (event.compactionType === 'observation') {
+    const messages = event.messagesCompacted != null
+      ? `${event.messagesCompacted} message${event.messagesCompacted !== 1 ? 's' : ''}`
+      : 'messages';
+    const tokens = event.observationTokens != null
+      ? ` (${formatTokenCount(event.observationTokens)} observed)`
+      : '';
+    label = `Observation: compacted ${messages}${tokens}`;
+  } else if (event.compactionType === 'reflection') {
+    if (event.tokensBefore != null && event.tokensAfter != null) {
+      const reduction = Math.round((1 - event.tokensAfter / event.tokensBefore) * 100);
+      label = `Reflection: ${formatTokenCount(event.tokensBefore)} -> ${formatTokenCount(event.tokensAfter)} (${reduction}% reduction)`;
+    } else {
+      label = 'Observation Reflection';
+    }
   } else if (event.tokensBefore != null && event.tokensAfter != null) {
     const reduction = Math.round((1 - event.tokensAfter / event.tokensBefore) * 100);
     label = `Compaction: ${formatTokenCount(event.tokensBefore)} -> ${formatTokenCount(event.tokensAfter)} (${reduction}% reduction)`;
@@ -360,13 +375,15 @@ function CompactionRow({ event }: { event: MergedEvent }) {
           {label}
         </span>
 
-        {event.turnsCompacted != null && (
+        {(event.compactionType === 'observation' ? event.messagesCompacted : event.turnsCompacted) != null && (
           <span css={css`
             font-family: ${theme.typography.fontFamily.mono};
             font-size: 11px;
             color: ${compactionColor}99;
           `}>
-            {event.turnsCompacted} turn{event.turnsCompacted !== 1 ? 's' : ''}
+            {event.compactionType === 'observation'
+              ? `${event.messagesCompacted} msg${event.messagesCompacted !== 1 ? 's' : ''}`
+              : `${event.turnsCompacted} turn${event.turnsCompacted !== 1 ? 's' : ''}`}
           </span>
         )}
 

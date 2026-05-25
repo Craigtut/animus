@@ -26,6 +26,25 @@ import { getSystemDb } from '../../db/index.js';
 import { getEnergyBand, computeCircadianBaseline } from '../../heartbeat/energy-engine.js';
 import { snakeToCamel } from '../../db/utils.js';
 
+function readContextWindow(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function deriveContextWindow(
+  contextSnapshot: Record<string, unknown> | null,
+  phaseSnapshots: Array<Record<string, unknown>>,
+): number | null {
+  const legacyWindow = readContextWindow(contextSnapshot?.['contextWindow']);
+  if (legacyWindow !== null) return legacyWindow;
+
+  for (const snapshot of phaseSnapshots) {
+    const phaseWindow = readContextWindow(snapshot['contextWindow']);
+    if (phaseWindow !== null) return phaseWindow;
+  }
+
+  return null;
+}
+
 export const heartbeatRouter = router({
   /**
    * Get current heartbeat state.
@@ -571,8 +590,10 @@ export const heartbeatRouter = router({
         }
       }
 
-      // Get Cortex context snapshot (new system, null for legacy ticks)
+      // Get Cortex context snapshots (legacy single-snapshot plus current per-phase snapshots)
       const cortexContextSnapshot = agentLogStore.getTickContextSnapshot(agentLogsDb, tickNumber);
+      const phaseSnapshots = agentLogStore.getPhaseContextSnapshots(agentLogsDb, tickNumber);
+      const contextWindow = deriveContextWindow(cortexContextSnapshot, phaseSnapshots);
 
       // Get per-phase usage records for cache visibility
       const phaseUsageRecords = agentLogStore.getUsageByTickNumber(agentLogsDb, tickNumber);
@@ -606,6 +627,8 @@ export const heartbeatRouter = router({
         usage,
         phaseUsage,
         cortexContextSnapshot,
+        contextWindow,
+        phaseSnapshots,
         createdAt: tickInput.createdAt,
       };
     }),
@@ -738,12 +761,13 @@ export const heartbeatRouter = router({
           model: u.model,
         }));
 
-      // Get context window size for budget visualization
+      // Get context window size for budget visualization. Current builds write
+      // phase_context_snapshot events, not the legacy context_snapshot event.
       const contextSnapshot = agentLogStore.getTickContextSnapshot(agentLogsDb, tickNumber);
-      const contextWindow = contextSnapshot?.['contextWindow'] as number | null ?? null;
 
       // Get per-phase context snapshots (if debug mode captured them)
       const phaseSnapshots = agentLogStore.getPhaseContextSnapshots(agentLogsDb, tickNumber);
+      const contextWindow = deriveContextWindow(contextSnapshot, phaseSnapshots);
 
       return {
         tickNumber,

@@ -20,6 +20,7 @@ import {
   type McpHttpConfig,
   type ToolContentDetails,
   type ObservationalMemoryState,
+  type AgentMessage,
   resolveCacheRetention,
   type ThinkingLevel,
 } from '@animus-labs/cortex';
@@ -58,6 +59,30 @@ import * as sessionStore from '../db/stores/session-store.js';
 
 const log = createLogger('CortexMind', 'heartbeat');
 const cortexLog = createLogger('Cortex', 'heartbeat');
+
+function estimateTextTokens(text: string): number {
+  if (!text) return 0;
+  return Math.ceil(text.length / 4);
+}
+
+function extractMessageContent(message: AgentMessage): string {
+  if (typeof message.content === 'string') return message.content;
+  return JSON.stringify(message.content);
+}
+
+function estimateMessageTokens(messages: AgentMessage[]): number {
+  return estimateTextTokens(messages.map(extractMessageContent).join('\n'));
+}
+
+function emptyObservationalMemoryState(): ObservationalMemoryState {
+  return {
+    observations: '',
+    continuationHint: null,
+    observationTokenCount: 0,
+    generationCount: 0,
+    bufferedChunks: [],
+  };
+}
 
 // ============================================================================
 // Context Slot Names (order matters: most stable first)
@@ -770,6 +795,9 @@ function wireEventHandlers(
   // persisted-result markers are compacted out of raw history, delete the
   // files they reference (unless still referenced in the remaining tail).
   cortexAgent.onObservation((event) => {
+    logCortexObservationEvent(cortexAgent, eventBus, event);
+    saveActiveSession(cortexAgent, state);
+
     void (async () => {
       try {
         const remaining = cortexAgent.getConversationHistory();
@@ -787,8 +815,89 @@ function wireEventHandlers(
     })();
   });
 
+  cortexAgent.onReflection((event) => {
+    logCortexReflectionEvent(eventBus, event);
+    saveActiveSession(cortexAgent, state);
+  });
+
   // Wire compaction error handler and debug logging
   wireCompactionHandlers(cortexAgent);
+}
+
+function insertLatestCompactionEvent(
+  eventBus: ReturnType<typeof getEventBus>,
+  data: Record<string, unknown>,
+): void {
+  try {
+    const agentLogsDb = getAgentLogsDb();
+    const { sessions } = agentLogStore.listSessions(agentLogsDb, { limit: 1 });
+    const latest = sessions[0];
+    if (!latest) return;
+
+    const event = agentLogStore.insertEvent(agentLogsDb, {
+      sessionId: latest.id,
+      eventType: 'compaction',
+      data,
+    });
+
+    eventBus.emit('agent:event:logged', {
+      id: event.id,
+      sessionId: event.sessionId,
+      eventType: event.eventType,
+      data: event.data,
+      createdAt: event.createdAt,
+    });
+  } catch (err) {
+    log.warn('Failed to log Cortex compaction event:', err);
+  }
+}
+
+function logCortexObservationEvent(
+  cortexAgent: CortexAgent,
+  eventBus: ReturnType<typeof getEventBus>,
+  event: {
+    compactedMessages: AgentMessage[];
+    observations: string;
+    contextUtilization: number;
+    sync: boolean;
+    timestamp: Date;
+  },
+): void {
+  insertLatestCompactionEvent(eventBus, {
+    kind: 'observation',
+    strategy: 'observational',
+    messagesCompacted: event.compactedMessages.length,
+    compactedMessageTokens: estimateMessageTokens(event.compactedMessages),
+    observationTokens: estimateTextTokens(event.observations),
+    contextUtilization: event.contextUtilization,
+    sync: event.sync,
+    historyMessagesRemaining: cortexAgent.getConversationHistory().length,
+    timestamp: event.timestamp.toISOString(),
+  });
+}
+
+function logCortexReflectionEvent(
+  eventBus: ReturnType<typeof getEventBus>,
+  event: {
+    previousObservations: string;
+    newObservations: string;
+    generationCount: number;
+    compressionLevel: number;
+    timestamp: Date;
+  },
+): void {
+  const tokensBefore = estimateTextTokens(event.previousObservations);
+  const tokensAfter = estimateTextTokens(event.newObservations);
+
+  insertLatestCompactionEvent(eventBus, {
+    kind: 'reflection',
+    strategy: 'observational',
+    tokensBefore,
+    tokensAfter,
+    generationCount: event.generationCount,
+    compressionLevel: event.compressionLevel,
+    timestamp: event.timestamp.toISOString(),
+  });
 }
 
 // ============================================================================
@@ -1444,20 +1553,30 @@ export function loadSessionForTick(
       log.info(`New thread session for (${contactId}, ${channel})`);
     }
 
-    // Restore Cortex observational memory state (compaction tracking)
+    // Restore Cortex observational memory state (compaction tracking).
+    // If the row has no saved state, explicitly reset it so observations from
+    // the previously active thread cannot leak into this one.
+    let restoredObservationalState = false;
     if (session?.cortexObservationalState) {
       try {
         const obsState = JSON.parse(session.cortexObservationalState) as ObservationalMemoryState;
         cortexAgent.restoreObservationalMemoryState(obsState);
+        restoredObservationalState = true;
         log.debug(`Restored observational state for (${contactId}, ${channel})`);
       } catch (err) {
         log.warn(`Failed to restore observational state for (${contactId}, ${channel}):`, err);
       }
     }
 
+    if (!restoredObservationalState) {
+      cortexAgent.restoreObservationalMemoryState(emptyObservationalMemoryState());
+      log.debug(`Reset observational state for (${contactId}, ${channel})`);
+    }
+
     state.activeSession = { contactId, channel };
   } else {
     cortexAgent.restoreConversationHistory([]);
+    cortexAgent.restoreObservationalMemoryState(emptyObservationalMemoryState());
     state.activeSession = null;
     log.debug('Inner-life tick: empty history, no session persistence');
   }
@@ -1487,7 +1606,7 @@ function saveActiveSession(
       channel,
       serializedHistory,
       serializedObs,
-      history.length,
+      estimateMessageTokens(history),
     );
 
     log.info(`Session saved (${contactId}, ${channel}): ${history.length} messages`);

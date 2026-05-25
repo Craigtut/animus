@@ -244,6 +244,7 @@ export function groupTurns(agenticEvents: TimelineEvent[]): AgenticTurn[] {
 
 function isCompactionEvent(eventType: string): boolean {
   return [
+    'compaction',
     'compaction_start', 'compaction_complete', 'compaction_error',
     'microcompaction', 'emergency_truncation',
   ].includes(eventType);
@@ -405,6 +406,8 @@ function createCompactionMergedEvent(event: TimelineEvent): MergedEvent {
   let compactionType: MergedEvent['compactionType'];
   if (event.eventType === 'microcompaction') compactionType = 'microcompaction';
   else if (event.eventType === 'emergency_truncation') compactionType = 'emergency_truncation';
+  else if (d['kind'] === 'observation') compactionType = 'observation';
+  else if (d['kind'] === 'reflection') compactionType = 'reflection';
   else compactionType = 'compaction';
 
   return {
@@ -415,6 +418,8 @@ function createCompactionMergedEvent(event: TimelineEvent): MergedEvent {
     tokensBefore: (d['tokensBefore'] as number) ?? undefined,
     tokensAfter: (d['tokensAfter'] as number) ?? undefined,
     turnsCompacted: (d['turnsCompacted'] as number) ?? (d['turnsRemoved'] as number) ?? undefined,
+    messagesCompacted: (d['messagesCompacted'] as number) ?? undefined,
+    observationTokens: (d['observationTokens'] as number) ?? undefined,
     compactionType,
     rawEvents: [event],
   };

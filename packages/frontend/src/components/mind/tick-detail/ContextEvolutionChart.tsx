@@ -93,6 +93,9 @@ export function ContextEvolutionChart({ turns, contextWindow }: ContextEvolution
   const numTurns = validTurns.length;
   const showLimit = contextWindow != null && contextWindow > 0;
   const limitRatio = showLimit ? contextWindow! / ceiling : 1;
+  const activationThreshold = showLimit ? contextWindow! * 0.9 : null;
+  const activationRatio = activationThreshold != null ? activationThreshold / ceiling : 1;
+  const showActivation = activationThreshold != null && activationRatio < 1;
   const chartHeight = Math.min(120, Math.max(60, numTurns * 4));
 
   return (
@@ -154,6 +157,36 @@ export function ContextEvolutionChart({ turns, contextWindow }: ContextEvolution
           </div>
         )}
 
+        {/* Cortex observational memory activation threshold */}
+        {showActivation && (
+          <div css={css`
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: ${activationRatio * 100}%;
+            display: flex;
+            align-items: center;
+            pointer-events: none;
+            z-index: 2;
+          `}>
+            <div css={css`
+              flex: 1;
+              height: 0;
+              border-top: 1px dashed ${theme.colors.text.hint}55;
+            `} />
+            <span css={css`
+              font-family: ${theme.typography.fontFamily.mono};
+              font-size: 9px;
+              color: ${theme.colors.text.hint};
+              padding-left: ${theme.spacing[1]};
+              white-space: nowrap;
+              flex-shrink: 0;
+            `}>
+              90%
+            </span>
+          </div>
+        )}
+
         {/* Bars */}
         <div css={css`
           position: relative;
@@ -161,7 +194,7 @@ export function ContextEvolutionChart({ turns, contextWindow }: ContextEvolution
           align-items: flex-end;
           height: 100%;
           gap: ${numTurns > 20 ? '1px' : '2px'};
-          padding-right: ${showLimit && limitRatio < 1 ? '48px' : '0'};
+          padding-right: ${(showLimit && limitRatio < 1) || showActivation ? '48px' : '0'};
         `}>
           {validTurns.map((turn, i) => {
             const tokens = contextSize(turn);
@@ -265,7 +298,7 @@ export function ContextEvolutionChart({ turns, contextWindow }: ContextEvolution
         display: flex;
         gap: ${numTurns > 20 ? '1px' : '2px'};
         margin-top: ${theme.spacing[0.5]};
-        padding-right: ${showLimit && limitRatio < 1 ? '48px' : '0'};
+        padding-right: ${(showLimit && limitRatio < 1) || showActivation ? '48px' : '0'};
       `}>
         {validTurns.map((turn, i) => {
           const show = shouldShowLabel(i, numTurns);

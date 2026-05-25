@@ -133,7 +133,9 @@ export interface MergedEvent {
   tokensBefore?: number | undefined;
   tokensAfter?: number | undefined;
   turnsCompacted?: number | undefined;
-  compactionType?: 'compaction' | 'microcompaction' | 'emergency_truncation' | undefined;
+  messagesCompacted?: number | undefined;
+  observationTokens?: number | undefined;
+  compactionType?: 'compaction' | 'microcompaction' | 'emergency_truncation' | 'observation' | 'reflection' | undefined;
   /** The raw event(s) this was merged from (for expand-to-detail) */
   rawEvents: TimelineEvent[];
 }

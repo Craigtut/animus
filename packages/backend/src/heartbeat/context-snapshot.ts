@@ -26,7 +26,6 @@ import type {
 } from '@animus-labs/shared';
 
 import { buildSystemPromptManifest } from './context-builder.js';
-import { MIND_SLOT_NAMES } from './cortex-mind.js';
 import type { CompiledPersona } from './persona-compiler.js';
 import type { GatherResult } from './gather-context.js';
 import type { EphemeralSection } from './cortex-pipeline.js';
@@ -380,9 +379,11 @@ export function buildAgenticSnapshot(params: {
       category: 'system',
     }));
 
-    // Context slots (iterate named slots from the ContextManager)
+    // Context slots. Include Cortex-owned internal slots such as
+    // _available_tools and _observations so the inspector's total matches the
+    // actual prompt surface more closely.
     const cm = cortexAgent.getContextManager();
-    const slots: ContextSnapshotSection[] = MIND_SLOT_NAMES.map(name => {
+    const slots: ContextSnapshotSection[] = [...cm.slots].map(name => {
       const content = cm.getSlot(name) ?? '';
       return {
         name,
