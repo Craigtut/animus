@@ -1600,11 +1600,6 @@ export function buildEphemeralSections(
     sections.push({ name: 'Trust Ramp', content: gathered.trustRampContext });
   }
 
-  // Spawn budget
-  if (gathered.spawnBudgetNote) {
-    sections.push({ name: 'Spawn Budget', content: gathered.spawnBudgetNote });
-  }
-
   return sections;
 }
 

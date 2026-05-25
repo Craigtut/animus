@@ -246,7 +246,7 @@ export const heartbeatRouter = router({
    */
   onAgentStatus: protectedProcedure.subscription(() => {
     return observable<{
-      type: 'spawned' | 'completed' | 'failed' | 'cancelled' | 'rate_limited';
+      type: 'spawned' | 'completed' | 'failed' | 'cancelled';
       taskId: string;
       detail?: string;
     }>((emit) => {
@@ -269,22 +269,17 @@ export const heartbeatRouter = router({
       const onCancelled = (data: { taskId: string; reason: string }) => {
         emit.next({ type: 'cancelled', taskId: data.taskId, detail: data.reason });
       };
-      const onRateLimited = (data: { taskId: string; count: number; limit: number }) => {
-        emit.next({ type: 'rate_limited', taskId: data.taskId, detail: `${data.count}/${data.limit}` });
-      };
 
       eventBus.on('agent:spawned', onSpawned);
       eventBus.on('agent:completed', onCompleted);
       eventBus.on('agent:failed', onFailed);
       eventBus.on('agent:cancelled', onCancelled);
-      eventBus.on('agent:rate_limited', onRateLimited);
 
       return () => {
         eventBus.off('agent:spawned', onSpawned);
         eventBus.off('agent:completed', onCompleted);
         eventBus.off('agent:failed', onFailed);
         eventBus.off('agent:cancelled', onCancelled);
-        eventBus.off('agent:rate_limited', onRateLimited);
       };
     });
   }),

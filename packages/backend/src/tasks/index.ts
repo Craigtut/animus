@@ -6,7 +6,7 @@
  */
 
 export { TaskScheduler, getTaskScheduler, computeNextRunAt, validateCronExpression } from './task-scheduler.js';
-export { TaskRunner, getTaskRunner, MAX_TASK_RETRIES, MAX_CONSECUTIVE_FAILURES } from './task-runner.js';
+export { TaskRunner, getTaskRunner } from './task-runner.js';
 export {
   DeferredQueue,
   getDeferredQueue,

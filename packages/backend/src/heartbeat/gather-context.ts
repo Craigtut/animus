@@ -75,7 +75,6 @@ export interface GatherResult {
   tickIntervalMs: number;
   memoryContext: MemoryContext | null;
   goalContext: GoalContext | null;
-  spawnBudgetNote: string | null;
   contacts: Array<{ contact: Contact; channels: ContactChannel[] }>;
   energyLevel: number | null;
   energyBand: EnergyBand | null;
@@ -428,17 +427,6 @@ export async function gatherContext(
     channels: contactStore.getContactChannelsByContactId(cDb, c.id),
   }));
 
-  // Check spawn budget for context injection
-  let spawnBudgetNote: string | null = null;
-  if (deps.agentOrchestrator) {
-    const budget = deps.agentOrchestrator.getSpawnBudgetStatus();
-    if (!budget.allowed) {
-      spawnBudgetNote = `Agent spawn budget exhausted (${budget.count}/${budget.limit} this hour). Handle tasks directly.`;
-    } else if (budget.warning) {
-      spawnBudgetNote = `You've spawned ${budget.count} agents in the last hour (limit: ${budget.limit}). Consider handling tasks directly when possible.`;
-    }
-  }
-
   // Gather plugin context (decision descriptions + context sources + credentials)
   let pluginDecisionDescriptions = '';
   let pluginContextSources = '';
@@ -565,7 +553,6 @@ export async function gatherContext(
     tickIntervalMs: energyBand === 'sleeping' ? settings.sleepTickIntervalMs : settings.heartbeatIntervalMs,
     memoryContext: memCtx,
     goalContext: goalCtx,
-    spawnBudgetNote,
     contacts: allContacts,
     energyLevel,
     energyBand,

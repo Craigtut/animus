@@ -364,7 +364,6 @@ async function cortexMindQuery(
     proposedGoalsContext: gathered.goalContext?.proposedGoalsSection ?? null,
     planningPromptsContext: gathered.goalContext?.planningPromptsSection ?? null,
     memoryFlushPending: false,
-    spawnBudgetNote: gathered.spawnBudgetNote,
     contacts: gathered.contacts,
     tickNumber,
     existenceParadigm: fullPersona.existenceParadigm ?? 'digital_consciousness',

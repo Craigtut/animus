@@ -92,8 +92,6 @@ export interface MindContextParams {
   planningPromptsContext?: string | null;
   /** Session approaching context limit */
   memoryFlushPending?: boolean;
-  /** Spawn budget warning/exhaustion note for the mind */
-  spawnBudgetNote?: string | null;
   /** All known contacts with their channels (for context and send_message) */
   contacts?: Array<{ contact: Contact; channels: ContactChannel[] }>;
   /** Current tick number (1-based) */
@@ -1388,14 +1386,7 @@ Usage: run_with_credentials({ command, credentialRef, envVar })`,
       params.budgetStatus ? 'no budget usage yet' : 'budget system not active', 'system'));
   }
 
-  // 11. Spawn budget note
-  if (params.spawnBudgetNote) {
-    manifest.push(included('spawn_budget_note', 'Spawn Budget', '── SESSION CONTEXT NOTE ──\n' + params.spawnBudgetNote, 'system'));
-  } else {
-    manifest.push(excluded('spawn_budget_note', 'Spawn Budget', 'budget not exhausted', 'system'));
-  }
-
-  // 12. Memory flush warning
+  // 11. Memory flush warning
   if (params.memoryFlushPending) {
     manifest.push(included('memory_flush_warning', 'Memory Flush Warning',
       '── SESSION CONTEXT NOTE ──\n' +

@@ -80,7 +80,6 @@ export interface AnimusEventMap {
   'agent:completed': { taskId: string; result: string | null };
   'agent:failed': { taskId: string; error: string };
   'agent:cancelled': { taskId: string; reason: string };
-  'agent:rate_limited': { taskId: string; count: number; limit: number };
 
   // Tick inspector
   'tick:input_stored': {

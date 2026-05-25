@@ -59,19 +59,10 @@ export interface AgentTaskRecord {
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  totalCostUsd: number;
 }
-
-/** Per-task-type timeout defaults (ms) */
-const TASK_TIMEOUTS: Record<string, number> = {
-  research: 5 * 60 * 1000,
-  code_generation: 10 * 60 * 1000,
-  analysis: 5 * 60 * 1000,
-  review: 3 * 60 * 1000,
-  planning: 5 * 60 * 1000,
-  execution: 10 * 60 * 1000,
-};
-
-const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
 // ============================================================================
 // Agent Task Store Interface
@@ -104,6 +95,9 @@ export interface AgentTaskStore {
     error: string | null;
     startedAt: string | null;
     completedAt: string | null;
+    inputTokens: number;
+    outputTokens: number;
+    totalCostUsd: number;
   }>): void;
 
   getAgentTask(id: string): AgentTaskRecord | null;
@@ -117,9 +111,6 @@ export interface AgentTaskStore {
 export class AgentOrchestrator {
   private taskStore: AgentTaskStore;
   private eventBus: IEventBus;
-  private timeoutTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private spawnTimestamps: number[] = [];
-  private spawnBudgetPerHour: number;
   private onAgentComplete: (params: {
     agentId: string;
     taskDescription: string;
@@ -132,7 +123,6 @@ export class AgentOrchestrator {
   constructor(params: {
     taskStore: AgentTaskStore;
     eventBus: IEventBus;
-    spawnBudgetPerHour?: number;
     onAgentComplete: (params: {
       agentId: string;
       taskDescription: string;
@@ -142,7 +132,6 @@ export class AgentOrchestrator {
   }) {
     this.taskStore = params.taskStore;
     this.eventBus = params.eventBus;
-    this.spawnBudgetPerHour = params.spawnBudgetPerHour ?? 20;
     this.onAgentComplete = params.onAgentComplete;
   }
 
@@ -182,23 +171,36 @@ export class AgentOrchestrator {
         completedAt: now(),
       });
 
-      // Persist sub-agent usage to agent_logs.db
       const usageData = usage as { turns?: number; cost?: number; durationMs?: number } | null;
       if (usageData?.cost != null && usageData.cost > 0) {
         try {
-          agentLogStore.insertUsage(getAgentLogsDb(), {
-            sessionId: taskId,
+          const agentLogsDb = getAgentLogsDb();
+          const usageSession = agentLogStore.createSession(agentLogsDb, {
+            provider: 'cortex',
+            model: 'cortex-sub-agent',
+          });
+          agentLogStore.insertUsage(agentLogsDb, {
+            sessionId: usageSession.id,
             inputTokens: 0,
             outputTokens: 0,
             totalTokens: 0,
             costUsd: usageData.cost,
             model: 'cortex-sub-agent',
+            tickNumber: task?.tickNumber ?? null,
             tickType: 'agent_complete',
             pipelinePhase: 'agentic_loop',
-            contactId: null,
+            contactId: task?.contactId ?? null,
+          });
+          agentLogStore.endSession(agentLogsDb, usageSession.id, 'completed');
+          this.taskStore.updateAgentTask(taskId, {
+            sessionId: usageSession.id,
+            totalCostUsd: usageData.cost,
           });
         } catch (err) {
           log.warn('Failed to log sub-agent usage:', err);
+          this.taskStore.updateAgentTask(taskId, {
+            totalCostUsd: usageData.cost,
+          });
         }
       }
 
@@ -237,29 +239,6 @@ export class AgentOrchestrator {
   }
 
   /**
-   * Check the rolling-window spawn budget.
-   * Returns whether spawning is allowed and current usage stats.
-   */
-  checkSpawnBudget(): { allowed: boolean; count: number; limit: number; warning: boolean } {
-    const oneHourAgo = Date.now() - 3_600_000;
-    this.spawnTimestamps = this.spawnTimestamps.filter((t) => t > oneHourAgo);
-    const count = this.spawnTimestamps.length;
-    return {
-      allowed: count < this.spawnBudgetPerHour,
-      count,
-      limit: this.spawnBudgetPerHour,
-      warning: count >= this.spawnBudgetPerHour * 0.8,
-    };
-  }
-
-  /**
-   * Get spawn budget status for context builder injection.
-   */
-  getSpawnBudgetStatus(): { allowed: boolean; count: number; limit: number; warning: boolean } {
-    return this.checkSpawnBudget();
-  }
-
-  /**
    * Spawn a new sub-agent for a task.
    *
    * Delegates to the cortex SubAgentManager infrastructure.
@@ -282,33 +261,6 @@ export class AgentOrchestrator {
    */
   private async spawnCortexSubAgent(params: SpawnAgentParams): Promise<string> {
     const timestamp = now();
-
-    // Check spawn budget
-    const budget = this.checkSpawnBudget();
-    if (!budget.allowed) {
-      const failedTaskId = generateUUID();
-      this.taskStore.insertAgentTask({
-        id: failedTaskId,
-        tickNumber: params.tickNumber,
-        sessionId: null,
-        provider: 'cortex',
-        status: 'failed',
-        taskType: params.taskType,
-        taskDescription: params.description,
-        parentTaskId: params.parentTaskId ?? null,
-        contactId: params.contactId,
-        sourceChannel: params.channel,
-        createdAt: timestamp,
-      });
-      this.taskStore.updateAgentTask(failedTaskId, {
-        status: 'failed',
-        error: 'Spawn budget exhausted',
-        completedAt: timestamp,
-      });
-      this.eventBus.emit('agent:rate_limited', { taskId: failedTaskId, count: budget.count, limit: budget.limit });
-      throw new Error(`Agent spawn budget exhausted (${budget.count}/${budget.limit} per hour)`);
-    }
-    this.spawnTimestamps.push(Date.now());
 
     try {
       const subAgentManager = this.cortexAgent!.getSubAgentManager();
@@ -340,13 +292,6 @@ export class AgentOrchestrator {
       this.taskStore.updateAgentTask(taskId, {
         startedAt: now(),
       });
-
-      // Set timeout
-      const timeoutMs = TASK_TIMEOUTS[params.taskType] ?? DEFAULT_TIMEOUT_MS;
-      const timer = setTimeout(() => {
-        this.handleTimeout(taskId);
-      }, timeoutMs);
-      this.timeoutTimers.set(taskId, timer);
 
       log.info(`Cortex sub-agent spawn requested: ${taskId} (${params.taskType}: ${params.description.substring(0, 80)})`);
 
@@ -411,13 +356,6 @@ export class AgentOrchestrator {
    * Calls abort() on the cortex sub-agent and marks it as cancelled.
    */
   async cancelAgent(params: CancelAgentParams): Promise<void> {
-    // Clear timeout
-    const timer = this.timeoutTimers.get(params.agentId);
-    if (timer) {
-      clearTimeout(timer);
-      this.timeoutTimers.delete(params.agentId);
-    }
-
     if (this.cortexAgent) {
       const subAgentManager = this.cortexAgent.getSubAgentManager();
       const tracked = subAgentManager.get(params.agentId);
@@ -470,56 +408,7 @@ export class AgentOrchestrator {
    * Clean up all active timers and references.
    */
   async cleanup(): Promise<void> {
-    // Clear all timeouts
-    for (const timer of this.timeoutTimers.values()) {
-      clearTimeout(timer);
-    }
-    this.timeoutTimers.clear();
-
     // Clear cortex reference (cortex agent lifecycle managed separately)
     this.cortexAgent = null;
-  }
-
-  // --------------------------------------------------------------------------
-  // Internal
-  // --------------------------------------------------------------------------
-
-  /**
-   * Handle sub-agent timeout.
-   * Aborts the sub-agent and marks it as timed out in the task store.
-   */
-  private async handleTimeout(taskId: string): Promise<void> {
-    this.timeoutTimers.delete(taskId);
-
-    if (!this.cortexAgent) return;
-
-    const subAgentManager = this.cortexAgent.getSubAgentManager();
-    const tracked = subAgentManager.get(taskId);
-    if (tracked) {
-      try {
-        const subAgent = tracked.agent as CortexAgent;
-        await subAgent.abort();
-      } catch (err) {
-        log.warn(`Failed to abort timed out sub-agent ${taskId}:`, err);
-      }
-      subAgentManager.fail(taskId, 'Agent exceeded timeout');
-    }
-
-    const task = this.taskStore.getAgentTask(taskId);
-
-    this.taskStore.updateAgentTask(taskId, {
-      status: 'timed_out',
-      error: 'Agent exceeded timeout',
-      completedAt: now(),
-    });
-
-    this.eventBus.emit('agent:failed', { taskId, error: 'Agent timed out' });
-
-    this.onAgentComplete({
-      agentId: taskId,
-      taskDescription: task?.taskDescription ?? '',
-      outcome: 'timed_out',
-      resultContent: 'The sub-agent timed out before completing its task.',
-    });
   }
 }

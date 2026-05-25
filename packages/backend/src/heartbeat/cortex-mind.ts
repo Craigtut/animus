@@ -57,6 +57,7 @@ import { getSessionsDb } from '../db/index.js';
 import * as sessionStore from '../db/stores/session-store.js';
 
 const log = createLogger('CortexMind', 'heartbeat');
+const cortexLog = createLogger('Cortex', 'heartbeat');
 
 // ============================================================================
 // Context Slot Names (order matters: most stable first)
@@ -615,10 +616,7 @@ export async function createCortexMind(
     slots: [...MIND_SLOT_NAMES],
     thinkingLevel: savedThinkingLevel as ThinkingLevel,
     workingTags: { enabled: true },
-    budgetGuard: {
-      maxTurns: (settingsAny['cortexMaxTurns'] as number | undefined) ?? 50,
-      maxCost: (settingsAny['cortexMaxCostPerTick'] as number | undefined) ?? 1.0,
-    },
+    logger: cortexLog,
     contextWindowLimit: (settingsAny['cortexContextWindowLimit'] as number | null | undefined) ?? null,
     resolvePermission: permissionResolver,
     tools: animusTools,
@@ -689,7 +687,18 @@ function wireEventHandlers(
 
   // Route classified errors to EventBus
   cortexAgent.onError((classified: ClassifiedError) => {
-    log.error(`CortexAgent error: ${classified.category} (${classified.severity}): ${classified.originalMessage}`);
+    const message = `CortexAgent error: ${classified.category} (${classified.severity}): ${classified.originalMessage}`;
+
+    if (classified.category === 'cancelled') {
+      log.info(`CortexAgent cancelled: ${classified.originalMessage}`);
+      return;
+    }
+
+    if (classified.severity === 'retry' || classified.severity === 'recoverable') {
+      log.warn(message);
+    } else {
+      log.error(message);
+    }
 
     if (classified.category === 'authentication') {
       eventBus.emit('system:error', {

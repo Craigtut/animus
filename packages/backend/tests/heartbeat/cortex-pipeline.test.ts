@@ -173,7 +173,6 @@ interface MockGatherResult {
   tickIntervalMs: number;
   memoryContext: null;
   goalContext: null;
-  spawnBudgetNote: null;
   contacts: Array<{ contact: { id: string; fullName: string; permissionTier: string; notes?: string }; channels: Array<{ channel: string }> }>;
   energyLevel: number | null;
   energyBand: string | null;
@@ -215,7 +214,6 @@ function createMockGather(overrides: Partial<MockGatherResult> = {}): MockGather
     tickIntervalMs: 300000,
     memoryContext: null,
     goalContext: null,
-    spawnBudgetNote: null,
     contacts: [
       {
         contact: { id: 'contact-1', fullName: 'Alice', permissionTier: 'primary' },

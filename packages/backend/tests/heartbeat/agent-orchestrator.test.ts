@@ -39,6 +39,7 @@ function createInMemoryTaskStore(): AgentTaskStore {
         status: data.status as AgentTaskRecord['status'],
         taskType: data.taskType,
         taskDescription: data.taskDescription,
+        parentTaskId: data.parentTaskId ?? null,
         contactId: data.contactId,
         sourceChannel: data.sourceChannel,
         currentActivity: null,
@@ -47,6 +48,9 @@ function createInMemoryTaskStore(): AgentTaskStore {
         createdAt: data.createdAt,
         startedAt: null,
         completedAt: null,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalCostUsd: 0,
       });
     },
     updateAgentTask(id, data) {
@@ -182,24 +186,6 @@ describe('AgentOrchestrator', () => {
       ).rejects.toThrow('no CortexAgent configured');
     });
 
-    it('fails when spawn budget is exhausted', async () => {
-      const limitedOrchestrator = new AgentOrchestrator({
-        taskStore,
-        eventBus,
-        spawnBudgetPerHour: 1,
-        onAgentComplete,
-      });
-      limitedOrchestrator.setCortexAgent(cortexAgent);
-
-      // First spawn succeeds
-      await limitedOrchestrator.spawnAgent(defaultSpawnParams);
-
-      // Second spawn exceeds budget
-      await expect(
-        limitedOrchestrator.spawnAgent(defaultSpawnParams)
-      ).rejects.toThrow('budget exhausted');
-    });
-
     it('fails when concurrency limit is reached', async () => {
       const fullSubAgentManager = createMockSubAgentManager({ canSpawn: false });
       const fullCortexAgent = createMockCortexAgent(fullSubAgentManager);
@@ -311,7 +297,7 @@ describe('AgentOrchestrator', () => {
   });
 
   describe('cleanup', () => {
-    it('clears timeouts and cortex reference', async () => {
+    it('clears the cortex reference', async () => {
       await orchestrator.spawnAgent(defaultSpawnParams);
       await orchestrator.cleanup();
 
@@ -320,59 +306,16 @@ describe('AgentOrchestrator', () => {
     });
   });
 
-  describe('timeout handling', () => {
-    it('times out agents after the configured timeout', async () => {
-      // Mock the sub-agent as tracked for the timeout handler
-      const mockSubAgent = { abort: vi.fn().mockResolvedValue(undefined) };
-
+  describe('long-running agents', () => {
+    it('does not impose a wall-clock timeout on Cortex sub-agents', async () => {
       const taskId = await orchestrator.spawnAgent(defaultSpawnParams);
 
-      // When the timeout fires, mock the sub-agent as being tracked
-      (subAgentManager.get as ReturnType<typeof vi.fn>).mockReturnValue({
-        agent: mockSubAgent,
-        instructions: 'test',
-      });
-
-      // Research timeout is 5 minutes = 300,000 ms
-      await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 100);
+      await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
 
       const task = taskStore.getAgentTask(taskId);
-      expect(task!.status).toBe('timed_out');
-
-      expect(onAgentComplete).toHaveBeenCalledWith(expect.objectContaining({
-        outcome: 'timed_out',
-      }));
+      expect(task!.status).toBe('running');
+      expect(onAgentComplete).not.toHaveBeenCalled();
     });
   });
 
-  describe('checkSpawnBudget', () => {
-    it('tracks rolling window budget', () => {
-      const budget = orchestrator.checkSpawnBudget();
-      expect(budget.allowed).toBe(true);
-      expect(budget.count).toBe(0);
-      expect(budget.limit).toBe(20);
-    });
-
-    it('warns at 80% usage', async () => {
-      const limitedOrchestrator = new AgentOrchestrator({
-        taskStore,
-        eventBus,
-        spawnBudgetPerHour: 5,
-        onAgentComplete,
-      });
-      limitedOrchestrator.setCortexAgent(cortexAgent);
-
-      // Spawn 4 agents (80% of 5)
-      for (let i = 0; i < 4; i++) {
-        await limitedOrchestrator.spawnAgent({
-          ...defaultSpawnParams,
-          description: `Task ${i}`,
-        });
-      }
-
-      const budget = limitedOrchestrator.checkSpawnBudget();
-      expect(budget.warning).toBe(true);
-      expect(budget.count).toBe(4);
-    });
-  });
 });

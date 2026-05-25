@@ -461,34 +461,16 @@ Only the top N deferred tasks are shown (sorted by priority, default N=5). The m
 
 ---
 
-## Retries
+## Failures
 
-Failed tasks can be retried up to a configurable limit (default: 3, configured in code).
+Tasks do not run through a separate executor with its own retry loop. Scheduled
+tasks fire heartbeat ticks, and deferred tasks surface inside normal heartbeat
+context. The mind may complete, cancel, skip, reschedule, or delegate a task
+based on the context of that tick.
 
-### One-Shot and Deferred Tasks
-
-```
-Run fails → retry_count incremented
-  → If retry_count < MAX_TASK_RETRIES:
-      One-shot: reschedule for ~5 minutes from now
-      Deferred: leave as pending (mind can try again on next pickup)
-  → If retry_count >= MAX_TASK_RETRIES:
-      Status → 'failed'
-      Result delivered to mind in next tick for awareness
-      Mind decides: inform user, try different approach, or accept failure
-```
-
-### Recurring Tasks
-
-A failed run does not count against the task's overall retry limit. Each run gets its own retry tracking:
-
-```
-Run 1 fails → retry up to MAX_TASK_RETRIES times
-  → If all retries fail: log the failed run in task_runs, move on
-  → Next scheduled run fires normally (fresh retry count)
-```
-
-If a recurring task fails N consecutive runs (configurable, default: 5), the task is paused and the mind is informed: "This recurring task has failed 5 times in a row. Consider revising the approach or cancelling it."
+Recurring task runs are recorded in `task_runs` when the mind explicitly
+completes them. One-shot and deferred tasks are completed, cancelled, skipped,
+or left available for a future tick by task decisions.
 
 ---
 
@@ -717,8 +699,6 @@ const recentExperiences = await db.getRecentExperiences(10);
 
 | Constant | Default | Description |
 |----------|---------|-------------|
-| `MAX_TASK_RETRIES` | 3 | Retries per task (per run for recurring) |
-| `MAX_CONSECUTIVE_FAILURES` | 5 | Recurring task auto-pause after N consecutive failed runs |
 | `MAX_DEFERRED_TASKS_IN_CONTEXT` | 5 | Deferred tasks shown to mind during idle ticks |
 | `DEFERRED_STALENESS_BOOST_DAYS` | 7 | Days before deferred task priority starts boosting |
 | `DEFERRED_STALENESS_BOOST_RATE` | 0.02 | Priority boost per day after staleness threshold |
