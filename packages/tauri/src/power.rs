@@ -94,6 +94,8 @@ mod platform {
 
     const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
     const K_IOPM_ASSERTION_LEVEL_ON: IOPMAssertionLevel = 255;
+    const K_IOPM_ASSERT_PREVENT_USER_IDLE_SYSTEM_SLEEP: &str = "PreventUserIdleSystemSleep";
+    const K_IOPM_ASSERT_PREVENT_USER_IDLE_DISPLAY_SLEEP: &str = "PreventUserIdleDisplaySleep";
 
     #[link(name = "CoreFoundation", kind = "framework")]
     extern "C" {
@@ -107,9 +109,6 @@ mod platform {
 
     #[link(name = "IOKit", kind = "framework")]
     extern "C" {
-        static kIOPMAssertionTypePreventUserIdleSystemSleep: CFStringRef;
-        static kIOPMAssertionTypePreventUserIdleDisplaySleep: CFStringRef;
-
         fn IOPMAssertionCreateWithName(
             assertion_type: CFStringRef,
             assertion_level: IOPMAssertionLevel,
@@ -136,7 +135,7 @@ mod platform {
         fn set_system_assertion(&mut self, enabled: bool) -> Result<(), String> {
             if enabled && self.system_assertion_id.is_none() {
                 self.system_assertion_id = Some(create_assertion(
-                    unsafe { kIOPMAssertionTypePreventUserIdleSystemSleep },
+                    K_IOPM_ASSERT_PREVENT_USER_IDLE_SYSTEM_SLEEP,
                     "Animus is keeping this computer awake",
                 )?);
             } else if !enabled {
@@ -148,7 +147,7 @@ mod platform {
         fn set_display_assertion(&mut self, enabled: bool) -> Result<(), String> {
             if enabled && self.display_assertion_id.is_none() {
                 self.display_assertion_id = Some(create_assertion(
-                    unsafe { kIOPMAssertionTypePreventUserIdleDisplaySleep },
+                    K_IOPM_ASSERT_PREVENT_USER_IDLE_DISPLAY_SLEEP,
                     "Animus is keeping this display awake",
                 )?);
             } else if !enabled {
@@ -165,23 +164,30 @@ mod platform {
         }
     }
 
-    fn create_assertion(assertion_type: CFStringRef, name: &str) -> Result<IOPMAssertionID, String> {
-        let c_name = CString::new(name).map_err(|_| "Power assertion name is invalid".to_string())?;
-        let cf_name = unsafe {
-            CFStringCreateWithCString(
-                std::ptr::null(),
-                c_name.as_ptr(),
-                K_CF_STRING_ENCODING_UTF8,
-            )
+    fn create_assertion(assertion_type: &str, name: &str) -> Result<IOPMAssertionID, String> {
+        let cf_assertion_type = create_cf_string(
+            assertion_type,
+            "Power assertion type is invalid",
+            "Could not create macOS power assertion type",
+        )?;
+        let cf_name = match create_cf_string(
+            name,
+            "Power assertion name is invalid",
+            "Could not create macOS power assertion name",
+        ) {
+            Ok(value) => value,
+            Err(err) => {
+                unsafe {
+                    CFRelease(cf_assertion_type);
+                }
+                return Err(err);
+            }
         };
-        if cf_name.is_null() {
-            return Err("Could not create macOS power assertion name".to_string());
-        }
 
         let mut assertion_id: IOPMAssertionID = 0;
         let result = unsafe {
             IOPMAssertionCreateWithName(
-                assertion_type,
+                cf_assertion_type,
                 K_IOPM_ASSERTION_LEVEL_ON,
                 cf_name,
                 &mut assertion_id,
@@ -189,12 +195,33 @@ mod platform {
         };
         unsafe {
             CFRelease(cf_name);
+            CFRelease(cf_assertion_type);
         }
 
         if result == 0 {
             Ok(assertion_id)
         } else {
             Err(format!("macOS power assertion failed with code {}", result))
+        }
+    }
+
+    fn create_cf_string(
+        value: &str,
+        invalid_message: &str,
+        null_message: &str,
+    ) -> Result<CFStringRef, String> {
+        let c_value = CString::new(value).map_err(|_| invalid_message.to_string())?;
+        let cf_value = unsafe {
+            CFStringCreateWithCString(
+                std::ptr::null(),
+                c_value.as_ptr(),
+                K_CF_STRING_ENCODING_UTF8,
+            )
+        };
+        if cf_value.is_null() {
+            Err(null_message.to_string())
+        } else {
+            Ok(cf_value)
         }
     }
 
@@ -254,7 +281,11 @@ mod platform {
     pub struct PowerAssertions;
 
     impl PowerAssertions {
-        pub fn apply(&mut self, _keep_awake: bool, _keep_display_awake: bool) -> Result<(), String> {
+        pub fn apply(
+            &mut self,
+            _keep_awake: bool,
+            _keep_display_awake: bool,
+        ) -> Result<(), String> {
             Ok(())
         }
     }
