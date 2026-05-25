@@ -18,7 +18,6 @@ export function DesktopStep() {
   const desktopPower = useDesktopPowerSettings();
 
   const desktopAvailable = isTauri();
-  const powerUnavailable = desktopPower.available && !desktopPower.loading && !desktopPower.supported;
 
   const handleContinue = () => {
     markStepComplete('desktop');
@@ -72,34 +71,32 @@ export function DesktopStep() {
           }}
         />
 
-        <RuntimeChoice
-          icon={<Power size={22} />}
-          title="Keep computer awake"
-          description="Prevent idle sleep while Animus is running, so the heartbeat can keep time."
-          checked={desktopPower.keepComputerAwake}
-          disabled={!desktopAvailable || desktopPower.loading || desktopPower.saving || !desktopPower.supported}
-          onChange={(checked) => {
-            void desktopPower.setKeepComputerAwake(checked);
-          }}
-        />
+        {desktopPower.available && (
+          <RuntimeChoice
+            icon={<Power size={22} />}
+            title="Keep computer awake"
+            description="Prevent idle sleep while Animus is running, so the heartbeat can keep time."
+            checked={desktopPower.keepComputerAwake}
+            disabled={desktopPower.loading || desktopPower.saving}
+            onChange={(checked) => {
+              void desktopPower.setKeepComputerAwake(checked);
+            }}
+          />
+        )}
 
-        <RuntimeChoice
-          icon={<Monitor size={22} />}
-          title="Keep display awake"
-          description="Keep the screen lit too. Most people can leave this off."
-          checked={desktopPower.keepDisplayAwake}
-          disabled={!desktopAvailable || desktopPower.loading || desktopPower.saving || !desktopPower.supported}
-          onChange={(checked) => {
-            void desktopPower.setKeepDisplayAwake(checked);
-          }}
-        />
+        {desktopPower.available && (
+          <RuntimeChoice
+            icon={<Monitor size={22} />}
+            title="Keep display awake"
+            description="Keep the screen lit too. Most people can leave this off."
+            checked={desktopPower.keepDisplayAwake}
+            disabled={desktopPower.loading || desktopPower.saving}
+            onChange={(checked) => {
+              void desktopPower.setKeepDisplayAwake(checked);
+            }}
+          />
+        )}
       </div>
-
-      {powerUnavailable && (
-        <Typography.Caption color="hint" css={css`line-height: ${theme.typography.lineHeight.relaxed};`}>
-          Keeping the computer awake is available on macOS and Windows.
-        </Typography.Caption>
-      )}
 
       <OnboardingNav
         onBack={handleBack}

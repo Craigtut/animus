@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { trpc } from '../utils/trpc';
-import { isTauri } from '../utils/tauri';
 import {
   getDesktopPowerStatus,
+  isDesktopPowerPlatform,
   setDesktopPowerSettings,
   type DesktopPowerStatus,
 } from '../utils/desktop-power';
@@ -19,6 +19,7 @@ interface DesktopPowerSettingsState {
 }
 
 export function useDesktopPowerSettings(): DesktopPowerSettingsState {
+  const platformAvailable = isDesktopPowerPlatform();
   const utils = trpc.useUtils();
   const { data: settings, isLoading: settingsLoading } = trpc.settings.getSystemSettings.useQuery();
   const updateSettingsMutation = trpc.settings.updateSystemSettings.useMutation({
@@ -26,10 +27,10 @@ export function useDesktopPowerSettings(): DesktopPowerSettingsState {
   });
 
   const [status, setStatus] = useState<DesktopPowerStatus | null>(null);
-  const [statusLoading, setStatusLoading] = useState(isTauri());
+  const [statusLoading, setStatusLoading] = useState(platformAvailable);
 
   useEffect(() => {
-    if (!isTauri()) {
+    if (!platformAvailable) {
       setStatusLoading(false);
       return;
     }
@@ -49,7 +50,7 @@ export function useDesktopPowerSettings(): DesktopPowerSettingsState {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [platformAvailable]);
 
   const apply = useCallback(async (keepComputerAwake: boolean, keepDisplayAwake: boolean) => {
     const persisted = await updateSettingsMutation.mutateAsync({
@@ -83,8 +84,8 @@ export function useDesktopPowerSettings(): DesktopPowerSettingsState {
   }, [apply, keepComputerAwake]);
 
   return {
-    available: isTauri(),
-    supported: status?.supported ?? false,
+    available: platformAvailable && status?.supported !== false,
+    supported: platformAvailable && status?.supported !== false,
     loading: settingsLoading || statusLoading,
     saving: updateSettingsMutation.isPending,
     keepComputerAwake,
