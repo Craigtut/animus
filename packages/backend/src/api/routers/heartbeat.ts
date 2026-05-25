@@ -369,7 +369,10 @@ export const heartbeatRouter = router({
     const settings = systemStore.getSystemSettings(sysDb);
 
     if (!settings.energySystemEnabled) {
-      return { energyLevel: null, energyBand: null, circadianBaseline: null, enabled: false };
+      // Energy is pinned high and steady when the system is off, matching the
+      // steady-state framing the mind receives in its prompt.
+      const pinned = 0.9;
+      return { energyLevel: pinned, energyBand: getEnergyBand(pinned), circadianBaseline: null, enabled: false };
     }
 
     const persona = personaStore.getPersona(getPersonaDb());

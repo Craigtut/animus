@@ -50,6 +50,7 @@ import {
   PREAMBLE,
   EMOTION_GUIDANCE,
   buildEnergyGuidance,
+  buildEnergyDisabledFramework,
   buildDecisionRef,
   MEMORY_INSTRUCTIONS,
   GOAL_GUIDANCE,
@@ -1333,8 +1334,9 @@ Guidelines for the tool parameters:
   // 4. Emotion Guidance
   sections.push(EMOTION_GUIDANCE);
 
-  // 5. Energy Guidance
-  sections.push(buildEnergyGuidance());
+  // 5. Energy Guidance (steady-state framing when the system is disabled,
+  //    so the mind is never asked to produce an energyDelta)
+  sections.push(gathered.energySystemEnabled ? buildEnergyGuidance() : buildEnergyDisabledFramework());
 
   // 6. Decisions Reference
   sections.push(buildDecisionRef(gathered.pluginDecisionDescriptions || undefined));

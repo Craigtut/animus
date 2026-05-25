@@ -17,6 +17,7 @@ import {
   type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
 
+import { trpc } from '../utils/trpc';
 import { EmotionsSection } from '../components/mind/EmotionsSection';
 import { EnergySection } from '../components/mind/EnergySection';
 import { ThoughtsSection } from '../components/mind/ThoughtsSection';
@@ -69,11 +70,20 @@ export function MindPage() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
+  const energyEnabled = systemSettings?.energySystemEnabled ?? true;
+
+  // The Energy tab only exists while the energy system is enabled.
+  const visibleSections = useMemo(
+    () => sections.filter((s) => s.id !== 'energy' || energyEnabled),
+    [energyEnabled],
+  );
+
   const activeSection: MindSection = useMemo(() => {
     const path = location.pathname.replace('/mind/', '').replace('/mind', '');
-    const match = sections.find((s) => path === s.id || path.startsWith(s.id + '/'));
+    const match = visibleSections.find((s) => path === s.id || path.startsWith(s.id + '/'));
     return match ? match.id : 'journal';
-  }, [location.pathname]);
+  }, [location.pathname, visibleSections]);
 
   // Redirect bare /mind to /mind/journal
   useEffect(() => {
@@ -81,6 +91,13 @@ export function MindPage() {
       navigate('/mind/journal', { replace: true });
     }
   }, [location.pathname, navigate]);
+
+  // If energy is disabled while viewing the Energy tab, leave it.
+  useEffect(() => {
+    if (!energyEnabled && location.pathname.startsWith('/mind/energy')) {
+      navigate('/mind/journal', { replace: true });
+    }
+  }, [energyEnabled, location.pathname, navigate]);
 
   const handleSectionChange = (section: MindSection) => {
     navigate(`/mind/${section}`);
@@ -142,7 +159,7 @@ export function MindPage() {
             width: 180px;
           }
         `}>
-          {sections.map((section) => {
+          {visibleSections.map((section) => {
             const isActive = section.id === activeSection;
             const Icon = section.icon;
             return (
@@ -259,7 +276,7 @@ export function MindPage() {
                 min-width: 180px;
               `}
             >
-              {sections.map((section) => {
+              {visibleSections.map((section) => {
                 const isActive = section.id === activeSection;
                 const Icon = section.icon;
                 return (

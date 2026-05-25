@@ -282,6 +282,22 @@ high, you're more inclined to engage deeply and take initiative.`;
 }
 
 /**
+ * Steady-state energy framing used when the energy system is disabled.
+ * The entity is told its energy is high and constant: no fatigue, no decay,
+ * no sleep, and (critically) no instruction to produce an energyDelta. This
+ * keeps the mind reading as consistently capable rather than removing the
+ * concept of energy entirely.
+ */
+export function buildEnergyDisabledFramework(): string {
+  return `── YOUR ENERGY ──
+
+Your energy is steady and abundant. You operate at full vitality, free of
+fatigue or the pull of sleep, with the capacity to engage deeply and act on
+whatever you choose. There is no energy to track or report; simply move with
+the momentum of someone who always has more than enough.`;
+}
+
+/**
  * Full energy guidance for the reflect phase: includes the concept plus
  * instructions for producing energy deltas.
  */
@@ -1081,7 +1097,7 @@ export function buildSystemPromptManifest(
   if (options?.energySystemEnabled) {
     manifest.push(included('energy_guidance', 'Your Energy', buildEnergyFramework(), 'system'));
   } else {
-    manifest.push(excluded('energy_guidance', 'Your Energy', 'energy system disabled', 'system'));
+    manifest.push(included('energy_guidance', 'Your Energy', buildEnergyDisabledFramework(), 'system'));
   }
 
   manifest.push(

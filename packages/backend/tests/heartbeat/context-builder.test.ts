@@ -510,16 +510,20 @@ describe('context-builder', () => {
       expect(prompt).toContain('energy colors your thinking');
     });
 
-    it('omits ENERGY_GUIDANCE when energySystemEnabled is false', () => {
+    it('uses steady-state energy framing when energySystemEnabled is false', () => {
       const persona = compilePersona(makePersonaConfig());
       const prompt = buildSystemPrompt(persona, { energySystemEnabled: false });
-      expect(prompt).not.toContain('YOUR ENERGY');
+      // Energy is pinned high and steady: the concept is present, but the
+      // fluctuating "energy level (0.0-1.0)" framing and delta instructions are not.
+      expect(prompt).toContain('YOUR ENERGY');
+      expect(prompt).toContain('steady and abundant');
+      expect(prompt).not.toContain('energy level (0.0-1.0)');
     });
 
-    it('omits ENERGY_GUIDANCE when options not provided', () => {
+    it('uses steady-state energy framing when options not provided', () => {
       const persona = compilePersona(makePersonaConfig());
       const prompt = buildSystemPrompt(persona);
-      expect(prompt).not.toContain('YOUR ENERGY');
+      expect(prompt).toContain('steady and abundant');
     });
   });
 

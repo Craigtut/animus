@@ -110,7 +110,7 @@ Note: `isInSleepHours` must handle ranges that cross midnight (e.g., 22:00–07:
 | `sleepEndHour` | integer (0–23) | 7 | When the morning ramp begins |
 | `sleepTickIntervalMs` | integer (ms) | 1,800,000 (30 min) | Heartbeat interval while in sleeping band |
 
-When `energySystemEnabled` is false, the heartbeat operates exactly as it does today — no energy tracking, no circadian curve, no sleep intervals, no energy prompting.
+When `energySystemEnabled` is false, the heartbeat drops all energy *dynamics*: no decay, no circadian curve, no sleep intervals, no `energyDelta` solicited in the reflect phase, and no per-tick energy state line. Energy is instead pinned high and steady. The mind still receives a short steady-state framing ("Your energy is steady and abundant... free of fatigue or the pull of sleep") so it reads as consistently capable rather than having the concept of energy removed entirely. `getEnergyState` returns a fixed `0.9` with `enabled: false`, and the Mind page hides its Energy tab.
 
 Setting `sleepStartHour` equal to `sleepEndHour` effectively disables sleep scheduling while keeping energy tracking active (the circadian baseline becomes a flat 0.85).
 
@@ -375,8 +375,10 @@ Exposed via existing `settings.getSystemSettings` / `settings.updateSystemSettin
 ## Error Handling & Edge Cases
 
 **Energy system disabled mid-session:**
-- Energy stops updating, prompting stops, interval reverts to normal
-- `energy_level` retains last value in DB (harmless, not read when disabled)
+- Energy dynamics stop (no decay, no `energyDelta`), interval reverts to normal
+- The mind switches to the steady-state framing; energy reads as a constant `0.9`
+- `energy_level` retains its last value in DB (harmless, not read when disabled)
+- The Mind page Energy tab disappears; existing `energy_history` rows are no longer surfaced
 
 **Sleep hours set to same start and end:**
 - Circadian baseline becomes flat 0.85 all day
