@@ -9,6 +9,8 @@ import {
   Gear,
   Star,
   ArrowsClockwise,
+  Target,
+  WarningCircle,
 } from '@phosphor-icons/react';
 import type { PhaseGroup, TickResults } from './types';
 import { Badge, formatDuration, formatCost, truncate } from './shared';
@@ -36,6 +38,65 @@ const PHASE_ICONS: Record<string, typeof Lightbulb> = {
   reflect: Eye,
   execute: ArrowsClockwise,
 };
+
+const GOAL_STRATEGY_DECISIONS = new Set([
+  'create_plan',
+  'revise_plan',
+  'create_plan_version',
+  'update_milestone',
+  'update_goal_snapshot',
+  'queue_goal_review',
+  'resolve_goal_review',
+]);
+
+const GOAL_DECISION_LABELS: Record<string, string> = {
+  create_plan: 'Create plan',
+  revise_plan: 'Revise plan',
+  create_plan_version: 'New plan version',
+  update_milestone: 'Update milestone',
+  update_goal_snapshot: 'Update snapshot',
+  queue_goal_review: 'Request review',
+  resolve_goal_review: 'Resolve review',
+};
+
+function isGoalStrategyDecision(type: string): boolean {
+  return GOAL_STRATEGY_DECISIONS.has(type);
+}
+
+function decisionParam(parameters: Record<string, unknown> | null, key: string): string | null {
+  const value = parameters?.[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function goalDecisionDetail(decision: TickResults['decisions'][number]): string | null {
+  switch (decision.type) {
+    case 'create_plan':
+    case 'revise_plan':
+    case 'create_plan_version':
+      return decisionParam(decision.parameters, 'reasonCreated')
+        ?? decisionParam(decision.parameters, 'revisionReason')
+        ?? decisionParam(decision.parameters, 'strategy');
+    case 'update_milestone': {
+      const status = decisionParam(decision.parameters, 'status');
+      const rationale = decisionParam(decision.parameters, 'completionRationale')
+        ?? decisionParam(decision.parameters, 'blockerNotes');
+      return [status ? `Status: ${status.replaceAll('_', ' ')}` : null, rationale].filter(Boolean).join(' · ') || null;
+    }
+    case 'update_goal_snapshot':
+      return decisionParam(decision.parameters, 'nextBestMove')
+        ?? decisionParam(decision.parameters, 'recentProgress')
+        ?? decisionParam(decision.parameters, 'summary');
+    case 'queue_goal_review': {
+      const scope = decisionParam(decision.parameters, 'scope');
+      const reason = decisionParam(decision.parameters, 'reason');
+      return [scope ? scope.replaceAll('_', ' ') : null, reason].filter(Boolean).join(' · ') || null;
+    }
+    case 'resolve_goal_review':
+      return decisionParam(decision.parameters, 'resolution');
+    default:
+      return null;
+  }
+}
 
 // ============================================================================
 // Token stats grid
@@ -385,17 +446,55 @@ function ReflectDetail({ phase, results }: { phase: PhaseGroup; results: TickRes
             const outcomeColor = d.outcome === 'executed' ? theme.colors.success.main
               : d.outcome === 'dropped' ? theme.colors.warning.main
               : theme.colors.error.main;
+            const isGoalDecision = isGoalStrategyDecision(d.type);
+            const detail = isGoalDecision ? goalDecisionDetail(d) : null;
             return (
               <div key={i} css={css`
-                display: flex;
-                align-items: baseline;
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr) auto;
+                align-items: flex-start;
                 gap: ${theme.spacing[2]};
-                flex-wrap: wrap;
+                padding: ${isGoalDecision ? `${theme.spacing[2]} ${theme.spacing[2]}` : 0};
+                border-radius: ${theme.borderRadius.sm};
+                background: ${isGoalDecision
+                  ? theme.mode === 'light' ? 'rgba(26, 24, 22, 0.025)' : 'rgba(250, 249, 244, 0.035)'
+                  : 'transparent'};
+
+                @media (max-width: 768px) {
+                  grid-template-columns: 1fr;
+                }
               `}>
-                <Badge label={d.type} color={outcomeColor} />
-                <span css={css`font-size: 13px; color: ${theme.colors.text.primary};`}>
-                  {d.description}
-                </span>
+                <Badge
+                  label={GOAL_DECISION_LABELS[d.type] ?? d.type}
+                  color={isGoalDecision ? theme.colors.warning.main : outcomeColor}
+                />
+                <div css={css`min-width: 0;`}>
+                  <div css={css`
+                    display: flex;
+                    align-items: baseline;
+                    gap: ${theme.spacing[1.5]};
+                  `}>
+                    {isGoalDecision && (
+                      d.type === 'queue_goal_review'
+                        ? <WarningCircle size={12} css={css`color: ${theme.colors.warning.main}; flex-shrink: 0;`} />
+                        : <Target size={12} css={css`color: ${theme.colors.warning.main}; flex-shrink: 0;`} />
+                    )}
+                    <span css={css`font-size: 13px; color: ${theme.colors.text.primary}; line-height: 1.45;`}>
+                      {d.description}
+                    </span>
+                  </div>
+                  {detail && (
+                    <span css={css`
+                      display: block;
+                      margin-top: ${theme.spacing[0.5]};
+                      font-size: 12px;
+                      color: ${theme.colors.text.hint};
+                      line-height: 1.45;
+                    `}>
+                      {detail}
+                    </span>
+                  )}
+                </div>
                 <span css={css`
                   font-family: ${theme.typography.fontFamily.mono};
                   font-size: 11px;
@@ -428,6 +527,10 @@ function ExecuteDetail({ phase, results }: { phase: PhaseGroup; results: TickRes
 
   const agentDecisions = (decisionsComplete?.data['agentDecisions'] as number) ?? 0;
   const pluginDecisions = (decisionsComplete?.data['pluginDecisions'] as number) ?? 0;
+  const decisionTypes = Array.isArray(decisionsComplete?.data['decisionTypes'])
+    ? decisionsComplete.data['decisionTypes'].filter((type): type is string => typeof type === 'string')
+    : [];
+  const goalStrategyTypes = decisionTypes.filter(isGoalStrategyDecision);
 
   const memoryCandidates = (memoryComplete?.data['candidateCount'] as number) ?? 0;
   const hadWorkingMemory = memoryComplete?.data['hadWorkingMemoryUpdate'] === true;
@@ -443,6 +546,12 @@ function ExecuteDetail({ phase, results }: { phase: PhaseGroup; results: TickRes
     if (agentDecisions > 0) parts.push(`${agentDecisions} agent`);
     if (pluginDecisions > 0) parts.push(`${pluginDecisions} plugin`);
     items.push(`${parts.join(', ')} decision(s) executed`);
+  }
+  if (goalStrategyTypes.length > 0) {
+    const labels = [...new Set(goalStrategyTypes)]
+      .map((type) => GOAL_DECISION_LABELS[type] ?? type)
+      .join(', ');
+    items.push(`Goal strategy: ${labels}`);
   }
   if (memoryCandidates > 0) items.push(`${memoryCandidates} memory candidate(s)`);
   if (hadWorkingMemory) items.push('Working memory updated');

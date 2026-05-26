@@ -37,6 +37,8 @@ export interface CreateTaskInput {
   nextRunAt?: string | undefined;
   goalId?: string | undefined;
   planId?: string | undefined;
+  milestoneId?: string | undefined;
+  milestoneIndex?: number | undefined;
   priority?: number | undefined;
   contactId?: string | undefined;
 }
@@ -47,6 +49,10 @@ export interface UpdateTaskInput {
   instructions?: string | null | undefined;
   status?: TaskStatus | undefined;
   priority?: number | undefined;
+  goalId?: string | null | undefined;
+  planId?: string | null | undefined;
+  milestoneId?: string | null | undefined;
+  milestoneIndex?: number | null | undefined;
   cronExpression?: string | null | undefined;
   scheduledAt?: string | null | undefined;
 }
@@ -55,6 +61,7 @@ export interface TaskFilters {
   status?: TaskStatus | undefined;
   scheduleType?: ScheduleType | undefined;
   goalId?: string | undefined;
+  milestoneId?: string | undefined;
 }
 
 // ============================================================================
@@ -73,6 +80,7 @@ class TaskService {
     if (filters.status !== undefined) storeFilters.status = filters.status;
     if (filters.scheduleType !== undefined) storeFilters.scheduleType = filters.scheduleType;
     if (filters.goalId !== undefined) storeFilters.goalId = filters.goalId;
+    if (filters.milestoneId !== undefined) storeFilters.milestoneId = filters.milestoneId;
     return taskStore.listTasks(db, storeFilters);
   }
 
@@ -138,6 +146,8 @@ class TaskService {
       ...(nextRunAt !== undefined && { nextRunAt }),
       ...(data.goalId !== undefined && { goalId: data.goalId }),
       ...(data.planId !== undefined && { planId: data.planId }),
+      ...(data.milestoneId !== undefined && { milestoneId: data.milestoneId }),
+      ...(data.milestoneIndex !== undefined && { milestoneIndex: data.milestoneIndex }),
       ...(data.priority !== undefined && { priority: data.priority }),
       ...(data.contactId !== undefined && { contactId: data.contactId }),
     };
@@ -173,6 +183,10 @@ class TaskService {
     if (rest.instructions !== undefined) updateData.instructions = rest.instructions;
     if (rest.status !== undefined) updateData.status = rest.status;
     if (rest.priority !== undefined) updateData.priority = rest.priority;
+    if (rest.goalId !== undefined) updateData.goalId = rest.goalId;
+    if (rest.planId !== undefined) updateData.planId = rest.planId;
+    if (rest.milestoneId !== undefined) updateData.milestoneId = rest.milestoneId;
+    if (rest.milestoneIndex !== undefined) updateData.milestoneIndex = rest.milestoneIndex;
     if (rest.cronExpression !== undefined) updateData.cronExpression = rest.cronExpression;
     if (rest.scheduledAt !== undefined) {
       updateData.scheduledAt = rest.scheduledAt;

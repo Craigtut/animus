@@ -32,6 +32,7 @@ export const tasksRouter = router({
             .enum(['one_shot', 'recurring', 'deferred'])
             .optional(),
           goalId: z.string().optional(),
+          milestoneId: z.string().optional(),
         })
         .optional()
     )
@@ -92,6 +93,8 @@ export const tasksRouter = router({
         nextRunAt: z.string().optional(),
         goalId: z.string().optional(),
         planId: z.string().optional(),
+        milestoneId: z.string().optional(),
+        milestoneIndex: z.number().int().nonnegative().optional(),
         priority: z.number().min(0).max(1).optional(),
         contactId: z.string().optional(),
       })
@@ -122,6 +125,10 @@ export const tasksRouter = router({
           ])
           .optional(),
         priority: z.number().min(0).max(1).optional(),
+        goalId: z.string().nullable().optional(),
+        planId: z.string().nullable().optional(),
+        milestoneId: z.string().nullable().optional(),
+        milestoneIndex: z.number().int().nonnegative().nullable().optional(),
         cronExpression: z.string().nullable().optional(),
         scheduledAt: z.string().nullable().optional(),
       })

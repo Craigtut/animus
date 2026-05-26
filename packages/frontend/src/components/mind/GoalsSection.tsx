@@ -18,6 +18,12 @@ import {
   SealCheck,
   ThumbsUp,
   ThumbsDown,
+  TreeStructure,
+  WarningCircle,
+  ClockCounterClockwise,
+  Notebook,
+  ListChecks,
+  Flag,
 } from '@phosphor-icons/react';
 import { trpc } from '../../utils/trpc';
 import { Card } from '../ui/Card';
@@ -26,6 +32,7 @@ import { Button } from '../ui/Button';
 import { Typography, Spinner } from '../ui';
 import { emotionColors } from '../../styles/theme';
 import type { Theme } from '../../styles/theme';
+import type { GoalEvent, GoalReviewRequest, GoalSnapshot, Milestone, Plan, Task } from '@animus-labs/shared';
 
 // ============================================================================
 // Constants
@@ -43,6 +50,46 @@ const ORIGIN_BADGE_VARIANT: Record<string, 'default' | 'success' | 'warning' | '
   user_directed: 'default',
   ai_internal: 'info',
   collaborative: 'warning',
+};
+
+const REVIEW_SCOPE_LABELS: Record<string, string> = {
+  plan_missing: 'Needs a plan',
+  milestone_acceptance: 'Milestone ready to judge',
+  plan_revision: 'Plan may need revision',
+  blocker: 'Blocked',
+  next_tasks: 'Needs next tasks',
+  user_alignment: 'Needs your alignment',
+  completion_check: 'May be complete',
+};
+
+const REVIEW_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'error' | 'info'> = {
+  low: 'default',
+  normal: 'warning',
+  high: 'error',
+};
+
+const EVENT_LABELS: Record<string, string> = {
+  'goal.created': 'Goal created',
+  'goal.activated': 'Goal activated',
+  'goal.paused': 'Goal paused',
+  'goal.resumed': 'Goal resumed',
+  'goal.completed': 'Goal completed',
+  'goal.abandoned': 'Goal abandoned',
+  'plan.created': 'Plan version created',
+  'plan.superseded': 'Plan superseded',
+  'milestone.started': 'Milestone started',
+  'milestone.updated': 'Milestone updated',
+  'milestone.completed': 'Milestone completed',
+  'milestone.blocked': 'Milestone blocked',
+  'task.created': 'Task created',
+  'task.started': 'Task started',
+  'task.completed': 'Task completed',
+  'task.cancelled': 'Task cancelled',
+  'task.skipped': 'Task skipped',
+  'task.failed': 'Task failed',
+  'review.requested': 'Review requested',
+  'review.resolved': 'Review resolved',
+  'snapshot.updated': 'Snapshot updated',
 };
 
 // ============================================================================
@@ -113,6 +160,534 @@ function cardStackStyles(theme: Theme) {
 // Shared expand/collapse animation props
 const collapseTransition = { duration: 0.25, ease: [0.25, 0.1, 0.25, 1] as const };
 
+function clamp01(value: number | null | undefined): number {
+  if (value == null || Number.isNaN(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function confidenceLabel(value: number | null | undefined): string {
+  const pct = Math.round(clamp01(value) * 100);
+  return `${pct}%`;
+}
+
+function milestoneProgress(milestones: Milestone[] | null | undefined): string | null {
+  if (!milestones || milestones.length === 0) return null;
+  const completed = milestones.filter((m) => m.status === 'completed' || m.status === 'skipped').length;
+  return `${completed}/${milestones.length} milestones`;
+}
+
+function currentMilestoneFrom(snapshot: GoalSnapshot | null | undefined, plan: Plan | null | undefined): Milestone | null {
+  const milestones = plan?.milestones ?? [];
+  if (snapshot?.currentMilestoneId) {
+    const byId = milestones.find((m) => m.id === snapshot.currentMilestoneId);
+    if (byId) return byId;
+  }
+  return milestones.find((m) => m.status === 'in_progress') ?? milestones.find((m) => m.status === 'pending') ?? null;
+}
+
+function isOpenTask(task: Task): boolean {
+  return task.status === 'pending' || task.status === 'scheduled' || task.status === 'in_progress' || task.status === 'paused';
+}
+
+function detailPanelStyles(theme: Theme) {
+  return css`
+    padding: ${theme.spacing[3]};
+    border-radius: ${theme.borderRadius.default};
+    background: ${theme.mode === 'light' ? 'rgba(26, 24, 22, 0.025)' : 'rgba(250, 249, 244, 0.035)'};
+    border: 1px solid ${theme.colors.border.light};
+  `;
+}
+
+function sectionLabelStyles(theme: Theme) {
+  return css`
+    display: flex;
+    align-items: center;
+    gap: ${theme.spacing[1.5]};
+    margin-bottom: ${theme.spacing[2]};
+    color: ${theme.colors.text.hint};
+    text-transform: uppercase;
+    letter-spacing: 0;
+    font-weight: ${theme.typography.fontWeight.medium};
+  `;
+}
+
+function ConfidenceMeter({ label, value }: { label: string; value: number | null | undefined }) {
+  const theme = useTheme();
+  const pct = clamp01(value) * 100;
+
+  return (
+    <div>
+      <div css={css`
+        display: flex;
+        justify-content: space-between;
+        gap: ${theme.spacing[2]};
+        margin-bottom: ${theme.spacing[1]};
+      `}>
+        <Typography.Tiny as="span" color="hint">
+          {label}
+        </Typography.Tiny>
+        <Typography.Tiny as="span" color="hint">
+          {confidenceLabel(value)}
+        </Typography.Tiny>
+      </div>
+      <div css={css`
+        height: 3px;
+        border-radius: 2px;
+        background: ${theme.colors.background.elevated};
+        overflow: hidden;
+      `}>
+        <motion.div
+          initial={false}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.4, ease: 'easeOut' }}
+          css={css`
+            height: 100%;
+            border-radius: 2px;
+            background: ${theme.colors.accent};
+            opacity: 0.55;
+          `}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SnapshotPanel({
+  snapshot,
+  currentMilestone,
+}: {
+  snapshot: GoalSnapshot | null | undefined;
+  currentMilestone: Milestone | null;
+}) {
+  const theme = useTheme();
+
+  if (!snapshot) {
+    return (
+      <div css={detailPanelStyles(theme)}>
+        <Typography.Caption color="hint">
+          Waiting for the first strategic snapshot.
+        </Typography.Caption>
+      </div>
+    );
+  }
+
+  return (
+    <div css={detailPanelStyles(theme)}>
+      <Typography.Caption css={sectionLabelStyles(theme)}>
+        <Flag size={13} />
+        Current state
+      </Typography.Caption>
+
+      <div css={css`
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(180px, 0.42fr);
+        gap: ${theme.spacing[4]};
+
+        @media (max-width: ${theme.breakpoints.md}) {
+          grid-template-columns: 1fr;
+        }
+      `}>
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+          {snapshot.summary && (
+            <Typography.SmallBody color="secondary" css={css`line-height: 1.6;`}>
+              {snapshot.summary}
+            </Typography.SmallBody>
+          )}
+
+          {currentMilestone && (
+            <div>
+              <Typography.Caption color="hint" css={css`display: block; margin-bottom: ${theme.spacing[1]};`}>
+                Current milestone
+              </Typography.Caption>
+              <div css={css`display: flex; align-items: center; gap: ${theme.spacing[2]};`}>
+                <MilestoneIcon status={currentMilestone.status} />
+                <Typography.SmallBody color="primary">
+                  {currentMilestone.title}
+                </Typography.SmallBody>
+              </div>
+            </div>
+          )}
+
+          {snapshot.recentProgress && (
+            <div>
+              <Typography.Caption color="hint" css={css`display: block; margin-bottom: ${theme.spacing[1]};`}>
+                Recent movement
+              </Typography.Caption>
+              <Typography.Caption color="secondary" css={css`line-height: 1.55;`}>
+                {snapshot.recentProgress}
+              </Typography.Caption>
+            </div>
+          )}
+
+          {snapshot.nextBestMove && (
+            <div>
+              <Typography.Caption color="hint" css={css`display: block; margin-bottom: ${theme.spacing[1]};`}>
+                Next move
+              </Typography.Caption>
+              <Typography.SmallBody serif italic color="secondary" css={css`line-height: 1.55;`}>
+                {snapshot.nextBestMove}
+              </Typography.SmallBody>
+            </div>
+          )}
+        </div>
+
+        <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+          <ConfidenceMeter label="Plan confidence" value={snapshot.planConfidence} />
+          <ConfidenceMeter label="Completion confidence" value={snapshot.completionConfidence} />
+
+          {snapshot.knownBlockers.length > 0 && (
+            <div>
+              <Typography.Caption color="hint" css={css`display: block; margin-bottom: ${theme.spacing[1]};`}>
+                Blockers
+              </Typography.Caption>
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+                {snapshot.knownBlockers.map((blocker, index) => (
+                  <Typography.Caption key={`${blocker}-${index}`} color="secondary" css={css`line-height: 1.45;`}>
+                    {blocker}
+                  </Typography.Caption>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {snapshot.openQuestions.length > 0 && (
+            <div>
+              <Typography.Caption color="hint" css={css`display: block; margin-bottom: ${theme.spacing[1]};`}>
+                Open questions
+              </Typography.Caption>
+              <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1]};`}>
+                {snapshot.openQuestions.map((question, index) => (
+                  <Typography.Caption key={`${question}-${index}`} color="secondary" css={css`line-height: 1.45;`}>
+                    {question}
+                  </Typography.Caption>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Typography.Tiny color="disabled">
+            Updated {formatRelativeTime(snapshot.updatedAt)}
+          </Typography.Tiny>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReviewCueList({ reviews }: { reviews: GoalReviewRequest[] | undefined }) {
+  const theme = useTheme();
+  if (!reviews || reviews.length === 0) return null;
+
+  return (
+    <div css={detailPanelStyles(theme)}>
+      <Typography.Caption css={sectionLabelStyles(theme)}>
+        <WarningCircle size={13} />
+        Needs judgment
+      </Typography.Caption>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+        {reviews.map((review) => (
+          <div key={review.id} css={css`
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: baseline;
+            gap: ${theme.spacing[2]};
+            padding: ${theme.spacing[2]} 0;
+            border-bottom: 1px solid ${theme.colors.border.light};
+
+            &:last-of-type {
+              border-bottom: none;
+            }
+
+            @media (max-width: ${theme.breakpoints.md}) {
+              grid-template-columns: 1fr;
+            }
+          `}>
+            <Badge variant={REVIEW_VARIANT[review.urgency] ?? 'warning'}>
+              {REVIEW_SCOPE_LABELS[review.scope] ?? review.scope}
+            </Badge>
+            <Typography.Caption color="secondary" css={css`line-height: 1.5;`}>
+              {review.reason}
+            </Typography.Caption>
+            <Typography.Tiny color="disabled">
+              {formatRelativeTime(review.createdAt)}
+            </Typography.Tiny>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CompactMilestoneRail({ milestones, currentMilestoneId }: { milestones: Milestone[]; currentMilestoneId?: string | null }) {
+  const theme = useTheme();
+
+  if (milestones.length === 0) return null;
+
+  return (
+    <div css={css`
+      display: flex;
+      align-items: center;
+      gap: ${theme.spacing[1]};
+      margin-top: ${theme.spacing[3]};
+    `}>
+      {milestones.map((milestone) => {
+        const isCurrent = milestone.id === currentMilestoneId || milestone.status === 'in_progress';
+        const color = milestone.status === 'completed'
+          ? theme.colors.success.main
+          : milestone.status === 'blocked'
+            ? theme.colors.error.main
+            : milestone.status === 'skipped'
+              ? theme.colors.text.disabled
+              : isCurrent
+                ? theme.colors.accent
+                : theme.colors.border.default;
+        return (
+          <span
+            key={milestone.id}
+            title={`${milestone.title} (${milestone.status.replaceAll('_', ' ')})`}
+            css={css`
+              height: 5px;
+              flex: 1;
+              min-width: 16px;
+              border-radius: 999px;
+              background: ${color};
+              opacity: ${milestone.status === 'pending' ? 0.5 : 0.75};
+            `}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function MilestoneList({
+  milestones,
+  currentMilestoneId,
+  tasks,
+}: {
+  milestones: Milestone[];
+  currentMilestoneId?: string | null;
+  tasks?: Task[] | undefined;
+}) {
+  const theme = useTheme();
+
+  if (milestones.length === 0) return null;
+
+  return (
+    <div css={detailPanelStyles(theme)}>
+      <Typography.Caption css={sectionLabelStyles(theme)}>
+        <TreeStructure size={13} />
+        Milestones
+      </Typography.Caption>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
+        {milestones.map((milestone) => {
+          const openTasks = (tasks ?? []).filter((task) => (
+            task.milestoneId === milestone.id && isOpenTask(task)
+          ));
+          const isCurrent = milestone.id === currentMilestoneId || milestone.status === 'in_progress';
+
+          return (
+            <div key={milestone.id} css={css`
+              display: grid;
+              grid-template-columns: 18px minmax(0, 1fr) auto;
+              gap: ${theme.spacing[2]};
+              align-items: flex-start;
+              padding: ${theme.spacing[2]} 0;
+              border-bottom: 1px solid ${theme.colors.border.light};
+
+              &:last-of-type {
+                border-bottom: none;
+              }
+            `}>
+              <div css={css`padding-top: 2px;`}>
+                <MilestoneIcon status={milestone.status} />
+              </div>
+              <div css={css`min-width: 0;`}>
+                <div css={css`
+                  display: flex;
+                  align-items: center;
+                  gap: ${theme.spacing[2]};
+                  flex-wrap: wrap;
+                  margin-bottom: ${theme.spacing[1]};
+                `}>
+                  <Typography.SmallBody as="span" color={milestone.status === 'completed' ? 'hint' : 'primary'} css={css`
+                    font-weight: ${isCurrent ? theme.typography.fontWeight.semibold : theme.typography.fontWeight.normal};
+                    ${milestone.status === 'completed' ? 'text-decoration: line-through;' : ''}
+                  `}>
+                    {milestone.title}
+                  </Typography.SmallBody>
+                  {isCurrent && (
+                    <Badge variant="info">current</Badge>
+                  )}
+                  {openTasks.length > 0 && (
+                    <Typography.Tiny color="hint">
+                      {openTasks.length} open task{openTasks.length === 1 ? '' : 's'}
+                    </Typography.Tiny>
+                  )}
+                </div>
+
+                {milestone.description && (
+                  <Typography.Caption color="secondary" css={css`display: block; line-height: 1.5;`}>
+                    {milestone.description}
+                  </Typography.Caption>
+                )}
+                {milestone.acceptanceCriteria && (
+                  <Typography.Caption color="hint" css={css`display: block; line-height: 1.5; margin-top: ${theme.spacing[1]};`}>
+                    Acceptance: {milestone.acceptanceCriteria}
+                  </Typography.Caption>
+                )}
+                {milestone.blockerNotes && (
+                  <Typography.Caption css={css`
+                    display: block;
+                    line-height: 1.5;
+                    margin-top: ${theme.spacing[1]};
+                    color: ${theme.colors.error.main};
+                  `}>
+                    {milestone.blockerNotes}
+                  </Typography.Caption>
+                )}
+                {milestone.completionRationale && (
+                  <Typography.Caption color="hint" css={css`display: block; line-height: 1.5; margin-top: ${theme.spacing[1]};`}>
+                    {milestone.completionRationale}
+                  </Typography.Caption>
+                )}
+              </div>
+              <Typography.Tiny color="disabled" css={css`white-space: nowrap; padding-top: 2px;`}>
+                {confidenceLabel(milestone.confidence)}
+              </Typography.Tiny>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CurrentTaskList({
+  tasks,
+  currentMilestoneId,
+}: {
+  tasks?: Task[] | undefined;
+  currentMilestoneId?: string | null;
+}) {
+  const theme = useTheme();
+  const openTasks = (tasks ?? []).filter((task) => (
+    isOpenTask(task) && (!currentMilestoneId || task.milestoneId === currentMilestoneId)
+  ));
+
+  if (openTasks.length === 0) return null;
+
+  return (
+    <div css={detailPanelStyles(theme)}>
+      <Typography.Caption css={sectionLabelStyles(theme)}>
+        <ListChecks size={13} />
+        Open tasks
+      </Typography.Caption>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[1.5]};`}>
+        {openTasks.slice(0, 6).map((task) => (
+          <div key={task.id} css={css`
+            display: flex;
+            align-items: center;
+            gap: ${theme.spacing[2]};
+          `}>
+            <Badge variant={task.status === 'in_progress' ? 'warning' : 'default'}>
+              {task.status === 'in_progress' ? 'active' : task.status}
+            </Badge>
+            <Typography.Caption color="secondary" css={css`
+              flex: 1;
+              min-width: 0;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+            `}>
+              {task.title}
+            </Typography.Caption>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PlanHistory({ plans, activePlanId }: { plans: Plan[] | undefined; activePlanId?: string | null }) {
+  const theme = useTheme();
+  if (!plans || plans.length <= 1) return null;
+
+  const sorted = [...plans].sort((a, b) => b.version - a.version);
+
+  return (
+    <div css={detailPanelStyles(theme)}>
+      <Typography.Caption css={sectionLabelStyles(theme)}>
+        <ClockCounterClockwise size={13} />
+        Plan history
+      </Typography.Caption>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+        {sorted.map((plan) => (
+          <div key={plan.id} css={css`
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            gap: ${theme.spacing[2]};
+            align-items: baseline;
+          `}>
+            <Badge variant={plan.id === activePlanId ? 'info' : 'default'}>
+              v{plan.version}
+            </Badge>
+            <Typography.Caption color="secondary" css={css`
+              min-width: 0;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+            `}>
+              {plan.reasonCreated || plan.revisionReason || plan.strategy}
+            </Typography.Caption>
+            <Typography.Tiny color="disabled">
+              {plan.status}
+            </Typography.Tiny>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GoalEventTimeline({ events }: { events: GoalEvent[] | undefined }) {
+  const theme = useTheme();
+  if (!events || events.length === 0) return null;
+
+  return (
+    <div css={detailPanelStyles(theme)}>
+      <Typography.Caption css={sectionLabelStyles(theme)}>
+        <Notebook size={13} />
+        Recent movement
+      </Typography.Caption>
+      <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[2]};`}>
+        {events.slice(0, 8).map((event) => (
+          <div key={event.id} css={css`
+            display: grid;
+            grid-template-columns: minmax(120px, 0.28fr) minmax(0, 1fr) auto;
+            gap: ${theme.spacing[2]};
+            align-items: baseline;
+
+            @media (max-width: ${theme.breakpoints.md}) {
+              grid-template-columns: 1fr;
+            }
+          `}>
+            <Typography.Caption color="hint">
+              {EVENT_LABELS[event.type] ?? event.type}
+            </Typography.Caption>
+            <Typography.Caption color="secondary" css={css`line-height: 1.45;`}>
+              {event.summary}
+            </Typography.Caption>
+            <Typography.Tiny color="disabled">
+              {formatRelativeTime(event.createdAt)}
+            </Typography.Tiny>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ============================================================================
 // Section 1: Active Goals
 // ============================================================================
@@ -126,6 +701,26 @@ function ActiveGoalCard({ goal }: ActiveGoalCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   const { data: plan, isLoading: planLoading } = trpc.goals.getActivePlan.useQuery(
+    { goalId: goal.id },
+    { retry: false },
+  );
+  const { data: snapshot } = trpc.goals.getGoalSnapshot.useQuery(
+    { goalId: goal.id },
+    { retry: false },
+  );
+  const { data: reviewRequests } = trpc.goals.getPendingReviewRequests.useQuery(
+    { goalId: goal.id },
+    { retry: false },
+  );
+  const { data: events } = trpc.goals.getRecentEvents.useQuery(
+    { goalId: goal.id, limit: 12 },
+    { retry: false, enabled: expanded },
+  );
+  const { data: plans } = trpc.goals.getPlansByGoal.useQuery(
+    { goalId: goal.id },
+    { retry: false, enabled: expanded },
+  );
+  const { data: goalTasks } = trpc.tasks.getTasks.useQuery(
     { goalId: goal.id },
     { retry: false, enabled: expanded },
   );
@@ -144,6 +739,11 @@ function ActiveGoalCard({ goal }: ActiveGoalCardProps) {
       ? plan.strategy.slice(0, 120).trimEnd() + '...'
       : plan.strategy
     : null;
+  const milestones = plan?.milestones ?? [];
+  const currentMilestone = currentMilestoneFrom(snapshot, plan);
+  const progress = milestoneProgress(milestones);
+  const pendingReviewCount = reviewRequests?.length ?? 0;
+  const nextLine = snapshot?.nextBestMove ?? currentMilestone?.title ?? planSummary;
 
   return (
     <motion.div layout="position" layoutId={`goal-${goal.id}`}>
@@ -180,6 +780,16 @@ function ActiveGoalCard({ goal }: ActiveGoalCardProps) {
                   {ORIGIN_LABELS[goal.origin] ?? goal.origin}
                 </Badge>
               )}
+              {pendingReviewCount > 0 && (
+                <Badge variant={reviewRequests?.some((r) => r.urgency === 'high') ? 'error' : 'warning'}>
+                  {pendingReviewCount} needs review
+                </Badge>
+              )}
+              {plan && (
+                <Typography.Caption color="hint">
+                  Plan v{plan.version}{progress ? ` · ${progress}` : ''}
+                </Typography.Caption>
+              )}
               {goal.linkedEmotion && (
                 <span css={css`
                   display: inline-flex;
@@ -198,14 +808,14 @@ function ActiveGoalCard({ goal }: ActiveGoalCardProps) {
                   {goal.linkedEmotion}
                 </span>
               )}
-              {!expanded && planSummary && (
+              {!expanded && nextLine && (
                 <Typography.Caption color="hint" css={css`
                   display: -webkit-box;
                   -webkit-line-clamp: 1;
                   -webkit-box-orient: vertical;
                   overflow: hidden;
                 `}>
-                  {planSummary}
+                  Next: {nextLine}
                 </Typography.Caption>
               )}
             </div>
@@ -300,6 +910,13 @@ function ActiveGoalCard({ goal }: ActiveGoalCardProps) {
           </div>
         )}
 
+        {milestones.length > 0 && (
+          <CompactMilestoneRail
+            milestones={milestones}
+            currentMilestoneId={snapshot?.currentMilestoneId}
+          />
+        )}
+
         {/* Expanded detail */}
         <AnimatePresence initial={false}>
           {expanded && (
@@ -333,69 +950,81 @@ function ActiveGoalCard({ goal }: ActiveGoalCardProps) {
                   </Typography.SmallBody>
                 )}
 
-                {/* Plan details */}
-                {planLoading ? (
-                  <div css={css`
-                    display: flex;
-                    align-items: center;
-                    gap: ${theme.spacing[2]};
-                    padding: ${theme.spacing[2]} 0;
-                  `}>
-                    <Spinner size={14} />
-                    <Typography.Caption color="hint">Loading plan...</Typography.Caption>
-                  </div>
-                ) : plan ? (
-                  <div css={css`margin-bottom: ${theme.spacing[3]};`}>
-                    <Typography.Caption color="hint" css={css`
-                      display: block;
-                      margin-bottom: ${theme.spacing[2]};
-                      text-transform: uppercase;
-                      letter-spacing: 0.05em;
-                    `}>
-                      Plan v{plan.version} &middot; Strategy
-                    </Typography.Caption>
-                    <Typography.SmallBody color="secondary" css={css`
-                      margin-bottom: ${theme.spacing[3]};
-                    `}>
-                      {plan.strategy}
-                    </Typography.SmallBody>
+                <div css={css`
+                  display: flex;
+                  flex-direction: column;
+                  gap: ${theme.spacing[3]};
+                  margin-bottom: ${theme.spacing[3]};
+                `}>
+                  <ReviewCueList reviews={reviewRequests} />
+                  <SnapshotPanel snapshot={snapshot} currentMilestone={currentMilestone} />
 
-                    {/* Milestones */}
-                    {plan.milestones && plan.milestones.length > 0 && (
-                      <div css={css`
-                        display: flex;
-                        flex-direction: column;
-                        gap: ${theme.spacing[2]};
+                  {/* Plan details */}
+                  {planLoading ? (
+                    <div css={css`
+                      display: flex;
+                      align-items: center;
+                      gap: ${theme.spacing[2]};
+                      padding: ${theme.spacing[2]} 0;
+                    `}>
+                      <Spinner size={14} />
+                      <Typography.Caption color="hint">Loading plan...</Typography.Caption>
+                    </div>
+                  ) : plan ? (
+                    <div css={detailPanelStyles(theme)}>
+                      <Typography.Caption css={sectionLabelStyles(theme)}>
+                        <TreeStructure size={13} />
+                        Plan v{plan.version}
+                      </Typography.Caption>
+                      <Typography.SmallBody color="secondary" css={css`
+                        line-height: 1.6;
                       `}>
+                        {plan.strategy}
+                      </Typography.SmallBody>
+                      {(plan.reasonCreated || plan.revisionReason) && (
                         <Typography.Caption color="hint" css={css`
-                          text-transform: uppercase;
-                          letter-spacing: 0.05em;
+                          display: block;
+                          margin-top: ${theme.spacing[2]};
+                          line-height: 1.5;
                         `}>
-                          Milestones
+                          {plan.reasonCreated || plan.revisionReason}
                         </Typography.Caption>
-                        {plan.milestones.map((ms, i) => (
-                          <div key={i} css={css`
-                            display: flex;
-                            align-items: center;
-                            gap: ${theme.spacing[2]};
-                          `}>
-                            <MilestoneIcon status={ms.status} />
-                            <Typography.SmallBody as="span" css={css`
-                              color: ${ms.status === 'completed'
-                                ? theme.colors.text.hint
-                                : ms.status === 'skipped'
-                                  ? theme.colors.text.disabled
-                                  : theme.colors.text.primary};
-                              ${ms.status === 'completed' ? 'text-decoration: line-through;' : ''}
-                            `}>
-                              {ms.title}
-                            </Typography.SmallBody>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
+                      )}
+                      {plan.assumptions.length > 0 && (
+                        <div css={css`
+                          display: flex;
+                          flex-wrap: wrap;
+                          gap: ${theme.spacing[1]};
+                          margin-top: ${theme.spacing[3]};
+                        `}>
+                          {plan.assumptions.map((assumption, index) => (
+                            <Badge key={`${assumption}-${index}`} variant="default">
+                              {assumption}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div css={detailPanelStyles(theme)}>
+                      <Typography.Caption color="hint">
+                        No plan version yet.
+                      </Typography.Caption>
+                    </div>
+                  )}
+
+                  <MilestoneList
+                    milestones={milestones}
+                    currentMilestoneId={snapshot?.currentMilestoneId}
+                    tasks={goalTasks}
+                  />
+                  <CurrentTaskList
+                    tasks={goalTasks}
+                    currentMilestoneId={currentMilestone?.id}
+                  />
+                  <PlanHistory plans={plans} activePlanId={plan?.id} />
+                  <GoalEventTimeline events={events} />
+                </div>
 
                 {/* Timestamps */}
                 <div css={css`
@@ -475,6 +1104,9 @@ function MilestoneIcon({ status }: { status: string }) {
   }
   if (status === 'skipped') {
     return <Prohibit size={14} css={css`color: ${theme.colors.text.disabled}; flex-shrink: 0;`} />;
+  }
+  if (status === 'blocked') {
+    return <WarningCircle size={14} weight="fill" css={css`color: ${theme.colors.error.main}; flex-shrink: 0;`} />;
   }
   // pending
   return (

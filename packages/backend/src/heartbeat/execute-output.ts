@@ -441,6 +441,8 @@ export async function executeOutput(
     pluginDecisions: output.decisions.filter(d => !builtInDecisionTypeSchema.safeParse(d.type).success).length,
     goalTaskDecisions: output.decisions.filter(d => [
       'create_seed', 'propose_goal', 'update_goal', 'create_plan', 'revise_plan',
+      'create_plan_version', 'update_milestone', 'update_goal_snapshot',
+      'queue_goal_review', 'resolve_goal_review',
       'schedule_task', 'start_task', 'complete_task', 'cancel_task', 'skip_task',
     ].includes(d.type)).length,
     totalDecisions: output.decisions.length,

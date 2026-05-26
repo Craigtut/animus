@@ -145,6 +145,46 @@ export function useSubscriptionManager() {
     },
   });
 
+  trpc.goals.onPlanChange.useSubscription(undefined, {
+    onData: () => {
+      queryClient.invalidateQueries({ queryKey: [['goals']] });
+      queryClient.invalidateQueries({ queryKey: [['tasks']] });
+    },
+  });
+
+  trpc.goals.onMilestoneChange.useSubscription(undefined, {
+    onData: () => {
+      queryClient.invalidateQueries({ queryKey: [['goals']] });
+      queryClient.invalidateQueries({ queryKey: [['tasks']] });
+    },
+  });
+
+  trpc.goals.onSnapshotChange.useSubscription(undefined, {
+    onData: () => {
+      queryClient.invalidateQueries({ queryKey: [['goals']] });
+    },
+  });
+
+  trpc.goals.onReviewChange.useSubscription(undefined, {
+    onData: () => {
+      queryClient.invalidateQueries({ queryKey: [['goals']] });
+    },
+  });
+
+  trpc.tasks.onTaskChange.useSubscription(undefined, {
+    onData: () => {
+      queryClient.invalidateQueries({ queryKey: [['tasks']] });
+      queryClient.invalidateQueries({ queryKey: [['goals']] });
+    },
+  });
+
+  trpc.tasks.onTaskDeleted.useSubscription(undefined, {
+    onData: () => {
+      queryClient.invalidateQueries({ queryKey: [['tasks']] });
+      queryClient.invalidateQueries({ queryKey: [['goals']] });
+    },
+  });
+
   // ========================================================================
   // 11. Memory changes
   // ========================================================================

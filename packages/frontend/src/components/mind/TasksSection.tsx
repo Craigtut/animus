@@ -19,6 +19,8 @@ import {
   Notebook,
   PencilSimple,
   Trash,
+  Target,
+  TreeStructure,
   type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
 import type { TaskJournal } from '@animus-labs/shared';
@@ -148,11 +150,126 @@ interface TaskItem {
   scheduledAt?: string | null;
   nextRunAt?: string | null;
   goalId?: string | null;
+  planId?: string | null;
+  milestoneId?: string | null;
+  milestoneIndex?: number | null;
   lastError?: string | null;
   startedAt?: string | null;
   completedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+interface LinkedGoal {
+  id: string;
+  title: string;
+  status: string;
+}
+
+interface LinkedMilestone {
+  id: string;
+  title: string;
+  status: string;
+  position: number;
+}
+
+interface LinkedPlan {
+  id: string;
+  version: number;
+  status: string;
+  milestones?: LinkedMilestone[] | null;
+}
+
+function GoalLineageBlock({
+  goal,
+  plan,
+  milestone,
+  task,
+}: {
+  goal: LinkedGoal | null | undefined;
+  plan: LinkedPlan | null | undefined;
+  milestone: LinkedMilestone | null | undefined;
+  task: TaskItem;
+}) {
+  const theme = useTheme();
+
+  if (!task.goalId) return null;
+
+  return (
+    <div css={css`
+      display: flex;
+      flex-direction: column;
+      gap: ${theme.spacing[2]};
+      padding: ${theme.spacing[3]};
+      border-radius: ${theme.borderRadius.default};
+      background: ${theme.mode === 'light' ? 'rgba(26, 24, 22, 0.025)' : 'rgba(250, 249, 244, 0.035)'};
+      border: 1px solid ${theme.colors.border.light};
+    `}>
+      <div css={css`
+        display: flex;
+        align-items: center;
+        gap: ${theme.spacing[1.5]};
+      `}>
+        <Target size={13} css={css`color: ${theme.colors.text.hint}; flex-shrink: 0;`} />
+        <Typography.Caption color="hint" css={css`
+          text-transform: uppercase;
+          letter-spacing: 0;
+          font-weight: ${theme.typography.fontWeight.medium};
+        `}>
+          Goal path
+        </Typography.Caption>
+      </div>
+
+      <div css={css`
+        display: flex;
+        align-items: center;
+        gap: ${theme.spacing[2]};
+        flex-wrap: wrap;
+      `}>
+        <Typography.SmallBody color="secondary">
+          {goal?.title ?? 'Linked goal'}
+        </Typography.SmallBody>
+        {goal?.status && (
+          <Badge variant="default">{goal.status}</Badge>
+        )}
+      </div>
+
+      {(plan || milestone || task.planId || task.milestoneId || task.milestoneIndex != null) && (
+        <div css={css`
+          display: flex;
+          align-items: center;
+          gap: ${theme.spacing[2]};
+          flex-wrap: wrap;
+        `}>
+          <TreeStructure size={13} css={css`color: ${theme.colors.text.disabled}; flex-shrink: 0;`} />
+          {plan ? (
+            <Typography.Caption color="hint">Plan v{plan.version}</Typography.Caption>
+          ) : task.planId ? (
+            <Typography.Caption color="hint">Plan linked</Typography.Caption>
+          ) : null}
+          {milestone ? (
+            <>
+              <Typography.Caption color="disabled">/</Typography.Caption>
+              <Typography.Caption color="secondary">{milestone.title}</Typography.Caption>
+              <Badge variant={milestone.status === 'blocked' ? 'error' : milestone.status === 'completed' ? 'success' : 'default'}>
+                {milestone.status.replaceAll('_', ' ')}
+              </Badge>
+            </>
+          ) : task.milestoneIndex != null ? (
+            <>
+              <Typography.Caption color="disabled">/</Typography.Caption>
+              <Typography.Caption color="hint">Milestone {task.milestoneIndex + 1}</Typography.Caption>
+            </>
+          ) : task.milestoneId ? (
+            <>
+              <Typography.Caption color="disabled">/</Typography.Caption>
+              <Typography.Caption color="hint">Milestone linked</Typography.Caption>
+            </>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface EditTaskModalProps {
@@ -522,6 +639,14 @@ function TaskCard({ task }: { task: TaskItem }) {
     { taskId: task.id },
     { retry: false, enabled: expanded },
   );
+  const { data: linkedGoal } = trpc.goals.getGoal.useQuery(
+    { goalId: task.goalId ?? '' },
+    { retry: false, enabled: Boolean(task.goalId) },
+  );
+  const { data: linkedPlans } = trpc.goals.getPlansByGoal.useQuery(
+    { goalId: task.goalId ?? '' },
+    { retry: false, enabled: Boolean(expanded && task.goalId && (task.planId || task.milestoneId || task.milestoneIndex != null)) },
+  );
 
   const deleteMutation = trpc.tasks.deleteTask.useMutation({
     onSuccess: () => {
@@ -555,6 +680,28 @@ function TaskCard({ task }: { task: TaskItem }) {
     if (task.scheduleType !== 'recurring' || !task.nextRunAt) return null;
     return formatScheduleTime(task.nextRunAt);
   }, [task.scheduleType, task.nextRunAt]);
+
+  const linkedPlan = useMemo(() => {
+    if (!linkedPlans || linkedPlans.length === 0) return null;
+    if (task.planId) {
+      const explicit = linkedPlans.find((p) => p.id === task.planId);
+      if (explicit) return explicit as LinkedPlan;
+    }
+    return (linkedPlans.find((p) => p.status === 'active') ?? linkedPlans[0] ?? null) as LinkedPlan | null;
+  }, [linkedPlans, task.planId]);
+
+  const linkedMilestone = useMemo(() => {
+    const milestones = linkedPlan?.milestones ?? [];
+    if (task.milestoneId) {
+      const byId = milestones.find((m) => m.id === task.milestoneId);
+      if (byId) return byId;
+    }
+    if (task.milestoneIndex != null) {
+      const byPosition = milestones.find((m) => m.position === task.milestoneIndex);
+      if (byPosition) return byPosition;
+    }
+    return null;
+  }, [linkedPlan, task.milestoneId, task.milestoneIndex]);
 
   // Priority drives the accent bar opacity (0.1 at 0, 0.8 at 1)
   const priority = (task.priority as number) ?? 0.5;
@@ -653,6 +800,29 @@ function TaskCard({ task }: { task: TaskItem }) {
           </div>
         )}
 
+        {task.goalId && (
+          <div css={css`
+            display: flex;
+            align-items: center;
+            gap: ${theme.spacing[1.5]};
+            margin-top: ${theme.spacing[1]};
+            min-width: 0;
+          `}>
+            <Target size={11} css={css`
+              color: ${theme.colors.text.disabled};
+              flex-shrink: 0;
+            `} />
+            <Typography.Caption color="hint" css={css`
+              font-size: 0.7rem;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+            `}>
+              {linkedGoal?.title ?? 'Linked goal'}
+            </Typography.Caption>
+          </div>
+        )}
+
         {/* Expanded detail panel */}
         <AnimatePresence>
           {expanded && (
@@ -683,12 +853,12 @@ function TaskCard({ task }: { task: TaskItem }) {
                   </Typography.SmallBody>
                 )}
 
-                {/* Goal linkage */}
-                {task.goalId && (
-                  <Typography.Caption color="hint">
-                    Linked to goal
-                  </Typography.Caption>
-                )}
+                <GoalLineageBlock
+                  goal={linkedGoal as LinkedGoal | null | undefined}
+                  plan={linkedPlan}
+                  milestone={linkedMilestone}
+                  task={task}
+                />
 
                 {/* Last error */}
                 {task.lastError && (
@@ -956,7 +1126,7 @@ export function TasksSection() {
           max-width: 360px;
           margin: 0 auto;
         `}>
-          No tasks yet. Tasks are created by the mind to organize and schedule work.
+          No tasks yet. Tasks appear when the mind gives a piece of work a place to return to.
         </Typography.Body>
       </div>
     );
