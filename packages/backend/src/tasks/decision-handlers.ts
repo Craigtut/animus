@@ -9,6 +9,7 @@
 
 import { registerDecisionHandler, type DecisionHandlerContext } from '../heartbeat/decision-registry.js';
 import * as taskStore from '../db/stores/task-store.js';
+import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import { now } from '@animus-labs/shared';
 import type { ScheduleType } from '@animus-labs/shared';
 import { createLogger } from '../lib/logger.js';
@@ -24,6 +25,7 @@ function resolveTaskIdOrThrow(taskId: string, decisionType: string, ctx: Decisio
   }
   return resolved;
 }
+
 
 // schedule_task
 registerDecisionHandler('schedule_task', async (params, decision, ctx) => {
@@ -46,6 +48,24 @@ registerDecisionHandler('schedule_task', async (params, decision, ctx) => {
     }
   }
 
+  const explicitPlanId = params['planId'] ? String(params['planId']) : undefined;
+  let milestoneId = params['milestoneId'] ? String(params['milestoneId']) : undefined;
+  let milestoneIndex = typeof params['milestoneIndex'] === 'number' ? params['milestoneIndex'] : undefined;
+
+  if (!milestoneId && explicitPlanId && milestoneIndex !== undefined) {
+    const milestone = heartbeatStore.getMilestoneByPlanPosition(ctx.hbDb, explicitPlanId, milestoneIndex);
+    if (milestone) {
+      milestoneId = milestone.id;
+    }
+  }
+
+  if (milestoneId && milestoneIndex === undefined) {
+    const milestone = heartbeatStore.getMilestone(ctx.hbDb, milestoneId);
+    if (milestone) {
+      milestoneIndex = milestone.position;
+    }
+  }
+
   const task = taskStore.createTask(ctx.hbDb, {
     title: String(params['title'] ?? decision.description),
     ...(params['description'] ? { description: String(params['description']) } : {}),
@@ -55,13 +75,16 @@ registerDecisionHandler('schedule_task', async (params, decision, ctx) => {
     ...(scheduledAt ? { scheduledAt } : {}),
     ...(nextRunAt ? { nextRunAt } : {}),
     ...(params['goalId'] ? { goalId: String(params['goalId']) } : {}),
-    ...(params['planId'] ? { planId: String(params['planId']) } : {}),
+    ...(explicitPlanId ? { planId: explicitPlanId } : {}),
+    ...(milestoneId ? { milestoneId } : {}),
+    ...(milestoneIndex !== undefined ? { milestoneIndex } : {}),
     ...(typeof params['priority'] === 'number' ? { priority: params['priority'] } : {}),
     createdBy: 'mind',
     ...(params['contactId'] ? { contactId: String(params['contactId']) } : {}),
     status: 'scheduled',
   });
   ctx.eventBus.emit('task:created', task);
+  ctx.goalManager?.recordTaskCreated(task);
 
   // Register with scheduler if it's a timed task
   if (scheduleType !== 'deferred') {
@@ -83,23 +106,39 @@ registerDecisionHandler('start_task', async (params, _decision, ctx) => {
   const journal = taskStore.updateTaskJournalStatus(ctx.hbDb, taskId, 'in_progress', ctx.tickNumber);
   if (journal) ctx.eventBus.emit('task:journal_updated', journal);
   const updated = taskStore.getTask(ctx.hbDb, taskId);
-  if (updated) ctx.eventBus.emit('task:updated', updated);
+  if (updated) {
+    ctx.eventBus.emit('task:updated', updated);
+    ctx.goalManager?.recordTaskStarted(updated);
+  }
 });
 
 // complete_task
 registerDecisionHandler('complete_task', async (params, _decision, ctx) => {
   const taskId = resolveTaskIdOrThrow(String(params['taskId'] ?? ''), 'complete_task', ctx);
+  const before = taskStore.getTask(ctx.hbDb, taskId);
   const result = params['result'] ? String(params['result']) : undefined;
   ctx.taskRunner.completeTask(taskId, result);
   const journal = taskStore.updateTaskJournalStatus(ctx.hbDb, taskId, 'complete', ctx.tickNumber);
   if (journal) ctx.eventBus.emit('task:journal_updated', journal);
   const updated = taskStore.getTask(ctx.hbDb, taskId);
   if (updated) ctx.eventBus.emit('task:updated', updated);
+  const taskForGoalEvent = before ?? updated;
+  if (taskForGoalEvent) {
+    ctx.goalManager?.recordTaskCompleted(taskForGoalEvent, result ?? null, {
+      remainingOpenTasksForGoal: taskForGoalEvent.goalId
+        ? taskStore.countOpenTasksByGoal(ctx.hbDb, taskForGoalEvent.goalId)
+        : 0,
+      remainingOpenTasksForMilestone: taskForGoalEvent.milestoneId
+        ? taskStore.countOpenTasksByMilestone(ctx.hbDb, taskForGoalEvent.milestoneId)
+        : null,
+    });
+  }
 });
 
 // cancel_task
 registerDecisionHandler('cancel_task', async (params, _decision, ctx) => {
   const taskId = resolveTaskIdOrThrow(String(params['taskId'] ?? ''), 'cancel_task', ctx);
+  const before = taskStore.getTask(ctx.hbDb, taskId);
   ctx.taskRunner.cancelTask(taskId);
   try {
     ctx.taskScheduler.unregisterTask(taskId);
@@ -108,6 +147,7 @@ registerDecisionHandler('cancel_task', async (params, _decision, ctx) => {
   }
   const updated = taskStore.getTask(ctx.hbDb, taskId);
   if (updated) ctx.eventBus.emit('task:updated', updated);
+  if (before) ctx.goalManager?.recordTaskCancelled(before, params['reason'] ? String(params['reason']) : undefined);
 });
 
 // skip_task
@@ -133,4 +173,5 @@ registerDecisionHandler('skip_task', async (params, _decision, ctx) => {
   }
   const updated = taskStore.getTask(ctx.hbDb, taskId);
   if (updated) ctx.eventBus.emit('task:updated', updated);
+  ctx.goalManager?.recordTaskSkipped(task, params['reason'] ? String(params['reason']) : undefined);
 });

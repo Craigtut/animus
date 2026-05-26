@@ -200,7 +200,8 @@ interface TaskDefinition {
   title: string;
   description: string;
   instructions: string;
-  milestoneIndex: number;       // Which milestone this serves
+  milestoneId: string;          // Which durable milestone row this serves
+  milestoneIndex?: number;      // Fallback for legacy plan outputs
   scheduleType: 'one_shot' | 'recurring' | 'deferred';
   cronExpression?: string;      // For recurring
   scheduledAt?: string;         // For one-shot
@@ -208,7 +209,7 @@ interface TaskDefinition {
 }
 ```
 
-**Only tasks for the current milestone are created.** When a milestone completes (all its tasks done), the mind can spawn another planning session to detail the next milestone's tasks, or create them directly if the next steps are obvious.
+**Only tasks for the current milestone are created.** Tasks should link to `goal_id`, `plan_id`, and `milestone_id` so progress can be reconstructed later. When all open tasks for a milestone finish, EXECUTE queues a milestone review cue. The mind then decides whether the milestone is complete, blocked, or needs more tasks.
 
 ### Mind Initiative
 
@@ -525,7 +526,8 @@ CREATE TABLE tasks (
   -- Goal linkage
   goal_id TEXT REFERENCES goals(id),     -- Nullable: standalone tasks have no goal
   plan_id TEXT REFERENCES plans(id),     -- Nullable: which plan generated this task
-  milestone_index INTEGER,               -- Which milestone this task serves (nullable)
+  milestone_id TEXT REFERENCES goal_milestones(id), -- Nullable: which durable milestone this task serves
+  milestone_index INTEGER,               -- Legacy fallback for old plan outputs
 
   -- Status
   status TEXT NOT NULL DEFAULT 'pending', -- See lifecycle diagram
@@ -553,6 +555,7 @@ CREATE TABLE tasks (
 
 CREATE INDEX idx_tasks_status ON tasks(status);
 CREATE INDEX idx_tasks_goal ON tasks(goal_id);
+CREATE INDEX idx_tasks_milestone ON tasks(milestone_id);
 CREATE INDEX idx_tasks_next_run ON tasks(next_run_at) WHERE status = 'scheduled';
 CREATE INDEX idx_tasks_deferred ON tasks(status, priority) WHERE schedule_type = 'deferred';
 ```
@@ -730,8 +733,8 @@ All task system tables live in **`heartbeat.db`**, consistent with goals, though
 The task system uses several shared abstractions (see `docs/architecture/tech-stack.md`):
 
 - **Context Builder** — Assembles task tick context (task details, goal/plan context, emotional state) via `buildTaskContext()` (`docs/architecture/context-builder.md`)
-- **Event Bus** — Emits `task:changed` events consumed by the frontend and task scheduler
-- **Database Stores** — Typed data access for tasks and task_runs tables in `heartbeat.db`
+- **Event Bus** — Emits `task:created`, `task:updated`, and `task:journal_updated` events consumed by the frontend and scheduler
+- **Database Stores** — Typed data access for tasks, task journals, and task_runs tables in `heartbeat.db`
 
 ## Related Documents
 

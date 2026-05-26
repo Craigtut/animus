@@ -87,6 +87,7 @@ export interface CreateTaskData {
   nextRunAt?: string | null;
   goalId?: string | null;
   planId?: string | null;
+  milestoneId?: string | null;
   milestoneIndex?: number | null;
   status?: TaskStatus;
   priority?: number;
@@ -103,11 +104,11 @@ export function createTask(db: Database.Database, data: CreateTaskData): Task {
   db.prepare(
     `INSERT INTO tasks (id, title, description, instructions,
        schedule_type, cron_expression, scheduled_at, next_run_at,
-       goal_id, plan_id, milestone_index,
+       goal_id, plan_id, milestone_id, milestone_index,
        status, priority,
        created_by, contact_id,
        created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     data.title,
@@ -119,6 +120,7 @@ export function createTask(db: Database.Database, data: CreateTaskData): Task {
     data.nextRunAt ?? null,
     data.goalId ?? null,
     data.planId ?? null,
+    data.milestoneId ?? null,
     data.milestoneIndex ?? null,
     status,
     priority,
@@ -141,6 +143,7 @@ export function createTask(db: Database.Database, data: CreateTaskData): Task {
     nextRunAt: data.nextRunAt ?? null,
     goalId: data.goalId ?? null,
     planId: data.planId ?? null,
+    milestoneId: data.milestoneId ?? null,
     milestoneIndex: data.milestoneIndex ?? null,
     status,
     priority,
@@ -188,6 +191,10 @@ export interface UpdateTaskData {
   cronExpression?: string | null;
   scheduledAt?: string | null;
   nextRunAt?: string | null;
+  goalId?: string | null;
+  planId?: string | null;
+  milestoneId?: string | null;
+  milestoneIndex?: number | null;
   status?: TaskStatus;
   priority?: number;
   retryCount?: number;
@@ -212,6 +219,10 @@ export function updateTask(
     cronExpression: 'cron_expression',
     scheduledAt: 'scheduled_at',
     nextRunAt: 'next_run_at',
+    goalId: 'goal_id',
+    planId: 'plan_id',
+    milestoneId: 'milestone_id',
+    milestoneIndex: 'milestone_index',
     status: 'status',
     priority: 'priority',
     retryCount: 'retry_count',
@@ -248,6 +259,7 @@ export interface ListTasksFilters {
   scheduleType?: ScheduleType;
   contactId?: string;
   goalId?: string;
+  milestoneId?: string;
 }
 
 export function listTasks(
@@ -273,6 +285,10 @@ export function listTasks(
     conditions.push('goal_id = ?');
     params.push(filters.goalId);
   }
+  if (filters?.milestoneId) {
+    conditions.push('milestone_id = ?');
+    params.push(filters.milestoneId);
+  }
 
   const where =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -280,6 +296,26 @@ export function listTasks(
     .prepare(`SELECT * FROM tasks ${where} ORDER BY created_at DESC`)
     .all(...params) as Array<Record<string, unknown>>;
   return rows.map(rowToTask);
+}
+
+export function countOpenTasksByGoal(db: Database.Database, goalId: string): number {
+  const row = db.prepare(
+    `SELECT COUNT(*) as count
+     FROM tasks
+     WHERE goal_id = ?
+       AND status IN ('pending', 'scheduled', 'in_progress', 'paused')`
+  ).get(goalId) as { count: number } | undefined;
+  return row?.count ?? 0;
+}
+
+export function countOpenTasksByMilestone(db: Database.Database, milestoneId: string): number {
+  const row = db.prepare(
+    `SELECT COUNT(*) as count
+     FROM tasks
+     WHERE milestone_id = ?
+       AND status IN ('pending', 'scheduled', 'in_progress', 'paused')`
+  ).get(milestoneId) as { count: number } | undefined;
+  return row?.count ?? 0;
 }
 
 /**

@@ -1527,6 +1527,13 @@ export function populateContextSlots(
 
   // Slot 8: goals
   const goalParts: string[] = [];
+  if (gathered.goalContext?.goalIndexSection) {
+    goalParts.push(
+      '── ACTIVE GOAL INDEX ──\n' +
+      'A compact map of active goals and review cues shown every tick.\n\n' +
+      gathered.goalContext.goalIndexSection,
+    );
+  }
   if (gathered.goalContext?.goalSection) {
     goalParts.push(
       '── THINGS ON YOUR MIND ──\n' +

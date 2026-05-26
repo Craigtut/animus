@@ -12,10 +12,14 @@ vi.mock('../../src/db/index.js', () => ({
 
 const mockGetGoal = vi.fn();
 const mockGetPlan = vi.fn();
+const mockGetMilestone = vi.fn();
+const mockGetMilestoneByPlanPosition = vi.fn();
 
 vi.mock('../../src/db/stores/heartbeat-store.js', () => ({
   getGoal: (...args: any[]) => mockGetGoal(...args),
   getPlan: (...args: any[]) => mockGetPlan(...args),
+  getMilestone: (...args: any[]) => mockGetMilestone(...args),
+  getMilestoneByPlanPosition: (...args: any[]) => mockGetMilestoneByPlanPosition(...args),
 }));
 
 const mockSetTaskDueHandler = vi.fn();
@@ -81,6 +85,8 @@ describe('TaskSubsystem', () => {
 
       mockGetGoal.mockReturnValue(null);
       mockGetPlan.mockReturnValue(null);
+      mockGetMilestone.mockReturnValue(null);
+      mockGetMilestoneByPlanPosition.mockReturnValue(null);
 
       handler({
         id: 'task-1',
@@ -107,6 +113,8 @@ describe('TaskSubsystem', () => {
 
       mockGetGoal.mockReturnValue({ title: 'Learn music' });
       mockGetPlan.mockReturnValue(null);
+      mockGetMilestone.mockReturnValue(null);
+      mockGetMilestoneByPlanPosition.mockReturnValue(null);
 
       handler({
         id: 'task-2',
@@ -134,6 +142,8 @@ describe('TaskSubsystem', () => {
 
       mockGetGoal.mockReturnValue(null);
       mockGetPlan.mockReturnValue({ strategy: 'Incremental practice' });
+      mockGetMilestone.mockReturnValue(null);
+      mockGetMilestoneByPlanPosition.mockReturnValue(null);
 
       handler({
         id: 'task-3',
@@ -162,12 +172,9 @@ describe('TaskSubsystem', () => {
       mockGetGoal.mockReturnValue({ title: 'Fitness' });
       mockGetPlan.mockReturnValue({
         strategy: 'Progressive overload',
-        milestones: [
-          { title: 'Week 1' },
-          { title: 'Week 2' },
-          { title: 'Week 3' },
-        ],
       });
+      mockGetMilestone.mockReturnValue(null);
+      mockGetMilestoneByPlanPosition.mockReturnValue({ title: 'Week 2' });
 
       handler({
         id: 'task-4',
@@ -188,6 +195,7 @@ describe('TaskSubsystem', () => {
         planTitle: 'Progressive overload',
         currentMilestone: 'Week 2',
       });
+      expect(mockGetMilestoneByPlanPosition).toHaveBeenCalledWith(mockDb, 'plan-2', 1);
     });
 
     it('omits currentMilestone when milestoneIndex is null', async () => {
@@ -198,8 +206,9 @@ describe('TaskSubsystem', () => {
       mockGetGoal.mockReturnValue(null);
       mockGetPlan.mockReturnValue({
         strategy: 'Some plan',
-        milestones: [{ title: 'M1' }],
       });
+      mockGetMilestone.mockReturnValue(null);
+      mockGetMilestoneByPlanPosition.mockReturnValue({ title: 'M1' });
 
       handler({
         id: 'task-5',

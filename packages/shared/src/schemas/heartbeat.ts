@@ -155,6 +155,11 @@ export const builtInDecisionTypeSchema = z.enum([
   'create_seed',
   'create_plan',
   'revise_plan',
+  'create_plan_version',
+  'update_milestone',
+  'update_goal_snapshot',
+  'queue_goal_review',
+  'resolve_goal_review',
   'schedule_task',
   'start_task',
   'complete_task',
@@ -278,13 +283,31 @@ export const milestoneStatusSchema = z.enum([
   'in_progress',
   'completed',
   'skipped',
+  'blocked',
 ]);
 
+export const goalMilestoneEvidenceSchema = z.object({
+  label: z.string(),
+  ref: z.string(),
+  context: z.string(),
+});
+
 export const milestoneSchema = z.object({
+  id: uuidSchema,
+  goalId: uuidSchema,
+  planId: uuidSchema,
+  position: z.number().int().nonnegative(),
   title: z.string(),
-  description: z.string(),
+  description: z.string().nullable(),
+  acceptanceCriteria: z.string().nullable(),
   status: milestoneStatusSchema,
-  completedAt: timestampSchema.optional(),
+  confidence: z.number().min(0).max(1).default(0.5),
+  evidence: z.array(goalMilestoneEvidenceSchema).default([]),
+  blockerNotes: z.string().nullable(),
+  completionRationale: z.string().nullable(),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+  completedAt: timestampSchema.nullable(),
 });
 
 export const planSchema = z.object({
@@ -296,8 +319,120 @@ export const planSchema = z.object({
   milestones: z.array(milestoneSchema).nullable(),
   createdBy: z.enum(['mind', 'planning_agent']),
   revisionReason: z.string().nullable(),
+  reasonCreated: z.string().nullable().default(null),
+  assumptions: z.array(z.string()).default([]),
+  supersedesPlanId: uuidSchema.nullable().default(null),
   createdAt: timestampSchema,
   supersededAt: timestampSchema.nullable(),
+});
+
+export const goalEventSourceSchema = z.enum([
+  'system',
+  'mind',
+  'user',
+  'task',
+  'agent',
+]);
+
+export const goalEventTypeSchema = z.enum([
+  'goal.created',
+  'goal.activated',
+  'goal.paused',
+  'goal.resumed',
+  'goal.completed',
+  'goal.abandoned',
+  'plan.created',
+  'plan.superseded',
+  'milestone.started',
+  'milestone.updated',
+  'milestone.completed',
+  'milestone.blocked',
+  'task.created',
+  'task.started',
+  'task.completed',
+  'task.cancelled',
+  'task.skipped',
+  'task.failed',
+  'review.requested',
+  'review.resolved',
+  'snapshot.updated',
+]);
+
+export const goalEventSchema = z.object({
+  id: uuidSchema,
+  goalId: uuidSchema,
+  tickNumber: z.number().int().nonnegative().nullable(),
+  type: goalEventTypeSchema,
+  summary: z.string(),
+  source: goalEventSourceSchema,
+  taskId: uuidSchema.nullable(),
+  planId: uuidSchema.nullable(),
+  milestoneId: uuidSchema.nullable(),
+  data: z.record(z.unknown()).default({}),
+  createdAt: timestampSchema,
+});
+
+export const goalSnapshotUpdatedBySchema = z.enum(['system', 'mind']);
+
+export const goalSnapshotSchema = z.object({
+  goalId: uuidSchema,
+  summary: z.string(),
+  currentPlanId: uuidSchema.nullable(),
+  currentMilestoneId: uuidSchema.nullable(),
+  recentProgress: z.string(),
+  knownBlockers: z.array(z.string()).default([]),
+  openQuestions: z.array(z.string()).default([]),
+  nextBestMove: z.string(),
+  planConfidence: z.number().min(0).max(1).default(0.5),
+  completionConfidence: z.number().min(0).max(1).default(0),
+  updatedFromEventId: uuidSchema.nullable(),
+  updatedBy: goalSnapshotUpdatedBySchema,
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+});
+
+export const goalReviewScopeSchema = z.enum([
+  'plan_missing',
+  'milestone_acceptance',
+  'plan_revision',
+  'blocker',
+  'next_tasks',
+  'user_alignment',
+  'completion_check',
+]);
+
+export const goalReviewStatusSchema = z.enum([
+  'pending',
+  'resolved',
+  'dismissed',
+]);
+
+export const goalReviewUrgencySchema = z.enum([
+  'low',
+  'normal',
+  'high',
+]);
+
+export const goalReviewRequestedBySchema = z.enum([
+  'system',
+  'mind',
+]);
+
+export const goalReviewRequestSchema = z.object({
+  id: uuidSchema,
+  goalId: uuidSchema,
+  scope: goalReviewScopeSchema,
+  status: goalReviewStatusSchema,
+  urgency: goalReviewUrgencySchema,
+  reason: z.string(),
+  evidenceRefs: z.array(z.string()).default([]),
+  requestedBy: goalReviewRequestedBySchema,
+  createdTickNumber: z.number().int().nonnegative().nullable(),
+  resolvedTickNumber: z.number().int().nonnegative().nullable(),
+  resolution: z.string().nullable(),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+  resolvedAt: timestampSchema.nullable(),
 });
 
 // ============================================================================
@@ -359,6 +494,7 @@ export const taskSchema = z.object({
   // Goal linkage
   goalId: uuidSchema.nullable(),
   planId: uuidSchema.nullable(),
+  milestoneId: uuidSchema.nullable().default(null),
   milestoneIndex: z.number().int().nonnegative().nullable(),
 
   // Status

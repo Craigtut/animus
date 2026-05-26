@@ -78,6 +78,12 @@ function createGoalWithStatus(
   return heartbeatStore.getGoal(testDb, goal.id)!;
 }
 
+function latestGoalUpdatedPayload(): Goal {
+  const calls = mockEmit.mock.calls.filter((call) => call[0] === 'goal:updated');
+  expect(calls.length).toBeGreaterThan(0);
+  return calls[calls.length - 1]![1] as Goal;
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -154,13 +160,11 @@ describe('goals router mutations', () => {
 
       const result = await caller.goals.activateGoal({ goalId: goal.id });
 
-      expect(mockEmit).toHaveBeenCalledTimes(1);
       expect(mockEmit).toHaveBeenCalledWith('goal:updated', expect.objectContaining({
         id: goal.id,
         status: 'active',
       }));
-      // Verify the emitted goal matches the returned goal
-      expect(mockEmit.mock.calls[0]![1]).toEqual(result);
+      expect(latestGoalUpdatedPayload()).toEqual(result);
     });
   });
 
@@ -228,12 +232,11 @@ describe('goals router mutations', () => {
 
       const result = await caller.goals.pauseGoal({ goalId: goal.id });
 
-      expect(mockEmit).toHaveBeenCalledTimes(1);
       expect(mockEmit).toHaveBeenCalledWith('goal:updated', expect.objectContaining({
         id: goal.id,
         status: 'paused',
       }));
-      expect(mockEmit.mock.calls[0]![1]).toEqual(result);
+      expect(latestGoalUpdatedPayload()).toEqual(result);
     });
   });
 
@@ -302,12 +305,11 @@ describe('goals router mutations', () => {
 
       const result = await caller.goals.resumeGoal({ goalId: goal.id });
 
-      expect(mockEmit).toHaveBeenCalledTimes(1);
       expect(mockEmit).toHaveBeenCalledWith('goal:updated', expect.objectContaining({
         id: goal.id,
         status: 'active',
       }));
-      expect(mockEmit.mock.calls[0]![1]).toEqual(result);
+      expect(latestGoalUpdatedPayload()).toEqual(result);
     });
   });
 
@@ -404,13 +406,12 @@ describe('goals router mutations', () => {
         reason: 'Testing',
       });
 
-      expect(mockEmit).toHaveBeenCalledTimes(1);
       expect(mockEmit).toHaveBeenCalledWith('goal:updated', expect.objectContaining({
         id: goal.id,
         status: 'abandoned',
         abandonedReason: 'Testing',
       }));
-      expect(mockEmit.mock.calls[0]![1]).toEqual(result);
+      expect(latestGoalUpdatedPayload()).toEqual(result);
     });
   });
 });

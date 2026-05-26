@@ -84,6 +84,8 @@ export interface MindContextParams {
   longTermMemories?: string | null;
   /** Salient goals formatted for context */
   goalContext?: string | null;
+  /** Compact active goal index shown deterministically */
+  goalIndexContext?: string | null;
   /** Graduating seeds for one-time prompt */
   graduatingSeedsContext?: string | null;
   /** Proposed goals awaiting approval */
@@ -350,55 +352,77 @@ Decisions are how you act on the world. Each decision has a type and
 type-specific parameters. You can make zero or many decisions per tick.
 
 AGENT DECISIONS:
-  spawn_agent    — Delegate a task to a sub-agent
+  spawn_agent    - Delegate a task to a sub-agent
                    params: { taskType, instructions, taskId?, contactId?, channel? }
-  update_agent   — Send new context to a running agent
+  update_agent   - Send new context to a running agent
                    params: { agentId, context }
-  cancel_agent   — Cancel a running agent
+  cancel_agent   - Cancel a running agent
                    params: { agentId, reason }
 
 GOAL DECISIONS:
-  create_seed    — Plant an idea seed (may grow into a goal)
+  create_seed    - Plant an idea seed (may grow into a goal)
                    params: { content, motivation?, linkedEmotion?, source? }
-  propose_goal   — Propose a new goal (awaits activation)
+  propose_goal   - Propose a new goal (awaits activation)
                    params: { title, description?, motivation?, origin?, linkedEmotion?, basePriority?, completionCriteria?, seedId? }
-  update_goal    — Change a goal's status
+  update_goal    - Change a goal's status
                    params: { goalId, status: "active"|"paused"|"completed"|"abandoned"|"resumed", reason? }
-  create_plan    — Create a plan for a goal
-                   params: { goalId, strategy, milestones?: [{title, description, status}] }
-  revise_plan    — Create a new plan version (supersedes the old one)
-                   params: { goalId, strategy, milestones? }
+  create_plan_version - Create or replace the current plan version for a goal
+                   params: { goalId, strategy, reasonCreated?, revisionReason?,
+                             assumptions?: string[],
+                             milestones?: [{title, description?, acceptanceCriteria?, status?, confidence?}] }
+  create_plan    - Backward-compatible alias for create_plan_version
+  revise_plan    - Backward-compatible alias for create_plan_version
+  update_milestone - Update a milestone when your judgment says its state truly changed
+                   params: { milestoneId, status?, title?, description?, acceptanceCriteria?,
+                             confidence?, blockerNotes?, completionRationale? }
+  update_goal_snapshot - Refresh the compact strategic snapshot for a goal
+                   params: { goalId, summary?, currentPlanId?, currentMilestoneId?,
+                             recentProgress?, knownBlockers?, openQuestions?,
+                             nextBestMove?, planConfidence?, completionConfidence? }
+  queue_goal_review - Ask your future self to review goal strategy later
+                   params: { goalId, scope, urgency?, reason, evidenceRefs? }
+  resolve_goal_review - Close a review cue after you've handled it
+                   params: { reviewRequestId, status?: "resolved"|"dismissed", resolution? }
 
 TASK DECISIONS:
-  schedule_task  — Create a new task
+  schedule_task  - Create a new task
                    params: { title, description?, instructions?, scheduleType: "one_shot"|"recurring"|"deferred",
-                             cronExpression?, scheduledAt?, nextRunAt?, goalId?, priority? (0-1), contactId? }
-  start_task     — Begin working on a deferred task
+                             cronExpression?, scheduledAt?, nextRunAt?, goalId?, planId?,
+                             milestoneId?, milestoneIndex?, priority? (0-1), contactId? }
+  start_task     - Begin working on a deferred task
                    params: { taskId }
-  complete_task  — Mark a task as done
+  complete_task  - Mark a task as done
                    params: { taskId, result? }
-  cancel_task    — Cancel a task
+  cancel_task    - Cancel a task
                    params: { taskId }
-  skip_task      — Skip a task's current execution (recurring: advance to next run)
+  skip_task      - Skip a task's current execution (recurring: advance to next run)
                    params: { taskId }
 
 When to create tasks:
   - Use schedule_task for work that needs continuity beyond the current tick,
     should resume during quiet intervals, has a future time, or should be
     tracked under a goal.
+  - When a task serves a goal plan, pass goalId, planId, and milestoneId from
+    context. Use milestoneIndex only as a fallback when milestoneId is absent.
   - Use scheduleType "deferred" for background work to continue when available.
   - If you delegate work for an existing task, pass taskId to spawn_agent so
     the completion result returns to the right task journal.
   - Use the full task ID shown in context. Short prefixes may work only when
     unambiguous.
 
+When to update goals:
+  - update_milestone when acceptance, blockage, or scope has actually changed.
+  - update_goal_snapshot after meaningful strategy changes, not after every
+    small task. The snapshot should be compact and current.
+  - resolve_goal_review when you have addressed a review cue.
+
 CHANNEL:
-  send_reaction  — React to the triggering message with a Unicode emoji
+  send_reaction  - React to the triggering message with a Unicode emoji
                    params: { emoji }
                    (Only available when channel supports reactions)
 
 OTHER:
-  no_action      — Deliberate choice to do nothing (different from empty decisions)
+  no_action      - Deliberate choice to do nothing (different from empty decisions)
 
 Each has a { type, description, parameters: {...} } structure.`;
 
@@ -461,7 +485,22 @@ ACTIVE GOALS
 When a goal is present and the moment feels right, advance it — create
 a plan, schedule a task, delegate to a sub-agent, or simply think about
 it more deeply. But don't force progress. Not every tick needs to move
-a goal forward. Goals serve your life — your life doesn't serve goals.`;
+a goal forward. Goals serve your life — your life doesn't serve goals.
+
+GOAL STRATEGY
+Plans are versioned. When the road changes, create a new plan version
+instead of mutating old history. Milestones are the durable phases inside
+a plan. Tasks should link to the relevant milestone so progress can be
+understood later.
+
+Review cues are not commands. They are moments where the system noticed
+that judgment is needed: all tasks under a milestone finished, a blocker
+appeared, no open tasks remain, or the goal may be complete. Handle the
+cue when it genuinely matters, then resolve it.
+
+Snapshots are compact strategic memory. Update them when your understanding
+of the goal, current milestone, blockers, open questions, or next best move
+has meaningfully changed. Do not use snapshots as a per-action log.`;
 
 
 const LOG_AWARENESS = `── LOG AWARENESS ──
@@ -893,7 +932,10 @@ export function buildTaskContextSection(tasks: Task[], journals: TaskJournal[] =
     ];
     if (task.description) lines.push(`Description: ${task.description}`);
     if (task.instructions) lines.push(`Instructions: ${task.instructions}`);
-    if (task.goalId) lines.push('Linked to goal');
+    if (task.goalId) lines.push(`Goal ID: ${task.goalId}`);
+    if (task.planId) lines.push(`Plan ID: ${task.planId}`);
+    if (task.milestoneId) lines.push(`Milestone ID: ${task.milestoneId}`);
+    if (task.milestoneIndex != null) lines.push(`Milestone index: ${task.milestoneIndex}`);
 
     const journal = journalsByTaskId.get(task.id);
     if (journal) {
@@ -1308,7 +1350,20 @@ function buildUserMessageManifest(params: MindContextParams): ContextSection[] {
     manifest.push(excluded('long_term_memories', 'Relevant Memories', 'no relevant memories retrieved', 'memory'));
   }
 
-  // 8. Goals
+  // 8. Active goal index
+  if (params.goalIndexContext) {
+    manifest.push(included('goal_index', 'Active Goal Index',
+      '── ACTIVE GOAL INDEX ──\n' +
+      'A compact map of active goals and any review cues. This is shown\n' +
+      'deterministically so long-running goals stay visible even when they\n' +
+      'are not the most emotionally salient thing in the moment.\n\n' +
+      params.goalIndexContext,
+      'goals'));
+  } else {
+    manifest.push(excluded('goal_index', 'Active Goal Index', 'no active goals', 'goals'));
+  }
+
+  // 8a. Salient goals
   if (params.goalContext) {
     manifest.push(included('goal_context', 'Things On Your Mind',
       '── THINGS ON YOUR MIND ──\n' +
@@ -1333,14 +1388,14 @@ function buildUserMessageManifest(params: MindContextParams): ContextSection[] {
     manifest.push(excluded('proposed_goals', 'Pending Goals', 'no proposed goals', 'goals'));
   }
 
-  // 8a. Planning prompts
+  // 8b. Planning prompts
   if (params.planningPromptsContext) {
     manifest.push(included('planning_prompts', 'Planning Prompts', params.planningPromptsContext, 'goals'));
   } else {
     manifest.push(excluded('planning_prompts', 'Planning Prompts', 'no goals need planning', 'goals'));
   }
 
-  // 8b. Deferred tasks
+  // 8c. Deferred tasks
   if (params.deferredTasks && params.deferredTasks.length > 0) {
     manifest.push(included('deferred_tasks', 'Pending Tasks',
       buildTaskContextSection(params.deferredTasks, params.taskJournals ?? []),

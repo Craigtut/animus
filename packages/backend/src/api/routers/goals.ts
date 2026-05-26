@@ -7,7 +7,7 @@ import { observable } from '@trpc/server/observable';
 import { router, protectedProcedure } from '../trpc.js';
 import { getEventBus } from '../../lib/event-bus.js';
 import { getGoalService } from '../../services/goal-service.js';
-import type { Goal, GoalSeed } from '@animus-labs/shared';
+import type { Goal, GoalReviewRequest, GoalSeed, GoalSnapshot, Milestone, Plan } from '@animus-labs/shared';
 
 export const goalsRouter = router({
   /**
@@ -61,6 +61,42 @@ export const goalsRouter = router({
     .input(z.object({ goalId: z.string() }))
     .query(({ input }) => {
       return getGoalService().getActivePlan(input.goalId);
+    }),
+
+  /**
+   * Get milestones for a plan.
+   */
+  getMilestonesByPlan: protectedProcedure
+    .input(z.object({ planId: z.string() }))
+    .query(({ input }) => {
+      return getGoalService().getMilestonesByPlan(input.planId);
+    }),
+
+  /**
+   * Get the compact strategic snapshot for a goal.
+   */
+  getGoalSnapshot: protectedProcedure
+    .input(z.object({ goalId: z.string() }))
+    .query(({ input }) => {
+      return getGoalService().getGoalSnapshot(input.goalId);
+    }),
+
+  /**
+   * Get pending review cues for a goal.
+   */
+  getPendingReviewRequests: protectedProcedure
+    .input(z.object({ goalId: z.string() }))
+    .query(({ input }) => {
+      return getGoalService().getPendingReviewRequests(input.goalId);
+    }),
+
+  /**
+   * Get recent factual goal events.
+   */
+  getRecentEvents: protectedProcedure
+    .input(z.object({ goalId: z.string(), limit: z.number().int().min(1).max(50).optional() }))
+    .query(({ input }) => {
+      return getGoalService().getRecentEvents(input.goalId, input.limit ?? 20);
     }),
 
   /**
@@ -127,6 +163,52 @@ export const goalsRouter = router({
       return () => {
         eventBus.off('seed:created', handler);
         eventBus.off('seed:updated', handler);
+      };
+    });
+  }),
+
+  onPlanChange: protectedProcedure.subscription(() => {
+    return observable<Plan>((emit) => {
+      const eventBus = getEventBus();
+      const handler = (plan: Plan) => emit.next(plan);
+      eventBus.on('goal:plan_created', handler);
+      return () => {
+        eventBus.off('goal:plan_created', handler);
+      };
+    });
+  }),
+
+  onMilestoneChange: protectedProcedure.subscription(() => {
+    return observable<Milestone>((emit) => {
+      const eventBus = getEventBus();
+      const handler = (milestone: Milestone) => emit.next(milestone);
+      eventBus.on('goal:milestone_updated', handler);
+      return () => {
+        eventBus.off('goal:milestone_updated', handler);
+      };
+    });
+  }),
+
+  onSnapshotChange: protectedProcedure.subscription(() => {
+    return observable<GoalSnapshot>((emit) => {
+      const eventBus = getEventBus();
+      const handler = (snapshot: GoalSnapshot) => emit.next(snapshot);
+      eventBus.on('goal:snapshot_updated', handler);
+      return () => {
+        eventBus.off('goal:snapshot_updated', handler);
+      };
+    });
+  }),
+
+  onReviewChange: protectedProcedure.subscription(() => {
+    return observable<GoalReviewRequest>((emit) => {
+      const eventBus = getEventBus();
+      const handler = (request: GoalReviewRequest) => emit.next(request);
+      eventBus.on('goal:review_requested', handler);
+      eventBus.on('goal:review_updated', handler);
+      return () => {
+        eventBus.off('goal:review_requested', handler);
+        eventBus.off('goal:review_updated', handler);
       };
     });
   }),

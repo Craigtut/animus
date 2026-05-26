@@ -49,8 +49,19 @@ import type {
   goalSchema,
   planStatusSchema,
   milestoneStatusSchema,
+  goalMilestoneEvidenceSchema,
   milestoneSchema,
   planSchema,
+  goalEventSourceSchema,
+  goalEventTypeSchema,
+  goalEventSchema,
+  goalSnapshotUpdatedBySchema,
+  goalSnapshotSchema,
+  goalReviewScopeSchema,
+  goalReviewStatusSchema,
+  goalReviewUrgencySchema,
+  goalReviewRequestedBySchema,
+  goalReviewRequestSchema,
   goalSalienceLogSchema,
   scheduleTypeSchema,
   taskStatusSchema,
@@ -197,8 +208,19 @@ export type Goal = z.infer<typeof goalSchema>;
 
 export type PlanStatus = z.infer<typeof planStatusSchema>;
 export type MilestoneStatus = z.infer<typeof milestoneStatusSchema>;
+export type GoalMilestoneEvidence = z.infer<typeof goalMilestoneEvidenceSchema>;
 export type Milestone = z.infer<typeof milestoneSchema>;
 export type Plan = z.infer<typeof planSchema>;
+export type GoalEventSource = z.infer<typeof goalEventSourceSchema>;
+export type GoalEventType = z.infer<typeof goalEventTypeSchema>;
+export type GoalEvent = z.infer<typeof goalEventSchema>;
+export type GoalSnapshotUpdatedBy = z.infer<typeof goalSnapshotUpdatedBySchema>;
+export type GoalSnapshot = z.infer<typeof goalSnapshotSchema>;
+export type GoalReviewScope = z.infer<typeof goalReviewScopeSchema>;
+export type GoalReviewStatus = z.infer<typeof goalReviewStatusSchema>;
+export type GoalReviewUrgency = z.infer<typeof goalReviewUrgencySchema>;
+export type GoalReviewRequestedBy = z.infer<typeof goalReviewRequestedBySchema>;
+export type GoalReviewRequest = z.infer<typeof goalReviewRequestSchema>;
 
 export type GoalSalienceLog = z.infer<typeof goalSalienceLogSchema>;
 

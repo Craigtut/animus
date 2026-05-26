@@ -9,9 +9,16 @@ import { TRPCError } from '@trpc/server';
 import { createLogger } from '../lib/logger.js';
 import { getHeartbeatDb } from '../db/index.js';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
-import { getEventBus } from '../lib/event-bus.js';
-import { now } from '@animus-labs/shared';
-import type { Goal, GoalSeed, Plan } from '@animus-labs/shared';
+import type {
+  Goal,
+  GoalEvent,
+  GoalReviewRequest,
+  GoalSeed,
+  GoalSnapshot,
+  Milestone,
+  Plan,
+} from '@animus-labs/shared';
+import { GoalManager } from '../goals/goal-manager.js';
 
 const log = createLogger('GoalService', 'heartbeat');
 
@@ -63,6 +70,22 @@ class GoalService {
     return heartbeatStore.getActivePlan(getHeartbeatDb(), goalId);
   }
 
+  getMilestonesByPlan(planId: string): Milestone[] {
+    return heartbeatStore.getMilestonesByPlan(getHeartbeatDb(), planId);
+  }
+
+  getGoalSnapshot(goalId: string): GoalSnapshot | null {
+    return heartbeatStore.getGoalSnapshot(getHeartbeatDb(), goalId);
+  }
+
+  getPendingReviewRequests(goalId: string): GoalReviewRequest[] {
+    return heartbeatStore.getPendingGoalReviewRequests(getHeartbeatDb(), goalId);
+  }
+
+  getRecentEvents(goalId: string, limit = 20): GoalEvent[] {
+    return heartbeatStore.getRecentGoalEvents(getHeartbeatDb(), goalId, limit);
+  }
+
   /**
    * Activate a proposed or paused goal.
    */
@@ -78,14 +101,8 @@ class GoalService {
         message: `Cannot activate a goal with status '${goal.status}'. Must be 'proposed' or 'paused'.`,
       });
     }
-    const state = heartbeatStore.getHeartbeatState(db);
-    heartbeatStore.updateGoal(db, goalId, {
-      status: 'active',
-      activatedAt: now(),
-      activatedAtTick: state.tickNumber,
-    });
+    new GoalManager(db).activateGoal(goalId);
     const updated = heartbeatStore.getGoal(db, goalId)!;
-    getEventBus().emit('goal:updated', updated);
     log.info(`Activated goal "${updated.title}" (${goalId})`);
     return updated;
   }
@@ -105,9 +122,8 @@ class GoalService {
         message: `Cannot pause a goal with status '${goal.status}'. Must be 'active'.`,
       });
     }
-    heartbeatStore.updateGoal(db, goalId, { status: 'paused' });
+    new GoalManager(db).pauseGoal(goalId);
     const updated = heartbeatStore.getGoal(db, goalId)!;
-    getEventBus().emit('goal:updated', updated);
     log.info(`Paused goal "${updated.title}" (${goalId})`);
     return updated;
   }
@@ -127,14 +143,8 @@ class GoalService {
         message: `Cannot resume a goal with status '${goal.status}'. Must be 'paused'.`,
       });
     }
-    const state = heartbeatStore.getHeartbeatState(db);
-    heartbeatStore.updateGoal(db, goalId, {
-      status: 'active',
-      activatedAt: now(),
-      activatedAtTick: state.tickNumber,
-    });
+    new GoalManager(db).resumeGoal(goalId);
     const updated = heartbeatStore.getGoal(db, goalId)!;
-    getEventBus().emit('goal:updated', updated);
     log.info(`Resumed goal "${updated.title}" (${goalId})`);
     return updated;
   }
@@ -154,13 +164,8 @@ class GoalService {
         message: `Cannot abandon a goal with status '${goal.status}'.`,
       });
     }
-    heartbeatStore.updateGoal(db, goalId, {
-      status: 'abandoned',
-      abandonedAt: now(),
-      abandonedReason: reason ?? null,
-    });
+    new GoalManager(db).abandonGoal(goalId, reason);
     const updated = heartbeatStore.getGoal(db, goalId)!;
-    getEventBus().emit('goal:updated', updated);
     log.info(`Abandoned goal "${updated.title}" (${goalId})`);
     return updated;
   }

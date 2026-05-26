@@ -359,6 +359,7 @@ async function cortexMindQuery(
     workingMemory: gathered.memoryContext?.workingMemorySection ?? null,
     coreSelf: gathered.memoryContext?.coreSelfSection ?? null,
     longTermMemories: gathered.memoryContext?.longTermMemorySection ?? null,
+    goalIndexContext: gathered.goalContext?.goalIndexSection ?? null,
     goalContext: gathered.goalContext?.goalSection ?? null,
     graduatingSeedsContext: gathered.goalContext?.graduatingSeedsSection ?? null,
     proposedGoalsContext: gathered.goalContext?.proposedGoalsSection ?? null,

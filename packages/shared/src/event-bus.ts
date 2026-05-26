@@ -14,7 +14,12 @@ import type {
   Message,
   TickDecision,
   Goal,
+  GoalEvent,
+  GoalReviewRequest,
+  GoalSnapshot,
   GoalSeed,
+  Milestone,
+  Plan,
   Task,
   TaskJournal,
   LongTermMemory,
@@ -59,6 +64,12 @@ export interface AnimusEventMap {
   // Goals & Seeds
   'goal:created': Goal;
   'goal:updated': Goal;
+  'goal:event_created': GoalEvent;
+  'goal:snapshot_updated': GoalSnapshot;
+  'goal:review_requested': GoalReviewRequest;
+  'goal:review_updated': GoalReviewRequest;
+  'goal:plan_created': Plan;
+  'goal:milestone_updated': Milestone;
   'seed:created': GoalSeed;
   'seed:updated': GoalSeed;
 

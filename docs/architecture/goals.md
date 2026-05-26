@@ -415,7 +415,12 @@ Salience log entries are TTL-cleaned after 90 days.
 
 ### How Goals Appear in the Mind's Context
 
-During GATHER CONTEXT, salient goals are assembled and presented to the mind with this framing:
+GATHER CONTEXT is deterministic. It does not infer whether a user is asking about a goal. To preserve long-term continuity, active goals appear through two surfaces:
+
+- **Active Goal Index**: a compact map of active goals, current plan, current milestone, next best move, and pending review cues. This is shown every tick when active goals exist.
+- **Things On Your Mind**: richer detail for salient goals only, including the snapshot, milestones, review cues, and recent goal events.
+
+The richer salient section uses this framing:
 
 ```
 ── THINGS ON YOUR MIND ──
@@ -442,13 +447,13 @@ entirely, or nothing at all.
 ──────────────────────────
 ```
 
-When no goals are above the visibility threshold, the goals section is omitted entirely. The mind gets a clean context with no goal pressure.
+When no goals are above the visibility threshold, the richer salient section is omitted. The compact index remains so long-running goals do not disappear from the mind's working surface.
 
 ---
 
 ## Plans
 
-Plans are the strategy layer between goals and tasks. A goal says *what* to achieve; a plan says *how* to approach it. Plans are created by planning sub-agents and are revisable when circumstances change.
+Plans are the strategy layer between goals and tasks. A goal says *what* to achieve; a plan says *how* to approach it. Plans are versioned. Creating a new plan version supersedes the previous active plan instead of mutating it in place.
 
 ### Plan Creation
 
@@ -463,10 +468,10 @@ When a goal becomes active and lacks a plan, the system guides the mind toward p
   - **Ticks 10+ (forceful):** "This goal needs a plan. Take a moment now to outline how you'd pursue it."
 
 The mind can respond to these prompts in several ways:
-- **Create a plan directly** via the `create_plan` decision — appropriate for straightforward goals
-- **Spawn a planning sub-agent** via `spawn_agent` — appropriate for complex goals requiring research or multi-step strategizing
-- **Abandon or pause the goal** — if the goal no longer feels relevant after reflection
-- **Ignore the prompt** — the mind always retains the freedom to simply exist
+- **Create a plan directly** via the `create_plan_version` decision, appropriate for straightforward goals
+- **Spawn a planning sub-agent** via `spawn_agent`, appropriate for complex goals requiring research or multi-step strategizing
+- **Abandon or pause the goal**, if the goal no longer feels relevant after reflection
+- **Ignore the prompt**, the mind always retains the freedom to simply exist
 
 **Simple goals may not need formal plans.** A goal like "check in with Craig once a week" might not benefit from a structured plan with milestones. The mind decides what level of planning serves each goal. The prompts are nudges, not demands.
 
@@ -474,24 +479,23 @@ This design follows the same pattern as seed graduation prompts and deferred tas
 
 ### Plan Revision
 
-Plans are living documents. They get revised when:
+Plans are living documents, but revisions are explicit versions. They get revised when:
 
 | Trigger | Example | Mechanism |
 |---------|---------|-----------|
-| **Task failure** | Can't sign up for Twitter — requires phone verification | Mind encounters the blocker, produces `revise_plan` decision |
+| **Task failure** | Can't sign up for Twitter because phone verification is required | System records failure, queues a blocker or plan revision review |
 | **User input** | "Actually, focus on LinkedIn instead" | Mind processes message, recognizes plan impact |
 | **Progress review** | "3 weeks in, only 50 followers. This isn't working." | Mind evaluates during an idle tick, decides to rethink |
-| **Milestone completion** | Phase 1 done, time to detail Phase 2 | Mind recognizes boundary, requests detailed plan for next phase |
+| **Milestone completion** | Phase 1 done, time to detail Phase 2 | System queues a milestone or next-tasks review |
 | **Context change** | New tool/capability opens new approaches | Mind notices and considers plan implications |
 
 The revision flow:
 
-1. Mind produces `revise_plan` decision with the reason
-2. EXECUTE spawns a planning sub-agent with: goal, current plan (marked as "being revised"), progress history, revision reason
-3. Planning agent produces a revised plan
-4. `agent_complete` tick fires, mind reviews the new plan
-5. Old plan is archived (status → `superseded`), new plan becomes active
-6. New tasks may be generated from the revised plan
+1. A deterministic event, user message, or the mind's own judgment indicates that strategy needs review.
+2. The system may queue a `goal_review_request` with scope such as `plan_revision`, `blocker`, `next_tasks`, or `completion_check`.
+3. The mind handles the cue when it matters. It may update a milestone, schedule tasks, complete the goal, or create a new plan version.
+4. Creating a new plan version marks the old active plan `superseded`, creates first-class milestone rows for the new plan, updates the compact snapshot, and resolves matching review requests.
+5. Tasks created after that should link to `goal_id`, `plan_id`, and `milestone_id`.
 
 ### Plan Data Model
 
@@ -502,9 +506,12 @@ CREATE TABLE plans (
   version INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL DEFAULT 'active',    -- 'active' | 'superseded' | 'abandoned'
   strategy TEXT NOT NULL,                   -- Free text: the plan's approach
-  milestones TEXT,                          -- JSON array of milestone objects
+  milestones TEXT,                          -- Legacy JSON mirror, not the source of truth
   created_by TEXT NOT NULL,                 -- 'mind' | 'planning_agent'
   revision_reason TEXT,                     -- Why the previous plan was superseded (null for v1)
+  reason_created TEXT,                      -- Why this version exists
+  assumptions TEXT NOT NULL DEFAULT '[]',    -- JSON array of assumptions behind the strategy
+  supersedes_plan_id TEXT REFERENCES plans(id),
   created_at TEXT NOT NULL,
   superseded_at TEXT,
 
@@ -516,18 +523,91 @@ CREATE INDEX idx_plans_goal ON plans(goal_id, status);
 
 ### Milestones
 
-Milestones are progress markers within a plan, stored as a JSON array on the plan record — not as a separate table. They are the plan's internal structure.
+Milestones are progress markers within a plan. They are first-class rows, not JSON inside the plan. This lets tasks link to the real milestone they serve, lets the UI show stable milestone IDs, and lets deterministic bookkeeping queue review cues when work reaches a boundary.
 
-```typescript
-interface Milestone {
-  title: string;
-  description: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'skipped';
-  completedAt?: string;
-}
+```sql
+CREATE TABLE goal_milestones (
+  id TEXT PRIMARY KEY,
+  goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+  plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  acceptance_criteria TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'in_progress' | 'completed' | 'skipped' | 'blocked'
+  confidence REAL NOT NULL DEFAULT 0.5,
+  evidence TEXT NOT NULL DEFAULT '[]',
+  blocker_notes TEXT,
+  completion_rationale TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT,
+
+  UNIQUE(plan_id, position)
+);
 ```
 
-The mind updates milestone status as part of `update_goal` decisions. Completing a milestone doesn't automatically complete the goal — the mind decides when the goal itself is achieved.
+The mind updates milestone status through `update_milestone`. Completing a milestone does not automatically complete the goal. The system may queue a `completion_check` review when all milestones are complete or skipped, but the mind still decides whether the goal itself is achieved.
+
+### Goal Events, Snapshots, and Reviews
+
+Goal progress is split into three durable surfaces:
+
+- **Goal events** are append-only factual history: goal created, plan superseded, task completed, milestone blocked, review resolved.
+- **Goal snapshots** are compact strategic memory: current plan, current milestone, recent progress, blockers, open questions, next best move, plan confidence, and completion confidence.
+- **Goal review requests** are deterministic cues for judgment. They are created when the system can know a boundary has been reached, but cannot know the right strategic answer.
+
+```sql
+CREATE TABLE goal_events (
+  id TEXT PRIMARY KEY,
+  goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+  tick_number INTEGER,
+  type TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'system',
+  task_id TEXT REFERENCES tasks(id),
+  plan_id TEXT REFERENCES plans(id),
+  milestone_id TEXT REFERENCES goal_milestones(id),
+  data TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE goal_snapshots (
+  goal_id TEXT PRIMARY KEY REFERENCES goals(id) ON DELETE CASCADE,
+  summary TEXT NOT NULL DEFAULT '',
+  current_plan_id TEXT REFERENCES plans(id),
+  current_milestone_id TEXT REFERENCES goal_milestones(id),
+  recent_progress TEXT NOT NULL DEFAULT '',
+  known_blockers TEXT NOT NULL DEFAULT '[]',
+  open_questions TEXT NOT NULL DEFAULT '[]',
+  next_best_move TEXT NOT NULL DEFAULT '',
+  plan_confidence REAL NOT NULL DEFAULT 0.5,
+  completion_confidence REAL NOT NULL DEFAULT 0,
+  updated_from_event_id TEXT REFERENCES goal_events(id),
+  updated_by TEXT NOT NULL DEFAULT 'system',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE goal_review_requests (
+  id TEXT PRIMARY KEY,
+  goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+  scope TEXT NOT NULL,                       -- plan_missing | milestone_acceptance | plan_revision | blocker | next_tasks | user_alignment | completion_check
+  status TEXT NOT NULL DEFAULT 'pending',    -- pending | resolved | dismissed
+  urgency TEXT NOT NULL DEFAULT 'normal',    -- low | normal | high
+  reason TEXT NOT NULL,
+  evidence_refs TEXT NOT NULL DEFAULT '[]',
+  requested_by TEXT NOT NULL DEFAULT 'system',
+  created_tick_number INTEGER,
+  resolved_tick_number INTEGER,
+  resolution TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  resolved_at TEXT
+);
+```
+
+This split keeps the agent loop light. EXECUTE records facts and queues review cues. The mind only updates snapshots, milestones, or plans when judgment is needed.
 
 ---
 
@@ -701,9 +781,13 @@ The mind's structured output includes these goal-related decision types:
 |---------------|-------------|
 | `create_seed` | Record a new emerging interest/desire |
 | `propose_goal` | Create a goal in `proposed` status (includes the proposal message to the user) |
-| `update_goal` | Update goal status (activate, pause, complete, abandon), priority, or milestone status |
-| `create_plan` | Create a plan for a goal (mind creates directly) or spawn a planning sub-agent |
-| `revise_plan` | Request plan revision (spawns planning sub-agent with revision reason) |
+| `update_goal` | Update goal status (activate, pause, resume, complete, abandon) |
+| `create_plan_version` | Create a new active plan version and supersede the previous active plan |
+| `update_milestone` | Update milestone state, confidence, blocker notes, or completion rationale |
+| `update_goal_snapshot` | Refresh compact strategic memory when understanding meaningfully changes |
+| `queue_goal_review` | Create a review cue intentionally from the mind |
+| `resolve_goal_review` | Close a review cue after it has been handled |
+| `create_plan` / `revise_plan` | Compatibility aliases for `create_plan_version` |
 
 ### EXECUTE Additions
 
@@ -717,28 +801,35 @@ The EXECUTE stage gains these operations (in order):
 [NEW]      5. Process goal decisions:
               - create_seed → insert seed record, embed content
               - propose_goal → insert goal in 'proposed' status
-              - update_goal → update status, priority, milestones
+              - update_goal → update lifecycle status
                 (when activating: set activated_at_tick to current tick number)
-              - create_plan → insert plan record directly (does NOT auto-spawn agent)
-              - revise_plan → spawn planning sub-agent with revision context
-[NEW]      6. Track planning context for goals without plans:
+              - create_plan_version → supersede old plan, insert plan and milestones
+              - update_milestone → update first-class milestone row
+              - update_goal_snapshot → update compact strategic memory
+              - queue_goal_review / resolve_goal_review → manage review cues
+[NEW]      6. Record deterministic goal events from task decisions:
+              - task.created, task.started, task.completed, task.cancelled,
+                task.skipped, task.failed
+              - update last_progress_at on completed goal-linked tasks
+              - queue review cues when all milestone tasks finish or no open goal tasks remain
+[NEW]      7. Track planning context for goals without plans:
               - For active goals missing plans, increment ticks-since-activation count
               - This is tracked via activated_at_tick field, used by GATHER CONTEXT
                 to compute escalating urgency for planning prompts
-[NEW]      7. Seed resonance check:
+[NEW]      8. Seed resonance check:
               - Compare new thought embeddings against active seed embeddings
               - Boost matching seeds
-[NEW]      8. Seed decay pass:
+[NEW]      9. Seed decay pass:
               - Apply time-based decay to all active seeds
               - Mark seeds below SEED_CLEANUP_THRESHOLD as 'decayed'
-[NEW]      9. Seed graduation check:
+[NEW]      10. Seed graduation check:
               - Flag seeds above SEED_GRADUATION_THRESHOLD as 'graduating'
               - (Graduation prompt included in next tick's GATHER CONTEXT)
-[NEW]      10. Log goal salience (already computed in GATHER CONTEXT)
-[NEW]      11. Periodic: goal cleanup (delete goals with avg salience < 0.05 over 30 days)
-[NEW]      12. Periodic: seed cleanup (delete decayed seeds older than 7 days)
-[existing] 13. TTL cleanup on thoughts, experiences, emotion history
-[existing] 14. Persist heartbeat state for crash recovery
+[NEW]      11. Log goal salience (already computed in GATHER CONTEXT)
+[NEW]      12. Periodic: goal cleanup (delete goals with avg salience < 0.05 over 30 days)
+[NEW]      13. Periodic: seed cleanup (delete decayed seeds older than 7 days)
+[existing] 14. TTL cleanup on thoughts, experiences, emotion history
+[existing] 15. Persist heartbeat state for crash recovery
 ```
 
 ---
@@ -813,9 +904,9 @@ The goal system uses several shared abstractions (see `docs/architecture/tech-st
 
 - **Decay Engine** — Computes seed strength decay and goal staleness
 - **Embedding Provider** — Generates seed embeddings for resonance detection
-- **Context Builder** — Includes salient goals in the mind's context with "goals serve life" framing (`docs/architecture/context-builder.md`)
-- **Event Bus** — Emits `goal:changed` events consumed by the frontend
-- **Database Stores** — Typed data access for goals, seeds, plans, and salience log tables in `heartbeat.db`
+- **Context Builder** — Includes the active goal index, salient goal details, review cues, proposed goals, and graduating seeds (`docs/architecture/context-builder.md`)
+- **Event Bus** — Emits `goal:created`, `goal:updated`, `goal:plan_created`, `goal:milestone_updated`, `goal:snapshot_updated`, and review events consumed by the frontend
+- **Database Stores** — Typed data access for goals, seeds, plans, milestones, events, snapshots, review requests, and salience logs in `heartbeat.db`
 
 ## Related Documents
 

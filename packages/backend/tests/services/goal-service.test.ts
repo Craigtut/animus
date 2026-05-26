@@ -74,6 +74,12 @@ function createGoalWithStatus(
   return heartbeatStore.getGoal(testDb, goal.id)!;
 }
 
+function latestGoalUpdatedPayload(): Goal {
+  const calls = mockEmit.mock.calls.filter((call) => call[0] === 'goal:updated');
+  expect(calls.length).toBeGreaterThan(0);
+  return calls[calls.length - 1]![1] as Goal;
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -356,7 +362,6 @@ describe('GoalService', () => {
       const service = getGoalService();
       const result = service.activateGoal(goal.id);
 
-      expect(mockEmit).toHaveBeenCalledTimes(1);
       expect(mockEmit).toHaveBeenCalledWith(
         'goal:updated',
         expect.objectContaining({
@@ -364,7 +369,7 @@ describe('GoalService', () => {
           status: 'active',
         }),
       );
-      expect(mockEmit.mock.calls[0]![1]).toEqual(result);
+      expect(latestGoalUpdatedPayload()).toEqual(result);
     });
   });
 
@@ -442,7 +447,6 @@ describe('GoalService', () => {
       const service = getGoalService();
       const result = service.pauseGoal(goal.id);
 
-      expect(mockEmit).toHaveBeenCalledTimes(1);
       expect(mockEmit).toHaveBeenCalledWith(
         'goal:updated',
         expect.objectContaining({
@@ -450,7 +454,7 @@ describe('GoalService', () => {
           status: 'paused',
         }),
       );
-      expect(mockEmit.mock.calls[0]![1]).toEqual(result);
+      expect(latestGoalUpdatedPayload()).toEqual(result);
     });
   });
 
@@ -539,7 +543,6 @@ describe('GoalService', () => {
       const service = getGoalService();
       const result = service.resumeGoal(goal.id);
 
-      expect(mockEmit).toHaveBeenCalledTimes(1);
       expect(mockEmit).toHaveBeenCalledWith(
         'goal:updated',
         expect.objectContaining({
@@ -547,7 +550,7 @@ describe('GoalService', () => {
           status: 'active',
         }),
       );
-      expect(mockEmit.mock.calls[0]![1]).toEqual(result);
+      expect(latestGoalUpdatedPayload()).toEqual(result);
     });
   });
 
@@ -658,7 +661,6 @@ describe('GoalService', () => {
       const service = getGoalService();
       const result = service.abandonGoal(goal.id, 'Testing');
 
-      expect(mockEmit).toHaveBeenCalledTimes(1);
       expect(mockEmit).toHaveBeenCalledWith(
         'goal:updated',
         expect.objectContaining({
@@ -667,7 +669,7 @@ describe('GoalService', () => {
           abandonedReason: 'Testing',
         }),
       );
-      expect(mockEmit.mock.calls[0]![1]).toEqual(result);
+      expect(latestGoalUpdatedPayload()).toEqual(result);
     });
   });
 });

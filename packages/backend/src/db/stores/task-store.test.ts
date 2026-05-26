@@ -18,6 +18,7 @@ beforeEach(() => {
       next_run_at TEXT,
       goal_id TEXT,
       plan_id TEXT,
+      milestone_id TEXT,
       milestone_index INTEGER,
       status TEXT NOT NULL DEFAULT 'pending',
       priority REAL NOT NULL DEFAULT 0.5,

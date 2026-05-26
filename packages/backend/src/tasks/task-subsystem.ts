@@ -33,9 +33,11 @@ export class TaskSubsystem implements SubsystemLifecycle {
       const hbDb = getHeartbeatDb();
       const goal = task.goalId ? heartbeatStore.getGoal(hbDb, task.goalId) : null;
       const plan = task.planId ? heartbeatStore.getPlan(hbDb, task.planId) : null;
-      const milestone = plan && task.milestoneIndex != null
-        ? (plan.milestones as Array<{ title: string }>)?.[task.milestoneIndex]?.title
-        : undefined;
+      const milestoneRecord = task.milestoneId
+        ? heartbeatStore.getMilestone(hbDb, task.milestoneId)
+        : task.planId && task.milestoneIndex != null
+          ? heartbeatStore.getMilestoneByPlanPosition(hbDb, task.planId, task.milestoneIndex)
+          : null;
 
       this.onScheduledTask({
         taskId: task.id,
@@ -44,7 +46,7 @@ export class TaskSubsystem implements SubsystemLifecycle {
         taskInstructions: task.instructions || '',
         ...(goal ? { goalTitle: goal.title } : {}),
         ...(plan ? { planTitle: plan.strategy } : {}),
-        ...(milestone ? { currentMilestone: milestone } : {}),
+        ...(milestoneRecord ? { currentMilestone: milestoneRecord.title } : {}),
       });
     });
     taskScheduler.start();
