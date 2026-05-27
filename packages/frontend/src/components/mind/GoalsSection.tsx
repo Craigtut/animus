@@ -741,6 +741,7 @@ function ActiveGoalCard({ goal }: ActiveGoalCardProps) {
     : null;
   const milestones = plan?.milestones ?? [];
   const currentMilestone = currentMilestoneFrom(snapshot, plan);
+  const currentMilestoneId = snapshot?.currentMilestoneId ?? null;
   const progress = milestoneProgress(milestones);
   const pendingReviewCount = reviewRequests?.length ?? 0;
   const nextLine = snapshot?.nextBestMove ?? currentMilestone?.title ?? planSummary;
@@ -913,7 +914,7 @@ function ActiveGoalCard({ goal }: ActiveGoalCardProps) {
         {milestones.length > 0 && (
           <CompactMilestoneRail
             milestones={milestones}
-            currentMilestoneId={snapshot?.currentMilestoneId}
+            currentMilestoneId={currentMilestoneId}
           />
         )}
 
@@ -1015,14 +1016,14 @@ function ActiveGoalCard({ goal }: ActiveGoalCardProps) {
 
                   <MilestoneList
                     milestones={milestones}
-                    currentMilestoneId={snapshot?.currentMilestoneId}
+                    currentMilestoneId={currentMilestoneId}
                     tasks={goalTasks}
                   />
                   <CurrentTaskList
                     tasks={goalTasks}
-                    currentMilestoneId={currentMilestone?.id}
+                    currentMilestoneId={currentMilestone?.id ?? null}
                   />
-                  <PlanHistory plans={plans} activePlanId={plan?.id} />
+                  <PlanHistory plans={plans} activePlanId={plan?.id ?? null} />
                   <GoalEventTimeline events={events} />
                 </div>
 

@@ -299,6 +299,11 @@ function ResponseRow({ event }: { event: MergedEvent }) {
 // CompactionRow
 // ============================================================================
 
+function formatReductionPercent(before: number, after: number): string {
+  if (before <= 0) return '0%';
+  return `${Math.round((1 - after / before) * 100)}%`;
+}
+
 function CompactionRow({ event }: { event: MergedEvent }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
@@ -320,14 +325,14 @@ function CompactionRow({ event }: { event: MergedEvent }) {
     label = `Observation: compacted ${messages}${tokens}`;
   } else if (event.compactionType === 'reflection') {
     if (event.tokensBefore != null && event.tokensAfter != null) {
-      const reduction = Math.round((1 - event.tokensAfter / event.tokensBefore) * 100);
-      label = `Reflection: ${formatTokenCount(event.tokensBefore)} -> ${formatTokenCount(event.tokensAfter)} (${reduction}% reduction)`;
+      const reduction = formatReductionPercent(event.tokensBefore, event.tokensAfter);
+      label = `Reflection: ${formatTokenCount(event.tokensBefore)} -> ${formatTokenCount(event.tokensAfter)} (${reduction} reduction)`;
     } else {
       label = 'Observation Reflection';
     }
   } else if (event.tokensBefore != null && event.tokensAfter != null) {
-    const reduction = Math.round((1 - event.tokensAfter / event.tokensBefore) * 100);
-    label = `Compaction: ${formatTokenCount(event.tokensBefore)} -> ${formatTokenCount(event.tokensAfter)} (${reduction}% reduction)`;
+    const reduction = formatReductionPercent(event.tokensBefore, event.tokensAfter);
+    label = `Compaction: ${formatTokenCount(event.tokensBefore)} -> ${formatTokenCount(event.tokensAfter)} (${reduction} reduction)`;
   } else {
     label = 'Compaction';
   }
