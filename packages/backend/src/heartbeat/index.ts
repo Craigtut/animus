@@ -440,6 +440,8 @@ async function cortexMindQuery(
   };
   eventBus.on('message:received', messageInjectionHandler);
 
+  cortexMind.currentLogSessionId = logSessionId;
+
   try {
     // Run the 5-phase cortex pipeline (THOUGHT, AGENTIC LOOP, REFLECT)
     ctx.currentPhase.value = 'gather';
@@ -475,6 +477,7 @@ async function cortexMindQuery(
     // Clean up mid-tick injection listener and log bridge
     eventBus.off('message:received', messageInjectionHandler);
     cortexLogBridge?.detach();
+    cortexMind.currentLogSessionId = null;
 
     // Reset rate-limit backoff on success
     ctx.consecutiveRateLimits = 0;
@@ -519,6 +522,7 @@ async function cortexMindQuery(
   } catch (err) {
     eventBus.off('message:received', messageInjectionHandler);
     cortexLogBridge?.detach();
+    cortexMind.currentLogSessionId = null;
 
     log.error('Cortex pipeline failed:', err);
     cortexMind.toolContext.current = null;

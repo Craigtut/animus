@@ -119,6 +119,8 @@ export interface CortexMindState {
   toolContext: MutableMindToolContext;
   /** Active thread session for this tick. Null = inner-life tick (no persistence). */
   activeSession: { contactId: string; channel: string } | null;
+  /** Active agent_logs session for the currently running tick. */
+  currentLogSessionId: string | null;
 }
 
 export interface MutableMindToolContext {
@@ -133,6 +135,7 @@ export function createCortexMindState(): CortexMindState {
     model: null,
     toolContext: { current: null },
     activeSession: null,
+    currentLogSessionId: null,
   };
 }
 
@@ -803,7 +806,7 @@ function wireEventHandlers(
   // persisted-result markers are compacted out of raw history, delete the
   // files they reference (unless still referenced in the remaining tail).
   cortexAgent.onObservation((event) => {
-    logCortexObservationEvent(cortexAgent, eventBus, event);
+    logCortexObservationEvent(cortexAgent, eventBus, state.currentLogSessionId, event);
     saveActiveSession(cortexAgent, state);
 
     void (async () => {
@@ -824,26 +827,25 @@ function wireEventHandlers(
   });
 
   cortexAgent.onReflection((event) => {
-    logCortexReflectionEvent(eventBus, event);
+    logCortexReflectionEvent(eventBus, state.currentLogSessionId, event);
     saveActiveSession(cortexAgent, state);
   });
 
   // Wire compaction error handler and debug logging
-  wireCompactionHandlers(cortexAgent);
+  wireCompactionHandlers(cortexAgent, state, eventBus);
 }
 
-function insertLatestCompactionEvent(
+function insertCompactionEvent(
   eventBus: ReturnType<typeof getEventBus>,
+  sessionId: string | null,
   data: Record<string, unknown>,
 ): void {
+  if (!sessionId) return;
+
   try {
     const agentLogsDb = getAgentLogsDb();
-    const { sessions } = agentLogStore.listSessions(agentLogsDb, { limit: 1 });
-    const latest = sessions[0];
-    if (!latest) return;
-
     const event = agentLogStore.insertEvent(agentLogsDb, {
-      sessionId: latest.id,
+      sessionId,
       eventType: 'compaction',
       data,
     });
@@ -863,6 +865,7 @@ function insertLatestCompactionEvent(
 function logCortexObservationEvent(
   cortexAgent: CortexAgent,
   eventBus: ReturnType<typeof getEventBus>,
+  sessionId: string | null,
   event: {
     compactedMessages: AgentMessage[];
     observations: string;
@@ -871,7 +874,7 @@ function logCortexObservationEvent(
     timestamp: Date;
   },
 ): void {
-  insertLatestCompactionEvent(eventBus, {
+  insertCompactionEvent(eventBus, sessionId, {
     kind: 'observation',
     strategy: 'observational',
     messagesCompacted: event.compactedMessages.length,
@@ -886,6 +889,7 @@ function logCortexObservationEvent(
 
 function logCortexReflectionEvent(
   eventBus: ReturnType<typeof getEventBus>,
+  sessionId: string | null,
   event: {
     previousObservations: string;
     newObservations: string;
@@ -897,7 +901,7 @@ function logCortexReflectionEvent(
   const tokensBefore = estimateTextTokens(event.previousObservations);
   const tokensAfter = estimateTextTokens(event.newObservations);
 
-  insertLatestCompactionEvent(eventBus, {
+  insertCompactionEvent(eventBus, sessionId, {
     kind: 'reflection',
     strategy: 'observational',
     tokensBefore,
@@ -918,26 +922,34 @@ function logCortexReflectionEvent(
  * In observational mode (the default), onBeforeCompaction and onPostCompaction
  * do not fire. Only the error handler and debug logging remain useful.
  */
-function wireCompactionHandlers(cortexAgent: CortexAgent): void {
+function wireCompactionHandlers(
+  cortexAgent: CortexAgent,
+  state: CortexMindState,
+  eventBus: ReturnType<typeof getEventBus>,
+): void {
   cortexAgent.onCompactionError((error: Error) => {
     log.error('Compaction failed:', error);
 
-    // Best-effort: log to the most recent per-tick session (compaction runs
-    // during the agentic loop, so the current tick's session is the newest).
+    const sessionId = state.currentLogSessionId;
+    if (!sessionId) return;
+
     try {
       const agentLogsDb = getAgentLogsDb();
-      const { sessions } = agentLogStore.listSessions(agentLogsDb, { limit: 1 });
-      const latest = sessions[0];
-      if (latest) {
-        agentLogStore.insertEvent(agentLogsDb, {
-          sessionId: latest.id,
-          eventType: 'compaction_error',
-          data: {
-            error: error.message,
-            stack: error.stack?.substring(0, 500),
-          },
-        });
-      }
+      const event = agentLogStore.insertEvent(agentLogsDb, {
+        sessionId,
+        eventType: 'compaction_error',
+        data: {
+          error: error.message,
+          stack: error.stack?.substring(0, 500),
+        },
+      });
+      eventBus.emit('agent:event:logged', {
+        id: event.id,
+        sessionId: event.sessionId,
+        eventType: event.eventType,
+        data: event.data,
+        createdAt: event.createdAt,
+      });
     } catch (logErr) {
       log.warn('Failed to log compaction_error event:', logErr);
     }
