@@ -74,6 +74,22 @@ Animus is a **multi-platform application**. Every change must work across all su
 
 The full build, signing, and release matrix lives in `docs/architecture/release-engineering.md`. Read it before touching build scripts, CI workflows, the Dockerfile, or `prepare-tauri.mjs`.
 
+### Data Directory: Development vs Production
+
+The entire runtime lives in a single data directory (databases, logs, saves, media, models, voices, packages, vault, jwt key, etc.). The path is resolved in `packages/backend/src/utils/env.ts`: it uses `ANIMUS_DATA_DIR` if set, otherwise falls back to `<repo>/animus/data/`. Where that directory physically lives depends on how the app was launched, and this matters when the user asks you to **debug a running instance**:
+
+- **"Debug the development version" / "the dev version that's running"** → the data directory is `animus/data/` **inside this repository** (the `ANIMUS_DATA_DIR` fallback). This is what `npm run dev` uses. Logs are at `animus/data/logs/animus.log`, databases at `animus/data/databases/`.
+
+- **"Debug the production version" / "the macOS app that's running"** → the Tauri desktop app sets `ANIMUS_DATA_DIR` to the OS app-data location, **not** the repo. On macOS that is:
+
+  ```
+  ~/Library/Application Support/com.animus.desktop/
+  ```
+
+  Same internal layout as dev: `logs/animus.log` (rotates to `animus.log.1`, `.2`), `databases/*.db`, `saves/`, `media/`, `tool-results/`, plus desktop-only files (`sidecar.log`, `dock-addon.log`, `animus-desktop.log`, `node-helper.app/`). The bundle identifier is `com.animus.desktop`; do **not** confuse it with `com.animus.reverie` (a separate, unrelated dir).
+
+When debugging, read logs and inspect databases from the correct directory for the version the user named. If it is ambiguous, ask which one. The Application Support path is macOS-specific; Windows and Linux use their own OS app-data conventions, and Docker/standalone set `ANIMUS_DATA_DIR` explicitly.
+
 ### Database Architecture
 
 Eight separate SQLite databases with distinct purposes and lifecycles, all stored under `data/databases/`:
