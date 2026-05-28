@@ -564,9 +564,9 @@ describe('MindOutput schema validation', () => {
       emotionDeltas: [],
       decisions: [
         {
-          type: 'spawn_agent',
-          description: 'Research a topic',
-          parameters: { taskType: 'research', instructions: 'Find info about X' },
+          type: 'update_agent',
+          description: 'Forward new context to a running agent',
+          parameters: { agentId: 'agent-1', context: 'Found info about X' },
         },
       ],
       workingMemoryUpdate: null,

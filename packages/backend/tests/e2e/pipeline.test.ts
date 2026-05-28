@@ -507,7 +507,7 @@ describe('Decision Execution with Permissions', () => {
 
   it('drops agent decisions for non-primary contacts', () => {
     const tickNumber = 2;
-    const agentDecisionTypes = ['spawn_agent', 'update_agent', 'cancel_agent'];
+    const agentDecisionTypes = ['update_agent', 'cancel_agent'];
 
     // Simulate the permission check logic from executeOutput
     const standardContact = { ...makeContact(), permissionTier: 'standard' as const };
@@ -535,7 +535,7 @@ describe('Decision Execution with Permissions', () => {
     }
 
     const decisions = heartbeatStore.getTickDecisions(hbDb, tickNumber);
-    expect(decisions).toHaveLength(3);
+    expect(decisions).toHaveLength(2);
     expect(decisions.every((d) => d.outcome === 'dropped')).toBe(true);
     expect(decisions.every((d) => d.outcomeDetail!.includes('standard'))).toBe(true);
   });
@@ -547,9 +547,9 @@ describe('Decision Execution with Permissions', () => {
     // For primary, decisions should be executed
     heartbeatStore.insertTickDecision(hbDb, {
       tickNumber,
-      type: 'spawn_agent',
-      description: 'Research hiking trails',
-      parameters: { taskType: 'research', instructions: 'Find top trails' },
+      type: 'update_agent',
+      description: 'Forward context to a running agent',
+      parameters: { agentId: 'agent-1', context: 'Found top trails' },
       outcome: 'executed',
     });
 

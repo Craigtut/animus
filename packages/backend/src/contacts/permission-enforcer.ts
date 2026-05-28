@@ -16,7 +16,6 @@ import type { Contact, PermissionTier, DecisionType } from '@animus-labs/shared'
 export type ContactAction =
   | 'trigger_tick'
   | 'receive_reply'
-  | 'spawn_agent'
   | 'schedule_task'
   | 'update_goal'
   | 'cancel_agent'
@@ -32,7 +31,6 @@ const PERMISSIONS: Record<PermissionTier, Set<ContactAction>> = {
   primary: new Set([
     'trigger_tick',
     'receive_reply',
-    'spawn_agent',
     'schedule_task',
     'update_goal',
     'cancel_agent',
@@ -53,7 +51,6 @@ const PERMISSIONS: Record<PermissionTier, Set<ContactAction>> = {
  */
 const ALLOWED_DECISIONS: Record<PermissionTier, Set<DecisionType>> = {
   primary: new Set([
-    'spawn_agent',
     'update_agent',
     'cancel_agent',
     'send_message',
@@ -136,7 +133,6 @@ export function getAvailableToolTypes(tier: PermissionTier): string[] {
   if (tier === 'primary') {
     return [
       'send_message',
-      'spawn_agent',
       'calendar_lookup',
       'read_memory',
       'schedule_task',

@@ -58,7 +58,7 @@ export interface DecisionExecutorDeps {
  * Restricted decision types that only primary contacts may trigger.
  */
 const restrictedDecisionTypes = [
-  'spawn_agent', 'update_agent', 'cancel_agent',
+  'update_agent', 'cancel_agent',
   'propose_goal', 'create_seed', 'schedule_task',
 ];
 

@@ -237,10 +237,10 @@ describe('HookDefinitionSchema', () => {
   it('parses with matcher', () => {
     const result = HookDefinitionSchema.parse({
       event: 'postDecision',
-      matcher: { type: 'spawn_agent' },
+      matcher: { type: 'update_agent' },
       handler: { type: 'command', command: 'node hook.js' },
     });
-    expect(result.matcher).toEqual({ type: 'spawn_agent' });
+    expect(result.matcher).toEqual({ type: 'update_agent' });
   });
 
   it('rejects invalid event name', () => {
@@ -479,7 +479,7 @@ describe('triggerTypeSchema (plugin_trigger)', () => {
 
 describe('decisionTypeSchema (extended for plugins)', () => {
   it('accepts built-in decision types', () => {
-    for (const t of ['spawn_agent', 'send_message', 'no_action', 'schedule_task']) {
+    for (const t of ['update_agent', 'send_message', 'no_action', 'schedule_task']) {
       expect(decisionTypeSchema.parse(t)).toBe(t);
     }
   });
@@ -495,7 +495,7 @@ describe('decisionTypeSchema (extended for plugins)', () => {
   });
 
   it('builtInDecisionTypeSchema accepts built-in types', () => {
-    expect(builtInDecisionTypeSchema.parse('spawn_agent')).toBe('spawn_agent');
+    expect(builtInDecisionTypeSchema.parse('update_agent')).toBe('update_agent');
     expect(builtInDecisionTypeSchema.parse('no_action')).toBe('no_action');
   });
 });

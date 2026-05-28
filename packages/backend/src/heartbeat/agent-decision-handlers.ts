@@ -1,40 +1,15 @@
 /**
  * Agent Decision Handlers
  *
- * Registers handlers for agent-related decisions:
- * spawn_agent, update_agent, cancel_agent.
+ * Registers handlers for agent-steering decisions: update_agent, cancel_agent.
+ *
+ * Spawning is no longer a decision: the mind delegates in-loop via Cortex's
+ * SubAgent tool (tracked through onBeforeSubAgentSpawn in cortex-mind.ts).
  *
  * Extracted from decision-executor.ts executeAgentDecisions().
  */
 
 import { registerDecisionHandler } from './decision-registry.js';
-import * as taskStore from '../db/stores/task-store.js';
-import { createLogger } from '../lib/logger.js';
-
-const log = createLogger('AgentDecisions', 'heartbeat');
-
-registerDecisionHandler('spawn_agent', async (params, decision, ctx) => {
-  if (!ctx.agentOrchestrator) return;
-  const rawTaskId = params['taskId'] ? String(params['taskId']) : null;
-  const parentTaskId = rawTaskId ? taskStore.resolveTaskId(ctx.hbDb, rawTaskId) : null;
-  if (rawTaskId && !parentTaskId) {
-    const message = `spawn_agent failed: task "${rawTaskId}" was not found or was ambiguous`;
-    log.warn(message);
-    throw new Error(message);
-  }
-  await ctx.agentOrchestrator.spawnAgent({
-    taskType: String(params['taskType'] ?? 'general'),
-    description: decision.description,
-    instructions: String(params['instructions'] ?? decision.description),
-    contactId: params['contactId'] ? String(params['contactId']) : (ctx.contact?.id ?? ''),
-    channel: String(params['channel'] ?? ctx.triggerChannel ?? 'web'),
-    tickNumber: ctx.tickNumber,
-    ...(parentTaskId ? { parentTaskId } : {}),
-    systemPrompt: ctx.compiledPersona
-      ? ctx.buildSystemPrompt(ctx.compiledPersona)
-      : '',
-  });
-});
 
 registerDecisionHandler('update_agent', async (params, _decision, ctx) => {
   if (!ctx.agentOrchestrator) return;

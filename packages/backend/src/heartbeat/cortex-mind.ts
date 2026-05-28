@@ -23,6 +23,8 @@ import {
   type AgentMessage,
   resolveCacheRetention,
   type ThinkingLevel,
+  type SubAgentSpawnRequest,
+  type SubAgentSpawnAugmentation,
 } from '@animus-labs/cortex';
 
 import { getSystemDb, getHeartbeatDb, getContactsDb, getMessagesDb, getMemoryDb, getPersonaDb, getAgentLogsDb } from '../db/index.js';
@@ -32,6 +34,7 @@ import * as messageStore from '../db/stores/message-store.js';
 import * as personaStore from '../db/stores/persona-store.js';
 import * as memoryDbStore from '../db/stores/memory-store.js';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
+import * as agentTaskStore from '../db/stores/agent-task-store.js';
 import * as agentLogStore from '../db/stores/agent-log-store.js';
 import * as vaultStore from '../db/stores/vault-store.js';
 import { getEventBus } from '../lib/event-bus.js';
@@ -40,7 +43,7 @@ import { PROJECT_ROOT, DATA_DIR, APP_VERSION } from '../utils/env.js';
 import { isBlockedPath, isBlockedCommand } from '../lib/file-deny-list.js';
 import { resolveToolGate } from '../tools/tool-gate.js';
 import { getToolPermission, getToolPermissions } from '../db/stores/system-store.js';
-import { ANIMUS_TOOL_DEFS, type AnimusToolName } from '@animus-labs/shared';
+import { ANIMUS_TOOL_DEFS, type AnimusToolName, now } from '@animus-labs/shared';
 import type { ChannelType } from '@animus-labs/shared';
 import { executeTool } from '../tools/registry.js';
 import type { ToolHandlerContext, ToolResult } from '../tools/types.js';
@@ -50,6 +53,7 @@ import { getChannelRouter } from '../channels/channel-router.js';
 import { getChannelManager } from '../channels/channel-manager.js';
 import { getPluginManager } from '../plugins/index.js';
 import { getEnvironmentService } from '../services/environment-service.js';
+import { getBudgetService } from '../services/budget-service.js';
 import {
   SETUP_ENVIRONMENT_SKILL_NAME,
   SETUP_ENVIRONMENT_SKILL_MD,
@@ -57,7 +61,7 @@ import {
 import { z } from 'zod/v3';
 import { join } from 'node:path';
 import { createToolResultPersistor, cleanupDereferencedPaths } from './tool-result-persistor.js';
-import { buildTaskContextSection, formatTimestamp } from './context-builder.js';
+import { formatTimestamp } from './context-builder.js';
 import { buildCortexEnvOverrides } from './cortex-env.js';
 import { getSessionsDb } from '../db/index.js';
 import * as sessionStore from '../db/stores/session-store.js';
@@ -102,8 +106,6 @@ export const MIND_SLOT_NAMES = [
   'experience-observations',
   'recent-messages',
   'message-observations',
-  'goals',
-  'tasks',
 ] as const;
 
 export type MindSlotName = typeof MIND_SLOT_NAMES[number];
@@ -526,6 +528,48 @@ export async function refreshChannelDependentTools(
 }
 
 // ============================================================================
+// Sub-agent spawn tracking
+// ============================================================================
+
+/**
+ * Record a sub-agent spawn in the agent_tasks table. Wired into Cortex via
+ * onBeforeSubAgentSpawn, so every in-loop SubAgent tool spawn is tracked
+ * (visible to getRunningAgentTasks and correlated by taskId at completion).
+ *
+ * Returns no augmentation: sub-agents inherit the entity's persona and working
+ * directory already, and their task is defined entirely by their instructions.
+ * Background context can be seeded here later if a concrete need arises.
+ */
+function recordSubAgentSpawn(
+  req: SubAgentSpawnRequest,
+  state: CortexMindState,
+): SubAgentSpawnAugmentation | void {
+  try {
+    const hbDb = getHeartbeatDb();
+    const tickNumber = heartbeatStore.getHeartbeatState(hbDb).tickNumber;
+    const contactId = state.activeSession?.contactId ?? state.toolContext.current?.contactId ?? null;
+    const channel = state.activeSession?.channel ?? state.toolContext.current?.sourceChannel ?? null;
+    const ts = now();
+    agentTaskStore.insertAgentTask(hbDb, {
+      id: req.taskId,
+      tickNumber,
+      sessionId: null,
+      provider: 'cortex',
+      status: 'running',
+      taskType: 'general',
+      taskDescription: req.instructions.slice(0, 500),
+      parentTaskId: null,
+      contactId,
+      sourceChannel: channel,
+      createdAt: ts,
+    });
+    agentTaskStore.updateAgentTask(hbDb, req.taskId, { startedAt: ts });
+  } catch (err) {
+    log.warn('Failed to record sub-agent spawn:', err);
+  }
+}
+
+// ============================================================================
 // Create CortexAgent for Mind
 // ============================================================================
 
@@ -653,6 +697,11 @@ export async function createCortexMind(
     contextWindowLimit: (settingsAny['cortexContextWindowLimit'] as number | null | undefined) ?? null,
     resolvePermission: permissionResolver,
     tools: animusTools,
+    onBeforeSubAgentSpawn: (req) => recordSubAgentSpawn(req, state),
+    canSpawnSubAgent: () =>
+      getBudgetService({ getSystemDb, getAgentLogsDb }).isHardStopped()
+        ? { allowed: false, reason: 'Weekly budget reached; not starting new sub-agents until it resets or is increased. Continue with what you can do directly.' }
+        : { allowed: true },
     ...(envOverrides ? { envOverrides } : {}),
     persistResult,
     ...(recallConfig ? { compaction: { observational: { recall: recallConfig } } } : {}),
@@ -673,6 +722,12 @@ export async function createCortexMind(
   const initialCacheRetention = resolveCacheRetention(provider, heartbeatIntervalMs);
   cortexAgent.setCacheRetention(initialCacheRetention);
   log.info(`Cache retention: ${initialCacheRetention} (provider=${provider}, interval=${heartbeatIntervalMs}ms)`);
+
+  // Stable cache/session key for the mind. The mind's system prompt + stable
+  // context slots form a long common prefix across every tick; a stable
+  // prompt_cache_key keeps those requests routed to the same inference machine
+  // so the cached prefix is reused (gpt-5.5 retains it for up to 24h).
+  cortexAgent.setSessionId('animus-mind');
 
   // Wire event handlers
   wireEventHandlers(cortexAgent, state);
@@ -1537,38 +1592,10 @@ export function populateContextSlots(
     ? '── MESSAGE OBSERVATIONS ──\n' + messageObs
     : '');
 
-  // Slot 8: goals
-  const goalParts: string[] = [];
-  if (gathered.goalContext?.goalIndexSection) {
-    goalParts.push(
-      '── ACTIVE GOAL INDEX ──\n' +
-      'A compact map of active goals and review cues shown every tick.\n\n' +
-      gathered.goalContext.goalIndexSection,
-    );
-  }
-  if (gathered.goalContext?.goalSection) {
-    goalParts.push(
-      '── THINGS ON YOUR MIND ──\n' +
-      'These are things you care about. They\'re part of who you are,\n' +
-      'but they don\'t control you. You may advance them, reflect on\n' +
-      'them, or set them aside entirely.\n\n' +
-      gathered.goalContext.goalSection,
-    );
-  }
-  if (gathered.goalContext?.proposedGoalsSection) {
-    goalParts.push('── PENDING GOALS ──\n' + gathered.goalContext.proposedGoalsSection);
-  }
-  if (gathered.goalContext?.planningPromptsSection) {
-    goalParts.push(gathered.goalContext.planningPromptsSection);
-  }
-  cm.setSlot('goals', goalParts.length > 0
-    ? goalParts.join('\n\n')
-    : '(No active goals)');
-
-  // Slot 8: tasks
-  cm.setSlot('tasks', gathered.deferredTasks.length > 0
-    ? buildTaskContextSection(gathered.deferredTasks, gathered.taskJournals)
-    : '(No pending tasks)');
+  // Goals and tasks are no longer context slots: they are mutable per-tick
+  // content and are rendered at the top of the ephemeral region instead
+  // (see buildEphemeralSections in cortex-pipeline.ts). Keeping them out of
+  // the stable slot anchor preserves the cached prefix when they change.
 
   log.debug('Context slots populated');
 }

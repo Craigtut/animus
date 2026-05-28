@@ -1345,7 +1345,7 @@ describe('Permission Enforcement for Decisions', () => {
       'complete_task',
       'cancel_task',
       'skip_task',
-      'spawn_agent',
+      'update_agent',
       'send_message',
       'no_action',
     ] as const;
@@ -1411,7 +1411,7 @@ describe('Permission Enforcement for Decisions', () => {
       'create_seed',
       'schedule_task',
       'update_goal',
-      'spawn_agent',
+      'update_agent',
     ]);
 
     expect(result.allowed).toEqual([
@@ -1420,7 +1420,7 @@ describe('Permission Enforcement for Decisions', () => {
       'create_seed',
       'schedule_task',
       'update_goal',
-      'spawn_agent',
+      'update_agent',
     ]);
     expect(result.dropped).toEqual([]);
   });

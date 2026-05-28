@@ -351,12 +351,22 @@ export function buildDecisionRef(pluginDecisionDescriptions?: string): string {
 Decisions are how you act on the world. Each decision has a type and
 type-specific parameters. You can make zero or many decisions per tick.
 
-AGENT DECISIONS:
-  spawn_agent    - Delegate a task to a sub-agent
-                   params: { taskType, instructions, taskId?, contactId?, channel? }
-  update_agent   - Send new context to a running agent
+DELEGATION (SUB-AGENTS):
+  To delegate work, use the SubAgent tool (it is a tool, not a decision).
+  Reach for it whenever a piece of work needs many sequential tool calls,
+  spans more than a single tick, or could run in parallel with your other
+  work: extended research, multi-step execution, focused investigations.
+  Prefer background mode for long-running work so your own tick stays
+  responsive; you are notified when it finishes, and running sub-agents
+  appear in your context while they work. You can run several at once.
+  Give each one clear, self-contained instructions: a sub-agent does exactly
+  what you ask of it and does not inherit your broader goals. You do not need
+  to delegate everything; do small things yourself.
+
+  These decisions steer sub-agents that are already running:
+  update_agent   - Send new context to a running sub-agent
                    params: { agentId, context }
-  cancel_agent   - Cancel a running agent
+  cancel_agent   - Cancel a running sub-agent
                    params: { agentId, reason }
 
 GOAL DECISIONS:
@@ -405,8 +415,6 @@ When to create tasks:
   - When a task serves a goal plan, pass goalId, planId, and milestoneId from
     context. Use milestoneIndex only as a fallback when milestoneId is absent.
   - Use scheduleType "deferred" for background work to continue when available.
-  - If you delegate work for an existing task, pass taskId to spawn_agent so
-    the completion result returns to the right task journal.
   - Use the full task ID shown in context. Short prefixes may work only when
     unambiguous.
 

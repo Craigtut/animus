@@ -54,6 +54,7 @@ import {
   buildDecisionRef,
   MEMORY_INSTRUCTIONS,
   GOAL_GUIDANCE,
+  buildTaskContextSection,
 } from './context-builder.js';
 
 const log = createLogger('CortexPipeline', 'heartbeat');
@@ -1428,6 +1429,60 @@ export function buildEphemeralSections(
   config: PipelineConfig,
 ): EphemeralSection[] {
   const sections: EphemeralSection[] = [];
+
+  // 0. Goals and tasks. These are mutable (they can change every tick during
+  // active work), so they live at the top of the ephemeral region rather than
+  // in the stable context slots. Keeping them out of the slot anchor preserves
+  // the cached prefix (system prompt + stable slots + conversation history)
+  // when goals/tasks change.
+  const goalParts: string[] = [];
+  if (gathered.goalContext?.goalIndexSection) {
+    goalParts.push(
+      '── ACTIVE GOAL INDEX ──\n' +
+      'A compact map of active goals and review cues shown every tick.\n\n' +
+      gathered.goalContext.goalIndexSection,
+    );
+  }
+  if (gathered.goalContext?.goalSection) {
+    goalParts.push(
+      '── THINGS ON YOUR MIND ──\n' +
+      'These are things you care about. They\'re part of who you are,\n' +
+      'but they don\'t control you. You may advance them, reflect on\n' +
+      'them, or set them aside entirely.\n\n' +
+      gathered.goalContext.goalSection,
+    );
+  }
+  if (gathered.goalContext?.proposedGoalsSection) {
+    goalParts.push('── PENDING GOALS ──\n' + gathered.goalContext.proposedGoalsSection);
+  }
+  if (gathered.goalContext?.planningPromptsSection) {
+    goalParts.push(gathered.goalContext.planningPromptsSection);
+  }
+  if (goalParts.length > 0) {
+    sections.push({ name: 'Goals', content: goalParts.join('\n\n') });
+  }
+  if (gathered.deferredTasks.length > 0) {
+    sections.push({ name: 'Tasks', content: buildTaskContextSection(gathered.deferredTasks, gathered.taskJournals) });
+  }
+
+  // Running sub-agents. The agentic loop already gets a richer live
+  // <background-tasks> block from Cortex; this concise list ensures the
+  // direct-completion phases (notably REFLECT, where update_agent and
+  // cancel_agent decisions are made) can reference valid sub-agent ids.
+  const runningAgents = config.cortexAgent.getActiveSubAgents();
+  if (runningAgents.length > 0) {
+    const lines = runningAgents.map(a => {
+      const instr = a.instructions.length > 100 ? a.instructions.slice(0, 100) + '…' : a.instructions;
+      const activity = a.lastToolName
+        ? ` (currently ${a.lastToolName}${a.lastToolSummary ? `: ${a.lastToolSummary}` : ''})`
+        : '';
+      return `  - [${a.taskId}] ${a.status}: ${instr}${activity}`;
+    });
+    sections.push({ name: 'Running Sub-Agents', content:
+      '── RUNNING SUB-AGENTS ──\n' +
+      'Work you have delegated. Use update_agent or cancel_agent with the\n' +
+      'bracketed id to steer or stop one.\n' + lines.join('\n') });
+  }
 
   // 1. Date/time awareness
   const now = new Date();

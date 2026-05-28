@@ -1,14 +1,15 @@
 /**
  * Agent Orchestrator
  *
- * Manages sub-agent lifecycle: spawning, updating, cancelling, and
- * processing completion results. Handles MindOutput decisions related
- * to sub-agents (spawn_agent, update_agent, cancel_agent).
+ * Manages sub-agent lifecycle: tracking spawns (via the Cortex
+ * onBeforeSubAgentSpawn hook), updating, cancelling, and processing
+ * completion results. Spawning itself happens in-loop via Cortex's SubAgent
+ * tool; the orchestrator handles the update_agent and cancel_agent decisions.
  *
  * See docs/architecture/agent-orchestration.md for the full design.
  */
 
-import { generateUUID, now } from '@animus-labs/shared';
+import { now } from '@animus-labs/shared';
 import type { IEventBus } from '@animus-labs/shared';
 import type { CortexAgent } from '@animus-labs/cortex';
 import { createLogger } from '../lib/logger.js';
@@ -20,17 +21,6 @@ const log = createLogger('AgentOrchestrator', 'agents');
 // ============================================================================
 // Types
 // ============================================================================
-
-export interface SpawnAgentParams {
-  taskType: string;
-  description: string;
-  instructions: string;
-  contactId: string;
-  channel: string;
-  tickNumber: number;
-  systemPrompt: string;
-  parentTaskId?: string | null;
-}
 
 export interface UpdateAgentParams {
   agentId: string;
@@ -141,7 +131,7 @@ export class AgentOrchestrator {
 
   /**
    * Set the CortexAgent for sub-agent spawning.
-   * Must be set before calling spawnAgent/updateAgent/cancelAgent.
+   * Must be set before calling updateAgent/cancelAgent or tracking spawns.
    */
   setCortexAgent(cortexAgent: CortexAgent | null): void {
     this.cortexAgent = cortexAgent;
@@ -236,88 +226,6 @@ export class AgentOrchestrator {
 
       log.warn(`Cortex sub-agent failed: ${taskId}: ${error}`);
     });
-  }
-
-  /**
-   * Spawn a new sub-agent for a task.
-   *
-   * Delegates to the cortex SubAgentManager infrastructure.
-   * Requires a CortexAgent to be set via setCortexAgent().
-   */
-  async spawnAgent(params: SpawnAgentParams): Promise<string> {
-    if (!this.cortexAgent) {
-      throw new Error('Cannot spawn sub-agent: no CortexAgent configured. Call setCortexAgent() first.');
-    }
-
-    return this.spawnCortexSubAgent(params);
-  }
-
-  /**
-   * Spawn a sub-agent via cortex SubAgentManager.
-   *
-   * The cortex SubAgent tool creates an independent CortexAgent instance.
-   * The orchestrator tracks it in the agent_tasks table and monitors
-   * completion via lifecycle hooks wired in wireCortexLifecycleHooks().
-   */
-  private async spawnCortexSubAgent(params: SpawnAgentParams): Promise<string> {
-    const timestamp = now();
-
-    try {
-      const subAgentManager = this.cortexAgent!.getSubAgentManager();
-
-      // Check concurrency limit
-      if (!subAgentManager.canSpawn()) {
-        throw new Error(`Cortex sub-agent concurrency limit reached (${subAgentManager.activeCount}/${subAgentManager.limit})`);
-      }
-
-      const { taskId } = await this.cortexAgent!.spawnBackgroundSubAgent({
-        instructions: params.instructions,
-        systemPrompt: params.systemPrompt,
-      });
-
-      this.taskStore.insertAgentTask({
-        id: taskId,
-        tickNumber: params.tickNumber,
-        sessionId: null,
-        provider: 'cortex',
-        status: 'running',
-        taskType: params.taskType,
-        taskDescription: params.description,
-        parentTaskId: params.parentTaskId ?? null,
-        contactId: params.contactId,
-        sourceChannel: params.channel,
-        createdAt: timestamp,
-      });
-
-      this.taskStore.updateAgentTask(taskId, {
-        startedAt: now(),
-      });
-
-      log.info(`Cortex sub-agent spawn requested: ${taskId} (${params.taskType}: ${params.description.substring(0, 80)})`);
-
-      return taskId;
-    } catch (err) {
-      const failedTaskId = generateUUID();
-      this.taskStore.insertAgentTask({
-        id: failedTaskId,
-        tickNumber: params.tickNumber,
-        sessionId: null,
-        provider: 'cortex',
-        status: 'failed',
-        taskType: params.taskType,
-        taskDescription: params.description,
-        parentTaskId: params.parentTaskId ?? null,
-        contactId: params.contactId,
-        sourceChannel: params.channel,
-        createdAt: timestamp,
-      });
-      this.taskStore.updateAgentTask(failedTaskId, {
-        status: 'failed',
-        error: err instanceof Error ? err.message : String(err),
-        completedAt: now(),
-      });
-      throw err;
-    }
   }
 
   /**

@@ -437,7 +437,7 @@ export async function executeOutput(
     }
   }
   logExecuteEvent('execute_decisions_complete', {
-    agentDecisions: output.decisions.filter(d => ['spawn_agent', 'update_agent', 'cancel_agent'].includes(d.type)).length,
+    agentDecisions: output.decisions.filter(d => ['update_agent', 'cancel_agent'].includes(d.type)).length,
     pluginDecisions: output.decisions.filter(d => !builtInDecisionTypeSchema.safeParse(d.type).success).length,
     goalTaskDecisions: output.decisions.filter(d => [
       'create_seed', 'propose_goal', 'update_goal', 'create_plan', 'revise_plan',

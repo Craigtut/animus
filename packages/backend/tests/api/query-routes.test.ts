@@ -78,8 +78,8 @@ describe('heartbeatStore.getRecentDecisions', () => {
     });
     heartbeatStore.insertTickDecision(db, {
       tickNumber: 2,
-      type: 'spawn_agent',
-      description: 'Spawn research agent',
+      type: 'update_agent',
+      description: 'Update research agent',
       outcome: 'executed',
     });
 
@@ -107,8 +107,8 @@ describe('heartbeatStore.getRecentDecisions', () => {
   it('should parse JSON parameters', () => {
     heartbeatStore.insertTickDecision(db, {
       tickNumber: 1,
-      type: 'spawn_agent',
-      description: 'Spawn agent',
+      type: 'update_agent',
+      description: 'Update agent',
       parameters: { provider: 'claude', model: 'opus' },
       outcome: 'executed',
     });

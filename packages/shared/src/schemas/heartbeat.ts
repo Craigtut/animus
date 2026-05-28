@@ -145,7 +145,6 @@ export const experienceSchema = z.object({
 // ============================================================================
 
 export const builtInDecisionTypeSchema = z.enum([
-  'spawn_agent',
   'update_agent',
   'cancel_agent',
   'send_message',

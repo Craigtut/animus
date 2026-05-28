@@ -99,15 +99,28 @@ function createMockCortexAgent(subAgentManager?: SubAgentManager): CortexAgent {
   } as unknown as CortexAgent;
 }
 
-const defaultSpawnParams = {
-  taskType: 'research',
-  description: 'Research quantum computing',
-  instructions: 'Look up recent papers on quantum error correction',
-  contactId: 'contact-1',
-  channel: 'web',
-  tickNumber: 5,
-  systemPrompt: 'You are a research assistant.',
-};
+/**
+ * Seed a running sub-agent task record directly. Spawning is no longer an
+ * orchestrator method (it happens in-loop via Cortex's SubAgent tool, tracked
+ * through onBeforeSubAgentSpawn); the orchestrator now only steers, cancels,
+ * and reports tasks that already exist in the store.
+ */
+function seedRunningTask(taskStore: AgentTaskStore, id = 'sub-agent-1'): string {
+  taskStore.insertAgentTask({
+    id,
+    tickNumber: 5,
+    sessionId: null,
+    provider: 'cortex',
+    status: 'running',
+    taskType: 'research',
+    taskDescription: 'Research quantum computing',
+    contactId: 'contact-1',
+    sourceChannel: 'web',
+    createdAt: new Date().toISOString(),
+  });
+  taskStore.updateAgentTask(id, { startedAt: new Date().toISOString() });
+  return id;
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -141,66 +154,9 @@ describe('AgentOrchestrator', () => {
     vi.useRealTimers();
   });
 
-  describe('spawnAgent', () => {
-    it('creates a task record and returns an id', async () => {
-      const taskId = await orchestrator.spawnAgent(defaultSpawnParams);
-
-      expect(typeof taskId).toBe('string');
-      expect(taskId.length).toBeGreaterThan(0);
-
-      const task = taskStore.getAgentTask(taskId);
-      expect(task).not.toBeNull();
-      expect(task!.taskType).toBe('research');
-      expect(task!.taskDescription).toBe('Research quantum computing');
-      expect(task!.provider).toBe('cortex');
-    });
-
-    it('emits agent:spawned event via lifecycle hooks', async () => {
-      await orchestrator.spawnAgent(defaultSpawnParams);
-
-      // The lifecycle hooks are wired in setCortexAgent. Since the cortex
-      // agent is mocked, the spawned event is emitted by spawnCortexSubAgent
-      // via the lifecycle hooks callback, but the mock doesn't actually call
-      // back. We verify the task record was created with running status.
-      const running = taskStore.getRunningAgentTasks();
-      expect(running.length).toBe(1);
-    });
-
-    it('sets task status to running', async () => {
-      const taskId = await orchestrator.spawnAgent(defaultSpawnParams);
-
-      const task = taskStore.getAgentTask(taskId);
-      expect(task!.status).toBe('running');
-      expect(task!.startedAt).not.toBeNull();
-    });
-
-    it('throws when no CortexAgent is configured', async () => {
-      const noAgentOrchestrator = new AgentOrchestrator({
-        taskStore,
-        eventBus,
-        onAgentComplete,
-      });
-
-      await expect(
-        noAgentOrchestrator.spawnAgent(defaultSpawnParams)
-      ).rejects.toThrow('no CortexAgent configured');
-    });
-
-    it('fails when concurrency limit is reached', async () => {
-      const fullSubAgentManager = createMockSubAgentManager({ canSpawn: false });
-      const fullCortexAgent = createMockCortexAgent(fullSubAgentManager);
-
-      orchestrator.setCortexAgent(fullCortexAgent);
-
-      await expect(
-        orchestrator.spawnAgent(defaultSpawnParams)
-      ).rejects.toThrow('concurrency limit reached');
-    });
-  });
-
   describe('cancelAgent', () => {
     it('cancels a tracked sub-agent and updates status', async () => {
-      const taskId = await orchestrator.spawnAgent(defaultSpawnParams);
+      const taskId = seedRunningTask(taskStore);
 
       // Mock the sub-agent as tracked
       const mockSubAgent = { abort: vi.fn().mockResolvedValue(undefined) };
@@ -233,7 +189,7 @@ describe('AgentOrchestrator', () => {
 
   describe('updateAgent', () => {
     it('steers a tracked sub-agent', async () => {
-      const taskId = await orchestrator.spawnAgent(defaultSpawnParams);
+      const taskId = seedRunningTask(taskStore);
 
       const mockSubAgent = { steer: vi.fn() };
       (subAgentManager.get as ReturnType<typeof vi.fn>).mockReturnValueOnce({
@@ -271,7 +227,7 @@ describe('AgentOrchestrator', () => {
 
   describe('getRunningTasks', () => {
     it('returns running tasks from the task store', async () => {
-      await orchestrator.spawnAgent(defaultSpawnParams);
+      seedRunningTask(taskStore);
 
       const running = orchestrator.getRunningTasks();
       expect(running.length).toBe(1);
@@ -298,7 +254,7 @@ describe('AgentOrchestrator', () => {
 
   describe('cleanup', () => {
     it('clears the cortex reference', async () => {
-      await orchestrator.spawnAgent(defaultSpawnParams);
+      seedRunningTask(taskStore);
       await orchestrator.cleanup();
 
       // After cleanup, cortexAgent is null, so isAgentRunning returns false
@@ -308,7 +264,7 @@ describe('AgentOrchestrator', () => {
 
   describe('long-running agents', () => {
     it('does not impose a wall-clock timeout on Cortex sub-agents', async () => {
-      const taskId = await orchestrator.spawnAgent(defaultSpawnParams);
+      const taskId = seedRunningTask(taskStore);
 
       await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
 

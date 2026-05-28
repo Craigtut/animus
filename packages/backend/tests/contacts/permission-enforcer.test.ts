@@ -29,7 +29,7 @@ describe('permission-enforcer', () => {
     it('allows primary contacts full access', () => {
       const primary = makeContact({ isPrimary: true, permissionTier: 'primary' });
       expect(canPerform(primary, 'trigger_tick')).toBe(true);
-      expect(canPerform(primary, 'spawn_agent')).toBe(true);
+      expect(canPerform(primary, 'cancel_agent')).toBe(true);
       expect(canPerform(primary, 'schedule_task')).toBe(true);
       expect(canPerform(primary, 'update_goal')).toBe(true);
       expect(canPerform(primary, 'access_config')).toBe(true);
@@ -40,7 +40,7 @@ describe('permission-enforcer', () => {
       expect(canPerform(standard, 'trigger_tick')).toBe(true);
       expect(canPerform(standard, 'receive_reply')).toBe(true);
       expect(canPerform(standard, 'send_message')).toBe(true);
-      expect(canPerform(standard, 'spawn_agent')).toBe(false);
+      expect(canPerform(standard, 'cancel_agent')).toBe(false);
       expect(canPerform(standard, 'schedule_task')).toBe(false);
       expect(canPerform(standard, 'update_goal')).toBe(false);
       expect(canPerform(standard, 'access_tools')).toBe(false);
@@ -50,14 +50,14 @@ describe('permission-enforcer', () => {
 
   describe('canPerformByTier', () => {
     it('checks by tier string', () => {
-      expect(canPerformByTier('primary', 'spawn_agent')).toBe(true);
-      expect(canPerformByTier('standard', 'spawn_agent')).toBe(false);
+      expect(canPerformByTier('primary', 'cancel_agent')).toBe(true);
+      expect(canPerformByTier('standard', 'cancel_agent')).toBe(false);
     });
   });
 
   describe('isDecisionAllowed', () => {
     it('allows all decisions for primary', () => {
-      expect(isDecisionAllowed('primary', 'spawn_agent')).toBe(true);
+      expect(isDecisionAllowed('primary', 'update_agent')).toBe(true);
       expect(isDecisionAllowed('primary', 'schedule_task')).toBe(true);
       expect(isDecisionAllowed('primary', 'update_goal')).toBe(true);
       expect(isDecisionAllowed('primary', 'no_action')).toBe(true);
@@ -66,7 +66,7 @@ describe('permission-enforcer', () => {
     it('restricts standard to send_message and no_action', () => {
       expect(isDecisionAllowed('standard', 'send_message')).toBe(true);
       expect(isDecisionAllowed('standard', 'no_action')).toBe(true);
-      expect(isDecisionAllowed('standard', 'spawn_agent')).toBe(false);
+      expect(isDecisionAllowed('standard', 'update_agent')).toBe(false);
       expect(isDecisionAllowed('standard', 'schedule_task')).toBe(false);
       expect(isDecisionAllowed('standard', 'update_goal')).toBe(false);
     });
@@ -76,21 +76,21 @@ describe('permission-enforcer', () => {
     it('separates allowed and dropped decisions', () => {
       const result = filterAllowedDecisions('standard', [
         'send_message',
-        'spawn_agent',
+        'update_agent',
         'schedule_task',
         'no_action',
       ]);
       expect(result.allowed).toEqual(['send_message', 'no_action']);
-      expect(result.dropped).toEqual(['spawn_agent', 'schedule_task']);
+      expect(result.dropped).toEqual(['update_agent', 'schedule_task']);
     });
 
     it('allows all for primary', () => {
       const result = filterAllowedDecisions('primary', [
         'send_message',
-        'spawn_agent',
+        'update_agent',
         'schedule_task',
       ]);
-      expect(result.allowed).toEqual(['send_message', 'spawn_agent', 'schedule_task']);
+      expect(result.allowed).toEqual(['send_message', 'update_agent', 'schedule_task']);
       expect(result.dropped).toEqual([]);
     });
   });
@@ -98,7 +98,7 @@ describe('permission-enforcer', () => {
   describe('getAvailableToolTypes', () => {
     it('returns full tool set for primary', () => {
       const tools = getAvailableToolTypes('primary');
-      expect(tools).toContain('spawn_agent');
+      expect(tools).toContain('update_goal');
       expect(tools).toContain('schedule_task');
       expect(tools).toContain('system_config');
     });
@@ -107,7 +107,7 @@ describe('permission-enforcer', () => {
       const tools = getAvailableToolTypes('standard');
       expect(tools).toContain('send_message');
       expect(tools).toContain('read_memory');
-      expect(tools).not.toContain('spawn_agent');
+      expect(tools).not.toContain('update_goal');
       expect(tools).not.toContain('schedule_task');
     });
   });

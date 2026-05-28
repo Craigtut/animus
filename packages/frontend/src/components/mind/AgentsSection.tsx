@@ -393,7 +393,7 @@ function RecentSubAgentsSection() {
     }
 
     // Only show agent-related decisions (not generic mind decisions like no_action, send_reaction)
-    const agentDecisionTypes = new Set(['spawn_agent', 'update_agent', 'cancel_agent']);
+    const agentDecisionTypes = new Set(['update_agent', 'cancel_agent']);
     for (const d of recentDecisions ?? []) {
       if (!agentDecisionTypes.has(d.type)) continue;
       result.push({

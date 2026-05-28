@@ -294,10 +294,12 @@ describe('Cortex Pipeline', () => {
 });
 
 describe('Context Slot Population', () => {
-  it('should populate all 10 slots', async () => {
-    const { populateContextSlots, MIND_SLOT_NAMES } = await import('../../src/heartbeat/cortex-mind.js');
+  it('should define the 8 stable context slots', async () => {
+    const { MIND_SLOT_NAMES } = await import('../../src/heartbeat/cortex-mind.js');
 
-    expect(MIND_SLOT_NAMES).toHaveLength(10);
+    // goals and tasks are intentionally NOT slots: they are mutable per-tick
+    // content rendered in the ephemeral region (see buildEphemeralSections).
+    expect(MIND_SLOT_NAMES).toHaveLength(8);
     expect(MIND_SLOT_NAMES).toContain('credentials');
     expect(MIND_SLOT_NAMES).toContain('contacts');
     expect(MIND_SLOT_NAMES).toContain('core-self');
@@ -306,8 +308,8 @@ describe('Context Slot Population', () => {
     expect(MIND_SLOT_NAMES).toContain('experience-observations');
     expect(MIND_SLOT_NAMES).toContain('recent-messages');
     expect(MIND_SLOT_NAMES).toContain('message-observations');
-    expect(MIND_SLOT_NAMES).toContain('goals');
-    expect(MIND_SLOT_NAMES).toContain('tasks');
+    expect(MIND_SLOT_NAMES).not.toContain('goals');
+    expect(MIND_SLOT_NAMES).not.toContain('tasks');
   });
 
   it('should call setSlot for each slot name', async () => {
@@ -323,10 +325,7 @@ describe('Context Slot Population', () => {
     const gathered = createMockGather();
     populateContextSlots(mockAgent as any, gathered as any);
 
-    // Should have been called 10 times (once per slot)
-    expect(mockSetSlot).toHaveBeenCalledTimes(10);
-
-    // Verify slot names
+    // Verify slot names (8 stable slots; goals/tasks are now ephemeral)
     const calledSlots = mockSetSlot.mock.calls.map((call: unknown[]) => call[0]);
     expect(calledSlots).toContain('credentials');
     expect(calledSlots).toContain('contacts');
@@ -336,8 +335,8 @@ describe('Context Slot Population', () => {
     expect(calledSlots).toContain('experience-observations');
     expect(calledSlots).toContain('recent-messages');
     expect(calledSlots).toContain('message-observations');
-    expect(calledSlots).toContain('goals');
-    expect(calledSlots).toContain('tasks');
+    expect(calledSlots).not.toContain('goals');
+    expect(calledSlots).not.toContain('tasks');
   });
 
   it('should populate contacts slot with contact data', async () => {
