@@ -10,7 +10,8 @@
 
 import type { SubsystemLifecycle } from '../lib/lifecycle.js';
 import { createLogger } from '../lib/logger.js';
-import { getHeartbeatDb, getAgentLogsDb } from '../db/index.js';
+import { getHeartbeatDb, getAgentLogsDb, getSystemDb } from '../db/index.js';
+import { getBudgetService } from '../services/budget-service.js';
 import * as heartbeatStore from '../db/stores/heartbeat-store.js';
 import * as agentLogStore from '../db/stores/agent-log-store.js';
 import { getEventBus } from '../lib/event-bus.js';
@@ -75,6 +76,16 @@ export class AgentSubsystem implements SubsystemLifecycle {
       taskStore: agentTaskStore,
       eventBus: getEventBus(),
       onAgentComplete: this.onAgentComplete,
+    });
+
+    // Count in-flight sub-agent cost toward the weekly budget. Sub-agent cost
+    // is only written to agent_usage on completion, so a long-running
+    // background sub-agent would otherwise be invisible to the budget until it
+    // finishes. This surfaces a runaway while it is still burning.
+    getBudgetService({ getSystemDb, getAgentLogsDb }).setInflightSubAgentCostProvider(() => {
+      const agent = this.cortexMind.agent;
+      if (!agent) return 0;
+      return agent.getActiveSubAgents().reduce((sum, a) => sum + (a.liveCostUsd ?? 0), 0);
     });
 
     // Keep the mind's channel-dependent tools (send_proactive_message,

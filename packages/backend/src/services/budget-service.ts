@@ -30,6 +30,29 @@ export interface BudgetServiceDeps {
 class BudgetService {
   constructor(private deps: BudgetServiceDeps) {}
 
+  /**
+   * Optional provider for the live (in-flight) cost of running sub-agents.
+   * Sub-agent cost is only written to agent_usage when a sub-agent completes,
+   * so a long-running background sub-agent would otherwise be invisible to the
+   * budget until it finishes. This lets a runaway be seen while it is still
+   * burning. Set once at startup; null = no in-flight cost is counted.
+   */
+  private inflightSubAgentCostProvider: (() => number) | null = null;
+
+  setInflightSubAgentCostProvider(provider: (() => number) | null): void {
+    this.inflightSubAgentCostProvider = provider;
+  }
+
+  private getInflightSubAgentCost(): number {
+    if (!this.inflightSubAgentCostProvider) return 0;
+    try {
+      const cost = this.inflightSubAgentCostProvider();
+      return Number.isFinite(cost) && cost > 0 ? cost : 0;
+    } catch {
+      return 0;
+    }
+  }
+
   // --------------------------------------------------------------------------
   // Config
   // --------------------------------------------------------------------------
@@ -93,11 +116,12 @@ class BudgetService {
     // Compute the rolling window
     const { windowStart, windowEnd } = this.getCurrentWindow();
 
-    // Query total spend in window
+    // Query total spend in window, plus any in-flight sub-agent cost not yet
+    // written to agent_usage.
     const currentSpendUsd = usageStore.getTotalSpend(this.deps.getAgentLogsDb(), {
       start: windowStart,
       end: windowEnd,
-    });
+    }) + this.getInflightSubAgentCost();
 
     const remainingUsd = Math.max(0, config.weeklyBudgetUsd - currentSpendUsd);
     const percentUsed =
@@ -189,6 +213,17 @@ class BudgetService {
   // --------------------------------------------------------------------------
   // Tick gating
   // --------------------------------------------------------------------------
+
+  /**
+   * Whether the weekly budget is hard-stopped (>=95% used, including in-flight
+   * sub-agent cost). Used to gate new sub-agent spawns. Returns false when no
+   * budget is configured.
+   */
+  isHardStopped(): boolean {
+    const config = this.getBudgetConfig();
+    if (config.weeklyBudgetUsd <= 0) return false;
+    return this.getPercentUsed() >= 0.95;
+  }
 
   shouldAllowTick(triggerType: string): {
     allowed: boolean;
@@ -288,7 +323,7 @@ class BudgetService {
     return usageStore.getTotalSpend(this.deps.getAgentLogsDb(), {
       start: windowStart,
       end: windowEnd,
-    });
+    }) + this.getInflightSubAgentCost();
   }
 
   private getCurrentWindow(): { windowStart: string; windowEnd: string } {
