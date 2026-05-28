@@ -29,26 +29,33 @@ The mind should handle simple, quick work directly and delegate work that would 
 - analysis that needs a long working context
 - tasks where the user explicitly asks Animus to go work on something
 
-The EXECUTE stage only allows `spawn_agent` decisions for the primary contact. Non-primary contact ticks drop these decisions as a hard permission boundary.
+Spawning happens **in-loop** via Cortex's built-in `SubAgent` tool: the moment
+the mind recognizes large or parallelizable work, it calls the tool (preferring
+background mode for long work) rather than waiting until the REFLECT phase. The
+legacy reflect-phase `spawn_agent` decision has been removed. The `update_agent`
+and `cancel_agent` decisions remain (REFLECT phase) and are restricted to the
+primary contact.
 
 ## Core Flow
 
 ```
 GATHER
   -> includes running sub-agent status and completed results
+     (the agentic loop also receives Cortex's live <background-tasks> block)
 
 AGENTIC LOOP
-  -> mind may produce spawn_agent, update_agent, cancel_agent, or fail_agent decisions
+  -> mind calls the SubAgent tool to delegate work (foreground or background)
+  -> Cortex onBeforeSubAgentSpawn fires -> backend records the agent_tasks row
+  -> mind may also produce update_agent / cancel_agent decisions (in REFLECT)
 
 EXECUTE
-  -> validates contact permissions
-  -> calls AgentOrchestrator
-  -> persists task and sub-agent state
+  -> validates contact permissions (update_agent / cancel_agent)
+  -> calls AgentOrchestrator for steering / cancellation
   -> sends user-facing messages when appropriate
 
 Cortex SubAgentManager
   -> owns active sub-agent sessions
-  -> emits lifecycle updates
+  -> emits lifecycle updates (onSpawned / onCompleted / onFailed)
   -> returns completion results
 
 agent_complete trigger
@@ -70,11 +77,13 @@ agent_complete trigger
 
 The mind can send new information to a running sub-agent through an `update_agent` decision. The orchestrator forwards that update to Cortex so it becomes part of the sub-agent's conversation.
 
-When a sub-agent is spawned for an existing task, the mind should include
-`taskId` in the `spawn_agent` decision. The orchestrator stores this parent
-task link on `agent_tasks`. When the sub-agent completes, the `agent_complete`
-tick includes the completion result plus the parent task and task journal
-context, allowing reflection to fold returned findings into the task journal.
+Every spawn (via the in-loop `SubAgent` tool) is recorded in `agent_tasks`
+through Cortex's `onBeforeSubAgentSpawn` hook (`recordSubAgentSpawn` in
+`cortex-mind.ts`), keyed by the Cortex task id. When the sub-agent completes,
+the `onSubAgentCompleted` lifecycle hook updates that row and the
+`agent_complete` tick includes the completion result, letting reflection fold
+the returned findings back in. A sub-agent's task is defined solely by its
+instructions; it does not inherit the mind's broader goals.
 
 Cancellation is handled through Cortex when possible. If a sub-agent cannot be stopped cleanly, Animus stops tracking it, marks the task state accordingly, and lets the next heartbeat tick reason over the outcome.
 
