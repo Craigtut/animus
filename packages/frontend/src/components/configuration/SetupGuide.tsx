@@ -115,7 +115,7 @@ export function SetupGuide({ guide, fields, startCollapsed = false, onFieldRef }
                       font-weight: ${theme.typography.fontWeight.semibold};
                       color: ${theme.colors.text.primary};
                     `}>
-                      {step.title}
+                      {resolveTemplates(step.title, templateVars)}
                     </Typography.SmallBody>
 
                     <Typography.Caption as="p" color="secondary" css={css`line-height: 1.6;`}>
