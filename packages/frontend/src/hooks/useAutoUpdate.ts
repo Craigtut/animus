@@ -87,6 +87,20 @@ export function useAutoUpdate(): AutoUpdateState {
     isRunningRef.current = true;
     setInstalling(true);
     try {
+      // The backend sidecar holds open native-module files (e.g. LanceDB's .node)
+      // that the installer must overwrite. On Windows a still-running sidecar makes
+      // the passive NSIS installer fail to write silently, so the update never
+      // applies. Shut it down and wait for the file locks to release first.
+      if (isTauri()) {
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          await invoke('shutdown_sidecar');
+        } catch {
+          // Older shell without the command, or already stopped: the OS job
+          // object still tears the sidecar down on exit, so proceed regardless.
+        }
+      }
+
       // download() only buffers the update in the Update resource; install()
       // is what actually swaps the app bundle. Without it, restarting does
       // nothing and the next launch just re-downloads the same version.
@@ -99,6 +113,14 @@ export function useAutoUpdate(): AutoUpdateState {
       toast.error('Failed to install update.', {
         detail: err instanceof Error ? err.message : String(err),
       });
+      // The sidecar was stopped for the install; relaunch to restore a working
+      // app rather than leaving the UI stranded with no backend.
+      try {
+        const { relaunch } = await import('@tauri-apps/plugin-process');
+        await relaunch();
+      } catch {
+        // Nothing more we can do; user can restart manually.
+      }
     }
   }, []);
 
