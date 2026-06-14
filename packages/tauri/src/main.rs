@@ -19,6 +19,10 @@ mod power;
 
 struct Sidecar(Mutex<Option<Child>>);
 
+/// The port the backend sidecar is listening on, exposed to commands so they can
+/// drive a graceful shutdown over the localhost /api/shutdown endpoint.
+struct BackendPort(u16);
+
 /// Simple file logger for the Rust side (sidecar output goes to same file)
 fn open_log_file(data_dir: &std::path::Path) -> File {
     let log_path = data_dir.join("animus-desktop.log");
@@ -49,6 +53,109 @@ fn chrono_now() -> String {
         .unwrap_or_default()
         .as_secs();
     format!("t+{}s", secs % 100000)
+}
+
+/// Force-kill a process and its entire descendant tree (MCP servers, channels,
+/// ffmpeg, etc.). Used as the last-resort fallback when graceful shutdown does
+/// not complete in time.
+fn kill_process_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+    #[cfg(unix)]
+    unsafe {
+        // Negative pid targets the whole process group.
+        libc::kill(-(pid as i32), libc::SIGKILL);
+    }
+}
+
+/// Confine the sidecar to a Windows Job Object whose member processes are killed
+/// when the job's last handle closes. The job handle is held by THIS (desktop)
+/// process and is never explicitly closed, so Windows tears down the sidecar and
+/// its entire child tree whenever this process exits -- including crashes,
+/// force-quits, and Task Manager "End Task", not just the clean RunEvent::Exit
+/// path. This is the Windows analog of the Unix process-group kill, but it also
+/// covers abnormal termination, which an in-process exit handler cannot.
+#[cfg(windows)]
+fn confine_sidecar_to_job(child: &Child, log_file: &mut Option<File>) {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject,
+        JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            log!(log_file, "WARN: CreateJobObject failed; sidecar not confined to job");
+            return;
+        }
+
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
+        if SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        ) == 0
+        {
+            log!(log_file, "WARN: SetInformationJobObject failed; sidecar not confined");
+            CloseHandle(job);
+            return;
+        }
+
+        if AssignProcessToJobObject(job, child.as_raw_handle() as _) == 0 {
+            log!(log_file, "WARN: AssignProcessToJobObject failed; sidecar not confined");
+            CloseHandle(job);
+            return;
+        }
+
+        // Intentionally leak `job`: the handle must stay open for the lifetime of
+        // this process so the kill-on-close limit fires when we exit.
+        log!(log_file, "Sidecar confined to job object (kill-on-close)");
+    }
+}
+
+/// Gracefully stop the backend sidecar and wait for it to exit. Invoked by the
+/// auto-updater before running the installer: on Windows the sidecar holds open
+/// native-module files (e.g. LanceDB's .node) that the passive NSIS installer
+/// must overwrite, and a still-running sidecar makes that write fail silently.
+#[tauri::command]
+fn shutdown_sidecar(
+    sidecar: tauri::State<Sidecar>,
+    port: tauri::State<BackendPort>,
+) -> Result<(), String> {
+    // Ask the backend to shut down gracefully (flush databases, etc.).
+    let url = format!("http://127.0.0.1:{}/api/shutdown", port.0);
+    let _ = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .and_then(|client| client.post(&url).send());
+
+    let mut guard = sidecar.0.lock().map_err(|e| e.to_string())?;
+    if let Some(mut child) = guard.take() {
+        let pid = child.id();
+        // Wait up to 6s for graceful exit, then force-kill the whole tree.
+        for _ in 0..60 {
+            if let Ok(Some(_)) = child.try_wait() {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        kill_process_tree(pid);
+        let _ = child.wait();
+    }
+    Ok(())
 }
 
 fn find_free_port() -> u16 {
@@ -579,6 +686,11 @@ fn main() {
 
         log!(log_file, "Sidecar spawned (pid: {})", child.id());
 
+        // Tie the sidecar's lifetime to this process at the OS level so it (and
+        // its descendants) cannot be orphaned, even on crash or force-quit.
+        #[cfg(windows)]
+        confine_sidecar_to_job(&child, &mut log_file);
+
         // Wait for the server to be ready
         if !wait_for_server(port, 60) {
             log!(log_file, "ERROR: Backend server failed to start on port {}", port);
@@ -602,9 +714,11 @@ fn main() {
             .plugin(tauri_plugin_process::init())
             .plugin(tauri_plugin_dialog::init())
             .manage(sidecar)
+            .manage(BackendPort(port))
             .manage(power::DesktopPowerManager::default())
             .invoke_handler(tauri::generate_handler![
                 export_animus_save,
+                shutdown_sidecar,
                 power::desktop_power_status,
                 power::set_desktop_power_settings,
             ])
@@ -689,15 +803,8 @@ fn main() {
                         }
                     }
 
-                    // Force kill the process group if still running
-                    #[cfg(unix)]
-                    unsafe {
-                        libc::kill(-(child_pid as i32), libc::SIGKILL);
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        let _ = child.kill();
-                    }
+                    // Force kill the whole tree if still running
+                    kill_process_tree(child_pid);
                     let _ = child.wait();
                 }
             }
