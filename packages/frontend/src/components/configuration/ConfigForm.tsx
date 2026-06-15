@@ -18,8 +18,9 @@ interface ConfigFormProps {
   onToggleSecret: (key: string) => void;
   onSave: () => void;
   onCancel: () => void;
-  isSaving: boolean;
-  saveError?: string | undefined;
+	  isSaving: boolean;
+	  saveError?: string | undefined;
+	  saveLabel?: string | undefined;
   /** When true, show raw JSON editor instead of schema form */
   rawJsonMode?: boolean | undefined;
   rawJson?: string | undefined;
@@ -40,8 +41,9 @@ export const ConfigForm = forwardRef<ConfigFormHandle, ConfigFormProps>(
     onToggleSecret,
     onSave,
     onCancel,
-    isSaving,
-    saveError,
+	    isSaving,
+	    saveError,
+	    saveLabel = 'Save Configuration',
     rawJsonMode,
     rawJson,
     onRawJsonChange,
@@ -228,9 +230,9 @@ export const ConfigForm = forwardRef<ConfigFormHandle, ConfigFormProps>(
           border-top: 1px solid ${theme.colors.border.light};
         `}>
           <Button variant="ghost" size="sm" onClick={onCancel} type="button">Cancel</Button>
-          <Button size="sm" type="submit" loading={isSaving} disabled={fields.length === 0}>
-            Save Configuration
-          </Button>
+	            <Button size="sm" type="submit" loading={isSaving} disabled={fields.length === 0}>
+	              {saveLabel}
+	            </Button>
         </div>
       </form>
     );

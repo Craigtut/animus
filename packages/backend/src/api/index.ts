@@ -23,6 +23,7 @@ import { goalsRouter } from './routers/goals.js';
 import { tasksRouter } from './routers/tasks.js';
 import { agentLogsRouter } from './routers/agent-logs.js';
 import { pluginsRouter } from './routers/plugins.js';
+import { packageSettingsRouter } from './routers/package-settings.js';
 import { savesRouter } from './routers/saves.js';
 import { toolsRouter } from './routers/tools.js';
 import { speechRouter } from './routers/speech.js';
@@ -54,9 +55,10 @@ export const appRouter = router({
   memory: memoryRouter,
   goals: goalsRouter,
   tasks: tasksRouter,
-  agentLogs: agentLogsRouter,
-  plugins: pluginsRouter,
-  saves: savesRouter,
+	  agentLogs: agentLogsRouter,
+	  plugins: pluginsRouter,
+	  packageSettings: packageSettingsRouter,
+	  saves: savesRouter,
   tools: toolsRouter,
   speech: speechRouter,
   downloads: downloadsRouter,

@@ -19,6 +19,7 @@ import { env, DATA_DIR } from '../utils/env.js';
 
 import { getSystemDb } from '../db/index.js';
 import * as pluginStore from '../db/stores/plugin-store.js';
+import * as packageSettingsStore from '../db/stores/package-settings-store.js';
 import { encrypt, decrypt } from '../lib/encryption-service.js';
 import { isUnsealed, getSealState } from '../lib/vault-manager.js';
 import { getEventBus } from '../lib/event-bus.js';
@@ -33,6 +34,7 @@ import {
   PluginMcpServerSchema,
   AgentFrontmatterSchema,
   configSchemaSchema,
+  packageSettingsManifestSchema,
   PackageManifestSchema,
 } from '@animus-labs/shared';
 import type {
@@ -46,6 +48,7 @@ import type {
   PluginMcpServer,
   AgentFrontmatter,
   ConfigSchema,
+  PackageSettingsSurface,
   InstallResult,
   RollbackResult,
   VerificationResult,
@@ -66,6 +69,8 @@ interface LoadedPlugin {
   source: PluginSource;
   enabled: boolean;
   configSchema: ConfigSchema | null;
+  settingsSchema: ConfigSchema | null;
+  settingsSurfaces: PackageSettingsSurface[];
   iconSvg: string | null;
   skills: Array<{ name: string; absolutePath: string }>;
   mcpServers: Record<string, PluginMcpServer>;
@@ -194,6 +199,8 @@ export class PluginManager {
         source,
         enabled: record.enabled,
         configSchema: null,
+        settingsSchema: null,
+        settingsSurfaces: [],
         iconSvg: null,
         skills: [],
         mcpServers: {},
@@ -258,6 +265,8 @@ export class PluginManager {
       source: source.type,
       enabled: true,
       configSchema: null,
+      settingsSchema: null,
+      settingsSurfaces: [],
       iconSvg: null,
       skills: [],
       mcpServers: {},
@@ -330,6 +339,7 @@ export class PluginManager {
 
     const db = getSystemDb();
     pluginStore.deletePlugin(db, name);
+    packageSettingsStore.deletePackageSettings(db, 'plugin', name);
 
     getEventBus().emit('plugin:changed', { pluginName: name, action: 'uninstalled' });
     log.info(`Uninstalled plugin: ${name}`);
@@ -514,6 +524,8 @@ export class PluginManager {
           memory: manifest.permissions.memory,
         } : undefined,
         configSchema: manifest.configSchema,
+        settingsSchema: manifest.settingsSchema,
+        surfaces: manifest.surfaces,
         setup: manifest.setup,
       } as PluginManifest;
     }
@@ -525,6 +537,8 @@ export class PluginManager {
       source: 'package',
       enabled: true,
       configSchema: null,
+      settingsSchema: null,
+      settingsSurfaces: [],
       iconSvg: null,
       skills: [],
       mcpServers: {},
@@ -692,6 +706,8 @@ export class PluginManager {
           memory: manifest.permissions.memory,
         } : undefined,
         configSchema: manifest.configSchema,
+        settingsSchema: manifest.settingsSchema,
+        surfaces: manifest.surfaces,
         setup: manifest.setup,
       } as PluginManifest;
     }
@@ -703,6 +719,8 @@ export class PluginManager {
       source: loaded?.source ?? 'package',
       enabled: false,
       configSchema: null,
+      settingsSchema: null,
+      settingsSurfaces: [],
       iconSvg: null,
       skills: [],
       mcpServers: {},
@@ -866,6 +884,8 @@ export class PluginManager {
         source: loaded?.source ?? 'package',
         enabled: true,
         configSchema: null,
+        settingsSchema: null,
+        settingsSurfaces: [],
         iconSvg: null,
         skills: [],
         mcpServers: {},
@@ -1380,6 +1400,7 @@ export class PluginManager {
   ): Promise<Array<{ name: string; content: string; priority: number }>> {
     const sources: Array<{ name: string; content: string; priority: number }> = [];
     const promises: Promise<void>[] = [];
+    const db = getSystemDb();
 
     for (const loaded of this.plugins.values()) {
       if (!loaded.enabled) continue;
@@ -1391,19 +1412,22 @@ export class PluginManager {
           loaded.absolutePath,
         );
         const config = this.getDecryptedConfig(loaded.manifest.name);
+        const settings = packageSettingsStore.getPackageSettings(db, 'plugin', loaded.manifest.name);
 
         promises.push(
-          this.executeHandler(command, { event: tickContext, config }, 10_000).then(result => {
-            if (result.success && result.result) {
-              sources.push({
-                name: cs.name,
-                content: typeof result.result === 'string' ? result.result : JSON.stringify(result.result),
-                priority: cs.priority,
-              });
-            }
-          }).catch(err => {
-            log.warn(`Context retrieval failed for ${cs.name} (${loaded.manifest.name}):`, err);
-          })
+          this.executeHandler(command, { event: tickContext, config, settings }, 10_000)
+            .then(result => {
+              if (result.success && result.result) {
+                sources.push({
+                  name: cs.name,
+                  content: typeof result.result === 'string' ? result.result : JSON.stringify(result.result),
+                  priority: cs.priority,
+                });
+              }
+            })
+            .catch(err => {
+              log.warn(`Context retrieval failed for ${cs.name} (${loaded.manifest.name}):`, err);
+            }),
         );
       }
     }
@@ -1475,6 +1499,61 @@ export class PluginManager {
 
   getPluginConfigSchema(name: string): ConfigSchema | null {
     return this.plugins.get(name)?.configSchema ?? null;
+  }
+
+  getPluginSettingsSchema(name: string): ConfigSchema | null {
+    return this.plugins.get(name)?.settingsSchema ?? null;
+  }
+
+  getPluginSettingsSurfaces(name: string): PackageSettingsSurface[] {
+    return this.plugins.get(name)?.settingsSurfaces ?? [];
+  }
+
+  async callSettingsAction(
+    name: string,
+    surfaceId: string,
+    actionId: string,
+    params: unknown,
+  ): Promise<unknown> {
+    const loaded = this.plugins.get(name);
+    if (!loaded) {
+      throw new Error(`Plugin "${name}" is not loaded`);
+    }
+
+    const surface = loaded.settingsSurfaces.find(s => s.id === surfaceId);
+    if (!surface) {
+      throw new Error(`Settings surface "${surfaceId}" not found for plugin "${name}"`);
+    }
+
+    const action = surface.actions[actionId];
+    if (!action) {
+      throw new Error(`Settings action "${actionId}" not found for surface "${surfaceId}"`);
+    }
+
+    const command = this.substitutePluginRoot(action.command, loaded.absolutePath);
+    const args = action.args.map(arg => this.substitutePluginRoot(arg, loaded.absolutePath));
+    const db = getSystemDb();
+    const settings = packageSettingsStore.getPackageSettings(db, 'plugin', name);
+    const result = await this.executeStructuredHandler(command, args, {
+      action: actionId,
+      params,
+      config: this.getDecryptedConfig(name),
+      settings,
+      surface: {
+        id: surface.id,
+        type: surface.type,
+        settingsKey: surface.settingsKey ?? null,
+      },
+      plugin: {
+        name: loaded.manifest.name,
+        displayName: loaded.manifest.displayName,
+      },
+    }, action.timeoutMs);
+
+    if (!result.success) {
+      throw new Error(result.error ?? `Settings action "${actionId}" failed`);
+    }
+    return result.result ?? null;
   }
 
   setPluginConfig(name: string, config: Record<string, unknown>): void {
@@ -1607,6 +1686,8 @@ export class PluginManager {
         memory: manifest.permissions.memory,
       } : undefined,
       configSchema: manifest.configSchema,
+      settingsSchema: manifest.settingsSchema,
+      surfaces: manifest.surfaces,
       setup: manifest.packageType === 'plugin' ? manifest.setup : undefined,
     } as PluginManifest;
   }
@@ -1624,13 +1705,21 @@ export class PluginManager {
       loaded.configSchema = await this.loadConfigSchema(absolutePath, manifest.configSchema);
     }
 
-      // Icon
-      if (manifest.icon) {
-        try {
-          const iconPath = this.resolvePluginPath(absolutePath, manifest.icon, 'icon');
-          loaded.iconSvg = await fs.readFile(iconPath, 'utf-8');
-        } catch {
-          log.debug(`No icon found for ${manifest.name}`);
+    if (manifest.settingsSchema) {
+      loaded.settingsSchema = await this.loadConfigSchema(absolutePath, manifest.settingsSchema);
+    }
+
+    if (manifest.surfaces) {
+      loaded.settingsSurfaces = await this.loadSettingsSurfaces(absolutePath, manifest.surfaces);
+    }
+
+    // Icon
+    if (manifest.icon) {
+      try {
+        const iconPath = this.resolvePluginPath(absolutePath, manifest.icon, 'icon');
+        loaded.iconSvg = await fs.readFile(iconPath, 'utf-8');
+      } catch {
+        log.debug(`No icon found for ${manifest.name}`);
       }
     }
 
@@ -1670,12 +1759,12 @@ export class PluginManager {
     }
 
     // Cache static context source content
-      for (const cs of loaded.contextSources) {
-        if (cs.type === 'static' && cs.content) {
-          try {
-            const contentPath = this.resolvePluginPath(absolutePath, cs.content, `context source ${cs.name}`);
-            const content = await fs.readFile(contentPath, 'utf-8');
-            this.staticContentCache.set(`${manifest.name}:${cs.name}`, content);
+    for (const cs of loaded.contextSources) {
+      if (cs.type === 'static' && cs.content) {
+        try {
+          const contentPath = this.resolvePluginPath(absolutePath, cs.content, `context source ${cs.name}`);
+          const content = await fs.readFile(contentPath, 'utf-8');
+          this.staticContentCache.set(`${manifest.name}:${cs.name}`, content);
         } catch (err) {
           log.warn(`Failed to cache static content for ${cs.name} (${manifest.name}):`, err);
         }
@@ -1698,10 +1787,26 @@ export class PluginManager {
     }
   }
 
+  private async loadSettingsSurfaces(
+    pluginDir: string,
+    surfacesPath: string,
+  ): Promise<PackageSettingsSurface[]> {
+    const filePath = this.resolvePluginPath(pluginDir, surfacesPath, 'settings surfaces');
+    try {
+      const raw = await fs.readFile(filePath, 'utf-8');
+      const json = JSON.parse(raw);
+      const manifest = packageSettingsManifestSchema.parse(Array.isArray(json) ? { surfaces: json } : json);
+      return manifest.surfaces;
+    } catch (err) {
+      log.warn(`Failed to load settings surfaces from ${filePath}:`, err);
+      return [];
+    }
+  }
+
   private async loadSkills(
     pluginDir: string,
     skillsPath: string,
-    ): Promise<Array<{ name: string; absolutePath: string }>> {
+  ): Promise<Array<{ name: string; absolutePath: string }>> {
     const skills: Array<{ name: string; absolutePath: string }> = [];
     const dir = this.resolvePluginPath(pluginDir, skillsPath, 'skills');
     log.debug(`Loading skills from: ${dir}`);
@@ -1998,47 +2103,110 @@ export class PluginManager {
     });
   }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
+  private executeStructuredHandler(
+    command: string,
+    args: string[],
+    input: unknown,
+    timeoutMs: number,
+  ): Promise<HandlerResult> {
+    return new Promise((resolve) => {
+      const proc = spawn(command, args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env },
+      });
 
-    private resolvePluginPath(pluginPath: string, value: string, label: string): string {
-      if (!value || value.includes('\0')) {
-        throw new Error(`Invalid plugin path for ${label}`);
-      }
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
 
-      const root = path.resolve(pluginPath);
-      const substituted = this.substitutePluginRoot(value, root);
-      const resolved = path.isAbsolute(substituted)
-        ? path.resolve(substituted)
-        : path.resolve(root, substituted);
-      const relative = path.relative(root, resolved);
-
-      if (relative.startsWith('..') || path.isAbsolute(relative)) {
-        throw new Error(`Plugin path for ${label} escapes plugin root: ${value}`);
-      }
-
-      return resolved;
-    }
-
-    private substitutePluginRoot(value: string, pluginPath: string): string {
-      const substituted = value.replace(/\$\{PLUGIN_ROOT\}/g, pluginPath);
-      if (!pluginPath || !value.includes('${PLUGIN_ROOT}')) return substituted;
-
-      const root = path.resolve(pluginPath);
-      for (const token of substituted.split(/\s+/)) {
-        const cleaned = token.replace(/^['"]|['"]$/g, '');
-        if (!cleaned.startsWith(root)) continue;
-
-        const resolved = path.resolve(cleaned);
-        const relative = path.relative(root, resolved);
-        if (relative.startsWith('..') || path.isAbsolute(relative)) {
-          throw new Error(`Plugin root substitution escapes plugin root: ${value}`);
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          proc.kill('SIGTERM');
+          resolve({ success: false, error: `Handler timed out after ${timeoutMs}ms` });
         }
-      }
+      }, timeoutMs);
 
-      return substituted;
+      proc.stdout?.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString();
+      });
+
+      proc.stderr?.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+
+      proc.on('error', (err) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve({ success: false, error: `Handler spawn error: ${err.message}` });
+        }
+      });
+
+      proc.on('exit', (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+
+        if (code !== 0) {
+          resolve({ success: false, error: stderr.trim() || `Handler exited with code ${code}` });
+          return;
+        }
+
+        try {
+          const result = JSON.parse(stdout.trim()) as HandlerResult;
+          resolve(result);
+        } catch {
+          resolve({ success: true, result: stdout.trim() });
+        }
+      });
+
+      proc.stdin?.write(JSON.stringify(input));
+      proc.stdin?.end();
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Helpers
+  // -------------------------------------------------------------------------
+
+  private resolvePluginPath(pluginPath: string, value: string, label: string): string {
+    if (!value || value.includes('\0')) {
+      throw new Error(`Invalid plugin path for ${label}`);
     }
+
+    const root = path.resolve(pluginPath);
+    const substituted = this.substitutePluginRoot(value, root);
+    const resolved = path.isAbsolute(substituted)
+      ? path.resolve(substituted)
+      : path.resolve(root, substituted);
+    const relative = path.relative(root, resolved);
+
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error(`Plugin path for ${label} escapes plugin root: ${value}`);
+    }
+
+    return resolved;
+  }
+
+  private substitutePluginRoot(value: string, pluginPath: string): string {
+    const substituted = value.replace(/\$\{PLUGIN_ROOT\}/g, pluginPath);
+    if (!pluginPath || !value.includes('${PLUGIN_ROOT}')) return substituted;
+
+    const root = path.resolve(pluginPath);
+    for (const token of substituted.split(/\s+/)) {
+      const cleaned = token.replace(/^['"]|['"]$/g, '');
+      if (!cleaned.startsWith(root)) continue;
+
+      const resolved = path.resolve(cleaned);
+      const relative = path.relative(root, resolved);
+      if (relative.startsWith('..') || path.isAbsolute(relative)) {
+        throw new Error(`Plugin root substitution escapes plugin root: ${value}`);
+      }
+    }
+
+    return substituted;
+  }
 
   private getDecryptedConfig(pluginName: string): Record<string, unknown> | null {
     const db = getSystemDb();

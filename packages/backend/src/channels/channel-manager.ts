@@ -15,6 +15,7 @@ import { getEventBus } from '../lib/event-bus.js';
 import { env, DATA_DIR } from '../utils/env.js';
 import { getSystemDb, getContactsDb } from '../db/index.js';
 import * as systemStore from '../db/stores/system-store.js';
+import * as packageSettingsStore from '../db/stores/package-settings-store.js';
 import * as contactStore from '../db/stores/contact-store.js';
 import { ChannelProcessHost, type SendDeliveryResult } from './process-host.js';
 import { getChannelRouter } from './channel-router.js';
@@ -248,10 +249,11 @@ export class ChannelManager {
       log.info(`Removed ${removedChannels} contact channel(s) for type: ${pkg.channelType}`);
     }
 
-    // Remove from DB
-    systemStore.deleteChannelPackage(db, name);
+	    // Remove from DB
+	    systemStore.deleteChannelPackage(db, name);
+	    packageSettingsStore.deletePackageSettings(db, 'channel', name);
 
-    // Clean up maps
+	    // Clean up maps
     this.manifests.delete(pkg.channelType);
     this.configSchemas.delete(pkg.channelType);
 
@@ -889,10 +891,11 @@ export class ChannelManager {
         identity: manifest?.identity ?? { resolution: 'lookup' as const },
         enabled: pkg.enabled,
         status: effectiveStatus,
-        lastError: pkg.lastError,
-        installedAt: pkg.installedAt,
-        installedFrom: pkg.installedFrom,
-      };
+	        lastError: pkg.lastError,
+	        installedAt: pkg.installedAt,
+	        installedFrom: pkg.installedFrom,
+	        hasSettings: !!(manifest?.settingsSchema || manifest?.surfaces),
+	      };
     });
   }
 

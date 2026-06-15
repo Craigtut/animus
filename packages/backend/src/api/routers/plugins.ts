@@ -62,9 +62,11 @@ export const pluginsRouter = router({
           decisionTypes: loaded?.decisionTypes.length ?? 0,
           triggers: loaded?.triggers.length ?? 0,
           agents: loaded?.agents.length ?? 0,
-        },
-        hasConfig: comps.tools !== undefined || pm.getPluginConfigSchema(p.name) !== null,
-      };
+	        },
+	        hasConfig: comps.tools !== undefined || pm.getPluginConfigSchema(p.name) !== null,
+	        hasSettings: pm.getPluginSettingsSchema(p.name) !== null ||
+	          pm.getPluginSettingsSurfaces(p.name).length > 0,
+	      };
     });
 
     // Include errored plugins from DB that aren't in the in-memory map
@@ -93,9 +95,10 @@ export const pluginsRouter = router({
           decisionTypes: 0,
           triggers: 0,
           agents: 0,
-        },
-        hasConfig: false,
-      });
+	        },
+	        hasConfig: false,
+	        hasSettings: false,
+	      });
     }
 
     return results;

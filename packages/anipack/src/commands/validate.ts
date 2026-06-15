@@ -101,11 +101,43 @@ export async function validate(absoluteDir: string): Promise<ValidateResult> {
     } else {
       errors.push(`Config schema file not found: ${configSchemaField}`);
     }
-  } else {
-    logger.detail('Config:', 'no config schema');
-  }
+	  } else {
+	    logger.detail('Config:', 'no config schema');
+	  }
 
-  // Plugin-specific checks
+	  const settingsSchemaField = raw['settingsSchema'] as string | undefined;
+	  if (settingsSchemaField) {
+	    const settingsPath = path.join(absoluteDir, settingsSchemaField);
+	    if (await fileExists(settingsPath)) {
+	      try {
+	        const content = await fs.readFile(settingsPath, 'utf-8');
+	        JSON.parse(content);
+	        logger.detail('Settings:', settingsSchemaField);
+	      } catch {
+	        errors.push(`Settings schema is not valid JSON: ${settingsSchemaField}`);
+	      }
+	    } else {
+	      errors.push(`Settings schema file not found: ${settingsSchemaField}`);
+	    }
+	  }
+
+	  const surfacesField = raw['surfaces'] as string | undefined;
+	  if (surfacesField) {
+	    const surfacesPath = path.join(absoluteDir, surfacesField);
+	    if (await fileExists(surfacesPath)) {
+	      try {
+	        const content = await fs.readFile(surfacesPath, 'utf-8');
+	        JSON.parse(content);
+	        logger.detail('Surfaces:', surfacesField);
+	      } catch {
+	        errors.push(`Surfaces file is not valid JSON: ${surfacesField}`);
+	      }
+	    } else {
+	      errors.push(`Surfaces file not found: ${surfacesField}`);
+	    }
+	  }
+
+	  // Plugin-specific checks
   if (type === 'plugin' && 'components' in parsed) {
     const components = parsed.components;
     logger.detail('Components:', '');

@@ -49,6 +49,8 @@ export const PluginManifestSchema = z.object({
   }).default({}),
 
   configSchema: z.string().optional(), // path to config.schema.json (uses same field format as channels)
+  settingsSchema: z.string().optional(), // path to ongoing settings form schema
+  surfaces: z.string().optional(), // path to package settings surfaces manifest
   setup: z.string().optional(),
 
   store: z.object({

@@ -115,6 +115,12 @@ import type {
   DecisionTypeSchema,
   TriggerDefinitionSchema,
   PluginMcpServerSchema,
+  // Package settings
+  packageTypeSchema,
+  packageSettingsActionSchema,
+  packageSettingsSurfaceTypeSchema,
+  packageSettingsSurfaceSchema,
+  packageSettingsManifestSchema,
   // Usage & Budget
   tickTypeSchema,
   pipelinePhaseSchema,
@@ -334,6 +340,16 @@ export type HookDefinition = z.infer<typeof HookDefinitionSchema>;
 export type DecisionTypeDefinition = z.infer<typeof DecisionTypeSchema>;
 export type TriggerDefinition = z.infer<typeof TriggerDefinitionSchema>;
 export type PluginMcpServer = z.infer<typeof PluginMcpServerSchema>;
+
+// ============================================================================
+// Package Settings
+// ============================================================================
+
+export type PackageType = z.infer<typeof packageTypeSchema>;
+export type PackageSettingsAction = z.infer<typeof packageSettingsActionSchema>;
+export type PackageSettingsSurfaceType = z.infer<typeof packageSettingsSurfaceTypeSchema>;
+export type PackageSettingsSurface = z.infer<typeof packageSettingsSurfaceSchema>;
+export type PackageSettingsManifest = z.infer<typeof packageSettingsManifestSchema>;
 
 // ============================================================================
 // Observational Memory (memory.db)

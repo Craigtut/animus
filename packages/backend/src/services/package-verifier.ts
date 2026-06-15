@@ -344,6 +344,8 @@ function validateManifestPaths(manifest: PackageManifest): string[] {
   const paths: Array<[string, string | undefined]> = [
     ['icon', manifest.icon],
     ['configSchema', manifest.configSchema],
+    ['settingsSchema', manifest.settingsSchema],
+    ['surfaces', manifest.surfaces],
   ];
 
   if (manifest.packageType === 'plugin') {

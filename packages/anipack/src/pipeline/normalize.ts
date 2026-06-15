@@ -36,9 +36,11 @@ export function normalizeManifest(
     author: raw['author'] as { name: string; url?: string },
     license: (raw['license'] as string | undefined) ?? undefined,
     icon: raw['icon'] as string,
-    engineVersion: (raw['engine'] as string | undefined) ?? undefined,
-    configSchema: (raw['configSchema'] as string | undefined) ?? undefined,
-    permissions: raw['permissions'] != null
+	    engineVersion: (raw['engine'] as string | undefined) ?? undefined,
+	    configSchema: (raw['configSchema'] as string | undefined) ?? undefined,
+	    settingsSchema: (raw['settingsSchema'] as string | undefined) ?? undefined,
+	    surfaces: (raw['surfaces'] as string | undefined) ?? undefined,
+	    permissions: raw['permissions'] != null
       ? raw['permissions'] as PackageManifest['permissions']
       : undefined,
     store: raw['store'] != null

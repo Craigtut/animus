@@ -65,6 +65,10 @@ export const channelManifestSchema = z.object({
   identity: channelIdentitySchema,
   capabilities: z.array(channelCapabilitySchema),
   replyGuidance: z.string().min(1),
+  skills: z.string().optional(),
+  configSchema: z.string().optional(),
+  settingsSchema: z.string().optional(),
+  surfaces: z.string().optional(),
   permissions: channelPermissionsSchema.optional(),
   store: channelStoreMetadataSchema.optional(),
 });
@@ -195,6 +199,7 @@ export const channelInfoSchema = z.object({
   lastError: z.string().nullable(),
   installedAt: z.string(),
   installedFrom: z.enum(['local', 'package']).default('local'),
+  hasSettings: z.boolean().default(false),
 });
 
 // ============================================================================

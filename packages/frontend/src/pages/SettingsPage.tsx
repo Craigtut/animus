@@ -2208,15 +2208,25 @@ function ChannelsSection() {
 
                       {/* Actions */}
                       <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={(e: React.MouseEvent) => { e.stopPropagation(); navigateToConfig(`/settings/channels/${channel.name}/configure`); }}
-                        >
-                          <GearFine size={14} css={css`margin-right: ${theme.spacing[1]};`} />
-                          Configure
-                        </Button>
-                        {channel.installedFrom === 'package' && (
+	                        <Button
+	                          variant="secondary"
+	                          size="sm"
+	                          onClick={(e: React.MouseEvent) => { e.stopPropagation(); navigateToConfig(`/settings/channels/${channel.name}/configure`); }}
+	                        >
+	                          <GearFine size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+	                          Configure
+	                        </Button>
+	                        {channel.hasSettings && (
+	                          <Button
+	                            variant="secondary"
+	                            size="sm"
+	                            onClick={(e: React.MouseEvent) => { e.stopPropagation(); navigateToConfig(`/settings/channels/${channel.name}/manage`); }}
+	                          >
+	                            <Wrench size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+	                            Manage
+	                          </Button>
+	                        )}
+	                        {channel.installedFrom === 'package' && (
                           <Button
                             variant="secondary"
                             size="sm"
@@ -2964,14 +2974,16 @@ function PluginsSection() {
                           </div>
                         </div>
                       ) : (
-                        <PluginDetail
-                          pluginName={plugin.name}
-                          installedFrom={plugin.installedFrom}
-                          hasConfig={plugin.hasConfig}
-                          onConfigure={() => navigateToConfig(`/settings/plugins/${plugin.name}/configure`)}
-                          onUninstall={() => setUninstallConfirm(plugin.name)}
-                          onUpdate={() => setUpdateTarget(plugin.name)}
-                        />
+	                        <PluginDetail
+	                          pluginName={plugin.name}
+	                          installedFrom={plugin.installedFrom}
+	                          hasConfig={plugin.hasConfig}
+	                          hasSettings={plugin.hasSettings}
+	                          onConfigure={() => navigateToConfig(`/settings/plugins/${plugin.name}/configure`)}
+	                          onManage={() => navigateToConfig(`/settings/plugins/${plugin.name}/manage`)}
+	                          onUninstall={() => setUninstallConfirm(plugin.name)}
+	                          onUpdate={() => setUpdateTarget(plugin.name)}
+	                        />
                       )}
                     </motion.div>
                   )}
@@ -3248,18 +3260,22 @@ function PluginsSection() {
 
 function PluginDetail({
   pluginName,
-  installedFrom,
-  hasConfig,
-  onConfigure,
-  onUninstall,
-  onUpdate,
-}: {
-  pluginName: string;
-  installedFrom: string;
-  hasConfig: boolean;
-  onConfigure: () => void;
-  onUninstall: () => void;
-  onUpdate: () => void;
+	  installedFrom,
+	  hasConfig,
+	  hasSettings,
+	  onConfigure,
+	  onManage,
+	  onUninstall,
+	  onUpdate,
+	}: {
+	  pluginName: string;
+	  installedFrom: string;
+	  hasConfig: boolean;
+	  hasSettings: boolean;
+	  onConfigure: () => void;
+	  onManage: () => void;
+	  onUninstall: () => void;
+	  onUpdate: () => void;
 }) {
   const theme = useTheme();
   const { data: detail, isLoading } = trpc.plugins.get.useQuery({ name: pluginName });
@@ -3408,17 +3424,27 @@ function PluginDetail({
 
       {/* Action buttons */}
       <div css={css`display: flex; gap: ${theme.spacing[2]}; flex-wrap: wrap;`}>
-        {hasConfig && (
-          <Button
+	        {hasConfig && (
+	          <Button
             variant="secondary"
             size="sm"
             onClick={(e: React.MouseEvent) => { e.stopPropagation(); onConfigure(); }}
           >
             <GearFine size={14} css={css`margin-right: ${theme.spacing[1]};`} />
-            Configure
-          </Button>
-        )}
-        {installedFrom === 'package' && (
+	            Configure
+	          </Button>
+	        )}
+	        {hasSettings && (
+	          <Button
+	            variant="secondary"
+	            size="sm"
+	            onClick={(e: React.MouseEvent) => { e.stopPropagation(); onManage(); }}
+	          >
+	            <Wrench size={14} css={css`margin-right: ${theme.spacing[1]};`} />
+	            Manage
+	          </Button>
+	        )}
+	        {installedFrom === 'package' && (
           <Button
             variant="secondary"
             size="sm"

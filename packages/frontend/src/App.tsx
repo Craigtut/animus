@@ -49,6 +49,7 @@ import { PeoplePage } from './pages/PeoplePage';
 import { PersonaPage } from './pages/PersonaPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ConfigurationPage } from './pages/ConfigurationPage';
+import { PackageSettingsPage } from './pages/PackageSettingsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { MaintenanceOverlay } from './components/MaintenanceOverlay';
 import { DownloadToast } from './components/DownloadToast';
@@ -204,9 +205,11 @@ export function App() {
                 <Route path="/people/*" element={<PeoplePage />} />
                 <Route path="/persona" element={<PersonaPage />} />
                 <Route path="/persona/*" element={<PersonaPage />} />
-                <Route path="/settings/channels/:name/configure" element={<ConfigurationPage extensionType="channel" />} />
-                <Route path="/settings/plugins/:name/configure" element={<ConfigurationPage extensionType="plugin" />} />
-                <Route path="/settings" element={<SettingsPage />} />
+	                <Route path="/settings/channels/:name/configure" element={<ConfigurationPage extensionType="channel" />} />
+	                <Route path="/settings/plugins/:name/configure" element={<ConfigurationPage extensionType="plugin" />} />
+	                <Route path="/settings/channels/:name/manage" element={<PackageSettingsPage packageType="channel" />} />
+	                <Route path="/settings/plugins/:name/manage" element={<PackageSettingsPage packageType="plugin" />} />
+	                <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/settings/*" element={<SettingsPage />} />
               </Route>
 

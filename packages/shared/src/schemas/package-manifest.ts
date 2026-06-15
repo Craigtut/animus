@@ -85,6 +85,8 @@ const packageManifestCommon = {
   icon: z.string().min(1),
   engineVersion: z.string().optional(),
   configSchema: z.string().optional(),
+  settingsSchema: z.string().optional(),
+  surfaces: z.string().optional(),
   permissions: packagePermissionsSchema.optional(),
   store: packageStoreMetadataSchema.optional(),
   distribution: packageDistributionSchema.optional(),
@@ -111,10 +113,11 @@ export const channelPackageManifestSchema = z.object({
   packageType: z.literal('channel'),
   channelType: z.string().min(1),
   adapter: z.string().min(1),
-  identity: channelIdentitySchema,
-  capabilities: z.array(channelCapabilitySchema),
-  replyGuidance: z.string().optional(),
-});
+	  identity: channelIdentitySchema,
+	  capabilities: z.array(channelCapabilitySchema),
+	  replyGuidance: z.string().optional(),
+	  skills: z.string().optional(),
+	});
 
 // ============================================================================
 // Discriminated Union
