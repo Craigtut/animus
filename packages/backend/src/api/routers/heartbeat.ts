@@ -910,6 +910,23 @@ export const heartbeatRouter = router({
   }),
 
   /**
+   * Subscribe to provider auth recovery (credentials resolved again after a
+   * prior failure). The frontend uses this to self-clear the re-auth banner.
+   */
+  onAuthRecovered: protectedProcedure.subscription(() => {
+    return observable<{ provider?: string }>((emit) => {
+      const eventBus = getEventBus();
+      const handler = (data: { provider?: string }) => {
+        emit.next(data);
+      };
+      eventBus.on('cortex:auth-recovered', handler);
+      return () => {
+        eventBus.off('cortex:auth-recovered', handler);
+      };
+    });
+  }),
+
+  /**
    * Cancel a running sub-agent via the orchestrator.
    */
   cancelAgentTask: protectedProcedure

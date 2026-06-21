@@ -39,6 +39,7 @@ import * as agentLogStore from '../db/stores/agent-log-store.js';
 import * as vaultStore from '../db/stores/vault-store.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { createLogger } from '../lib/logger.js';
+import { surfaceAuthFailure, resolveApiKeyWithAuthDetection } from './auth-detection.js';
 import { PROJECT_ROOT, DATA_DIR, APP_VERSION } from '../utils/env.js';
 import { isBlockedPath, isBlockedCommand } from '../lib/file-deny-list.js';
 import { resolveToolGate } from '../tools/tool-gate.js';
@@ -123,6 +124,12 @@ export interface CortexMindState {
   activeSession: { contactId: string; channel: string } | null;
   /** Active agent_logs session for the currently running tick. */
   currentLogSessionId: string | null;
+  /**
+   * True once a provider auth failure has been surfaced to the UI (re-auth
+   * needed). Used to emit a single `cortex:auth-recovered` when credentials
+   * resolve again, so the persistent re-auth banner can self-clear.
+   */
+  authErrorActive: boolean;
 }
 
 export interface MutableMindToolContext {
@@ -138,6 +145,7 @@ export function createCortexMindState(): CortexMindState {
     toolContext: { current: null },
     activeSession: null,
     currentLogSessionId: null,
+    authErrorActive: false,
   };
 }
 
@@ -618,9 +626,16 @@ export async function createCortexMind(
   const { getCortexCredentialService } = await import('../services/cortex-credential-service.js');
   const credService = getCortexCredentialService();
 
-  const getApiKey = async (providerName: string): Promise<string> => {
-    return credService.resolveApiKey(providerName);
-  };
+  // getApiKey is the single point where credentials are resolved (and OAuth
+  // tokens refreshed) before every LLM call. It is also the most reliable place
+  // to detect that re-authentication is needed (see resolveApiKeyWithAuthDetection).
+  const getApiKey = (providerName: string): Promise<string> =>
+    resolveApiKeyWithAuthDetection(
+      state,
+      providerName,
+      (p) => credService.resolveApiKey(p),
+      (p) => !!state.providerManager?.checkEnvApiKey(p),
+    );
 
   // Build Animus tools (send_message, read_memory, etc.)
   const animusTools = await buildAnimusTools(state.toolContext);
@@ -792,15 +807,10 @@ function wireEventHandlers(
     }
 
     if (classified.category === 'authentication') {
-      eventBus.emit('system:error', {
-        category: 'authentication',
-        message: classified.originalMessage,
-        recoverable: false,
-        suggestedAction: classified.suggestedAction ?? 'Check your API key in Settings.',
-      });
-      eventBus.emit('cortex:auth-failed', {
-        message: classified.originalMessage,
-      });
+      // Belt-and-suspenders for post-resolution provider rejections (e.g. a key
+      // that was valid at resolve time but is revoked provider-side). The
+      // getApiKey wrapper already covers credential-resolution failures.
+      surfaceAuthFailure(state, state.model?.provider, classified.originalMessage);
     } else if (classified.category === 'rate_limit') {
       eventBus.emit('system:error', {
         category: 'provider',
