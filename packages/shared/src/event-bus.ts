@@ -164,6 +164,8 @@ export interface AnimusEventMap {
   'cortex:context-limit-changed': { limit: number | null };
   'cortex:utility-model-changed': { utilityModel: string };
   'cortex:auth-failed': { provider?: string; message: string };
+  /** Provider auth started working again after a prior failure (token refreshed / re-authenticated). */
+  'cortex:auth-recovered': { provider?: string };
 
   // System
   'system:settings_updated': Record<string, unknown>;
