@@ -6,6 +6,7 @@ import { NavigationPill } from './NavigationPill';
 import { CommandPalette } from './CommandPalette';
 import { TauriDragRegion } from './TauriDragRegion';
 import { BudgetBanner } from '../BudgetBanner';
+import { ProviderAuthBanner } from '../ProviderAuthBanner';
 import { useSubscriptionManager } from '../../hooks/useSubscriptionManager';
 
 /** Mounts all tRPC WebSocket subscriptions for the main app. */
@@ -37,6 +38,7 @@ export function AppLayout() {
     >
       <TauriDragRegion />
       <BudgetBanner />
+      <ProviderAuthBanner />
       <NavigationPill />
       <CommandPalette />
       {/* WS auth token is set by AuthGuard, which wraps all authed routes */}

@@ -268,6 +268,14 @@ export function useSubscriptionManager() {
     },
   });
 
+  // Provider auth recovered (token refreshed / reconnected): clear the
+  // persistent re-auth banner without requiring a manual dismiss.
+  trpc.heartbeat.onAuthRecovered.useSubscription(undefined, {
+    onData: () => {
+      useHeartbeatStore.getState().clearSystemErrorsByCategory('authentication');
+    },
+  });
+
   // ========================================================================
   // 18. Download progress
   // ========================================================================

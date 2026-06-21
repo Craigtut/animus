@@ -117,6 +117,7 @@ interface HeartbeatStoreState {
   clearReplyStream: () => void;
   addSystemError: (error: Omit<SystemError, 'id' | 'receivedAt'>) => void;
   dismissSystemError: (id: string) => void;
+  clearSystemErrorsByCategory: (category: string) => void;
   /** Reset all state to initial values. Used after a save restore. */
   reset: () => void;
 }
@@ -290,6 +291,12 @@ export const useHeartbeatStore = create<HeartbeatStoreState>()((set) => ({
     set((prev) => ({
       systemErrors: prev.systemErrors.filter((e) => e.id !== id),
     })),
+
+  clearSystemErrorsByCategory: (category) =>
+    set((prev) => {
+      const next = prev.systemErrors.filter((e) => e.category !== category);
+      return next.length === prev.systemErrors.length ? prev : { systemErrors: next };
+    }),
 
   reset: () =>
     set({
