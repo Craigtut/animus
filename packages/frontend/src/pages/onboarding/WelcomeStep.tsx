@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Button, Typography } from '../../components/ui';
 import { useOnboardingStore } from '../../store';
+import { isTauri } from '../../utils/tauri';
 
 export function WelcomeStep() {
   const theme = useTheme();
@@ -12,8 +13,15 @@ export function WelcomeStep() {
 
   const handleContinue = () => {
     markStepComplete('welcome');
-    setCurrentStep('desktop');
-    navigate('/onboarding/desktop');
+    // The desktop step only applies to the native app. On web, skip straight
+    // to the provider step.
+    if (isTauri()) {
+      setCurrentStep('desktop');
+      navigate('/onboarding/desktop');
+    } else {
+      setCurrentStep('agent_provider');
+      navigate('/onboarding/agent');
+    }
   };
 
   return (

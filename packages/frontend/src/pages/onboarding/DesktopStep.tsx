@@ -2,7 +2,7 @@
 import { css, useTheme } from '@emotion/react';
 import { Monitor, Power, SignIn } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { Card, Toggle, Typography } from '../../components/ui';
 import { useAutostart } from '../../hooks/useAutostart';
 import { useDesktopPowerSettings } from '../../hooks/useDesktopPowerSettings';
@@ -17,7 +17,12 @@ export function DesktopStep() {
   const autostart = useAutostart();
   const desktopPower = useDesktopPowerSettings();
 
-  const desktopAvailable = isTauri();
+  // Desktop runtime controls (start at login, keep-awake) only exist in the
+  // native macOS/Windows app. On web or any non-Tauri runtime, skip this step
+  // entirely rather than showing disabled controls that can't do anything.
+  if (!isTauri()) {
+    return <Navigate to="/onboarding/agent" replace />;
+  }
 
   const handleContinue = () => {
     markStepComplete('desktop');
@@ -46,26 +51,13 @@ export function DesktopStep() {
         </Typography.SmallBody>
       </div>
 
-      {!desktopAvailable && (
-        <div css={css`
-          padding: ${theme.spacing[3]} ${theme.spacing[4]};
-          border: 1px solid ${theme.colors.border.light};
-          border-radius: ${theme.borderRadius.default};
-          background: ${theme.colors.background.paper};
-        `}>
-          <Typography.SmallBody color="secondary">
-            Desktop controls are available in the macOS and Windows app.
-          </Typography.SmallBody>
-        </div>
-      )}
-
       <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[3]};`}>
         <RuntimeChoice
           icon={<SignIn size={22} />}
           title="Start at login"
           description="Open Animus when you sign in, hidden in the menu bar or system tray."
           checked={autostart.enabled}
-          disabled={!desktopAvailable || autostart.loading || !autostart.available}
+          disabled={autostart.loading || !autostart.available}
           onChange={(checked) => {
             void autostart.setEnabled(checked);
           }}

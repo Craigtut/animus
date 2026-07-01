@@ -7,6 +7,7 @@ import { TauriDragRegion } from '../../components/layout/TauriDragRegion';
 import { Typography } from '../../components/ui';
 import { useState } from 'react';
 import type { OnboardingStep } from '../../store';
+import { isTauri } from '../../utils/tauri';
 
 /**
  * Freezes the outlet element so exiting AnimatePresence motion.divs
@@ -45,7 +46,11 @@ export function OnboardingLayout() {
 
   const isRestore = location.pathname === '/onboarding/restore';
   const isPersona = location.pathname.includes('/persona/');
-  const steps = isPersona ? personaSteps : setupSteps;
+  // The desktop step is only part of the flow in the native app.
+  const setupStepsForRuntime = isTauri()
+    ? setupSteps
+    : setupSteps.filter((s) => s.step !== 'desktop');
+  const steps = isPersona ? personaSteps : setupStepsForRuntime;
   const groupLabel = isPersona ? 'Persona' : 'Setup';
   const currentIndex = steps.findIndex((s) => location.pathname === s.path);
   const currentStepLabel = currentIndex >= 0 ? steps[currentIndex]!.label : '';

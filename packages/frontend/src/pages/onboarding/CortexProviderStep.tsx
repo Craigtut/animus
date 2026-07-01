@@ -19,6 +19,7 @@ import { useOnboardingStore } from '../../store';
 import { OnboardingNav } from './OnboardingNav';
 import { trpc } from '../../utils/trpc';
 import { buildOAuthCards } from '../../utils/provider-display';
+import { isTauri } from '../../utils/tauri';
 
 // ============================================================================
 // Component
@@ -388,7 +389,8 @@ export function CortexProviderStep() {
     navigate('/onboarding/identity');
   }, [markStepComplete, setCurrentStep, navigate, persona?.isFinalized, connectedProvider, statusData?.provider, statusData?.model, setActiveProviderMutation, setCortexProvider, selectedModel, selectedContextLimit, setContextLimitMutation, completeFromRestoreMutation, utils.onboarding.getState]);
 
-  const handleBack = () => navigate('/onboarding/desktop');
+  // The desktop step is skipped on web, so Back returns to welcome there.
+  const handleBack = () => navigate(isTauri() ? '/onboarding/desktop' : '/onboarding/welcome');
 
   // ── Render ──
 

@@ -14,6 +14,7 @@ import {
 import { Button, Typography } from '../../components/ui';
 import { OnboardingNav } from './OnboardingNav';
 import { trpc } from '../../utils/trpc';
+import { isTauri } from '../../utils/tauri';
 import type { SaveInfo } from '@animus-labs/shared';
 
 type RestoreState =
@@ -139,7 +140,8 @@ export function RestoreStep() {
                 utils.onboarding.getState.setData(undefined, onboardingState);
                 utils.persona.get.invalidate();
                 utils.cortexProvider.getStatus.invalidate();
-                navigate('/onboarding/desktop');
+                // The desktop step only applies to the native app; skip it on web.
+                navigate(isTauri() ? '/onboarding/desktop' : '/onboarding/agent');
               },
               onError: (err) => {
                 setState({
