@@ -41,6 +41,7 @@ import {
 import { Card, SelectionCard, Button, Input, Select, Modal, Badge, Toggle, Slider, Typography, Tooltip } from '../components/ui';
 import { trpc } from '../utils/trpc';
 import { isTauri } from '../utils/tauri';
+import { preopenAuthWindow, openAuthUrl, closeAuthWindow } from '../utils/oauth-open';
 import { useAutostart } from '../hooks/useAutostart';
 import { useDesktopPowerSettings } from '../hooks/useDesktopPowerSettings';
 import { useAutoUpdate } from '../hooks/useAutoUpdate';
@@ -633,6 +634,10 @@ function CortexProviderSection() {
   const [reconnectCodeCopied, setReconnectCodeCopied] = useState(false);
   const [reconnectManualCodeRecommended, setReconnectManualCodeRecommended] = useState(false);
   const [reconnectFlowType, setReconnectFlowType] = useState<string | null>(null);
+
+  // Remote/headless auto-open for the reconnect flow (see utils/oauth-open).
+  const reconnectAuthWindowRef = useRef<Window | null>(null);
+  const reconnectAuthDeliveredRef = useRef(false);
   const oauthRespondMutation = trpc.cortexProvider.oauthRespond.useMutation();
 
   // Subscribe to OAuth status when reconnecting
@@ -644,6 +649,12 @@ function CortexProviderSection() {
         setReconnectDeviceCode(event.deviceCode ?? null);
         setReconnectManualCodeRecommended(event.manualCodeRecommended ?? false);
         setReconnectFlowType(event.flowType ?? null);
+        // Remote/headless: open the sign-in page here (backend can't).
+        if (statusData?.headless && !reconnectAuthDeliveredRef.current) {
+          reconnectAuthDeliveredRef.current = true;
+          openAuthUrl(event.url, reconnectAuthWindowRef.current);
+          reconnectAuthWindowRef.current = null;
+        }
       } else if (event.type === 'prompt') {
         setReconnectPromptMessage(event.message);
         setReconnectPromptPlaceholder(event.placeholder ?? 'Paste here...');
@@ -665,6 +676,8 @@ function CortexProviderSection() {
       } else if (event.type === 'error') {
         setReconnectState('idle');
         setReconnectError(event.message);
+        closeAuthWindow(reconnectAuthWindowRef.current);
+        reconnectAuthWindowRef.current = null;
       }
     },
   });
@@ -767,16 +780,21 @@ function CortexProviderSection() {
     setReconnectFlowType(null);
     setReconnectUrlCopied(false);
     setReconnectCodeCopied(false);
+    // Remote/headless: pre-open a tab in the click gesture for the auth URL.
+    reconnectAuthDeliveredRef.current = false;
+    reconnectAuthWindowRef.current = statusData?.headless ? preopenAuthWindow() : null;
     initiateOAuthMutation.mutate(
       { provider: activeProvider },
       {
         onError: (err) => {
           setReconnectState('idle');
           setReconnectError(err.message || 'Sign-in failed.');
+          closeAuthWindow(reconnectAuthWindowRef.current);
+          reconnectAuthWindowRef.current = null;
         },
       }
     );
-  }, [activeProvider, initiateOAuthMutation]);
+  }, [activeProvider, initiateOAuthMutation, statusData?.headless]);
 
   const handleCancelReconnect = useCallback(() => {
     cancelOAuthMutation.mutate();
@@ -784,6 +802,9 @@ function CortexProviderSection() {
     setReconnectAuthUrl(null);
     setReconnectDeviceCode(null);
     setReconnectPromptMessage(null);
+    closeAuthWindow(reconnectAuthWindowRef.current);
+    reconnectAuthWindowRef.current = null;
+    reconnectAuthDeliveredRef.current = false;
   }, [cancelOAuthMutation]);
 
   const handleReconnectPromptSubmit = useCallback(() => {
@@ -1214,6 +1235,10 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
   const [oauthError, setOauthError] = useState<string | null>(null);
   const [urlCopied, setUrlCopied] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
+
+  // Remote/headless auto-open (see utils/oauth-open).
+  const pendingAuthWindowRef = useRef<Window | null>(null);
+  const authDeliveredRef = useRef(false);
   const [oauthPromptMessage, setOauthPromptMessage] = useState<string | null>(null);
   const [oauthPromptPlaceholder, setOauthPromptPlaceholder] = useState('Paste here...');
   const [oauthPromptAllowEmpty, setOauthPromptAllowEmpty] = useState(false);
@@ -1252,6 +1277,12 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
         setOauthDeviceCode(event.deviceCode ?? null);
         setOauthFlowType(event.flowType ?? null);
         setOauthManualCodeRecommended(event.manualCodeRecommended ?? false);
+        // Remote/headless: open the sign-in page here (backend can't).
+        if (statusData?.headless && !authDeliveredRef.current) {
+          authDeliveredRef.current = true;
+          openAuthUrl(event.url, pendingAuthWindowRef.current);
+          pendingAuthWindowRef.current = null;
+        }
       } else if (event.type === 'prompt') {
         setOauthPromptMessage(event.message);
         setOauthPromptPlaceholder(event.placeholder ?? 'Paste here...');
@@ -1266,6 +1297,8 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
         setOauthState('error');
         setOauthError(event.message);
         setOauthPromptMessage(null);
+        closeAuthWindow(pendingAuthWindowRef.current);
+        pendingAuthWindowRef.current = null;
       }
     },
   });
@@ -1294,16 +1327,21 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
     setOauthPromptAllowEmpty(false);
     setUrlCopied(false);
     setCodeCopied(false);
+    // Remote/headless: pre-open a tab in the click gesture for the auth URL.
+    authDeliveredRef.current = false;
+    pendingAuthWindowRef.current = statusData?.headless ? preopenAuthWindow() : null;
     initiateOAuthMutation.mutate(
       { provider: providerId },
       {
         onError: (err) => {
           setOauthState('error');
           setOauthError(err.message ?? 'Authentication failed');
+          closeAuthWindow(pendingAuthWindowRef.current);
+          pendingAuthWindowRef.current = null;
         },
       }
     );
-  }, [initiateOAuthMutation]);
+  }, [initiateOAuthMutation, statusData?.headless]);
 
   const handleOAuthCancel = useCallback(() => {
     cancelOAuthMutation.mutate();
@@ -1314,6 +1352,9 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
     setOauthFlowType(null);
     setOauthManualCodeRecommended(false);
     setOauthPromptMessage(null);
+    closeAuthWindow(pendingAuthWindowRef.current);
+    pendingAuthWindowRef.current = null;
+    authDeliveredRef.current = false;
   }, [cancelOAuthMutation]);
 
   const handleOAuthPromptSubmit = useCallback(() => {
@@ -1415,7 +1456,7 @@ function SwitchProviderModalContent({ onClose }: { onClose: () => void }) {
     <div css={css`display: flex; flex-direction: column; gap: ${theme.spacing[4]};`}>
       <Typography.Caption color="secondary">
         {statusData?.headless
-          ? 'Animus is running remotely. OAuth opens in this browser and may ask for a final redirect URL.'
+          ? 'Animus is running remotely. Sign-in opens in a new tab, and may ask you to paste the final address back here.'
           : 'Connect to a different AI provider. Your existing configuration will be replaced.'}
       </Typography.Caption>
 

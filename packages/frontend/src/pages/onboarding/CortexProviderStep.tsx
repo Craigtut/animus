@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { css, keyframes, useTheme } from '@emotion/react';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -20,6 +20,7 @@ import { OnboardingNav } from './OnboardingNav';
 import { trpc } from '../../utils/trpc';
 import { buildOAuthCards } from '../../utils/provider-display';
 import { isTauri } from '../../utils/tauri';
+import { preopenAuthWindow, openAuthUrl, closeAuthWindow } from '../../utils/oauth-open';
 
 // ============================================================================
 // Component
@@ -46,6 +47,11 @@ export function CortexProviderStep() {
   const [oauthError, setOauthError] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
   const [urlCopied, setUrlCopied] = useState(false);
+
+  // Remote/headless auto-open: a tab pre-opened in the Sign In click gesture,
+  // navigated to the auth URL once it arrives (see utils/oauth-open).
+  const pendingAuthWindowRef = useRef<Window | null>(null);
+  const authDeliveredRef = useRef(false);
 
   // API key state
   const [apiKeyExpanded, setApiKeyExpanded] = useState(false);
@@ -108,6 +114,13 @@ export function CortexProviderStep() {
         setOauthFlowType(event.flowType ?? null);
         setOauthManualCodeRecommended(event.manualCodeRecommended ?? false);
         if (event.deviceCode) setOauthDeviceCode(event.deviceCode);
+        // In remote/headless mode the backend can't open a browser, so open the
+        // sign-in page here. Local mode: the backend already opened it.
+        if (statusData?.headless && !authDeliveredRef.current) {
+          authDeliveredRef.current = true;
+          openAuthUrl(event.url, pendingAuthWindowRef.current);
+          pendingAuthWindowRef.current = null;
+        }
       } else if (event.type === 'prompt') {
         // OAuth flow needs user input (e.g., paste redirect URL in Docker)
         setOauthPromptMessage(event.message);
@@ -130,6 +143,9 @@ export function CortexProviderStep() {
         setOauthState('error');
         setOauthError(event.message);
         setOauthPromptMessage(null);
+        // Close a pre-opened tab that never got a URL.
+        closeAuthWindow(pendingAuthWindowRef.current);
+        pendingAuthWindowRef.current = null;
       }
     },
   });
@@ -185,6 +201,11 @@ export function CortexProviderStep() {
     setUrlCopied(false);
     setCodeCopied(false);
 
+    // Remote/headless: pre-open a tab now (inside the click gesture) so the auth
+    // URL can be delivered to it later without tripping popup blockers.
+    authDeliveredRef.current = false;
+    pendingAuthWindowRef.current = statusData?.headless ? preopenAuthWindow() : null;
+
     initiateOAuthMutation.mutate(
       { provider: providerId },
       {
@@ -194,10 +215,12 @@ export function CortexProviderStep() {
         onError: (err) => {
           setOauthState('error');
           setOauthError(err.message ?? 'Authentication failed');
+          closeAuthWindow(pendingAuthWindowRef.current);
+          pendingAuthWindowRef.current = null;
         },
       }
     );
-  }, [initiateOAuthMutation]);
+  }, [initiateOAuthMutation, statusData?.headless]);
 
   const handleOAuthCancel = useCallback(() => {
     cancelOAuthMutation.mutate();
@@ -212,6 +235,9 @@ export function CortexProviderStep() {
     setOauthPromptAllowEmpty(false);
     setUrlCopied(false);
     setCodeCopied(false);
+    closeAuthWindow(pendingAuthWindowRef.current);
+    pendingAuthWindowRef.current = null;
+    authDeliveredRef.current = false;
   }, [cancelOAuthMutation]);
 
   const handleSignOut = useCallback((providerId: string) => {
@@ -425,7 +451,7 @@ export function CortexProviderStep() {
         </Typography.Title3>
         <Typography.Caption color="hint">
           {statusData?.headless
-            ? 'Running remotely. OAuth opens here and may ask for a final redirect URL.'
+            ? 'Running remotely. Sign-in opens in a new tab, and may ask you to paste the final address back here.'
             : 'Sign in with your existing subscription. No API keys needed.'}
         </Typography.Caption>
       </div>
