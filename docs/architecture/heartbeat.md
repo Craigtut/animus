@@ -143,6 +143,8 @@ The warm session model allows rapid messages from the same contact to be gathere
 4. **Same-contact deduplication**: If a tick trigger for Contact A is already in the queue, a new message from Contact A does NOT add another queue entry — the existing queued tick will gather the new message when it runs
 5. **Same-contact during active tick**: If a tick is currently running for Contact A and a new message arrives, queue ONE follow-up tick for Contact A (the running tick has already passed GATHER CONTEXT). When that follow-up tick fires, the session is still warm — full conversational continuity, no cold start
 
+> **Being revised — tick continuation.** A follow-up that arrives during the post-reply settling phases (deferred THOUGHT/REFLECT) currently waits for the whole tick to finish, including REFLECT. Tick continuation makes those phases interruptible: a same-contact message during settling aborts settling and re-enters the agentic loop within the same tick, so REFLECT/EXECUTE commit only once the exchange settles. See `docs/architecture/tick-continuation.md`.
+
 ```
 Contact A sends 3 messages in 1 second:
 

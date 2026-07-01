@@ -52,6 +52,7 @@ Use this index to find the right files to read. Each entry includes the file pat
 |------|--------|
 | `docs/architecture/heartbeat.md` | The heartbeat tick system, mind session lifecycle (cold/active/warm states), 3-stage pipeline (GATHER CONTEXT, MIND QUERY, EXECUTE), 5 tick triggers (interval, message, scheduled_task, agent_complete, plugin_trigger), emotion engine (12 emotions, decay, baselines), MindOutput schema, streaming structured output, tick queuing and concurrency, crash recovery, TTL cleanup |
 | `docs/architecture/context-builder.md` | Context Builder system, centralized context assembly for all LLM prompts (mind ticks, sub-agents, task ticks), prompt compilation, token budget management, persona compilation, four compilation targets |
+| `docs/architecture/tick-continuation.md` | Interruptible settling for conversational responsiveness, re-entering the agentic loop when a message arrives during deferred THOUGHT/REFLECT, burst history boundary, abortable direct completions (Cortex signal/AbortError), TickQueue follow-up coordination, side-effect safety |
 | `docs/architecture/persona.md` | Persona system design, 8-step creation flow, archetypes, personality dimensions (10 sliders), trait chips, ranked values, existence paradigm (Simulated Life vs Digital Consciousness), prompt compilation system, onboarding gate |
 | `docs/architecture/memory.md` | Memory system, four layers (short-term, working memory, core self, long-term), memory.db schema, write pipeline (embed, dedup, store), retrieval scoring, consolidation, forgetting, Transformers.js embeddings |
 | `docs/architecture/observational-memory.md` | Three-stream compression (messages/thoughts/experiences), Observer and Reflector agents, token-based thresholds, batch threshold mechanism, async processing in EXECUTE phase, temporal annotations |
@@ -158,6 +159,7 @@ When you need context for a task, follow this approach:
 Use this to quickly map user questions to the right docs:
 
 - **heartbeat, tick, pipeline, mind session, inner life, emotion, decay, gather context, streaming output, MindOutput, plugin trigger** -> `docs/architecture/heartbeat.md`
+- **tick continuation, interruptible settling, reflect interruption, conversational responsiveness, re-enter agentic loop, abort completion, burst, follow-up coalescing** -> `docs/architecture/tick-continuation.md`
 - **tech stack, database, sqlite, lancedb, fastify, trpc, vite, react, shared abstractions, embedding provider, decay engine, encryption service, event bus, database stores** -> `docs/architecture/tech-stack.md`
 - **design, UI, colors, typography, animation, texture, photography, the presence, motion, components, interaction patterns** -> `docs/design-vision.md`
 - **persona, personality, archetype, traits, values, existence, identity creation** -> `docs/architecture/persona.md`
