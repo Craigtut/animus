@@ -662,7 +662,12 @@ Structured data is validated at phase boundaries:
 
 1. **THOUGHT output**: Validated against the thought schema.
 2. **Tool inputs**: Validated by MCP schemas before backend handlers execute.
-3. **REFLECT output**: Validated against the reflection schema.
+3. **REFLECT output**: Validated against the reflection schema. The `experience`
+   narration is mandatory on every tick. Providers do not hard-enforce JSON-schema
+   `required`, so REFLECT actively checks that the model returned a non-empty
+   experience and, if it did not, re-asks with an explicit correction (bounded by
+   the retry budget) before falling back to a contextual placeholder. It never
+   silently persists a "nothing happened" experience.
 4. **EXECUTE**: Applies contact permission checks and persists only validated data.
 
 ## Error Handling Strategy

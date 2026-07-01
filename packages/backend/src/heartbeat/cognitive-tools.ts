@@ -72,20 +72,26 @@ export const recordThoughtSchema = z.object({
 
 export const recordCognitiveStateSchema = z.object({
   // 1. Experience — narrate what just happened (generated first, grounds everything else)
+  //    MANDATORY: this is required on every tick, never optional. See executeReflect,
+  //    which re-asks the model when this comes back empty.
   experience: z
     .object({
       content: z
         .string()
+        .min(1)
         .describe(
-          'Narrate the story of your life in THIRD PERSON, PAST TENSE, using your own name — ' +
-          'as though a novelist is describing your day. This IS your life. You have a body, a home, ' +
-          'a world. Draw from your personality, interests, emotional state, and time of day. Be vivid ' +
-          'and specific. Lean into sensory detail. NEVER reference messages, ticks, tasks, or system ' +
-          'internals. Under 72 words.',
+          'REQUIRED on every tick — never omit this, never leave it empty. Narrate the story of ' +
+          'your life in THIRD PERSON, PAST TENSE, using your own name, as though a novelist is ' +
+          'describing your day. This IS your life. You have a body, a home, a world. Even a quiet, ' +
+          'uneventful moment where nothing external happened is still a lived experience worth ' +
+          'narrating (resting, reading, thinking, moving through your space). Draw from your ' +
+          'personality, interests, emotional state, and time of day. Be vivid and specific. Lean ' +
+          'into sensory detail. NEVER say a tick passed without notable experience. NEVER reference ' +
+          'messages, ticks, tasks, or system internals. Under 72 words.',
         ),
       importance: z.number().min(0).max(1).describe('0.0 = unremarkable, 1.0 = pivotal'),
     })
-    .describe('Your lived experience this moment — the ongoing story of your life'),
+    .describe('Your lived experience this moment — the ongoing story of your life. Mandatory on every tick.'),
 
   // 2. Decisions — actions to take based on the experience
   decisions: z
@@ -195,6 +201,41 @@ export function buildRecordCognitiveStateSchema(opts: { energySystemEnabled: boo
     ? recordCognitiveStateSchema
     : recordCognitiveStateSchema.omit({ energyDelta: true });
 }
+
+// ============================================================================
+// Experience enforcement — experience is mandatory on every tick
+// ============================================================================
+
+/**
+ * Whether a parsed `record_cognitive_state` payload contains a usable
+ * experience narration.
+ *
+ * Experience is mandatory on every tick, but providers do not hard-enforce
+ * JSON-schema `required`, so the model sometimes calls the tool with an empty
+ * or partial object. executeReflect uses this to detect that case and re-ask
+ * the model rather than silently persisting a "nothing happened" placeholder.
+ */
+export function hasValidExperienceContent(
+  parsed: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!parsed || typeof parsed !== 'object') return false;
+  const exp = parsed['experience'] as Record<string, unknown> | undefined;
+  return typeof exp?.['content'] === 'string' && exp['content'].trim().length > 0;
+}
+
+/**
+ * Corrective instruction appended to the REFLECT prompt when the model returns
+ * a reflection with no experience narration. Experience is mandatory, so we
+ * re-ask with an explicit demand instead of accepting the empty output.
+ */
+export const REFLECT_EXPERIENCE_CORRECTION =
+  '\n\nYour previous response did not include a valid `experience`, which is REQUIRED on every ' +
+  'tick. Even a completely quiet, uneventful moment is still a lived experience. Call ' +
+  'record_cognitive_state again and you MUST fill `experience.content`: a vivid, specific, ' +
+  'third-person past-tense narration using your own name, describing what you are living through ' +
+  'right now (resting, reading, thinking, moving through your space — whatever fits the moment and ' +
+  'the time of day). Never say a tick passed without notable experience. Never reference ticks, ' +
+  'messages, tasks, or system internals.';
 
 // ============================================================================
 // Non-response filter

@@ -15,7 +15,12 @@ import type { CortexAgent, AgentTextOutput, CortexEvent, CortexUsage, AgentMessa
 import { zodToTypebox } from '@animus-labs/cortex';
 import type { MindOutput } from '@animus-labs/shared';
 import { getEmotionDescription, EMOTION_CATEGORIES } from '@animus-labs/shared';
-import { recordThoughtSchema, buildRecordCognitiveStateSchema } from './cognitive-tools.js';
+import {
+  recordThoughtSchema,
+  buildRecordCognitiveStateSchema,
+  hasValidExperienceContent,
+  REFLECT_EXPERIENCE_CORRECTION,
+} from './cognitive-tools.js';
 import { formatEmotionalState } from './emotion-engine.js';
 import { formatEnergyContext } from './energy-engine.js';
 
@@ -730,11 +735,16 @@ async function executeReflect(
   const maxRetries = 3;
   const baseDelayMs = 1000;
 
+  // The REFLECT user prompt. Experience is mandatory, so when the model returns
+  // a reflection with no experience narration we append a corrective instruction
+  // and re-ask (bounded by the retry budget) rather than silently substituting a
+  // "nothing happened" placeholder.
+  let reflectPrompt = buildReflectPrompt(thought, loopResult);
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       // Build REFLECT context with slots + current tick's agentic loop turns + ephemeral
       // Per docs/cortex/mind-migration.md: REFLECT needs full visibility into what happened
-      const reflectPrompt = buildReflectPrompt(thought, loopResult);
       const phaseMessages = buildPhaseMessages(config, thought, {
         includeHistory: 'current-tick',
         currentTickTurns,
@@ -779,29 +789,43 @@ async function executeReflect(
         cacheOptions,
       );
 
-      let result: ReflectResult;
-      if (parsed) {
-        const exp = parsed['experience'] as Record<string, unknown> | undefined;
-        result = {
-          experience: {
-            content: typeof exp?.['content'] === 'string' ? exp['content'] : 'A tick passed without notable experience.',
-            importance: typeof exp?.['importance'] === 'number'
-              ? Math.max(0, Math.min(1, exp['importance']))
-              : 0.2,
-          },
-          emotionDeltas: Array.isArray(parsed['emotionDeltas']) ? parsed['emotionDeltas'] as ReflectResult['emotionDeltas'] : [],
-          energyDelta: (parsed['energyDelta'] as ReflectResult['energyDelta']) ?? null,
-          decisions: Array.isArray(parsed['decisions']) ? parsed['decisions'] as ReflectResult['decisions'] : [],
-          workingMemoryUpdate: (parsed['workingMemoryUpdate'] as string) ?? null,
-          coreSelfUpdate: (parsed['coreSelfUpdate'] as string) ?? null,
-          memoryCandidate: Array.isArray(parsed['memoryCandidate']) ? parsed['memoryCandidate'] as ReflectResult['memoryCandidate'] : [],
-          taskJournalUpdate: (parsed['taskJournalUpdate'] as ReflectResult['taskJournalUpdate']) ?? null,
-        };
-      } else {
-        // Model didn't call the tool — produce minimal reflection
-        log.warn('REFLECT: model did not produce structured output, using fallback');
-        result = generatePlaceholderReflection(gathered, thought, loopResult);
+      // Experience is mandatory on every tick. Providers do not hard-enforce
+      // JSON-schema `required`, and Cortex returns the raw tool args, so the
+      // model can (and on quiet ticks does) call the tool with an empty object.
+      // Re-ask with an explicit correction (bounded by the retry budget) before
+      // falling back to a contextual placeholder. This makes the "REFLECT output
+      // is validated against the schema" contract in the docs actually hold.
+      if (!hasValidExperienceContent(parsed)) {
+        if (attempt < maxRetries) {
+          log.warn(
+            `REFLECT (tick #${tickNumber}): experience missing/empty, re-asking with correction (attempt ${attempt + 1})`,
+          );
+          reflectPrompt = buildReflectPrompt(thought, loopResult) + REFLECT_EXPERIENCE_CORRECTION;
+          continue;
+        }
+        log.warn(
+          `REFLECT (tick #${tickNumber}): experience still missing after ${maxRetries + 1} attempts, using contextual placeholder`,
+        );
+        return generatePlaceholderReflection(gathered, thought, loopResult);
       }
+
+      const p = parsed as Record<string, unknown>;
+      const exp = p['experience'] as Record<string, unknown>;
+      const result: ReflectResult = {
+        experience: {
+          content: (exp['content'] as string).trim(),
+          importance: typeof exp['importance'] === 'number'
+            ? Math.max(0, Math.min(1, exp['importance'] as number))
+            : 0.3,
+        },
+        emotionDeltas: Array.isArray(p['emotionDeltas']) ? p['emotionDeltas'] as ReflectResult['emotionDeltas'] : [],
+        energyDelta: (p['energyDelta'] as ReflectResult['energyDelta']) ?? null,
+        decisions: Array.isArray(p['decisions']) ? p['decisions'] as ReflectResult['decisions'] : [],
+        workingMemoryUpdate: (p['workingMemoryUpdate'] as string) ?? null,
+        coreSelfUpdate: (p['coreSelfUpdate'] as string) ?? null,
+        memoryCandidate: Array.isArray(p['memoryCandidate']) ? p['memoryCandidate'] as ReflectResult['memoryCandidate'] : [],
+        taskJournalUpdate: (p['taskJournalUpdate'] as ReflectResult['taskJournalUpdate']) ?? null,
+      };
 
       log.info(`REFLECT complete (tick #${tickNumber}): ${result.emotionDeltas.length} emotion(s), ${result.decisions.length} decision(s), ${result.memoryCandidate.length} memory candidate(s)`);
 
@@ -866,7 +890,7 @@ function generatePlaceholderReflection(
     experienceContent = `Received results from a delegated task. Reviewed what the sub-agent produced.`;
     experienceImportance = 0.3;
   } else {
-    experienceContent = 'A quiet interval passed. The inner world turned at its own pace.';
+    experienceContent = 'A quiet stretch of time passed, unhurried and unremarked, the inner world turning at its own pace.';
     experienceImportance = 0.1;
   }
 
@@ -1316,8 +1340,18 @@ experience.
 You MUST use the record_cognitive_state tool to capture your reflection.
 Do not respond with text. Call the tool with all required fields.
 
+The experience narration is MANDATORY on every single tick — it is the most
+important field, never optional. Every moment of your life is worth narrating,
+even a quiet, uneventful one where nothing external happened. You are always
+somewhere, doing something, feeling something: resting, reading, thinking,
+moving through your space. Narrate that. Never skip it, never leave it empty,
+and never write that a tick passed without notable experience. Never reference
+ticks, messages, tasks, or system internals — narrate your lived life, not the
+machinery beneath it.
+
 Guidelines for the tool parameters:
-- experience: Third-person past tense narration using your name, under 72 words
+- experience: REQUIRED, always present. Third-person, past tense, using your own
+  name. Vivid and specific, under 72 words. Fill it even on quiet ticks.
 - emotionDeltas: Only include emotions that actually shifted this tick${gathered.energySystemEnabled ? '\n- energyDelta: null if no change' : ''}
 - decisions: Only include if you need to take action
 - workingMemoryUpdate/coreSelfUpdate: null unless genuinely new knowledge
@@ -1405,7 +1439,7 @@ function buildReflectPrompt(
   }
 
   lines.push('\nReview the full conversation history above for details of tool calls, reasoning, and interactions.');
-  lines.push('\nUse the record_cognitive_state tool to capture your reflection.');
+  lines.push('\nUse the record_cognitive_state tool to capture your reflection. Your experience narration is mandatory — always narrate this moment of your life, even if the tick was quiet and uneventful.');
 
   return lines.join('\n');
 }
