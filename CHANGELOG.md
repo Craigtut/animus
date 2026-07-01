@@ -4,6 +4,37 @@ All notable changes to the Animus Engine will be documented in this file.
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
 
+## [0.4.7](https://github.com/Craigtut/animus/compare/v0.4.6...v0.4.7) (2026-06-14)
+
+### Features
+
+* **agents:** count in-flight sub-agent cost and block new spawns when over budget ([c218d44](https://github.com/Craigtut/animus/commit/c218d44cf784d9bcb0ddc3dc0ad2a5a977c9608e))
+* **agents:** replace spawn_agent decision with the in-loop SubAgent tool ([b0d9c86](https://github.com/Craigtut/animus/commit/b0d9c86abb1cd65b28c3209904426b4155e19a5f))
+* **backend:** add self-managed environment overlay, tool, and bootstrap skill ([5aaf43e](https://github.com/Craigtut/animus/commit/5aaf43e622ffcef83898538ea5e2785b577c5ec2))
+* **goals:** add durable goal strategy layer ([dd56f8a](https://github.com/Craigtut/animus/commit/dd56f8a6ad8481c9ba120c65a37a00bd42e92e4e))
+* **goals:** surface strategy state in mind UI ([50805ab](https://github.com/Craigtut/animus/commit/50805ab554ece3bd56ee62096a6c21c1e2c3421b))
+* **heartbeat:** pin energy high and stop energy prompting when system disabled ([aba29fa](https://github.com/Craigtut/animus/commit/aba29faab3cab9654c263bc3892f582c06f60c7a))
+* **shared:** add environment manifest schema and manage_environment tool ([a3a8a1e](https://github.com/Craigtut/animus/commit/a3a8a1e4dbd3ce70d37dd36cc8a91f78a9578d4f))
+* **tasks:** add task journals ([1564a86](https://github.com/Craigtut/animus/commit/1564a86c63d0439368d2996a9db00ee79619ce95))
+* **tauri:** add desktop runtime controls ([1a48e9b](https://github.com/Craigtut/animus/commit/1a48e9b19b2f557565b195ea1997888575265d41))
+* **tauri:** add macOS PATH floor so GUI launches find user tooling ([6e8227b](https://github.com/Craigtut/animus/commit/6e8227b82f0fa9796af567f425ba75441d6a8401))
+
+### Bug Fixes
+
+* **backend:** harden audio transcription ([a6eeebb](https://github.com/Craigtut/animus/commit/a6eeebb9086b4256b8c3859f173898a9a224943e))
+* **channels:** drive proactive messaging tool channel options from installed channels ([b448ec3](https://github.com/Craigtut/animus/commit/b448ec3a756dd8b29ce801e67cf68c333183a763))
+* **ci:** patch latest.json updater url after installer rename ([7f7520c](https://github.com/Craigtut/animus/commit/7f7520cbaa48c61257c135926bee0cf4dfcc1b87))
+* **frontend:** clean up goal and compaction rendering ([6c3d68b](https://github.com/Craigtut/animus/commit/6c3d68bec5459961d12e3a728a158eea405f5df6))
+* **frontend:** hide unsupported awake controls ([a489e5e](https://github.com/Craigtut/animus/commit/a489e5eaf062897e2490ce4c45682458be7fe450))
+* **heartbeat:** log compactions to active session ([99a275f](https://github.com/Craigtut/animus/commit/99a275f3080bd79065f0df1b852c6272c8a5751a))
+* **heartbeat:** remove artificial execution caps ([4a7e8a7](https://github.com/Craigtut/animus/commit/4a7e8a75294dfe9e714e1a306e04604e77a7e2bf))
+* **heartbeat:** surface Cortex compaction state ([70523f8](https://github.com/Craigtut/animus/commit/70523f88c68a0c34f03a9366cc6d04452aab7ff6))
+* **release:** sync only crate version in Cargo.lock instead of cargo generate-lockfile ([4b91c51](https://github.com/Craigtut/animus/commit/4b91c51523c394ae3bd61081d069971ed0958bb3))
+* **tasks:** satisfy backend task journal types ([1425511](https://github.com/Craigtut/animus/commit/14255117b3d5caa70698db20609e8e385c50cb45))
+* **tauri:** allow desktop power commands ([b1f4398](https://github.com/Craigtut/animus/commit/b1f439864ee8d7cb6194318d0f251e2acc0b7ea0))
+* **tauri:** confine sidecar to job object and stop it before update install ([f5e7af3](https://github.com/Craigtut/animus/commit/f5e7af34553749843ac168d38ec528396b289f43))
+* **tauri:** resolve macos power assertion link errors ([015a4d3](https://github.com/Craigtut/animus/commit/015a4d33377f98f85f08e3acb74c8f0e3802c253))
+
 ## [0.4.6](https://github.com/Craigtut/animus/compare/v0.4.5...v0.4.6) (2026-05-24)
 
 ### Features
