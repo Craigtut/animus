@@ -273,6 +273,7 @@ Do NOT add a commit body or footer. No `Co-Authored-By`, no bullet lists, no ext
 - Always use `git commit -m "..."` with a single-line message.
 
 **What agents must NOT do:**
+- Do NOT create git branches without asking first. Commit directly to the current branch (normally `main`). If a branch seems warranted, ask before creating one. This includes agent worktree isolation, which also creates branches.
 - Do NOT run `scripts/bump-version.mjs` or `scripts/release.mjs`
 - Do NOT create git tags
 - Do NOT push to remote unless explicitly asked
