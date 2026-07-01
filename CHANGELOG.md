@@ -4,6 +4,25 @@ All notable changes to the Animus Engine will be documented in this file.
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
 
+## [0.5.0](https://github.com/Craigtut/animus/compare/v0.4.7...v0.5.0) (2026-07-01)
+
+### Features
+
+* add package settings surfaces ([4bd3183](https://github.com/Craigtut/animus/commit/4bd3183a977fcde59970bc95d9a32a1d7e802515))
+* **frontend:** add persistent provider re-authentication banner ([5172e07](https://github.com/Craigtut/animus/commit/5172e07d343ac81264b5a8540e9f68076e927269))
+* **frontend:** auto-open OAuth sign-in page in remote mode ([22bca59](https://github.com/Craigtut/animus/commit/22bca59d061b84409a5f4a80ab91a13f994a8ed1))
+* **heartbeat:** detect provider re-authentication needed and recovery ([44f59a9](https://github.com/Craigtut/animus/commit/44f59a96531f158a087ad178a2115dff665f62f3))
+* **plugins:** label MCP tool preview by plugin display name and clarify consent copy ([eec06ef](https://github.com/Craigtut/animus/commit/eec06ef06d9f39aa068be762614e85740b81cb52))
+* **shared:** add cortex:auth-recovered event to event map ([d4875bc](https://github.com/Craigtut/animus/commit/d4875bc39c1b2391ab3aa1aa5dc3983d05be579f))
+
+### Bug Fixes
+
+* **ci:** patch latest.json updater url after installer rename ([34bb809](https://github.com/Craigtut/animus/commit/34bb809f69030e210ecd2bdd2f3dca815fe6abea))
+* **frontend:** resolve {{name}} template in setup guide step titles ([2e6f02b](https://github.com/Craigtut/animus/commit/2e6f02b474997aea2f9a843bac56c3c0fa987b1c))
+* **frontend:** skip desktop onboarding step outside the native app ([ff10ba3](https://github.com/Craigtut/animus/commit/ff10ba36976a70c79507084ef0a0ca392871975b))
+* **frontend:** stop Select from snapping to selected item on parent re-render ([b0d1d8d](https://github.com/Craigtut/animus/commit/b0d1d8df5cd21d4bf88d42e4fc3a701f588ef3d3))
+* **tauri:** confine sidecar to job object and stop it before update install ([55ed572](https://github.com/Craigtut/animus/commit/55ed572925c077d18b86a7a2bcdad4849d79b099))
+
 ## [0.4.7](https://github.com/Craigtut/animus/compare/v0.4.6...v0.4.7) (2026-06-14)
 
 ### Features
