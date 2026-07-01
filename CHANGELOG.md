@@ -4,6 +4,12 @@ All notable changes to the Animus Engine will be documented in this file.
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
 
+## [0.5.1](https://github.com/Craigtut/animus/compare/v0.5.0...v0.5.1) (2026-07-01)
+
+### Bug Fixes
+
+* **heartbeat:** enforce mandatory experience in REFLECT phase ([416145b](https://github.com/Craigtut/animus/commit/416145b28eee21c6295ae9fc2f1a174aae491f46))
+
 ## [0.5.0](https://github.com/Craigtut/animus/compare/v0.4.7...v0.5.0) (2026-07-01)
 
 ### Features
