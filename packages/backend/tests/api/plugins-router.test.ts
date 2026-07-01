@@ -31,6 +31,8 @@ vi.mock('../../src/plugins/index.js', () => {
     getPluginConfig: vi.fn(),
     getPluginConfigMasked: vi.fn(),
     getPluginConfigSchema: vi.fn().mockReturnValue(null),
+    getPluginSettingsSchema: vi.fn().mockReturnValue(null),
+    getPluginSettingsSurfaces: vi.fn().mockReturnValue([]),
     setPluginConfig: vi.fn(),
     hasRequiredConfig: vi.fn().mockReturnValue(true),
     updateFromPackage: vi.fn(),
@@ -53,6 +55,8 @@ type PluginManagerModule = typeof import('../../src/plugins/index.js') & {
     getPluginConfig: ReturnType<typeof vi.fn>;
     getPluginConfigMasked: ReturnType<typeof vi.fn>;
     getPluginConfigSchema: ReturnType<typeof vi.fn>;
+    getPluginSettingsSchema: ReturnType<typeof vi.fn>;
+    getPluginSettingsSurfaces: ReturnType<typeof vi.fn>;
     setPluginConfig: ReturnType<typeof vi.fn>;
     hasRequiredConfig: ReturnType<typeof vi.fn>;
     updateFromPackage: ReturnType<typeof vi.fn>;
