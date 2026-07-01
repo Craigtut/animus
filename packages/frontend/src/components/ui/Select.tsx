@@ -87,20 +87,27 @@ export function Select({
     };
   }, [isOpen, updatePosition]);
 
-  // Reset active index when opening
+  // Keep latest options/value accessible without making them effect deps.
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
+  // Reset active index and scroll the selected item into view when opening.
+  // Depends only on isOpen: parent re-renders that recreate the options array
+  // (e.g. a live countdown ticking every second) must not re-fire this and yank
+  // the list back to the selected item while the user is scrolling.
   useEffect(() => {
-    if (isOpen) {
-      const idx = options.findIndex((o) => o.value === value);
-      setActiveIndex(idx >= 0 ? idx : 0);
-      // Scroll selected item into view on open
-      requestAnimationFrame(() => {
-        if (listRef.current) {
-          const active = listRef.current.querySelector('[data-active="true"]');
-          active?.scrollIntoView({ block: 'nearest' });
-        }
-      });
-    }
-  }, [isOpen, options, value]);
+    if (!isOpen) return;
+    const idx = optionsRef.current.findIndex((o) => o.value === valueRef.current);
+    setActiveIndex(idx >= 0 ? idx : 0);
+    requestAnimationFrame(() => {
+      if (listRef.current) {
+        const active = listRef.current.querySelector('[data-active="true"]');
+        active?.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  }, [isOpen]);
 
   // Scroll active item into view only for keyboard navigation
   useEffect(() => {
