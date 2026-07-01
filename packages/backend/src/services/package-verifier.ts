@@ -262,7 +262,7 @@ export async function verifyPackage(anpkPath: string): Promise<VerificationResul
         const parsed = z
           .record(PluginMcpServerSchema)
           .parse(JSON.parse(toolsRaw));
-        result.toolPreview = computeMcpToolPreview(manifest.name, parsed);
+        result.toolPreview = computeMcpToolPreview(manifest.name, parsed, manifest.displayName);
       } catch (err) {
         log.warn(
           `Could not compute MCP tool preview for ${manifest.name}: ${err instanceof Error ? err.message : String(err)}`,

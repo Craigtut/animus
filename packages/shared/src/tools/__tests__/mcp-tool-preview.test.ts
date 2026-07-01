@@ -27,14 +27,35 @@ describe('computeMcpToolPreview', () => {
         riskTier: 'acts',
       },
     };
-    const preview = computeMcpToolPreview('home-assistant', servers);
+    const preview = computeMcpToolPreview('home-assistant', servers, 'Home Assistant');
     expect(preview).toHaveLength(1);
     expect(preview[0]).toMatchObject({
       toolName: 'mcp__home-assistant__ha',
+      // Display name is the plugin's human name with no redundant "(all tools)"
+      // suffix; the frontend frames it as "All tools from <displayName>".
+      displayName: 'Home Assistant',
       riskTier: 'acts',
       defaultMode: 'ask',
       dynamic: true,
     });
+  });
+
+  it('falls back to the technical plugin name when no display name is given', () => {
+    const servers: Record<string, PluginMcpServer> = {
+      ha: { type: 'http', url: 'https://x', args: [], env: {}, headers: {}, riskTier: 'acts' },
+    };
+    const preview = computeMcpToolPreview('home-assistant', servers);
+    expect(preview[0]?.displayName).toBe('home-assistant');
+  });
+
+  it('disambiguates the catch-all label per server when a plugin ships several', () => {
+    const servers: Record<string, PluginMcpServer> = {
+      lights: { command: 'x', args: [], env: {}, headers: {}, riskTier: 'acts' },
+      climate: { command: 'x', args: [], env: {}, headers: {}, riskTier: 'acts' },
+    };
+    const preview = computeMcpToolPreview('home-assistant', servers, 'Home Assistant');
+    const labels = preview.map((t) => t.displayName).sort();
+    expect(labels).toEqual(['Home Assistant (climate)', 'Home Assistant (lights)']);
   });
 
   it('emits per-tool rows with declared tiers plus the server catch-all', () => {

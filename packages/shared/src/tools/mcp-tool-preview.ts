@@ -52,21 +52,29 @@ export interface McpToolPreview {
 export function computeMcpToolPreview(
   pluginName: string,
   mcpServers: Record<string, PluginMcpServer>,
+  pluginDisplayName?: string,
 ): McpToolPreview[] {
   const out: McpToolPreview[] = [];
+  const serverCount = Object.keys(mcpServers).length;
 
   for (const [serverName, config] of Object.entries(mcpServers)) {
     const namespacedKey = `${pluginName}__${serverName}`;
     const serverTier: RiskTier = config.riskTier ?? 'acts';
 
+    // Human label for the catch-all row. Prefer the plugin's display name
+    // (e.g. "Home Assistant"); fall back to the technical plugin name. When a
+    // plugin ships more than one server, append the server name so the rows
+    // stay distinct. The frontend frames this as "All tools from <label>", so
+    // the label is just the name, never a redundant "(all tools)" suffix.
+    const baseLabel = pluginDisplayName ?? pluginName;
+    const dynamicLabel =
+      serverCount > 1 ? `${baseLabel} (${serverName})` : baseLabel;
+
     // Server-level catch-all row (covers dynamically discovered tools).
     out.push({
       toolName: `mcp__${namespacedKey}`,
-      displayName: config.description
-        ? `${serverName} (all tools)`
-        : `${serverName} server`,
-      description:
-        config.description ?? `All tools from the ${serverName} MCP server`,
+      displayName: dynamicLabel,
+      description: config.description ?? `All of ${baseLabel}'s tools`,
       riskTier: serverTier,
       defaultMode: riskTierToDefaultMode(serverTier),
       dynamic: true,

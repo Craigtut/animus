@@ -268,7 +268,7 @@ function SensitiveToolWarningDialog({
             color: ${theme.colors.error.main}; flex-shrink: 0; margin-top: 2px;
           `} />
           <Typography.SmallBody css={css`color: ${theme.colors.error.main};`}>
-            Only change this setting if you fully understand the risks. You can always change it back to "Ask First" later in Settings.
+            Only change this setting if you fully understand the risks. You can always change it back to "Ask First" later in settings.
           </Typography.SmallBody>
         </div>
 
@@ -325,7 +325,7 @@ function ToolPreviewRow({
       <div css={css`flex: 1; min-width: 0;`}>
         <Typography.SmallBody as="div" css={css`font-weight: ${theme.typography.fontWeight.medium};`}>
           {tool.dynamic
-            ? `All tools from ${tool.displayName} (discovered at runtime)`
+            ? `All tools from ${tool.displayName}`
             : tool.displayName}
         </Typography.SmallBody>
         <Typography.Caption as="div" color="hint" css={css`
@@ -339,7 +339,7 @@ function ToolPreviewRow({
             font-style: italic;
             opacity: 0.85;
           `}>
-            Individual tools appear in Settings after first use and inherit this setting until then.
+            This applies to all of the plugin's tools.
           </Typography.Caption>
         )}
       </div>
@@ -570,8 +570,8 @@ export function PackageConsentDialog({
             <Typography.Caption color="hint" css={css`
               line-height: ${theme.typography.lineHeight.relaxed};
             `}>
-              Choose how Animus may use this plugin's tools. Your choices are locked
-              in and can be changed later in Settings.
+              Choose how Animus may use this plugin's tools. You can change these
+              later in settings.
             </Typography.Caption>
             <div css={css`display: flex; flex-direction: column; margin-top: ${theme.spacing[1]};`}>
               {toolPreview.map((tool) => (
