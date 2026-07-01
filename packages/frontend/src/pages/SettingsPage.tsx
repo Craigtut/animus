@@ -4280,17 +4280,21 @@ export function SettingsPage() {
           padding: ${theme.spacing[4]} ${theme.spacing[4]} ${theme.spacing[16]};
         }
       `}>
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeSection}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-          >
-            {renderSection()}
-          </motion.div>
-        </AnimatePresence>
+        {/*
+          Enter-only transition (no AnimatePresence / no exit): keying a plain
+          motion.div remounts the incoming section immediately, so nothing gates
+          the new content on an outgoing exit animation. mode="wait" could stall
+          on nested-motion subtrees and leave the panel blank. See MindPage for
+          the full write-up. Do not reintroduce AnimatePresence mode="wait" here.
+        */}
+        <motion.div
+          key={activeSection}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
+        >
+          {renderSection()}
+        </motion.div>
       </main>
 
       {/* Right spacer to balance sidebar — keeps content truly centered */}

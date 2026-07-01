@@ -326,17 +326,24 @@ export function MindPage() {
           padding: ${theme.spacing[4]} ${theme.spacing[4]} ${theme.spacing[16]};
         }
       `}>
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeSection}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-          >
-            <SectionComponent />
-          </motion.div>
-        </AnimatePresence>
+        {/*
+          Enter-only transition. A keyed motion.div (no AnimatePresence / no exit)
+          remounts the incoming section immediately on navigation, so the fade-in
+          runs but nothing gates the new content on an outgoing animation.
+          mode="wait" previously withheld the next tab until the old tab's exit
+          completed; the heartbeat tick-detail views mount a deep nested-motion
+          tree, and its exit-completion bookkeeping could stall (racing tRPC/store
+          re-renders), leaving the panel permanently blank while the sidebar still
+          switched. Do not reintroduce AnimatePresence mode="wait" here.
+        */}
+        <motion.div
+          key={activeSection}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
+        >
+          <SectionComponent />
+        </motion.div>
       </main>
 
       {/* Right spacer to balance sidebar — keeps content truly centered */}
