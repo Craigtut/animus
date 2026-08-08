@@ -26,25 +26,48 @@ All methods ultimately register the package in the same database tables (`plugin
 ```
 ~/.animus/
 ├── packages/                       # Extracted package contents
-│   ├── weather/                    # Plugin: extracted from weather-1.0.0.anpk
-│   │   ├── manifest.json
-│   │   ├── CHECKSUMS
-│   │   ├── icon.svg
-│   │   ├── skills/weather/SKILL.md
-│   │   └── ...
-│   ├── twilio-sms/                 # Channel: extracted from twilio-sms-1.0.0.anpk
-│   │   ├── manifest.json
-│   │   ├── CHECKSUMS
-│   │   ├── adapter.js
-│   │   └── ...
-│   └── .cache/                     # Cached .anpk files for rollback
-│       ├── weather-1.0.0.anpk
-│       ├── weather-0.9.0.anpk     # Previous version (for rollback)
-│       ├── twilio-sms-1.0.0.anpk
-│       └── ...
+│   ├── channels/                   # Channel namespace
+│   │   ├── twilio-sms/             # Extracted from twilio-sms-1.0.0.anpk
+│   │   │   ├── manifest.json
+│   │   │   ├── .animus-package.json # Ownership stamp
+│   │   │   ├── CHECKSUMS
+│   │   │   ├── adapter.js
+│   │   │   └── ...
+│   │   ├── home-assistant/         # Channel: HA talks to Animus
+│   │   └── .cache/                 # Cached channel .anpk files for rollback
+│   │       ├── twilio-sms-1.0.0.anpk
+│   │       └── home-assistant-1.0.0.anpk
+│   └── plugins/                    # Plugin namespace
+│       ├── weather/                # Extracted from weather-1.0.0.anpk
+│       │   ├── manifest.json
+│       │   ├── .animus-package.json # Ownership stamp
+│       │   ├── CHECKSUMS
+│       │   ├── icon.svg
+│       │   ├── skills/weather/SKILL.md
+│       │   └── ...
+│       ├── home-assistant/         # Plugin: Animus controls HA
+│       └── .cache/                 # Cached plugin .anpk files for rollback
+│           ├── weather-1.0.0.anpk
+│           ├── weather-0.9.0.anpk  # Previous version (for rollback)
+│           └── home-assistant-1.1.0.anpk
 └── keys/                           # Public keys for signature verification
     └── animus-labs.pub             # Animus Labs Ed25519 public key
 ```
+
+### Install namespaces
+
+**A package's identity is `(type, name)`, not `name`.** The database has always modelled it that way: channels and plugins live in separate tables, and `package_settings` is keyed on `(package_type, package_name, setting_key)`. The filesystem must carry the same identity, so each package type owns a subdirectory under `packages/`.
+
+This is not cosmetic. A channel and a plugin for the same service will routinely share a name, because both are named after the service and they point in opposite directions: the `home-assistant` **channel** lets Home Assistant talk to Animus, while the `home-assistant` **plugin** lets Animus control Home Assistant. Before the split, both extracted to `packages/home-assistant/` and each installer's conflict check consulted only its own table, so installing one silently `rm -rf`'d the other and left a dangling database row pointing at the wrong package's files.
+
+Two rules enforce this, both in `packages/backend/src/lib/package-registry.ts`:
+
+1. **Type-namespaced paths.** Install directories and rollback caches are resolved through `package-paths.ts`. Never build a package path by hand.
+2. **Never remove a directory you cannot prove you own.** Every install writes an `.animus-package.json` stamp recording `{type, name, version, installedAt}`. Every destructive operation calls `removeOwnedDir()`, which refuses when the stamp (or, for pre-stamp installs, the manifest's `packageType`) names a different package. This holds even if two packages somehow resolve to the same path.
+
+Load time enforces the same invariant: `ChannelManager.loadAll()` and `PluginManager.scanAllDirectories()` verify ownership *before* parsing a type-specific manifest, so a directory occupied by another package reports a real diagnosis instead of a confusing schema validation error.
+
+**Migration.** Installs predating the split still sit at `packages/{name}/`. They are relocated into their namespace on first load, but only when the on-disk manifest confirms the type, so a directory left corrupt by an old collision is never moved under the wrong owner. The pre-split `packages/.cache/` is still read as a fallback during rollback; because it was keyed on name and version alone, the archive's `packageType` is re-verified after extraction rather than trusted from the filename.
 
 **Note**: The `~/.animus/keys/` directory holds public keys. The primary Animus Labs public key is also embedded in the engine source code at `packages/shared/src/keys/animus-labs.pub`. The filesystem copy is a fallback and can be updated independently of engine releases (for key rotation scenarios).
 
@@ -190,10 +213,15 @@ interface InstallOptions {
 ┌─────────────────────────────────────────────────────────────┐
 │ STEP 8: EXTRACTION                                           │
 │                                                              │
-│ 1. Create directory: ~/.animus/packages/{name}/              │
-│ 2. Extract all files from archive                            │
-│ 3. Exclude SIGNATURE (verification metadata, not runtime)    │
-│ 4. Set appropriate file permissions (644 for files, 755 for  │
+│ 1. Resolve directory: ~/.animus/packages/{type}/{name}/      │
+│    where {type} is "channels" or "plugins" (see Install      │
+│    namespaces below)                                          │
+│ 2. Verify ownership before replacing an existing directory;  │
+│    refuse if it belongs to a different package               │
+│ 3. Extract all files from archive                            │
+│ 4. Exclude SIGNATURE (verification metadata, not runtime)    │
+│ 5. Write .animus-package.json ownership stamp                │
+│ 6. Set appropriate file permissions (644 for files, 755 for  │
 │    executables like adapter.js and scripts)                   │
 │                                                              │
 │ Failure → clean up partial extraction, report error          │
@@ -221,12 +249,13 @@ interface InstallOptions {
 │                                                              │
 │ 1. Insert into database:                                     │
 │    - plugins table (if plugin) or channel_packages (channel) │
-│    - path: absolute path to ~/.animus/packages/{name}/       │
+│    - path: absolute path to ~/.animus/packages/{type}/{name}/│
 │    - source: 'store' or 'local'                              │
 │    - version: from manifest                                  │
 │    - enabled: false (not yet enabled)                        │
 │    - consented_permissions: JSON blob                        │
-│ 2. Cache .anpk in ~/.animus/packages/.cache/{name}-{v}.anpk │
+│ 2. Cache .anpk in                                            │
+│    ~/.animus/packages/{type}/.cache/{name}-{v}.anpk          │
 │ 3. Emit 'plugin:installed' or 'channel:installed' event      │
 │                                                              │
 │ Package is now installed but disabled.                        │
@@ -311,7 +340,7 @@ When the user initiates an update:
 4. If new permissions requested → show consent dialog for NEW permissions only
 5. Disable current version (if enabled)
 6. Move current extracted directory to a temporary location
-7. Extract new version to ~/.animus/packages/{name}/
+7. Extract new version to ~/.animus/packages/{type}/{name}/
 8. Verify checksums
 9. Migrate configuration (see Config Migration below)
 10. Update database record (version, path, checksum)
@@ -371,12 +400,14 @@ If the user is prompted for new required fields and cancels → update aborts, o
 
 ### How Rollback Works
 
-Previous `.anpk` files are cached in `~/.animus/packages/.cache/`. Rollback re-installs from cache.
+Previous `.anpk` files are cached in `~/.animus/packages/{type}/.cache/`. Rollback re-installs from cache.
 
 ```
 1. User clicks "Rollback" in Settings (or via tRPC API)
 2. Engine finds previous version in .cache/:
-   ~/.animus/packages/.cache/{name}-{previousVersion}.anpk
+   ~/.animus/packages/{type}/.cache/{name}-{previousVersion}.anpk
+   (falls back to the pre-namespacing ~/.animus/packages/.cache/,
+    re-verifying packageType after extraction)
 3. Disable current version
 4. Delete current extracted directory
 5. Re-run install flow from cached .anpk (skip permissions consent — already granted)

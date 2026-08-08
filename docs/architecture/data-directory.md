@@ -29,8 +29,11 @@ $ANIMUS_DATA_DIR/
   saves/                  # Snapshot/restore archives (.animus files: AI databases + lived file assets)
   cache/                  # Ephemeral caches (model pricing data)
   logs/                   # Application logs (animus.log, rotated)
-  packages/               # Installed channel + plugin packages
-    .cache/               # .anpk cache for rollback
+  packages/               # Installed packages, namespaced by type
+    channels/             # Installed channel packages
+      .cache/             # .anpk cache for channel rollback
+    plugins/              # Installed plugin packages
+      .cache/             # .anpk cache for plugin rollback
   workspace/              # Agent working directory (reserved for future use)
   package-uploads/        # Temp staging for .anpk installs
   vault.json              # Password-wrapped DEK + KDF parameters (see encryption-architecture.md)

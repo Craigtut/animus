@@ -13,7 +13,6 @@ import fs from 'fs/promises';
 import fsSync from 'node:fs';
 import path from 'path';
 import { spawn } from 'child_process';
-import extractZip from 'extract-zip';
 import { logProcessSpawn, logProcessExit } from '../lib/process-diagnostics.js';
 import { env, DATA_DIR } from '../utils/env.js';
 
@@ -25,6 +24,14 @@ import { isUnsealed, getSealState } from '../lib/vault-manager.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { isFileSecretValue, maskFileSecret } from '../utils/secure-temp-file.js';
 import { createLogger } from '../lib/logger.js';
+import {
+  stagePackage,
+  materializePackage,
+  restoreFromCache,
+  resolveInstallDir,
+  verifyOwnership,
+} from '../lib/package-registry.js';
+import { findCachedPackage, getLegacyInstallDir } from '../lib/package-paths.js';
 import {
   PluginManifestSchema,
   ContextSourceSchema,
@@ -55,7 +62,6 @@ import type {
   PackageManifest,
 } from '@animus-labs/shared';
 import { z } from 'zod/v3';
-import { verifyPackage } from '../services/package-verifier.js';
 
 const log = createLogger('PluginManager', 'plugins');
 
@@ -454,17 +460,8 @@ export class PluginManager {
     log.info(`Installing plugin from package: ${anpkPath}`);
 
     // 1. Verify the package
-    const verification = await verifyPackage(anpkPath);
-    if (!verification.valid || !verification.manifest) {
-      throw new Error(
-        `Package verification failed: ${verification.errors.join('; ')}`,
-      );
-    }
-
-    const manifest = verification.manifest;
-    if (manifest.packageType !== 'plugin') {
-      throw new Error(`Expected plugin package but got "${manifest.packageType}"`);
-    }
+    const staged = await stagePackage('plugin', anpkPath);
+    const { manifest, verification } = staged;
 
     // 2. Conflict check
     const db = getSystemDb();
@@ -473,25 +470,8 @@ export class PluginManager {
       throw new Error(`Plugin "${manifest.name}" is already installed`);
     }
 
-    // 3. Extract to packages directory
-    const packagesDir = path.join(DATA_DIR, 'packages');
-    const extractDir = path.join(packagesDir, manifest.name);
-
-    // Clean any leftover files from a previous failed install before extracting
-    await fs.rm(extractDir, { recursive: true, force: true });
-    await fs.mkdir(extractDir, { recursive: true });
-    try {
-      await extractZip(anpkPath, { dir: extractDir });
-    } catch (err) {
-      await fs.rm(extractDir, { recursive: true, force: true });
-      throw new Error(`Failed to extract package: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    // 4. Cache the .anpk file for rollback
-    const cacheDir = path.join(packagesDir, '.cache');
-    await fs.mkdir(cacheDir, { recursive: true });
-    const cachePath = path.join(cacheDir, `${manifest.name}-${manifest.version}.anpk`);
-    await fs.copyFile(anpkPath, cachePath);
+    // 3. Extract into the plugin namespace and cache the .anpk for rollback
+    const { installDir: extractDir, cachePath } = await materializePackage('plugin', staged);
 
     // 5. Read plugin.json from the extracted directory to get the native PluginManifest
     //    (the .anpk contains manifest.json which is the unified format — the extracted
@@ -629,17 +609,8 @@ export class PluginManager {
     }
 
     // 1. Verify the new package
-    const verification = await verifyPackage(anpkPath);
-    if (!verification.valid || !verification.manifest) {
-      throw new Error(
-        `Package verification failed: ${verification.errors.join('; ')}`,
-      );
-    }
-
-    const manifest = verification.manifest;
-    if (manifest.packageType !== 'plugin') {
-      throw new Error(`Expected plugin package but got "${manifest.packageType}"`);
-    }
+    const staged = await stagePackage('plugin', anpkPath);
+    const { manifest, verification } = staged;
 
     // Ensure the package name matches the installed plugin
     if (manifest.name !== name) {
@@ -659,24 +630,9 @@ export class PluginManager {
       this.deregisterDecisionTypes(name);
     }
 
-    // 3. Extract to packages directory (replaces existing files)
-    const packagesDir = path.join(DATA_DIR, 'packages');
-    const extractDir = path.join(packagesDir, manifest.name);
-
-    await fs.rm(extractDir, { recursive: true, force: true });
-    await fs.mkdir(extractDir, { recursive: true });
-    try {
-      await extractZip(anpkPath, { dir: extractDir });
-    } catch (err) {
-      await fs.rm(extractDir, { recursive: true, force: true });
-      throw new Error(`Failed to extract package: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    // 4. Cache the new .anpk file for rollback; keep old version in cache too
-    const cacheDir = path.join(packagesDir, '.cache');
-    await fs.mkdir(cacheDir, { recursive: true });
-    const cachePath = path.join(cacheDir, `${manifest.name}-${manifest.version}.anpk`);
-    await fs.copyFile(anpkPath, cachePath);
+    // 3. Replace the install directory and cache the new .anpk for rollback;
+    //    the old version stays in the cache.
+    const { installDir: extractDir, cachePath } = await materializePackage('plugin', staged);
 
     // 5. Read plugin manifest from extracted directory
     let pluginManifest: PluginManifest;
@@ -825,10 +781,9 @@ export class PluginManager {
     const currentVersion = record.version;
 
     // Find the cached .anpk for the previous version
-    const cacheDir = path.join(DATA_DIR, 'packages', '.cache');
-    const previousCachePath = path.join(cacheDir, `${packageName}-${previousVersion}.anpk`);
+    const previousCachePath = findCachedPackage('plugin', packageName, previousVersion);
 
-    if (!fsSync.existsSync(previousCachePath)) {
+    if (!previousCachePath) {
       return {
         success: false,
         previousVersion,
@@ -846,13 +801,14 @@ export class PluginManager {
         this.deregisterDecisionTypes(packageName);
       }
 
-      // 2. Remove current extracted directory
-      const extractDir = path.join(DATA_DIR, 'packages', packageName);
-      await fs.rm(extractDir, { recursive: true, force: true });
-
-      // 3. Re-extract from cached .anpk
-      await fs.mkdir(extractDir, { recursive: true });
-      await extractZip(previousCachePath, { dir: extractDir });
+      // 2-3. Replace the install directory from the cached .anpk. The archive's
+      //      manifest is re-verified, so a legacy cache entry that actually holds
+      //      the other package type fails here instead of being installed.
+      const { installDir: extractDir } = await restoreFromCache(
+        'plugin',
+        packageName,
+        previousVersion,
+      );
 
       // 4. Re-read plugin manifest
       const pluginManifest = await this.readManifest(extractDir);
@@ -1630,16 +1586,32 @@ export class PluginManager {
     const dbPlugins = pluginStore.getAllPlugins(db);
     for (const record of dbPlugins) {
       try {
-        // Normalize stored path — if it doesn't exist, try DATA_DIR/packages/<name>
+        // Normalize stored path. Only two cases are redirected: a path that no
+        // longer exists, and a pre-namespacing flat install that needs migrating
+        // into the plugin namespace. Any other existing path (a local dev
+        // checkout, say) is left exactly as registered.
         let pluginPath = record.path;
-        if (!fsSync.existsSync(pluginPath)) {
-          const corrected = path.join(DATA_DIR, 'packages', record.name);
-          if (fsSync.existsSync(corrected)) {
-            log.info(`Correcting stored path for plugin ${record.name} → ${corrected}`);
-            pluginPath = corrected;
-            pluginStore.updatePlugin(db, record.name, { path: corrected });
+        const isLegacyFlat =
+          path.resolve(pluginPath) === path.resolve(getLegacyInstallDir(record.name));
+        if (!fsSync.existsSync(pluginPath) || isLegacyFlat) {
+          const resolved = resolveInstallDir('plugin', record.name);
+          if (resolved && resolved !== pluginPath) {
+            log.info(`Correcting stored path for plugin ${record.name} → ${resolved}`);
+            pluginPath = resolved;
+            pluginStore.updatePlugin(db, record.name, { path: resolved });
           }
         }
+
+        // Confirm the directory still holds this plugin before parsing it, so a
+        // directory occupied by another package produces a real diagnosis rather
+        // than a confusing manifest schema error.
+        const ownership = verifyOwnership(pluginPath, 'plugin', record.name);
+        if (ownership.status === 'foreign') {
+          throw new Error(
+            `Install directory ${pluginPath} holds ${ownership.holder}, not the plugin "${record.name}". Reinstall the plugin package.`,
+          );
+        }
+
         const manifest = await this.readManifest(pluginPath);
         results.push([pluginPath, manifest, record.source]);
       } catch (err) {

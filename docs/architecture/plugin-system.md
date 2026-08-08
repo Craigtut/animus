@@ -1023,7 +1023,7 @@ User opens Settings > Plugins > "Add from Package File"
   │
   ├─→ Reviews requested permissions (consent screen)
   │
-  ├─→ Extracted to ~/.animus/packages/{name}/
+  ├─→ Extracted to ~/.animus/packages/plugins/{name}/
   │   └─→ Plugin loaded, components activated (hot-swap lifecycle)
   │
   └─→ .anpk cached for rollback support
@@ -1056,8 +1056,8 @@ User opens Settings > Plugins > "Browse Store"
 |--------|-------------|----------------|----------|
 | **Built-in** | Auto-discovered at startup | `packages/backend/plugins/` (in engine) | Core functionality shipped with Animus |
 | **Local path** | Register path in system.db via Settings | Stays on disk where it is (no copy) | Development |
-| **Package file (.anpk)** | Upload via Settings or download from store | `~/.animus/packages/{name}/` | Primary distribution format |
-| **Store** | Browse in-engine or via web, one-click install | `~/.animus/packages/{name}/` | Marketplace distribution |
+| **Package file (.anpk)** | Upload via Settings or download from store | `~/.animus/packages/plugins/{name}/` | Primary distribution format |
+| **Store** | Browse in-engine or via web, one-click install | `~/.animus/packages/plugins/{name}/` | Marketplace distribution |
 
 **Local path registration** remains available for development. The plugin stays where it is on disk — Animus just learns where to find it. Edits take effect on the next tick (after session invalidation).
 

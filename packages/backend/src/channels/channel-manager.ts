@@ -9,7 +9,6 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import extractZip from 'extract-zip';
 import { createLogger } from '../lib/logger.js';
 import { getEventBus } from '../lib/event-bus.js';
 import { env, DATA_DIR } from '../utils/env.js';
@@ -31,8 +30,15 @@ import type {
   PackageManifest,
 } from '@animus-labs/shared';
 import { channelManifestSchema, configSchemaSchema } from '@animus-labs/shared';
-import { verifyPackage } from '../services/package-verifier.js';
 import { isUnsealed } from '../lib/vault-manager.js';
+import {
+  stagePackage,
+  materializePackage,
+  restoreFromCache,
+  resolveInstallDir,
+  verifyOwnership,
+} from '../lib/package-registry.js';
+import { findCachedPackage, getLegacyInstallDir } from '../lib/package-paths.js';
 
 const log = createLogger('ChannelManager', 'channels');
 
@@ -71,14 +77,32 @@ export class ChannelManager {
 
     for (const pkg of packages) {
       try {
-        // Normalize stored path — if it doesn't exist, try DATA_DIR/packages/<name>
-        if (!fs.existsSync(pkg.path)) {
-          const corrected = path.join(DATA_DIR, 'packages', pkg.name);
-          if (fs.existsSync(corrected)) {
-            log.info(`Correcting stored path for channel ${pkg.name} → ${corrected}`);
-            pkg.path = corrected;
-            systemStore.updateChannelPackage(db, pkg.name, { path: corrected });
+        // Normalize stored path. Only two cases are redirected: a path that no
+        // longer exists, and a pre-namespacing flat install that needs migrating
+        // into the channel namespace. Any other existing path (a local dev
+        // checkout, say) is left exactly as registered.
+        const isLegacyFlat =
+          path.resolve(pkg.path) === path.resolve(getLegacyInstallDir(pkg.name));
+        if (!fs.existsSync(pkg.path) || isLegacyFlat) {
+          const resolved = resolveInstallDir('channel', pkg.name);
+          if (resolved && resolved !== pkg.path) {
+            log.info(`Correcting stored path for channel ${pkg.name} → ${resolved}`);
+            pkg.path = resolved;
+            systemStore.updateChannelPackage(db, pkg.name, { path: resolved });
           }
+        }
+
+        // Confirm the directory still holds this channel before parsing it.
+        // Without this, a directory occupied by another package surfaces as a
+        // confusing manifest schema error instead of a real diagnosis.
+        const ownership = verifyOwnership(pkg.path, 'channel', pkg.name);
+        if (ownership.status !== 'owned') {
+          const reason = ownership.status === 'absent'
+            ? `Install directory missing: ${pkg.path}`
+            : `Install directory ${pkg.path} holds ${ownership.holder}, not the channel "${pkg.name}". Reinstall the channel package.`;
+          log.error(`Cannot load channel ${pkg.name}: ${reason}`);
+          systemStore.updateChannelPackageStatus(db, pkg.name, 'error', reason);
+          continue;
         }
 
         const manifest = this.loadManifest(pkg.path);
@@ -352,17 +376,8 @@ export class ChannelManager {
     log.info(`Installing channel from package: ${anpkPath}`);
 
     // 1. Verify the package
-    const verification = await verifyPackage(anpkPath);
-    if (!verification.valid || !verification.manifest) {
-      throw new Error(
-        `Package verification failed: ${verification.errors.join('; ')}`,
-      );
-    }
-
-    const manifest = verification.manifest;
-    if (manifest.packageType !== 'channel') {
-      throw new Error(`Expected channel package but got "${manifest.packageType}"`);
-    }
+    const staged = await stagePackage('channel', anpkPath);
+    const { manifest, verification } = staged;
 
     // 2. Conflict check
     const db = getSystemDb();
@@ -378,47 +393,30 @@ export class ChannelManager {
       throw new Error(`Channel "${manifest.name}" is already installed`);
     }
 
-    // 3. Extract to packages directory
-    const packagesDir = path.join(DATA_DIR, 'packages');
-    const extractDir = path.join(packagesDir, manifest.name);
+    // 3. Extract into the channel namespace and cache the .anpk for rollback
+    const { installDir: extractDir, cachePath } = await materializePackage('channel', staged);
 
-    // Clean any leftover files from a previous failed install before extracting
-    await fsp.rm(extractDir, { recursive: true, force: true });
-    await fsp.mkdir(extractDir, { recursive: true });
-    try {
-      await extractZip(anpkPath, { dir: extractDir });
-    } catch (err) {
-      await fsp.rm(extractDir, { recursive: true, force: true });
-      throw new Error(`Failed to extract package: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    // 4. Cache the .anpk file for rollback
-    const cacheDir = path.join(packagesDir, '.cache');
-    await fsp.mkdir(cacheDir, { recursive: true });
-    const cachePath = path.join(cacheDir, `${manifest.name}-${manifest.version}.anpk`);
-    await fsp.copyFile(anpkPath, cachePath);
-
-    // 5. Load channel manifest from extracted directory
+    // 4. Load channel manifest from extracted directory
     const channelManifest = this.loadManifest(extractDir);
 
-    // 6. Check adapter file exists
+    // 5. Check adapter file exists
     const adapterPath = path.join(extractDir, channelManifest.adapter);
     if (!fs.existsSync(adapterPath)) {
       await fsp.rm(extractDir, { recursive: true, force: true });
       throw new Error(`Adapter file not found: ${channelManifest.adapter}`);
     }
 
-    // 7. Compute adapter checksum
+    // 6. Compute adapter checksum
     const checksum = this.computeChecksum(adapterPath);
 
-    // 8. Load and store config schema
+    // 7. Load and store config schema
     const configSchema = this.loadConfigSchema(extractDir);
     if (configSchema) this.configSchemas.set(channelManifest.type, configSchema);
 
     const needsConfig = configSchema &&
       configSchema.fields.some(f => f.required);
 
-    // 9. Register in DB
+    // 8. Register in DB
     systemStore.createChannelPackage(db, {
       name: manifest.name,
       channelType: channelManifest.type,
@@ -482,17 +480,8 @@ export class ChannelManager {
     }
 
     // 1. Verify the new package
-    const verification = await verifyPackage(anpkPath);
-    if (!verification.valid || !verification.manifest) {
-      throw new Error(
-        `Package verification failed: ${verification.errors.join('; ')}`,
-      );
-    }
-
-    const manifest = verification.manifest;
-    if (manifest.packageType !== 'channel') {
-      throw new Error(`Expected channel package but got "${manifest.packageType}"`);
-    }
+    const staged = await stagePackage('channel', anpkPath);
+    const { manifest, verification } = staged;
 
     // Ensure the package name matches the installed channel
     if (manifest.name !== name) {
@@ -511,37 +500,22 @@ export class ChannelManager {
       this.processes.delete(existing.channelType);
     }
 
-    // 3. Extract to packages directory (replaces existing files)
-    const packagesDir = path.join(DATA_DIR, 'packages');
-    const extractDir = path.join(packagesDir, manifest.name);
+    // 3. Replace the install directory and cache the new .anpk for rollback;
+    //    the old version stays in the cache.
+    const { installDir: extractDir, cachePath } = await materializePackage('channel', staged);
 
-    await fsp.rm(extractDir, { recursive: true, force: true });
-    await fsp.mkdir(extractDir, { recursive: true });
-    try {
-      await extractZip(anpkPath, { dir: extractDir });
-    } catch (err) {
-      await fsp.rm(extractDir, { recursive: true, force: true });
-      throw new Error(`Failed to extract package: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    // 4. Cache the new .anpk file for rollback; keep old version in cache too
-    const cacheDir = path.join(packagesDir, '.cache');
-    await fsp.mkdir(cacheDir, { recursive: true });
-    const cachePath = path.join(cacheDir, `${manifest.name}-${manifest.version}.anpk`);
-    await fsp.copyFile(anpkPath, cachePath);
-
-    // 5. Re-read channel manifest
+    // 4. Re-read channel manifest
     const channelManifest = this.loadManifest(extractDir);
     this.manifests.set(existing.channelType, channelManifest);
 
-    // 6. Check adapter file exists
+    // 5. Check adapter file exists
     const adapterPath = path.join(extractDir, channelManifest.adapter);
     if (!fs.existsSync(adapterPath)) {
       await fsp.rm(extractDir, { recursive: true, force: true });
       throw new Error(`Adapter file not found: ${channelManifest.adapter}`);
     }
 
-    // 7. Compute adapter checksum and update config schema
+    // 6. Compute adapter checksum and update config schema
     const checksum = this.computeChecksum(adapterPath);
     const configSchema = this.loadConfigSchema(extractDir);
     if (configSchema) {
@@ -551,7 +525,7 @@ export class ChannelManager {
     const needsConfig = configSchema &&
       configSchema.fields.some(f => f.required);
 
-    // 8. Update DB record — preserves config column (we only update version/path/checksum)
+    // 7. Update DB record — preserves config column (we only update version/path/checksum)
     systemStore.updateChannelPackage(db, name, {
       version: manifest.version,
       path: extractDir,
@@ -578,7 +552,7 @@ export class ChannelManager {
       name,
     );
 
-    // 9. Re-enable if was enabled and has required config
+    // 8. Re-enable if was enabled and has required config
     if (wasEnabled) {
       const updatedPkg = systemStore.getChannelPackage(db, name);
       if (updatedPkg && this.hasRequiredConfig(updatedPkg)) {
@@ -639,10 +613,9 @@ export class ChannelManager {
     const currentVersion = pkg.version;
 
     // Find the cached .anpk for the previous version
-    const cacheDir = path.join(DATA_DIR, 'packages', '.cache');
-    const previousCachePath = path.join(cacheDir, `${packageName}-${previousVersion}.anpk`);
+    const previousCachePath = findCachedPackage('channel', packageName, previousVersion);
 
-    if (!fs.existsSync(previousCachePath)) {
+    if (!previousCachePath) {
       return {
         success: false,
         previousVersion,
@@ -659,13 +632,14 @@ export class ChannelManager {
         this.processes.delete(pkg.channelType);
       }
 
-      // 2. Remove current extracted directory
-      const extractDir = path.join(DATA_DIR, 'packages', packageName);
-      await fsp.rm(extractDir, { recursive: true, force: true });
-
-      // 3. Re-extract from cached .anpk
-      await fsp.mkdir(extractDir, { recursive: true });
-      await extractZip(previousCachePath, { dir: extractDir });
+      // 2-3. Replace the install directory from the cached .anpk. The archive's
+      //      manifest is re-verified, so a legacy cache entry that actually holds
+      //      the other package type fails here instead of being installed.
+      const { installDir: extractDir } = await restoreFromCache(
+        'channel',
+        packageName,
+        previousVersion,
+      );
 
       // 4. Re-read channel manifest
       const channelManifest = this.loadManifest(extractDir);

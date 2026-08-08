@@ -826,10 +826,11 @@ User uploads .anpk file  — OR —  clicks "Install" in store browser
   ├─→ Displays permissions consent screen
   │
   ├─→ On approval:
-  │   ├─→ Extracts to ~/.animus/packages/{name}/
+  │   ├─→ Extracts to ~/.animus/packages/channels/{name}/
   │   ├─→ Verifies per-file checksums against CHECKSUMS
+  │   ├─→ Writes .animus-package.json ownership stamp
   │   ├─→ Registers in channel_packages table
-  │   ├─→ Caches .anpk in ~/.animus/packages/.cache/ (for rollback)
+  │   ├─→ Caches .anpk in ~/.animus/packages/channels/.cache/ (for rollback)
   │   └─→ Channel appears in Settings > Channels as "Disabled"
   │
   └─→ Emit 'channel:installed' on EventBus
