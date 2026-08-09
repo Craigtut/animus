@@ -4,6 +4,13 @@ All notable changes to the Animus Engine will be documented in this file.
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) and [Semantic Versioning](https://semver.org/).
 
+## [0.5.2](https://github.com/Craigtut/animus/compare/v0.5.1...v0.5.2) (2026-08-09)
+
+### Bug Fixes
+
+* **backend:** namespace package installs by type so channels and plugins cannot overwrite each other ([0b82166](https://github.com/Craigtut/animus/commit/0b82166d2bf013d0a4759d007719dee6fc833715))
+* **frontend:** prevent blank tab panels from stalled exit animations ([436c27c](https://github.com/Craigtut/animus/commit/436c27c5ced2ebcf5f8fc1fe923a4c8e0ea4c2c5))
+
 ## [0.5.1](https://github.com/Craigtut/animus/compare/v0.5.0...v0.5.1) (2026-07-01)
 
 ### Bug Fixes
